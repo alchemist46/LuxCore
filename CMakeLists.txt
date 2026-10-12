@@ -89,6 +89,7 @@ OPTION(LUXCORE_TESTS "Enable to build tests" OFF)
 OPTION(LUXRAYS_ENABLE_OPENCL "Enable to use OpenCL" ON)
 OPTION(LUXRAYS_ENABLE_CUDA "Enable to use CUDA" ON)
 OPTION(LUXRAYS_ENABLE_OPTIX "Enable to use Optix" ON)
+OPTION(LUXRAYS_ENABLE_HIP "Enable to use HIP" ON)
 
 # Sanitization (optional)
 IF(DEFINED ENV{LUX_SANITIZE})
@@ -148,10 +149,11 @@ endif()
 
 if (LUXRAYS_DISABLE_OPENCL)
   ADD_DEFINITIONS("-DLUXRAYS_DISABLE_OPENCL")
-  # CUDA requires OpenCL support
+  # CUDA and HIP require OpenCL support
   ADD_DEFINITIONS("-DLUXRAYS_DISABLE_CUDA")
+  ADD_DEFINITIONS("-DLUXRAYS_DISABLE_HIP")
 
-  message(STATUS "OpenCL and CUDA support: disabled")
+  message(STATUS "OpenCL, CUDA and HIP support: disabled")
 else()
   if (LUXRAYS_DISABLE_CUDA)
     ADD_DEFINITIONS("-DLUXRAYS_DISABLE_CUDA")
@@ -160,6 +162,13 @@ else()
   else()
     message(STATUS "OpenCL support: enabled")
     message(STATUS "CUDA support: enabled")
+  endif()
+
+  if (LUXRAYS_DISABLE_HIP)
+    ADD_DEFINITIONS("-DLUXRAYS_DISABLE_HIP")
+    message(STATUS "HIP support: disabled")
+  else()
+    message(STATUS "HIP support: enabled")
   endif()
 endif()
 
@@ -249,6 +258,7 @@ include_directories("${LuxRays_INCLUDE_DIR}")
 # Embedded dependencies
 include_directories("${PROJECT_SOURCE_DIR}/deps/cuew/include")
 include_directories("${PROJECT_SOURCE_DIR}/deps/clew/include")
+include_directories("${PROJECT_SOURCE_DIR}/deps/hipew/include")
 include_directories("${PROJECT_SOURCE_DIR}/deps/optix-7.1.0/include")
 
 # OpenCL preprocessing

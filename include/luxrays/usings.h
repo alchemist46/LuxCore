@@ -70,6 +70,10 @@ DECLARE_SUBTYPES(ExtTriangleMesh);
 DECLARE_SUBTYPES(ExtInstanceTriangleMesh);
 DECLARE_SUBTYPES(ExtMotionTriangleMesh);
 DECLARE_SUBTYPES(HardwareDevice);
+DECLARE_SUBTYPES(HIPDevice);
+DECLARE_SUBTYPES(HIPDeviceKernel);
+DECLARE_SUBTYPES(HIPDeviceProgram);
+DECLARE_SUBTYPES(HIPDeviceDescription);
 DECLARE_SUBTYPES(HardwareDeviceKernel);
 DECLARE_SUBTYPES(HardwareDeviceProgram);
 DECLARE_SUBTYPES(HardwareIntersectionDevice)

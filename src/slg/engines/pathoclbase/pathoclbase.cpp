@@ -105,6 +105,29 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(RenderConfigRef rcfg,
 #endif
 
 	//--------------------------------------------------------------------------
+	// Add HIP devices
+	//--------------------------------------------------------------------------
+
+#if !defined(LUXRAYS_DISABLE_HIP)
+	SLG_LOG("HIP devices used:");
+	for (IntersectionDeviceRef dev : devs) {
+		if (dev.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) {
+			SLG_LOG("[" << dev.GetName() << "]");
+			intersectionDevices.push_back(dev);
+
+			// Suggested compiler options: -ffast-math (the hiprtc equivalent
+			// of --use_fast_math and -cl-fast-relaxed-math)
+			auto& hwDev = dynamic_cast<HardwareDeviceRef>(dev);
+
+			std::vector<std::string> compileOpts;
+			compileOpts.push_back("-ffast-math");
+
+			hwDev.SetAdditionalCompileOpts(compileOpts);
+		}
+	}
+#endif
+
+	//--------------------------------------------------------------------------
 	// Add OpenCL devices
 	//--------------------------------------------------------------------------
 

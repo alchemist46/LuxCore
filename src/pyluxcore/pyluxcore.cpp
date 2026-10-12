@@ -128,7 +128,7 @@ static py::list GetOpenCLDeviceList() {
 
   // Select only OpenCL devices
   luxrays::DeviceDescription::Filter(
-		(luxrays::DeviceType)(luxrays::DEVICE_TYPE_OPENCL_ALL | luxrays::DEVICE_TYPE_CUDA_ALL),
+		luxrays::DEVICE_TYPE_ALL_HARDWARE,
 		deviceDescriptions
 	);
 
@@ -2201,8 +2201,9 @@ PYBIND11_MODULE(pyluxcore, m) {
 
   // Kernel cache management
   m.def("ClearCUDAKernelCache", &ClearCUDAKernelCache, "Clear all CUDA kernel caches");
+  m.def("ClearHIPKernelCache", &ClearHIPKernelCache, "Clear all HIP kernel caches");
   m.def("ClearOCLKernelCache", &ClearOCLKernelCache, "Clear all OpenCL kernel caches");
-  m.def("ClearAllKernelCaches", &ClearAllKernelCaches, "Clear all kernel caches (CUDA and OpenCL)");
+  m.def("ClearAllKernelCaches", &ClearAllKernelCaches, "Clear all kernel caches (CUDA, HIP and OpenCL)");
 
   m.def("KernelCacheFill", &LuxCore_KernelCacheFill1);
   m.def("KernelCacheFill", &LuxCore_KernelCacheFill2);

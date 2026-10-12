@@ -71,9 +71,15 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 	auto cudaDescs = ctx->GetAvailableDeviceDescriptions();
 	DeviceDescription::Filter(DEVICE_TYPE_CUDA_ALL, cudaDescs);
 
+	auto hipDescs = ctx->GetAvailableDeviceDescriptions();
+	DeviceDescription::Filter(DEVICE_TYPE_HIP_ALL, hipDescs);
+
+	// The order (OpenCL, CUDA, HIP) is the one of the selection string and of
+	// luxcore::GetOpenCLDeviceDescs()
 	DeviceDescriptions descs;
 	descs.insert(descs.end(), oclDescs.begin(), oclDescs.end());
 	descs.insert(descs.end(), cudaDescs.begin(), cudaDescs.end());
+	descs.insert(descs.end(), hipDescs.begin(), hipDescs.end());
 
 	// Device info
 	bool haveSelectionString = (oclDeviceConfig.length() > 0);
@@ -96,7 +102,7 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 		bool selected = false;
 		if (haveSelectionString) {
 			if (oclDeviceConfig.at(i) == '1') {
-				if (desc.GetType() & (DEVICE_TYPE_OPENCL_GPU | DEVICE_TYPE_CUDA_GPU))
+				if (desc.GetType() & (DEVICE_TYPE_OPENCL_GPU | DEVICE_TYPE_CUDA_GPU | DEVICE_TYPE_HIP_GPU))
 					desc.SetForceWorkGroupSize(forceGPUWorkSize);
 				else if (desc.GetType() & DEVICE_TYPE_OPENCL_CPU)
 					desc.SetForceWorkGroupSize(forceCPUWorkSize);
@@ -105,6 +111,8 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 				selected = true;
 			}
 		} else {
+			// HIP devices are used only if explicitly selected: an AMD GPU is
+			// listed by both OpenCL and HIP, and it would be used twice
 			if ((useCPUs && (desc.GetType() & DEVICE_TYPE_OPENCL_CPU)) ||
 					(useGPUs && desc.GetType() & (DEVICE_TYPE_OPENCL_GPU | DEVICE_TYPE_CUDA_GPU))) {
 				if (desc.GetType() & (DEVICE_TYPE_OPENCL_GPU | DEVICE_TYPE_CUDA_GPU))

@@ -63,6 +63,7 @@ extern void Init();
 inline bool isOpenCLAvilable = true;
 inline bool isCudaAvilable = true;
 inline bool isOptixAvilable = true;
+inline bool isHipAvailable = true;
 inline std::locale cLocale("C");
 
 }

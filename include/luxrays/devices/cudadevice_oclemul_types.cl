@@ -31,7 +31,10 @@
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 typedef unsigned int uint;
+#if !defined(LUXRAYS_HIP_DEVICE)
+// HIP already defines ulong
 typedef unsigned long long ulong;
+#endif
 
 #define INFINITY __int_as_float(0x7f800000)
 #define M_PI_F 3.141592654f

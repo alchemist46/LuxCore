@@ -26,6 +26,9 @@
 #if !defined(LUXRAYS_DISABLE_CUDA)
 #include "luxrays/utils/cuda.h"
 #endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+#include "luxrays/utils/hip.h"
+#endif
 
 using namespace std;
 using namespace luxrays;
@@ -88,6 +91,22 @@ void Init() {
 			if (optixInit() == OPTIX_SUCCESS)
 				isOptixAvilable = true;
 		}
+	}
+#endif
+
+#if !defined(LUXRAYS_DISABLE_HIP)
+	// Report HIP as available only once fully initialized
+	isHipAvailable = false;
+	if (hipewInit(HIPEW_INIT_HIP | HIPEW_INIT_HIPRTC) != HIPEW_SUCCESS) {
+		std::cerr << "HIP disabled: HIP runtime or hiprtc library not found\n";
+	} else {
+		// hipErrorNoDevice is the normal case when ROCm is installed without
+		// any supported AMD GPU
+		const hipError_t err = hipInit(0);
+		if (err == hipSuccess)
+			isHipAvailable = true;
+		else if (err != hipErrorNoDevice)
+			std::cerr << "HIP disabled: hipInit() error " << err << "\n";
 	}
 #endif
 }

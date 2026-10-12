@@ -90,6 +90,8 @@ std::string DeviceDescription::GetDeviceType(const DeviceType type) {
 			return "OPENCL_UNKNOWN";
 		case DEVICE_TYPE_CUDA_GPU:
 			return "CUDA_GPU";
+		case DEVICE_TYPE_HIP_GPU:
+			return "HIP_GPU";
 		default:
 			throw runtime_error("Unknown device type in DeviceDescription::GetDeviceType(): " + ::ToString(type));
 	}

@@ -40,6 +40,10 @@
 #include "luxrays/devices/cudadevice.h"
 #include "luxrays/devices/cudaintersectiondevice.h"
 #endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+#include "luxrays/devices/hipdevice.h"
+#include "luxrays/devices/hipintersectiondevice.h"
+#endif
 
 using namespace std;
 using namespace luxrays;
@@ -113,11 +117,9 @@ Context::Context(LuxRaysDebugHandler handler, PropertiesUPtr&& config)
 	
 	LR_LOG((*this), "CUDA support: enabled");
 
-	if (isCudaAvilable) {
-		if(!cuDriverGetVersion) {
-			LR_LOG((*this), "Warning: No CUDA API available");
-			return;
-		}
+	if (isCudaAvilable && !cuDriverGetVersion) {
+		LR_LOG((*this), "Warning: No CUDA API available");
+	} else if (isCudaAvilable) {
 		LR_LOG((*this), "CUDA support: available");
 
 		int driverVersion;
@@ -138,6 +140,31 @@ Context::Context(LuxRaysDebugHandler handler, PropertiesUPtr&& config)
 	}
 #else
 	LR_LOG((*this), "CUDA support: disabled");
+#endif
+
+#if !defined(LUXRAYS_DISABLE_HIP)
+	//--------------------------------------------------------------------------
+	// Add all HIP devices
+	//--------------------------------------------------------------------------
+
+	LR_LOG((*this), "HIP support: enabled");
+
+	if (isHipAvailable) {
+		LR_LOG((*this), "HIP support: available (" << hipewHipLibraryName() << ", " << hipewHiprtcLibraryName() << ")");
+
+		int driverVersion;
+		CHECK_HIP_ERROR(hipDriverGetVersion(&driverVersion));
+		LR_LOG((*this), "HIP driver version: " << driverVersion);
+
+		int devCount;
+		CHECK_HIP_ERROR(hipGetDeviceCount(&devCount));
+		LR_LOG((*this), "HIP device count: " << devCount);
+
+		HIPDeviceDescription::AddDeviceDescs(deviceDescriptions);
+	} else
+		LR_LOG((*this), "HIP support: not available");
+#else
+	LR_LOG((*this), "HIP support: disabled");
 #endif
 
 	// Print device info
@@ -171,6 +198,14 @@ Context::Context(LuxRaysDebugHandler handler, PropertiesUPtr&& config)
 			LR_LOG((*this), "Device " << i << " CUDA compute capability: " <<
 					cudaDesc.GetCUDAComputeCapabilityMajor() << "." <<
 					cudaDesc.GetCUDAComputeCapabilityMinor());
+		}
+#endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+		if (desc->GetType() & DEVICE_TYPE_HIP_ALL) {
+			const auto& hipDesc = static_cast<HIPDeviceDescriptionConstRef>(*desc);
+
+			LR_LOG((*this), "Device " << i << " HIP architecture: " <<
+					hipDesc.GetHIPArch() << " (warp size " << hipDesc.GetHIPWarpSize() << ")");
 		}
 #endif
 	}
@@ -320,6 +355,17 @@ std::vector<IntersectionDeviceUPtr> Context::CreateIntersectionDevices(
 			);
 		}
 #endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+		else if (deviceType & DEVICE_TYPE_HIP_ALL) {
+			// HIP devices
+			const auto& hipDeviceDesc =
+				static_cast<HIPDeviceDescriptionConstRef>(devDesc);
+
+			device = std::make_unique<HIPIntersectionDevice>(
+				*this, hipDeviceDesc, indexOffset + i
+			);
+		}
+#endif
 		else {
 			throw runtime_error(
 				"Unknown device type in Context::CreateIntersectionDevices(): "
@@ -402,6 +448,17 @@ std::vector<HardwareDeviceUPtr> Context::CreateHardwareDevices(
 
 			device = std::make_unique<CUDADevice>(
 				*this, cudaDeviceDesc, indexOffset + i
+			);
+		}
+#endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+		else if (deviceType & DEVICE_TYPE_HIP_ALL) {
+			// HIP devices
+			const auto& hipDeviceDesc =
+				static_cast<HIPDeviceDescriptionConstRef>(devDesc);
+
+			device = std::make_unique<HIPDevice>(
+				*this, hipDeviceDesc, indexOffset + i
 			);
 		}
 #endif

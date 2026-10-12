@@ -171,7 +171,10 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	// source, the split is not used: all the kernels are loaded from the one
 	// program obtained by translating the SPIR-V module (there is nothing
 	// left to compile in parallel).
-	const bool isCUDADevice = (intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_CUDA_ALL) != 0;
+	//
+	// HIP devices follow the CUDA path (hiprtc compiles the monolithic source).
+	const bool isCUDADevice = (intersectionDevice.GetDeviceDesc().GetType() &
+			(DEVICE_TYPE_CUDA_ALL | DEVICE_TYPE_HIP_ALL)) != 0;
 	const bool hasEmbeddedSPIRV = intersectionDevice.HasEmbeddedSPIRV(kernelsParameters, fullKernelSource);
 	const bool splitKernels = !isCUDADevice && !hasEmbeddedSPIRV &&
 			renderEngine->renderConfig.GetConfig().Get(

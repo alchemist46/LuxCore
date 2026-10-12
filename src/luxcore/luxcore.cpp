@@ -38,6 +38,10 @@
 #if !defined(LUXRAYS_DISABLE_CUDA)
 #include "luxrays/utils/cudacache.h"
 #endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+#include "luxrays/devices/hipdevice.h"
+#include "luxrays/utils/hipcache.h"
+#endif
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 #include "luxrays/utils/oclcache.h"
 #endif
@@ -169,6 +173,14 @@ PropertiesUPtr luxcore::GetPlatformDesc() {
 	props << Property("compile.LUXRAYS_ENABLE_OPTIX")(false);
 #endif
 
+#if !defined(LUXRAYS_DISABLE_HIP)
+	props << Property("compile.LUXRAYS_DISABLE_HIP")(!luxrays::isHipAvailable);
+	props << Property("compile.LUXRAYS_ENABLE_HIP")(luxrays::isHipAvailable);
+#else
+	props << Property("compile.LUXRAYS_DISABLE_HIP")(true);
+	props << Property("compile.LUXRAYS_ENABLE_HIP")(false);
+#endif
+
 #if !defined(LUXCORE_DISABLE_OIDN)
 	props << Property("compile.LUXCORE_ENABLE_OIDN")(true);
 	props << Property("compile.LUXCORE_DISABLE_OIDN")(false);
@@ -199,8 +211,8 @@ PropertiesUPtr luxcore::GetOpenCLDeviceDescs() {
 	Context ctx;
 	auto deviceDescriptions = ctx.GetAvailableDeviceDescriptions();
 
-	// Select only OpenCL devices
-	DeviceDescription::Filter((DeviceType)(DEVICE_TYPE_OPENCL_ALL | DEVICE_TYPE_CUDA_ALL), deviceDescriptions);
+	// Select only hardware devices, in the order used by opencl.devices.select
+	DeviceDescription::Filter(DEVICE_TYPE_ALL_HARDWARE, deviceDescriptions);
 
 	// Add all device information to the list
 	for (int i=0; DeviceDescriptionRef desc : deviceDescriptions) {
@@ -220,6 +232,8 @@ PropertiesUPtr luxcore::GetOpenCLDeviceDescs() {
 			deviceConstMem = oclDesc.GetConstMem();
 		} else if (desc.GetType() & DEVICE_TYPE_CUDA_ALL) {
 			platformName = "NVIDIA";
+		} else if (desc.GetType() & DEVICE_TYPE_HIP_ALL) {
+			platformName = "AMD HIP";
 		}
 
 		const string prefix = "opencl.device." + ToString(i++);
@@ -243,6 +257,13 @@ PropertiesUPtr luxcore::GetOpenCLDeviceDescs() {
 			props <<
 					Property(prefix + ".cuda.compute.major")(cudaDesc.GetCUDAComputeCapabilityMajor()) <<
 					Property(prefix + ".cuda.compute.minor")(cudaDesc.GetCUDAComputeCapabilityMinor());
+		}
+#endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+		if (desc.GetType() & DEVICE_TYPE_HIP_ALL) {
+			const auto& hipDesc = dynamic_cast<HIPDeviceDescriptionConstRef>(desc);
+
+			props << Property(prefix + ".hip.arch")(hipDesc.GetHIPArch());
 		}
 #endif
 	}
@@ -297,6 +318,16 @@ void luxcore::ClearCUDAKernelCache() {
 	API_END();
 }
 
+void luxcore::ClearHIPKernelCache() {
+	API_BEGIN_NOARGS();
+
+#if !defined(LUXRAYS_DISABLE_HIP)
+	luxrays::hipKernelPersistentCache::ClearAllCaches();
+#endif
+
+	API_END();
+}
+
 void luxcore::ClearOCLKernelCache() {
 	API_BEGIN_NOARGS();
 	
@@ -312,6 +343,9 @@ void luxcore::ClearAllKernelCaches() {
 	
 #if !defined(LUXRAYS_DISABLE_CUDA)
 	luxrays::cudaKernelPersistentCache::ClearAllCaches();
+#endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+	luxrays::hipKernelPersistentCache::ClearAllCaches();
 #endif
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 	luxrays::oclKernelPersistentCache::ClearAllCaches();

@@ -138,6 +138,8 @@ __forceinline__ float4 TO_FLOAT4(const float x) {
 // vload_half()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
+// HIP already defines half and __half2float()
 typedef unsigned short half;
 
 __forceinline__ float __half2float(const half a) {
@@ -147,6 +149,7 @@ __forceinline__ float __half2float(const half a) {
 
     return val;
 }
+#endif
 
 __forceinline__ float vload_half(const size_t offset, const half *p) {
 	return __half2float(p[offset]);
@@ -315,17 +318,21 @@ __forceinline__ int4 isinf(const float4 x) {
 // sqrt()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float sqrt(const float x) {
 	return sqrtf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // pow()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float pow(const float x, const float y) {
 	return powf(x, y);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // native_powr()
@@ -339,9 +346,11 @@ __forceinline__ float native_powr(const float x, const float y) {
 // exp()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float exp(const float x) {
 	return expf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // native_exp()
@@ -355,9 +364,11 @@ __forceinline__ float native_exp(const float x) {
 // log()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float log(const float x) {
 	return logf(x);
 }
+#endif
 
 __forceinline__ float3 log(const float3 x) {
 	return MAKE_FLOAT3(logf(x.x), logf(x.y), logf(x.z));
@@ -375,57 +386,71 @@ __forceinline__ float native_log(const float x) {
 // sin()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float sin(const float x) {
 	return sinf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // cos()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float cos(const float x) {
 	return cosf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // atan()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float atan(const float x) {
 	return atanf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // atan2()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float atan2(const float x, const float y) {
 	return atan2f(x, y);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // atanh()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float atanh(const float x) {
 	return atanhf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // fabs()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float fabs(const float x) {
 	return fabsf(x);
 }
+#endif
 
 //------------------------------------------------------------------------------
 // fmax()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float fmax(const float x, const float y) {
 	return fmaxf(x, y);
 }
+#endif
 
 
 __forceinline__ float3 fmax(const float3 x, const float3 y) {
@@ -436,9 +461,11 @@ __forceinline__ float3 fmax(const float3 x, const float3 y) {
 // fmin()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_HIP_DEVICE)
 __forceinline__ float fmin(const float x, const float y) {
 	return fminf(x, y);
 }
+#endif
 
 __forceinline__ float3 fmin(const float3 x, const float3 y) {
 	return MAKE_FLOAT3(fminf(x.x, y.x), fminf(x.y, y.y), fminf(x.z, y.z));

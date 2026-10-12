@@ -114,12 +114,15 @@ set(LUXRAYS_SRCS
   ${PROJECT_SOURCE_DIR}/src/luxrays/core/geometry/transform.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/devices/cudadevice.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/devices/cudaintersectiondevice.cpp
+  ${PROJECT_SOURCE_DIR}/src/luxrays/devices/hipdevice.cpp
+  ${PROJECT_SOURCE_DIR}/src/luxrays/devices/hipintersectiondevice.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/devices/nativeintersectiondevice.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/devices/ocldevice.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/devices/oclintersectiondevice.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/buffer.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/config.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/cuda.cpp
+  ${PROJECT_SOURCE_DIR}/src/luxrays/utils/hip.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/mc.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/ocl.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/safesave.cpp
@@ -130,6 +133,7 @@ set(LUXRAYS_SRCS
   ${PROJECT_SOURCE_DIR}/src/luxrays/utils/utils.cpp
   ${PROJECT_SOURCE_DIR}/deps/cuew/src/cuew.cpp
   ${PROJECT_SOURCE_DIR}/deps/clew/src/clew.cpp
+  ${PROJECT_SOURCE_DIR}/deps/hipew/src/hipew.cpp
 )
 SOURCE_GROUP("Source Files\\LuxRays Library" FILES ${LUXRAYS_SRCS})
 

@@ -48,12 +48,14 @@ typedef enum {
 	DEVICE_TYPE_OPENCL_GPU = 1 << 3,
 	DEVICE_TYPE_OPENCL_UNKNOWN = 1 << 4,
 	DEVICE_TYPE_CUDA_GPU = 1 << 5,
+	DEVICE_TYPE_HIP_GPU = 1 << 6,
 	DEVICE_TYPE_OPENCL_ALL = DEVICE_TYPE_OPENCL_DEFAULT |
 		DEVICE_TYPE_OPENCL_CPU | DEVICE_TYPE_OPENCL_GPU |
 		DEVICE_TYPE_OPENCL_UNKNOWN,
 	DEVICE_TYPE_CUDA_ALL = DEVICE_TYPE_CUDA_GPU,
+	DEVICE_TYPE_HIP_ALL = DEVICE_TYPE_HIP_GPU,
 	DEVICE_TYPE_ALL = DEVICE_TYPE_NATIVE | DEVICE_TYPE_OPENCL_ALL,
-	DEVICE_TYPE_ALL_HARDWARE = DEVICE_TYPE_OPENCL_ALL | DEVICE_TYPE_CUDA_ALL,
+	DEVICE_TYPE_ALL_HARDWARE = DEVICE_TYPE_OPENCL_ALL | DEVICE_TYPE_CUDA_ALL | DEVICE_TYPE_HIP_ALL,
 	DEVICE_TYPE_ALL_INTERSECTION = DEVICE_TYPE_NATIVE | DEVICE_TYPE_OPENCL_ALL,
 } DeviceType;
 
@@ -110,6 +112,12 @@ protected:
  *
  *            | =>   HardwareDevice   => | =>         CudaDevice         => |
  *  Device => |					                                            | => CudaIntersectionDevice
+ *            | =>   HardwareDevice   => |                                  |
+ *            |                          | => HardwareIntersectionDevice => |
+ *            | => IntersectionDevice => |
+ *
+ *            | =>   HardwareDevice   => | =>         HIPDevice          => |
+ *  Device => |					                                            | => HIPIntersectionDevice
  *            | =>   HardwareDevice   => |                                  |
  *            |                          | => HardwareIntersectionDevice => |
  *            | => IntersectionDevice => |

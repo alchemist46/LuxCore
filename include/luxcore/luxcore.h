@@ -209,6 +209,9 @@ CPP_EXPORT CPP_API void KernelCacheFill(
  *		true or false if the sources has been compiled with LUXRAYS_ENABLE_CUDA and
  *		CUDA support is available or not.
  * - compile.LUXRAYS_ENABLE_OPTIX is true if Optix is available, false otherwise.
+ * - compile.LUXRAYS_ENABLE_HIP and compile.LUXRAYS_DISABLE_HIP\n
+ *		true or false if the sources has been compiled with LUXRAYS_ENABLE_HIP and
+ *		HIP support (AMD GPUs) is available or not.
  * - compile.LUXCORE_DISABLE_EMBREE_BVH_BUILDER\n
  *		true or false if the sources has been compiled with LUXCORE_DISABLE_EMBREE_BVH_BUILDER and
  *		Embree BVH builder is used for OpenCL or not. This is now always false.
@@ -270,12 +273,17 @@ CPP_EXPORT CPP_API std::vector<std::string> GetFileNameResolverPaths();
 CPP_EXPORT CPP_API void ClearCUDAKernelCache();
 
 /*!
+ * \brief Clear all HIP kernel caches.
+ */
+CPP_EXPORT CPP_API void ClearHIPKernelCache();
+
+/*!
  * \brief Clear all OpenCL kernel caches.
  */
 CPP_EXPORT CPP_API void ClearOCLKernelCache();
 
 /*!
- * \brief Clear all kernel caches (CUDA and OpenCL).
+ * \brief Clear all kernel caches (CUDA, HIP and OpenCL).
  */
 CPP_EXPORT CPP_API void ClearAllKernelCaches();
 

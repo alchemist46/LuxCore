@@ -149,6 +149,14 @@ void Film::CreateHWContext() {
 			hardwareDevice->SetAdditionalCompileOpts(compileOpts);
 		}
 
+		if (hardwareDevice->GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) {
+			// Suggested compiler options: -ffast-math
+			vector<string> compileOpts;
+			compileOpts.push_back("-ffast-math");
+
+			hardwareDevice->SetAdditionalCompileOpts(compileOpts);
+		}
+
 		if (hardwareDevice->GetDeviceDesc().GetType() & DEVICE_TYPE_OPENCL_ALL) {
 			// Suggested compiler options: -cl-fast-relaxed-math -cl-mad-enable
 
