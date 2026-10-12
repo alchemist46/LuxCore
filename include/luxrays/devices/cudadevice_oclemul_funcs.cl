@@ -187,7 +187,7 @@ __forceinline__ void vstore4(const float4 data, const size_t offset, float *p) {
 	p[offset] = data.x;
 	p[offset + 1] = data.y;
 	p[offset + 2] = data.z;
-	p[offset + 2] = data.w;
+	p[offset + 3] = data.w;
 }
 
 //------------------------------------------------------------------------------
