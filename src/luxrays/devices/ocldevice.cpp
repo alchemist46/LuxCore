@@ -115,9 +115,14 @@ void OpenCLDeviceDescription::AddDeviceDescs(
 ) {
 	// Get the list of devices available on the platform
 	cl_uint deviceCount;
-	CHECK_OCL_ERROR(
-		clGetDeviceIDs(oclPlatform, CL_DEVICE_TYPE_ALL, 0, nullptr, &deviceCount)
-	);
+	const cl_int err = clGetDeviceIDs(oclPlatform, CL_DEVICE_TYPE_ALL, 0, nullptr, &deviceCount);
+	// A platform can be installed without any device (i.e. Mesa rusticl
+	// when no driver is enabled with RUSTICL_ENABLE): just skip it
+	if ((err == CL_DEVICE_NOT_FOUND) || ((err == CL_SUCCESS) && (deviceCount == 0))) {
+		SLG_LOG("OpenCL platform " << GetOCLPlatformName(oclPlatform) << " has no device, skipping it");
+		return;
+	}
+	CHECK_OCL_ERROR(err);
 
 	auto devices = std::make_unique<cl_device_id[]>(deviceCount);
 	CHECK_OCL_ERROR(
