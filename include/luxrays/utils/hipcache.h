@@ -25,6 +25,7 @@
 #include <memory>
 #include <filesystem>
 
+#include "luxrays/luxrays.h"
 #include "luxrays/utils/hip.h"
 
 #if !defined(LUXRAYS_DISABLE_HIP)
@@ -42,6 +43,9 @@ namespace luxrays {
 // the device to be current, is done on the calling thread.
 class hipKernelPersistentCache {
 public:
+	// The largest work group the compiled kernels can be launched with
+	static constexpr u_int MaxWorkGroupSize = 256;
+
 	hipKernelPersistentCache(const std::string &applicationName, const std::string &gpuArch);
 	~hipKernelPersistentCache();
 
@@ -72,6 +76,9 @@ public:
 
 	// Clear all HIP kernel caches (all applications)
 	static void ClearAllCaches();
+
+	// The options used for all the programs, in addition to the program ones
+	static std::vector<std::string> GetCompilerOptions(const std::string &gpuArch);
 
 	static bool ForcedCompileCodeObject(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,

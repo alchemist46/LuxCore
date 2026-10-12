@@ -49,6 +49,23 @@ std::filesystem::path hipKernelPersistentCache::GetCacheDir(const std::string &a
 	return luxrays::GetCacheDir() / "hip_kernel_cache" / SanitizeFileName(applicationName);
 }
 
+std::vector<std::string> hipKernelPersistentCache::GetCompilerOptions(const std::string &gpuArch) {
+	return {
+		// Compile for the architecture of the device the program will run on
+		"--offload-arch=" + gpuArch,
+		"-O3",
+		// The OpenCL-style sources produce a lot of harmless warnings once
+		// compiled as HIP (unused variables, sign conversions, etc.)
+		"-w",
+		// By default, kernels are compiled to run work groups of up to 1024
+		// threads, which halves the registers available to each thread. The
+		// render engines use much smaller work groups and the kernels are
+		// register hungry: on gfx1030, this is about 20% faster (the same
+		// speed of the AMD OpenCL compiler) and spills less to the stack.
+		"--gpu-max-threads-per-block=" + std::to_string(MaxWorkGroupSize)
+	};
+}
+
 bool hipKernelPersistentCache::ForcedCompileCodeObject(
 	const std::vector<std::string> &kernelsParameters, const std::string &kernelSource,
 	const std::string &programName, const std::string &gpuArch,
@@ -60,17 +77,11 @@ bool hipKernelPersistentCache::ForcedCompileCodeObject(
 	hiprtcProgram prog;
 	CHECK_HIPRTC_ERROR(hiprtcCreateProgram(&prog, kernelSource.c_str(), programName.c_str(), 0, nullptr, nullptr));
 
+	const std::vector<std::string> compilerOpts = GetCompilerOptions(gpuArch);
+
 	std::vector<const char *> hipOpts;
-
-	// Compile for the architecture of the device the program will run on
-	const std::string targetArch = "--offload-arch=" + gpuArch;
-	hipOpts.push_back(targetArch.c_str());
-
-	hipOpts.push_back("-O3");
-	// The OpenCL-style sources produce a lot of harmless warnings once
-	// compiled as HIP (unused variables, sign conversions, etc.)
-	hipOpts.push_back("-w");
-
+	for (auto const &o : compilerOpts)
+		hipOpts.push_back(o.c_str());
 	for (auto const &p : kernelsParameters)
 		hipOpts.push_back(p.c_str());
 
@@ -107,9 +118,12 @@ bool hipKernelPersistentCache::CompileCodeObject(const std::vector<std::string> 
 		*error = "";
 	*cached = false;
 
-	// Check if the kernel is available in the cache
+	// Check if the kernel is available in the cache. The compiler options are
+	// part of the hash, so a change of them invalidates the cached kernels.
+	std::vector<std::string> allOpts = GetCompilerOptions(arch);
+	allOpts.insert(allOpts.end(), kernelsParameters.begin(), kernelsParameters.end());
 	const std::string kernelName =
-			oclKernelPersistentCache::HashString(oclKernelPersistentCache::ToOptsString(kernelsParameters))
+			oclKernelPersistentCache::HashString(oclKernelPersistentCache::ToOptsString(allOpts))
 			+ "-" +
 			oclKernelPersistentCache::HashString(kernelSource) +
 			"_" + SanitizeFileName(arch) + ".co";

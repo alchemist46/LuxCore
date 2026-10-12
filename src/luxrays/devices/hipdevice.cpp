@@ -425,6 +425,12 @@ void HIPDevice::EnqueueKernel(HardwareDeviceKernelRPtr kernel,
 			blockX, blockY, blockZ,
 			threadX, threadY, threadZ);
 
+	// The kernels are compiled for a limited work group size
+	if (threadX * threadY * threadZ > hipKernelPersistentCache::MaxWorkGroupSize)
+		throw runtime_error("HIP work group size " + ToString(threadX * threadY * threadZ) +
+				" is larger than the supported maximum of " + ToString(hipKernelPersistentCache::MaxWorkGroupSize) +
+				" (check opencl.gpu.workgroup.size)");
+
 	CHECK_HIP_ERROR(hipModuleLaunchKernel(hipDeviceKernel.hipKernel,
 			blockX, blockY, blockZ,  // blocks
 			threadX, threadY, threadZ,  // threads
