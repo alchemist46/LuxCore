@@ -150,9 +150,12 @@ void Film::CreateHWContext() {
 		}
 
 		if (hardwareDevice->GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) {
-			// Suggested compiler options: -ffast-math
+			// Suggested compiler options: -ffast-math -fno-finite-math-only
+			// (INFINITY marks pixels without samples, -ffast-math alone folds
+			// isinf() to false)
 			vector<string> compileOpts;
 			compileOpts.push_back("-ffast-math");
+			compileOpts.push_back("-fno-finite-math-only");
 
 			hardwareDevice->SetAdditionalCompileOpts(compileOpts);
 		}

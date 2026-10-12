@@ -115,12 +115,14 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(RenderConfigRef rcfg,
 			SLG_LOG("[" << dev.GetName() << "]");
 			intersectionDevices.push_back(dev);
 
-			// Suggested compiler options: -ffast-math (the hiprtc equivalent
-			// of --use_fast_math and -cl-fast-relaxed-math)
+			// Suggested compiler options: -ffast-math -fno-finite-math-only
+			// (the hiprtc equivalent of --use_fast_math). The kernels use
+			// isinf()/isnan(), which -ffast-math alone folds to false.
 			auto& hwDev = dynamic_cast<HardwareDeviceRef>(dev);
 
 			std::vector<std::string> compileOpts;
 			compileOpts.push_back("-ffast-math");
+			compileOpts.push_back("-fno-finite-math-only");
 
 			hwDev.SetAdditionalCompileOpts(compileOpts);
 		}
