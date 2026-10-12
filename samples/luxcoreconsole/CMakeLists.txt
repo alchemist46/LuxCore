@@ -25,7 +25,8 @@
 set(LUXCORECONSOLE_SRCS luxcoreconsole.cpp)
 
 add_executable(luxcoreconsole ${LUXCORECONSOLE_SRCS})
-TARGET_LINK_LIBRARIES(luxcoreconsole PRIVATE luxrays luxcore_static boost::boost)
+# Executables can replace malloc() (see onetbb::onetbb in the main CMakeLists.txt)
+TARGET_LINK_LIBRARIES(luxcoreconsole PRIVATE luxrays luxcore_static boost::boost TBB::tbbmalloc_proxy)
 
 if(APPLE)
   TARGET_LINK_LIBRARIES(luxcoreconsole PRIVATE expat "-framework Carbon" "-framework IOKit")

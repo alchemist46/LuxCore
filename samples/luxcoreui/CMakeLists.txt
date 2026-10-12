@@ -61,6 +61,8 @@ target_link_libraries(luxcoreui PRIVATE
   imgui::imgui
   imguifiledialog::imguifiledialog
   glfw
+  # Executables can replace malloc() (see onetbb::onetbb in the main CMakeLists.txt)
+  TBB::tbbmalloc_proxy
 )
 set_target_properties(luxcoreui PROPERTIES
   INSTALL_RPATH "\$ORIGIN/../lib"

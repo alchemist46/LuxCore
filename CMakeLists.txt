@@ -188,6 +188,14 @@ INCLUDE(CheckCompilerVersion)
 # Nota: please keep all 'find_package' gathered here (for maintenance reasons)
 message(STATUS "LuxCore - Add dependency targets")
 find_package(TBB REQUIRED)
+# onetbb::onetbb includes tbbmalloc_proxy, which replaces malloc()/free()
+# process-wide. It must be loaded at program start: when a library (i.e. the
+# pyluxcore Python module) brings it in later, the heap of the libraries loaded
+# afterwards is corrupted (i.e. "free(): invalid size" in the AMD ROCm runtime,
+# used by both OpenCL and HIP). Only executables link it, explicitly.
+get_target_property(_lux_tbb_libs onetbb::onetbb INTERFACE_LINK_LIBRARIES)
+list(REMOVE_ITEM _lux_tbb_libs TBB::tbbmalloc_proxy)
+set_target_properties(onetbb::onetbb PROPERTIES INTERFACE_LINK_LIBRARIES "${_lux_tbb_libs}")
 find_package(minizip REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(OpenImageIO REQUIRED)
