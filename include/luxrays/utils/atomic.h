@@ -30,25 +30,18 @@ namespace luxrays {
 //------------------------------------------------------------------------------
 
 inline float AtomicAdd(float *val, const float delta) {
-	union bits {
-		float f;
-		uint32_t i;
+	std::atomic_ref<float> ref(*val);
 
-	};
-
-	bits oldVal, newVal;
-
-	do {
+	float oldVal = ref.load(std::memory_order_relaxed);
+	// compare_exchange_weak() updates oldVal on failure
+	while (!ref.compare_exchange_weak(oldVal, oldVal + delta, std::memory_order_relaxed)) {
+		// Back off only when another thread has updated the value
 #if (defined(__i386__) || defined(__amd64__))
 		__asm__ __volatile__("pause\n");
 #endif
+	}
 
-		oldVal.f = *val;
-		newVal.f = oldVal.f + delta;
-	} while (boost::interprocess::ipcdetail::atomic_cas32(
-			((uint32_t *) val), newVal.i, oldVal.i) != oldVal.i);
-
-	return oldVal.f;
+	return oldVal;
 }
 
 template<class T>

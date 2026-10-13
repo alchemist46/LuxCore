@@ -84,16 +84,46 @@ public:
 	friend class boost::serialization::access;
 
 private:
-	template<class Archive> void serialize(Archive &ar, const unsigned int version) {
+	// The serialized format has a vector for each counter
+	template<class Archive> void save(Archive &ar, const unsigned int version) const {
+		std::vector<double> total(threadCount), perPixel(threadCount), perScreen(threadCount);
+		for (u_int i = 0; i < threadCount; ++i) {
+			total[i] = counts[i].total;
+			perPixel[i] = counts[i].RADIANCE_PER_PIXEL_NORMALIZED;
+			perScreen[i] = counts[i].RADIANCE_PER_SCREEN_NORMALIZED;
+		}
+
 		ar & threadCount;
-		ar & total_SampleCount;
-		ar & RADIANCE_PER_PIXEL_NORMALIZED_SampleCount;
-		ar & RADIANCE_PER_SCREEN_NORMALIZED_SampleCount;
+		ar & total;
+		ar & perPixel;
+		ar & perScreen;
 	}
+	template<class Archive> void load(Archive &ar, const unsigned int version) {
+		std::vector<double> total, perPixel, perScreen;
+		ar & threadCount;
+		ar & total;
+		ar & perPixel;
+		ar & perScreen;
+
+		counts.resize(threadCount);
+		for (u_int i = 0; i < threadCount; ++i) {
+			counts[i].total = total[i];
+			counts[i].RADIANCE_PER_PIXEL_NORMALIZED = perPixel[i];
+			counts[i].RADIANCE_PER_SCREEN_NORMALIZED = perScreen[i];
+		}
+	}
+	BOOST_SERIALIZATION_SPLIT_MEMBER()
+
+	// The counters of each render thread are in their own cache line: they
+	// are updated for every sample
+	struct alignas(64) ThreadSampleCounts {
+		double total = 0.0;
+		double RADIANCE_PER_PIXEL_NORMALIZED = 0.0;
+		double RADIANCE_PER_SCREEN_NORMALIZED = 0.0;
+	};
 
 	u_int threadCount;
-	std::vector<double> total_SampleCount;
-	std::vector<double> RADIANCE_PER_PIXEL_NORMALIZED_SampleCount, RADIANCE_PER_SCREEN_NORMALIZED_SampleCount;
+	std::vector<ThreadSampleCounts> counts;
 };
 
 //------------------------------------------------------------------------------

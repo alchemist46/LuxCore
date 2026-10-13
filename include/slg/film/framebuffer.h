@@ -187,7 +187,7 @@ public:
 		} else {
 			for (u_int i = 0; i < CHANNELS - 1; ++i)
 				luxrays::AtomicAdd(&pixel[i], v[i] * weight);
-			pixel[CHANNELS - 1] += weight;
+			luxrays::AtomicAdd(&pixel[CHANNELS - 1], weight);
 		}
 	}
 

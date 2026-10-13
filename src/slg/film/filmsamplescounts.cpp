@@ -37,42 +37,29 @@ void FilmSamplesCounts::Init(const u_int count) {
 	assert (count > 0);
 
 	threadCount = count;
-
-	total_SampleCount.resize(threadCount);
-	RADIANCE_PER_PIXEL_NORMALIZED_SampleCount.resize(threadCount);
-	RADIANCE_PER_SCREEN_NORMALIZED_SampleCount.resize(threadCount);
-
-	fill(total_SampleCount.begin(), total_SampleCount.end(), 0.0);
-	fill(RADIANCE_PER_PIXEL_NORMALIZED_SampleCount.begin(), RADIANCE_PER_PIXEL_NORMALIZED_SampleCount.end(), 0.0);
-	fill(RADIANCE_PER_SCREEN_NORMALIZED_SampleCount.begin(), RADIANCE_PER_SCREEN_NORMALIZED_SampleCount.end(), 0.0);
+	counts.assign(threadCount, ThreadSampleCounts());
 }
 
 void FilmSamplesCounts::Clear() {
-	fill(total_SampleCount.begin(), total_SampleCount.end(), 0.0);
-	fill(RADIANCE_PER_PIXEL_NORMALIZED_SampleCount.begin(), RADIANCE_PER_PIXEL_NORMALIZED_SampleCount.end(), 0.0);
-	fill(RADIANCE_PER_SCREEN_NORMALIZED_SampleCount.begin(), RADIANCE_PER_SCREEN_NORMALIZED_SampleCount.end(), 0.0);
+	fill(counts.begin(), counts.end(), ThreadSampleCounts());
 }
 
 void FilmSamplesCounts::SetSampleCount(const double sampleCount,
 		const double RADIANCE_PER_PIXEL_NORMALIZED_count,
 		const double RADIANCE_PER_SCREEN_NORMALIZED_count) {
-	total_SampleCount[0] = sampleCount;
-	RADIANCE_PER_PIXEL_NORMALIZED_SampleCount[0] = RADIANCE_PER_PIXEL_NORMALIZED_count;
-	RADIANCE_PER_SCREEN_NORMALIZED_SampleCount[0] = RADIANCE_PER_SCREEN_NORMALIZED_count;
+	Clear();
 
-	for (u_int i = 1; i < threadCount; ++i) {
-		total_SampleCount[0] = 0.0;
-		RADIANCE_PER_PIXEL_NORMALIZED_SampleCount[i] = 0.0;
-		RADIANCE_PER_SCREEN_NORMALIZED_SampleCount[i] = 0.0;
-	}
+	counts[0].total = sampleCount;
+	counts[0].RADIANCE_PER_PIXEL_NORMALIZED = RADIANCE_PER_PIXEL_NORMALIZED_count;
+	counts[0].RADIANCE_PER_SCREEN_NORMALIZED = RADIANCE_PER_SCREEN_NORMALIZED_count;
 }
 
 void FilmSamplesCounts::AddSampleCount(const double sampleCount,
 		const double RADIANCE_PER_PIXEL_NORMALIZED_count,
 		const double RADIANCE_PER_SCREEN_NORMALIZED_count) {
-	total_SampleCount[0] += sampleCount;
-	RADIANCE_PER_PIXEL_NORMALIZED_SampleCount[0] += RADIANCE_PER_PIXEL_NORMALIZED_count;
-	RADIANCE_PER_SCREEN_NORMALIZED_SampleCount[0] += RADIANCE_PER_SCREEN_NORMALIZED_count;
+	counts[0].total += sampleCount;
+	counts[0].RADIANCE_PER_PIXEL_NORMALIZED += RADIANCE_PER_PIXEL_NORMALIZED_count;
+	counts[0].RADIANCE_PER_SCREEN_NORMALIZED += RADIANCE_PER_SCREEN_NORMALIZED_count;
 }
 
 void FilmSamplesCounts::AddSampleCount(const u_int threadIndex,
@@ -80,29 +67,30 @@ void FilmSamplesCounts::AddSampleCount(const u_int threadIndex,
 		const double RADIANCE_PER_SCREEN_NORMALIZED_count) {
 	assert (threadIndex < threadCount);
 
-	total_SampleCount[threadIndex] += Max(RADIANCE_PER_PIXEL_NORMALIZED_count, RADIANCE_PER_SCREEN_NORMALIZED_count);
-	RADIANCE_PER_PIXEL_NORMALIZED_SampleCount[threadIndex] += RADIANCE_PER_PIXEL_NORMALIZED_count;
-	RADIANCE_PER_SCREEN_NORMALIZED_SampleCount[threadIndex] += RADIANCE_PER_SCREEN_NORMALIZED_count;
+	ThreadSampleCounts &c = counts[threadIndex];
+	c.total += Max(RADIANCE_PER_PIXEL_NORMALIZED_count, RADIANCE_PER_SCREEN_NORMALIZED_count);
+	c.RADIANCE_PER_PIXEL_NORMALIZED += RADIANCE_PER_PIXEL_NORMALIZED_count;
+	c.RADIANCE_PER_SCREEN_NORMALIZED += RADIANCE_PER_SCREEN_NORMALIZED_count;
 }
 
 double FilmSamplesCounts::GetSampleCount() const {
 	double result = 0.0;
 	for (u_int i = 0; i < threadCount; ++i)
-		result += total_SampleCount[i];
+		result += counts[i].total;
 	return result;
 }
 
 double FilmSamplesCounts::GetSampleCount_RADIANCE_PER_PIXEL_NORMALIZED() const {
 	double result = 0.0;
 	for (u_int i = 0; i < threadCount; ++i)
-		result += RADIANCE_PER_PIXEL_NORMALIZED_SampleCount[i];
+		result += counts[i].RADIANCE_PER_PIXEL_NORMALIZED;
 	return result;	
 }
 
 double FilmSamplesCounts::GetSampleCount_RADIANCE_PER_SCREEN_NORMALIZED() const {
 	double result = 0.0;
 	for (u_int i = 0; i < threadCount; ++i)
-		result += RADIANCE_PER_SCREEN_NORMALIZED_SampleCount[i];
+		result += counts[i].RADIANCE_PER_SCREEN_NORMALIZED;
 	return result;	
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
