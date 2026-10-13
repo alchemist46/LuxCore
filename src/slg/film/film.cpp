@@ -1405,20 +1405,23 @@ void Film::RunTests() {
 		return;
 	}
 
-	if (convTest) {
-		assert (HasChannel(IMAGEPIPELINE));
-
-		// Required in order to have a valid convergence test
-		ExecuteImagePipeline(0);
-	}
-
 	const bool convTestRequired = (convTest && convTest->IsTestUpdateRequired());
 	const bool noiseEstimationRequired = (noiseEstimation && noiseEstimation->IsTestUpdateRequired());
-	if (convTestRequired || noiseEstimationRequired) {
+
+	// Execute the image pipelines read by the tests only when a test is due,
+	// and each one only once (an image pipeline can include a denoiser). The
+	// image pipeline outputs execute their pipeline on their own.
+	if (convTestRequired) {
 		assert (HasChannel(IMAGEPIPELINE));
 
-		// Required in order to have a valid convergence test
-		ExecuteImagePipeline(0);
+		ExecuteImagePipeline(haltNoiseThresholdImagePipelineIndex);
+	}
+
+	if (noiseEstimationRequired && !(convTestRequired &&
+			(noiseEstimationImagePipelineIndex == haltNoiseThresholdImagePipelineIndex))) {
+		assert (HasChannel(IMAGEPIPELINE));
+
+		ExecuteImagePipeline(noiseEstimationImagePipelineIndex);
 	}
 
 	if (convTestRequired) {
@@ -1431,7 +1434,6 @@ void Film::RunTests() {
 	}
 
 	if (noiseEstimationRequired) {
-		ExecuteImagePipeline(noiseEstimationImagePipelineIndex);
 		// Run the noise estimation test
 		noiseEstimation->Test();
 	}
