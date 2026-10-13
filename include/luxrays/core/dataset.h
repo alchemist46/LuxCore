@@ -19,6 +19,8 @@
 #ifndef _LUXRAYS_DATASET_H
 #define	_LUXRAYS_DATASET_H
 
+#include <array>
+#include <atomic>
 #include <deque>
 #include <vector>
 #include <mutex>
@@ -80,8 +82,13 @@ private:
 	BBox bbox;
 	BSphere bsphere;
 
+	// The accelerators are built on demand and requested for each ray by all
+	// the rendering threads: the lookup doesn't lock. A slot is written only
+	// once (under accelsMutex) and then published with its ready flag.
+	static constexpr u_int ACCEL_TYPE_COUNT = ACCEL_HIPRT + 1;
 	mutable std::mutex accelsMutex;
-	mutable std::unordered_map<AcceleratorType, AcceleratorSPtr> accels;  // Cache
+	mutable std::array<AcceleratorSPtr, ACCEL_TYPE_COUNT> accels;  // Cache
+	mutable std::array<std::atomic<bool>, ACCEL_TYPE_COUNT> accelsReady{};
 
 	AcceleratorType accelType;
 	bool preprocessed;

@@ -60,8 +60,8 @@ DataSet::DataSet(const Context& luxRaysContext): context(luxRaysContext) {
 }
 
 DataSet::~DataSet() {
-	for (auto it = accels.begin(); it != accels.end(); ++it)
-		it->second.reset();
+	for (auto &accel : accels)
+		accel.reset();
 }
 
 TriangleMeshID DataSet::Add(MeshConstRef mesh) {
@@ -106,20 +106,19 @@ void DataSet::UpdateBBoxes() {
 }
 
 bool DataSet::HasAccelerator(const AcceleratorType accelType) const {
-	auto it = accels.find(accelType);
-
-	return !(it == accels.end());
+	return accelsReady[accelType].load(std::memory_order_acquire);
 }
 
 AcceleratorConstSPtr DataSet::GetAccelerator(const AcceleratorType accelType) const {
-	auto it = accels.find(accelType);
-	if (it == accels.end()) {
+	// Fast path without locking (see the declaration of accels)
+	if (accelsReady[accelType].load(std::memory_order_acquire))
+		return accels[accelType];
+
+	{
 		std::unique_lock<std::mutex> lock(accelsMutex);
 
 		// Try again under mutex
-		it = accels.find(accelType);
-
-		if (it == accels.end()) {
+		if (!accelsReady[accelType].load(std::memory_order_relaxed)) {
 			LR_LOG(context, "Adding DataSet accelerator: " << Accelerator::AcceleratorType2String(accelType));
 			LR_LOG(context, "Total vertex count: " << totalVertexCount);
 			LR_LOG(context, "Total triangle count: " << totalTriangleCount);
@@ -152,18 +151,18 @@ AcceleratorConstSPtr DataSet::GetAccelerator(const AcceleratorType accelType) co
 
 			accel->Init(meshes, totalVertexCount, totalTriangleCount);
 
+			// Publish the accelerator
 			accels[accelType] = accel;
+			accelsReady[accelType].store(true, std::memory_order_release);
+		}
 
-			return accel;
-		} else
-			return it->second;
-	} else
-		return it->second;
+		return accels[accelType];
+	}
 }
 
 bool DataSet::DoesAllAcceleratorsSupportUpdate() const {
-	for (auto it = accels.begin(); it != accels.end(); ++it) {
-		if (!it->second->DoesSupportUpdate())
+	for (const auto &accel : accels) {
+		if (accel && !accel->DoesSupportUpdate())
 			return false;
 	}
 
@@ -171,9 +170,11 @@ bool DataSet::DoesAllAcceleratorsSupportUpdate() const {
 }
 
 void DataSet::UpdateAccelerators() {
-	for (auto it = accels.begin(); it != accels.end(); ++it) {
-		assert(it->second->DoesSupportUpdate());
-		it->second->Update();
+	for (auto &accel : accels) {
+		if (accel) {
+			assert(accel->DoesSupportUpdate());
+			accel->Update();
+		}
 	}
 }
 
