@@ -578,11 +578,11 @@ void slg::RenderConfig::save_construct_data(
 ) {
     // save data required to construct instance
 
-	// Save Configuration
-	PropertiesUPtr completeCfg;
+	// Save Configuration (with the additional one, see SaveSerialized())
+	PropertiesUPtr completeCfg = std::make_unique<Properties>();
 	completeCfg->Set(*t->cfg);
 	completeCfg->Set(t->saveAdditionalCfg);
-	ar << t->cfg;
+	ar << completeCfg;
 
 	// Save internal Scene
 	ar << t->internalScene;

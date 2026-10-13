@@ -1809,7 +1809,7 @@ RenderSessionImpl::RenderSessionImpl(
 	stats(std::make_unique<Properties>())
 {
 
-	auto startFilm = slg::Film::LoadSerialized(startFilmFileName);
+	loadedStartFilm = slg::Film::LoadSerialized(startFilmFileName);
 	auto startState = slg::RenderState::LoadSerialized(startStateFileName);
 
 	slg::RenderConfigRef rcfg(*config.renderConfig);
@@ -1817,7 +1817,7 @@ RenderSessionImpl::RenderSessionImpl(
 	renderSession = std::make_unique<slg::RenderSession>(
 		rcfg,
 		startState,
-		slg::FilmPtr(startFilm.get())
+		slg::FilmPtr(loadedStartFilm.get())
 	);
 }
 

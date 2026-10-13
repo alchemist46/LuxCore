@@ -38,7 +38,10 @@ BOOST_CLASS_EXPORT_IMPLEMENT(slg::Film)
 void Film::SaveSerialized(const string &fileName, FilmRef  film) {
 	SerializationOutputFile sof(fileName);
 
-	sof.GetArchive() << film;
+	// Serialized as a pointer: it is the format used by LoadSerialized() (and
+	// by the files of the previous versions)
+	const Film *filmPtr = &film;
+	sof.GetArchive() << filmPtr;
 
 	if (!sof.IsGood())
 		throw runtime_error("Error while saving serialized film: " + fileName);
@@ -50,13 +53,14 @@ void Film::SaveSerialized(const string &fileName, FilmRef  film) {
 FilmUPtr Film::LoadSerialized(const string &fileName) {
 	SerializationInputFile sif(fileName);
 
-	FilmUPtr film;
+	Film *film = nullptr;
 	sif.GetArchive() >> film;
+	FilmUPtr result(film);
 
 	if (!sif.IsGood())
 		throw runtime_error("Error while loading serialized film: " + fileName);
 
-	return film;
+	return result;
 }
 
 template<class Archive> void Film::load(Archive &ar, const u_int version) {

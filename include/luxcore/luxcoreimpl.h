@@ -658,6 +658,11 @@ private:
 	// Back link, not owned
 	RenderConfigImplConstRef renderConfig;
 
+	// The start film loaded from a file (when resuming a rendering): the
+	// render engine only observes it. It is declared before renderSession
+	// in order to be destroyed after it.
+	slg::FilmUPtr loadedStartFilm;
+
 	// RenderSessionImpl creates and owns a slg::RenderSession and a FilmImpl
 	// RenderSession must not be shared
 	std::unique_ptr<slg::RenderSession> renderSession;

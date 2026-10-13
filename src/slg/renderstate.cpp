@@ -46,8 +46,10 @@ void RenderState::CheckEngineTag(const std::string &tag) {
 RenderStateSPtr RenderState::LoadSerialized(const std::string &fileName) {
 	SerializationInputFile sif(fileName);
 
-	RenderStateSPtr renderState;
-	sif.GetArchive() >> renderState;
+	// Serialized as a pointer by SaveSerialized()
+	RenderState *state = nullptr;
+	sif.GetArchive() >> state;
+	RenderStateSPtr renderState(state);
 
 	if (!sif.IsGood())
 		throw runtime_error("Error while loading serialized render state: " + fileName);
