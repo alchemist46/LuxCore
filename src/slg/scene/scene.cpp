@@ -706,10 +706,30 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 	// intersection (and not BSDF initialization)
 	bsdf->hitPoint.throughShadowTransparency = false;
 
+	// A shadow ray outside of any volume stops at the first hit of a shadow
+	// blocker: the result doesn't depend on the hit point and the callers
+	// don't use the BSDF, the connection throughput or the ray hit of a shadow
+	// ray that hits something. Without a current volume, the volume priority
+	// system can't continue the ray (PathVolumeInfo::ContinueToTrace()).
+	const bool shadowBlockerStop = shadowRay && !sampleResult;
+
+	// If all the objects are shadow blockers, any hit will do
+	if (shadowBlockerStop && allShadowBlockers && !defaultWorldVolume &&
+			!volInfo->HasCurrentVolume()) {
+		return device ?
+			device->TraceOccluded(ray) :
+			dataSet->GetAccelerator(ACCEL_EMBREE)->Occluded(ray);
+	}
+
 	for (;;) {
 		bool hit = device ?
 			device->TraceRay(ray, rayHit) :
 			dataSet->GetAccelerator(ACCEL_EMBREE)->Intersect(ray, rayHit);
+
+		if (hit && shadowBlockerStop && !volInfo->HasCurrentVolume() &&
+				(rayHit->meshIndex < shadowBlockers.size()) &&
+				shadowBlockers[rayHit->meshIndex])
+			return true;
 
 		bool bevelContinueToTrace = !hit;
 		VolumeConstPtr rayVolume =
@@ -838,6 +858,24 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 		}
 
 		passThrough = rng.floatValue();
+	}
+}
+
+void Scene::UpdateShadowBlockers() {
+	const u_int objCount = objDefs.GetSize();
+
+	shadowBlockers.resize(objCount);
+	allShadowBlockers = true;
+	for (u_int i = 0; i < objCount; ++i) {
+		const SceneObject &obj = objDefs.GetSceneObject(i);
+		const Material &mat = obj.GetMaterial();
+
+		const bool blocker = (obj.GetExtMesh().GetBevelRadius() == 0.f) &&
+				!mat.HasPassThroughTransparency() &&
+				mat.GetPassThroughShadowTransparency().Black();
+
+		shadowBlockers[i] = blocker;
+		allShadowBlockers = allShadowBlockers && blocker;
 	}
 }
 

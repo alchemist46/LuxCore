@@ -128,6 +128,10 @@ public:
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
 		const bool backTracing) const;
+	// Returns false if GetPassThroughTransparency() always returns black
+	virtual bool HasPassThroughTransparency() const {
+		return frontTransparencyTex || backTransparencyTex;
+	}
 
 	void SetPassThroughShadowTransparency(const luxrays::Spectrum &t) {
 		passThroughShadowTransparency = t;

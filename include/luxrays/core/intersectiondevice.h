@@ -69,6 +69,11 @@ public:
 		statsTotalSerialRayCount += 1;
 		return accel->Intersect(ray, rayHit);
 	}
+	// Returns true if the ray hits anything, without the hit information
+	virtual bool TraceOccluded(const Ray *ray) {
+		statsTotalSerialRayCount += 1;
+		return accel->Occluded(ray);
+	}
 
 	friend class Context;
 

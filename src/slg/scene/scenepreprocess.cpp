@@ -83,7 +83,11 @@ void Scene::Preprocess(Context& ctx, const u_int filmWidth, const u_int filmHeig
 	// At this point, both the data set and the camera are updated
 	const BBox sceneBBox = Union(dataSet->GetBBox(), camera->GetBBox());
 	sceneBSphere = sceneBBox.BoundingSphere();		
-	
+
+	// Before the light sources preprocessing: it can trace shadow rays (i.e.
+	// the direct light sampling cache)
+	UpdateShadowBlockers();
+
 	//--------------------------------------------------------------------------
 	// Check if something has changed in light sources
 	//--------------------------------------------------------------------------

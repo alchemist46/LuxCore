@@ -50,6 +50,7 @@ public:
 	virtual void Update();
 
 	virtual bool Intersect(const Ray *ray, RayHit *hit) const;
+	virtual bool Occluded(const Ray *ray) const;
 
 private:
 	static bool MeshPtrCompare(const Mesh * p0, const Mesh * p1);

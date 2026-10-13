@@ -283,6 +283,34 @@ bool EmbreeAccel::Intersect(const Ray *ray, RayHit *hit) const {
 	}
 }
 
+bool EmbreeAccel::Occluded(const Ray *ray) const {
+	if (isnan(ray->o.x) || isnan(ray->o.y) || isnan(ray->o.z) || isnan(ray->d.x) || isnan(ray->d.y) || isnan(ray->d.z)) {
+		return false;
+	}
+
+	RTCRay embreeRay;
+
+	embreeRay.org_x = ray->o.x;
+	embreeRay.org_y = ray->o.y;
+	embreeRay.org_z = ray->o.z;
+
+	embreeRay.dir_x = ray->d.x;
+	embreeRay.dir_y = ray->d.y;
+	embreeRay.dir_z = ray->d.z;
+
+	embreeRay.tnear = ray->mint;
+	embreeRay.tfar = ray->maxt;
+
+	embreeRay.mask = 0xFFFFFFFF;
+	embreeRay.time = (ray->time - minTime) * timeScale;
+	embreeRay.flags = 0;
+
+	rtcOccluded1(embreeScene, &embreeRay);
+
+	// Embree sets tfar to -inf if the ray is occluded
+	return (embreeRay.tfar < 0.f);
+}
+
 HardwareIntersectionKernelUPtr EmbreeAccel::NewHardwareIntersectionKernel(
 	HardwareIntersectionDevice &device
 ) const {

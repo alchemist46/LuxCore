@@ -53,6 +53,12 @@ public:
 	virtual void Update() { throw new std::runtime_error("Internal error in Accelerator::Update()"); }
 
 	virtual bool Intersect(const Ray *ray, RayHit *hit) const = 0;
+	// Returns true if the ray hits anything in [mint, maxt]. It can be faster
+	// than Intersect() because any hit will do.
+	virtual bool Occluded(const Ray *ray) const {
+		RayHit hit;
+		return Intersect(ray, &hit);
+	}
 
 	static std::string AcceleratorType2String(const AcceleratorType type);
 	static AcceleratorType String2AcceleratorType(const std::string &type);

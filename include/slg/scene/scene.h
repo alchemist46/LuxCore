@@ -312,6 +312,12 @@ protected:
 	// The bounding sphere of the scene (including the camera)
 	luxrays::BSphere sceneBSphere;
 
+	// The objects stopping any shadow ray, without having to look at the hit
+	// point: no pass-through or shadow transparency and no bevel. Updated by
+	// Preprocess().
+	std::vector<bool> shadowBlockers;
+	bool allShadowBlockers = false;
+
 	EditActionList editActions;
 
 	bool enableParsePrint;
@@ -323,6 +329,7 @@ private:
 	ColorSpaceConverters colorSpaceConv;
 
 	void Init(luxrays::PropertiesRPtr resizePolicyProps);
+	void UpdateShadowBlockers();
 
 	void ParseCamera(const luxrays::Properties &props);
 	void ParseTextures(const luxrays::Properties &props);

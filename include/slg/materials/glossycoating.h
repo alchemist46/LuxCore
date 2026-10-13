@@ -58,6 +58,9 @@ public:
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
 		const bool backTracing) const;
+	virtual bool HasPassThroughTransparency() const {
+		return Material::HasPassThroughTransparency() || matBase->HasPassThroughTransparency();
+	}
 
 	virtual VolumeConstPtr GetInteriorVolume(const HitPoint &hitPoint,
 		const float passThroughEvent) const;
