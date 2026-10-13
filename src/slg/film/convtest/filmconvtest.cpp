@@ -18,6 +18,9 @@
 
 #include <limits>
 
+#include <tbb/parallel_reduce.h>
+#include <tbb/blocked_range.h>
+
 #include <boost/serialization/shared_ptr.hpp>
 
 #include "slg/film/film.h"
@@ -105,24 +108,37 @@ u_int FilmConvTest::Test() {
 			const float *ref = referenceImage->GetPixels();
 			const float *img = GetFilm().channel_IMAGEPIPELINEs[index]->GetPixels();
 
-			todoPixelsCount = 0;
-			maxError = 0.f;
 			const bool hasConvChannel = GetFilm().HasChannel(Film::CONVERGENCE);
 
-			for (u_int i = 0; i < pixelsCount; ++i) {
-				const float dr = fabsf((*img++) - (*ref++));
-				const float dg = fabsf((*img++) - (*ref++));
-				const float db = fabsf((*img++) - (*ref++));
-				const float diff = Max(Max(dr, dg), db);
-				maxError = Max(maxError, diff);
+			// The count and the maximum don't depend on the order, so the
+			// parallel result is the same as the serial one
+			struct TestResult { u_int todoPixelsCount; float maxError; };
+			const TestResult result = tbb::parallel_reduce(
+					tbb::blocked_range<u_int>(0, pixelsCount), TestResult{0, 0.f},
+					[&](const tbb::blocked_range<u_int> &range, TestResult res) {
+						for (u_int i = range.begin(); i < range.end(); ++i) {
+							const float *imgPixel = &img[i * 3];
+							const float *refPixel = &ref[i * 3];
+							const float dr = fabsf(imgPixel[0] - refPixel[0]);
+							const float dg = fabsf(imgPixel[1] - refPixel[1]);
+							const float db = fabsf(imgPixel[2] - refPixel[2]);
+							const float diff = Max(Max(dr, dg), db);
+							res.maxError = Max(res.maxError, diff);
 
-				if (diff > threshold)
-					++todoPixelsCount;
+							if (diff > threshold)
+								++res.todoPixelsCount;
 
-				// Update the CONVERGENCE channel
-				if (hasConvChannel)
-					*(GetFilm().channel_CONVERGENCE->GetPixel(i)) = Max(diff - threshold, 0.f);
-			}
+							// Update the CONVERGENCE channel
+							if (hasConvChannel)
+								*(GetFilm().channel_CONVERGENCE->GetPixel(i)) = Max(diff - threshold, 0.f);
+						}
+						return res;
+					},
+					[](const TestResult &a, const TestResult &b) {
+						return TestResult{a.todoPixelsCount + b.todoPixelsCount, Max(a.maxError, b.maxError)};
+					});
+			todoPixelsCount = result.todoPixelsCount;
+			maxError = result.maxError;
 
 			if (hasConvChannel && useFilter) {
 				GaussianBlur3x3FilterPlugin::ApplyBlurFilter(GetFilm().GetWidth(), GetFilm().GetHeight(),

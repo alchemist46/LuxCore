@@ -51,8 +51,9 @@ void errorCallback(void* userPtr, lux::oidn::Error error, const char* message) {
 }
 
 IntelOIDN::IntelOIDN(const string ft, const int m, const float s, const bool pref,
-		const float fs) {
+		const float fs, const string q) {
 	filterType = ft;
+	quality = q;
 	oidnMemLimit = m;
 	sharpness = s;
 	enablePrefiltering = pref;
@@ -61,6 +62,7 @@ IntelOIDN::IntelOIDN(const string ft, const int m, const float s, const bool pre
 
 IntelOIDN::IntelOIDN() {
 	filterType = "RT";
+	quality = "default";
 	oidnMemLimit = 6000;
 	sharpness = 0.f;
 	enablePrefiltering = true;
@@ -68,7 +70,7 @@ IntelOIDN::IntelOIDN() {
 }
 
 ImagePipelinePlugin *IntelOIDN::Copy() const {
-	return new IntelOIDN(filterType, oidnMemLimit, sharpness, enablePrefiltering, fireflySigma);
+	return new IntelOIDN(filterType, oidnMemLimit, sharpness, enablePrefiltering, fireflySigma, quality);
 }
 
 // Scale outliers down to the local median + k * MAD (5x5 window on luma).
@@ -189,6 +191,14 @@ void IntelOIDN::FilterImage(const string &imageName,
 
     filter.set("hdr", true);
 	filter.set("cleanAux", cleanAux);
+	// The quality mode: "balanced" and "fast" trade some quality for speed
+	// (for interactive rendering); "default" leaves the OIDN default (high)
+	if (quality == "high")
+		filter.set("quality", lux::oidn::Quality::High);
+	else if (quality == "balanced")
+		filter.set("quality", lux::oidn::Quality::Balanced);
+	else if (quality == "fast")
+		filter.set("quality", lux::oidn::Quality::Fast);
 	filter.set("maxMemoryMB", oidnMemLimit);
     filter.setImage("color", colorBuf, lux::oidn::Format::Float3, width, height);
     if (albedoBuffer) {

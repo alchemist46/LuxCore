@@ -44,7 +44,8 @@ class IntelOIDN : public ImagePipelinePlugin {
 public:
 	IntelOIDN(const std::string filterType,
 			const int oidnMemLimit, const float sharpness,
-			bool enablePrefiltering, const float fireflySigma = 0.f);
+			bool enablePrefiltering, const float fireflySigma = 0.f,
+			const std::string quality = "default");
 
 	virtual ImagePipelinePlugin *Copy() const;
 
@@ -83,6 +84,8 @@ private:
 		ar & enablePrefiltering;
 		if (version >= 5)
 			ar & fireflySigma;
+		if (version >= 6)
+			ar & quality;
 	}
 
 	std::string filterType;
@@ -93,12 +96,14 @@ private:
 	bool enablePrefiltering;
 	// Firefly suppression threshold in units of local sigma (0 = off)
 	float fireflySigma;
+	// OIDN quality mode: "default" (the OIDN default, high), "high", "balanced" or "fast"
+	std::string quality;
 };
 
 }
 
 
-BOOST_CLASS_VERSION(slg::IntelOIDN, 5)
+BOOST_CLASS_VERSION(slg::IntelOIDN, 6)
 
 BOOST_CLASS_EXPORT_KEY(slg::IntelOIDN)
 

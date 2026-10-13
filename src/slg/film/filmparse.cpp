@@ -737,8 +737,12 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const float sharpness = Clamp(props.Get(Property(prefix + ".sharpness")(.1)).Get<double>(), 0.0, 1.0);
 				const bool enablePrefiltering = props.Get(Property(prefix + ".prefilter.enable")(true)).Get<bool>();
 				const float fireflySigma = Max(props.Get(Property(prefix + ".firefly.sigma")(0.0)).Get<double>(), 0.0);
+				string quality = props.Get(Property(prefix + ".quality")("default")).Get<string>();
+				boost::algorithm::to_lower(quality);
+				if ((quality != "default") && (quality != "high") && (quality != "balanced") && (quality != "fast"))
+					throw runtime_error("Unknown INTEL_OIDN quality: " + quality + " (default, high, balanced or fast)");
 
-				imagePipeline->AddPlugin(new IntelOIDN(filterType, oidnMemLimit, sharpness, enablePrefiltering, fireflySigma));
+				imagePipeline->AddPlugin(new IntelOIDN(filterType, oidnMemLimit, sharpness, enablePrefiltering, fireflySigma, quality));
 #endif
 			} else if (type == "WHITE_BALANCE") {
 				const float temperature = Clamp(props.Get(Property(prefix + ".temperature")(6500.0)).Get<double>(), 1000.0, 40000.0);
