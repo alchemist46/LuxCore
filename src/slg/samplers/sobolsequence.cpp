@@ -28,8 +28,14 @@ using namespace slg;
 // SobolSequence
 //------------------------------------------------------------------------------
 
+static u_int NestedUniformScramble(const u_int x, const u_int seed);
+
 SobolSequence::SobolSequence() : directions(NULL) {
 	seed = 0;
+
+	cachedPass = 0;
+	cachedSeed = 0;
+	cachedShuffledPass = NestedUniformScramble(cachedPass, cachedSeed);
 }
 
 SobolSequence::~SobolSequence() {
@@ -73,14 +79,19 @@ static inline u_int LaineKarrasPermutation(u_int x, const u_int seed) {
 	return x;
 }
 
-static inline u_int NestedUniformScramble(const u_int x, const u_int seed) {
+static u_int NestedUniformScramble(const u_int x, const u_int seed) {
 	return ReverseBits(LaineKarrasPermutation(ReverseBits(x), seed));
 }
 
 float SobolSequence::GetSample(const u_int pass, const u_int index) const {
 	// Shuffle the order of the samples (it keeps the stratification of the
 	// power of 2 sized prefixes of the sequence)
-	const u_int shuffledPass = NestedUniformScramble(pass, seed);
+	if ((pass != cachedPass) || (seed != cachedSeed)) {
+		cachedPass = pass;
+		cachedSeed = seed;
+		cachedShuffledPass = NestedUniformScramble(pass, seed);
+	}
+	const u_int shuffledPass = cachedShuffledPass;
 
 	// Owen scramble each dimension with a different seed
 	const u_int dimensionSeed = Hash(HashCombine(seed, index));

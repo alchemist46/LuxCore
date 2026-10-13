@@ -69,6 +69,9 @@ private:
 	u_int SobolDimension(const u_int index, const u_int dimension) const;
 
 	u_int *directions;
+
+	// The scrambled pass is the same for all the dimensions of a sample
+	mutable u_int cachedPass, cachedSeed, cachedShuffledPass;
 };
 
 }
