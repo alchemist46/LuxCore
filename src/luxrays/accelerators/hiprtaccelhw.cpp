@@ -43,7 +43,8 @@ class HiprtKernel : public HardwareIntersectionKernel {
 public:
 	HiprtKernel(HardwareIntersectionDevice &dev, const HiprtAccel &hiprtAccel) :
 			HardwareIntersectionKernel(dev), hipDevice(nullptr),
-			hiprtCtx(nullptr), scene(nullptr),
+			hiprtCtx(nullptr), mergedGeometry(nullptr), scene(nullptr),
+			mergedTrianglesBuff(nullptr), instanceMeshesBuff(nullptr),
 			tmpBuff(nullptr), rayTimeOffset(0.f), stackBuffer{} {
 		hipDevice = dynamic_cast<HIPIntersectionDevice *>(&dev);
 
@@ -86,28 +87,24 @@ public:
 			HardwareDeviceBuffer *rayHitBuff, const unsigned int rayCount);
 
 private:
-	// Returns the geometry of a mesh, building it only the first time (the
-	// same mesh can be used by many instances)
-	hiprtGeometry GetGeometry(const TriangleMesh &mesh) {
-		auto it = geometries.find(&mesh);
-		if (it != geometries.end())
-			return it->second;
-
+	// Builds a geometry from triangles in host memory
+	hiprtGeometry BuildGeometry(const Point *verts, const u_int vertCount,
+			const Triangle *tris, const u_int triCount) {
 		// Allocate vertices and triangle vertex indices buffers. They are
 		// only used by the build: HIPRT stores the triangles in its nodes.
 		HardwareDeviceBuffer *vertsBuff = nullptr;
-		hipDevice->AllocBufferRO(&vertsBuff, mesh.GetVertices().data(), sizeof(Point) * mesh.GetTotalVertexCount());
+		hipDevice->AllocBufferRO(&vertsBuff, (void *)verts, sizeof(Point) * vertCount);
 		HardwareDeviceBuffer *trisBuff = nullptr;
-		hipDevice->AllocBufferRO(&trisBuff, mesh.GetTriangles().data(), sizeof(Triangle) * mesh.GetTotalTriangleCount());
+		hipDevice->AllocBufferRO(&trisBuff, (void *)tris, sizeof(Triangle) * triCount);
 
 		hiprtGeometryBuildInput buildInput;
 		buildInput.type = hiprtPrimitiveTypeTriangleMesh;
 		hiprtTriangleMeshPrimitive &triangleMesh = buildInput.primitive.triangleMesh;
 		triangleMesh.vertices = ((HIPDeviceBuffer *)vertsBuff)->GetHIPDevicePointer();
-		triangleMesh.vertexCount = mesh.GetTotalVertexCount();
+		triangleMesh.vertexCount = vertCount;
 		triangleMesh.vertexStride = sizeof(Point);
 		triangleMesh.triangleIndices = ((HIPDeviceBuffer *)trisBuff)->GetHIPDevicePointer();
-		triangleMesh.triangleCount = mesh.GetTotalTriangleCount();
+		triangleMesh.triangleCount = triCount;
 		triangleMesh.triangleStride = sizeof(Triangle);
 
 		hiprtBuildOptions buildOptions;
@@ -119,7 +116,7 @@ private:
 
 		hiprtGeometry geometry;
 		CHECK_HIPRT_ERROR(hiprtCreateGeometry(hiprtCtx, buildInput, buildOptions, geometry));
-		geometries[&mesh] = geometry;
+		geometries.push_back(geometry);
 		CHECK_HIPRT_ERROR(hiprtBuildGeometry(hiprtCtx, hiprtBuildOperationBuild,
 				buildInput, buildOptions, tmp, nullptr, geometry));
 
@@ -128,6 +125,74 @@ private:
 
 		hipDevice->FreeBuffer(&vertsBuff);
 		hipDevice->FreeBuffer(&trisBuff);
+
+		return geometry;
+	}
+
+	// Returns the geometry of an instanced mesh, building it only the first
+	// time (the same mesh can be used by many instances)
+	hiprtGeometry GetGeometry(const TriangleMesh &mesh) {
+		auto it = instancedGeometries.find(&mesh);
+		if (it != instancedGeometries.end())
+			return it->second;
+
+		hiprtGeometry geometry = BuildGeometry(mesh.GetVertices().data(), mesh.GetTotalVertexCount(),
+				mesh.GetTriangles().data(), mesh.GetTotalTriangleCount());
+		instancedGeometries[&mesh] = geometry;
+
+		return geometry;
+	}
+
+	// Merges all the meshes without a transformation (their vertices are
+	// already in world space) in a single geometry: a ray has to traverse a
+	// single BVH instead of the one of each mesh with an overlapping bounding
+	// box
+	hiprtGeometry BuildMergedGeometry(const HiprtAccel &hiprtAccel) {
+		u_longlong vertCount = 0;
+		u_longlong triCount = 0;
+		for (auto mesh : hiprtAccel.meshes) {
+			if ((mesh->GetType() == TYPE_TRIANGLE) || (mesh->GetType() == TYPE_EXT_TRIANGLE)) {
+				vertCount += mesh->GetTotalVertexCount();
+				triCount += mesh->GetTotalTriangleCount();
+			}
+		}
+
+		if (triCount == 0)
+			return nullptr;
+		if ((vertCount > numeric_limits<u_int>::max()) || (triCount > numeric_limits<u_int>::max()))
+			throw runtime_error("Too many triangles for the HIPRT accelerator: " + ToString(triCount));
+
+		vector<Point> verts;
+		verts.reserve(vertCount);
+		vector<Triangle> tris;
+		tris.reserve(triCount);
+		// The mesh index and triangle index of each merged triangle
+		vector<u_int> triMeshes;
+		triMeshes.reserve(2 * triCount);
+
+		for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
+			auto mesh = hiprtAccel.meshes[i];
+			if ((mesh->GetType() != TYPE_TRIANGLE) && (mesh->GetType() != TYPE_EXT_TRIANGLE))
+				continue;
+
+			auto& tm = dynamic_cast<const TriangleMesh &>(*mesh);
+
+			const u_int vertOffset = verts.size();
+			verts.insert(verts.end(), tm.GetVertices().begin(), tm.GetVertices().end());
+
+			const Triangle *meshTris = tm.GetTriangles().data();
+			for (u_int j = 0; j < tm.GetTotalTriangleCount(); ++j) {
+				tris.push_back(Triangle(meshTris[j].v[0] + vertOffset,
+						meshTris[j].v[1] + vertOffset, meshTris[j].v[2] + vertOffset));
+				triMeshes.push_back(i);
+				triMeshes.push_back(j);
+			}
+		}
+
+		hiprtGeometry geometry = BuildGeometry(verts.data(), verts.size(), tris.data(), tris.size());
+
+		hipDevice->AllocBufferRO(&mergedTrianglesBuff, triMeshes.data(), sizeof(u_int) * triMeshes.size(),
+				"HIPRT merged triangles");
 
 		return geometry;
 	}
@@ -160,110 +225,134 @@ private:
 
 		LR_LOG(device.GetContext(), "Building HIPRT accelerator");
 
+		mergedGeometry = BuildMergedGeometry(hiprtAccel);
+
 		// HIPRT uses the first motion frame when the ray time is 0, whatever
 		// the frame times are, so all frame times are shifted to be >= 1
 		float minMotionTime = numeric_limits<float>::infinity();
+		bool hasTransformedMeshes = false;
 		for (auto mesh : hiprtAccel.meshes) {
 			if ((mesh->GetType() == TYPE_TRIANGLE_MOTION) || (mesh->GetType() == TYPE_EXT_TRIANGLE_MOTION)) {
 				auto& mtm = dynamic_cast<const MotionTriangleMesh &>(*mesh);
 				minMotionTime = Min(minMotionTime, mtm.GetMotionSystem().times.front());
 			}
+
+			if ((mesh->GetType() != TYPE_TRIANGLE) && (mesh->GetType() != TYPE_EXT_TRIANGLE))
+				hasTransformedMeshes = true;
 		}
 		rayTimeOffset = std::isinf(minMotionTime) ? 0.f : (minMotionTime - 1.f);
 
-		// One instance for each mesh, so the instance ID is the mesh index
+		if (hasTransformedMeshes) {
+			// An instance for the merged geometry (if any) and one for each
+			// instanced or motion blurred mesh
 
-		vector<hiprtInstance> instances(hiprtAccel.meshes.size());
-		vector<hiprtTransformHeader> transformHeaders(hiprtAccel.meshes.size());
-		vector<hiprtFrameMatrix> frames;
-		frames.reserve(hiprtAccel.meshes.size());
+			vector<hiprtInstance> instances;
+			vector<u_int> instanceMeshes;
+			vector<hiprtTransformHeader> transformHeaders;
+			vector<hiprtFrameMatrix> frames;
 
-		for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
-			auto mesh = hiprtAccel.meshes[i];
-
-			instances[i].type = hiprtInstanceTypeGeometry;
-			transformHeaders[i].frameIndex = frames.size();
-
-			switch (mesh->GetType()) {
-				case TYPE_TRIANGLE:
-				case TYPE_EXT_TRIANGLE: {
-					auto& tm = dynamic_cast<const TriangleMesh &>(*mesh);
-
-					// The vertices are already in world space
-					instances[i].geometry = GetGeometry(tm);
-					frames.push_back(ToFrame(Matrix4x4(), 0.f));
-					break;
-				}
-				case TYPE_TRIANGLE_INSTANCE:
-				case TYPE_EXT_TRIANGLE_INSTANCE: {
-					auto& itm = dynamic_cast<const InstanceTriangleMesh &>(*mesh);
-
-					instances[i].geometry = GetGeometry(itm.GetTriangleMesh());
-
-					Transform local2World;
-					itm.GetLocal2World(0.f, local2World);
-					frames.push_back(ToFrame(local2World.m, 0.f));
-					break;
-				}
-				case TYPE_TRIANGLE_MOTION:
-				case TYPE_EXT_TRIANGLE_MOTION: {
-					auto& mtm = dynamic_cast<const MotionTriangleMesh &>(*mesh);
-
-					instances[i].geometry = GetGeometry(mtm.GetTriangleMesh());
-
-					// One frame for each motion system key: HIPRT interpolates
-					// the matrices like Optix does
-					const MotionSystem &ms = mtm.GetMotionSystem();
-					for (auto t : ms.times)
-						frames.push_back(ToFrame(ms.SampleInverse(t), t - rayTimeOffset));
-					break;
-				}
-				default:
-					throw runtime_error("Unsupported mesh type in HiprtKernel(): " + ToString(mesh->GetType()));
+			if (mergedGeometry) {
+				hiprtInstance instance;
+				instance.type = hiprtInstanceTypeGeometry;
+				instance.geometry = mergedGeometry;
+				instances.push_back(instance);
+				instanceMeshes.push_back(NULL_INDEX);
+				transformHeaders.push_back({ (u_int)frames.size(), 1 });
+				frames.push_back(ToFrame(Matrix4x4(), 0.f));
 			}
 
-			transformHeaders[i].frameCount = frames.size() - transformHeaders[i].frameIndex;
-		}
+			for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
+				auto mesh = hiprtAccel.meshes[i];
 
-		LR_LOG(device.GetContext(), "HIPRT accelerator instances: " << instances.size() <<
-				" (geometries: " << geometries.size() << ")");
+				hiprtInstance instance;
+				instance.type = hiprtInstanceTypeGeometry;
+				hiprtTransformHeader transformHeader;
+				transformHeader.frameIndex = frames.size();
 
-		// Build the scene
+				switch (mesh->GetType()) {
+					case TYPE_TRIANGLE:
+					case TYPE_EXT_TRIANGLE:
+						// Already in the merged geometry
+						continue;
+					case TYPE_TRIANGLE_INSTANCE:
+					case TYPE_EXT_TRIANGLE_INSTANCE: {
+						auto& itm = dynamic_cast<const InstanceTriangleMesh &>(*mesh);
 
-		HardwareDeviceBuffer *instancesBuff = nullptr;
-		hipDevice->AllocBufferRO(&instancesBuff, &instances[0], sizeof(hiprtInstance) * instances.size());
-		HardwareDeviceBuffer *transformHeadersBuff = nullptr;
-		hipDevice->AllocBufferRO(&transformHeadersBuff, &transformHeaders[0], sizeof(hiprtTransformHeader) * transformHeaders.size());
-		HardwareDeviceBuffer *framesBuff = nullptr;
-		hipDevice->AllocBufferRO(&framesBuff, &frames[0], sizeof(hiprtFrameMatrix) * frames.size());
+						instance.geometry = GetGeometry(itm.GetTriangleMesh());
 
-		hiprtSceneBuildInput buildInput = {};
-		buildInput.instances = ((HIPDeviceBuffer *)instancesBuff)->GetHIPDevicePointer();
-		buildInput.instanceTransformHeaders = ((HIPDeviceBuffer *)transformHeadersBuff)->GetHIPDevicePointer();
-		buildInput.instanceFrames = ((HIPDeviceBuffer *)framesBuff)->GetHIPDevicePointer();
-		buildInput.instanceMasks = nullptr;
-		buildInput.instanceCount = instances.size();
-		buildInput.frameCount = frames.size();
-		buildInput.frameType = hiprtFrameTypeMatrix;
+						Transform local2World;
+						itm.GetLocal2World(0.f, local2World);
+						frames.push_back(ToFrame(local2World.m, 0.f));
+						break;
+					}
+					case TYPE_TRIANGLE_MOTION:
+					case TYPE_EXT_TRIANGLE_MOTION: {
+						auto& mtm = dynamic_cast<const MotionTriangleMesh &>(*mesh);
 
-		hiprtBuildOptions buildOptions;
-		buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
+						instance.geometry = GetGeometry(mtm.GetTriangleMesh());
 
-		size_t tmpSize;
-		CHECK_HIPRT_ERROR(hiprtGetSceneBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
-		hiprtDevicePtr tmp = GetTemporaryBuffer(tmpSize);
+						// One frame for each motion system key: HIPRT interpolates
+						// the matrices like Optix does
+						const MotionSystem &ms = mtm.GetMotionSystem();
+						for (auto t : ms.times)
+							frames.push_back(ToFrame(ms.SampleInverse(t), t - rayTimeOffset));
+						break;
+					}
+					default:
+						throw runtime_error("Unsupported mesh type in HiprtKernel(): " + ToString(mesh->GetType()));
+				}
 
-		CHECK_HIPRT_ERROR(hiprtCreateScene(hiprtCtx, buildInput, buildOptions, scene));
-		CHECK_HIPRT_ERROR(hiprtBuildScene(hiprtCtx, hiprtBuildOperationBuild,
-				buildInput, buildOptions, tmp, nullptr, scene));
+				transformHeader.frameCount = frames.size() - transformHeader.frameIndex;
 
-		// The build is asynchronous
-		hipDevice->FinishQueue();
+				instances.push_back(instance);
+				instanceMeshes.push_back(i);
+				transformHeaders.push_back(transformHeader);
+			}
 
-		// The scene has its own copy of the instances and frames
-		hipDevice->FreeBuffer(&instancesBuff);
-		hipDevice->FreeBuffer(&transformHeadersBuff);
-		hipDevice->FreeBuffer(&framesBuff);
+			LR_LOG(device.GetContext(), "HIPRT accelerator instances: " << instances.size() <<
+					" (geometries: " << geometries.size() << ")");
+
+			// Build the scene
+
+			HardwareDeviceBuffer *instancesBuff = nullptr;
+			hipDevice->AllocBufferRO(&instancesBuff, &instances[0], sizeof(hiprtInstance) * instances.size());
+			HardwareDeviceBuffer *transformHeadersBuff = nullptr;
+			hipDevice->AllocBufferRO(&transformHeadersBuff, &transformHeaders[0], sizeof(hiprtTransformHeader) * transformHeaders.size());
+			HardwareDeviceBuffer *framesBuff = nullptr;
+			hipDevice->AllocBufferRO(&framesBuff, &frames[0], sizeof(hiprtFrameMatrix) * frames.size());
+
+			hiprtSceneBuildInput buildInput = {};
+			buildInput.instances = ((HIPDeviceBuffer *)instancesBuff)->GetHIPDevicePointer();
+			buildInput.instanceTransformHeaders = ((HIPDeviceBuffer *)transformHeadersBuff)->GetHIPDevicePointer();
+			buildInput.instanceFrames = ((HIPDeviceBuffer *)framesBuff)->GetHIPDevicePointer();
+			buildInput.instanceMasks = nullptr;
+			buildInput.instanceCount = instances.size();
+			buildInput.frameCount = frames.size();
+			buildInput.frameType = hiprtFrameTypeMatrix;
+
+			hiprtBuildOptions buildOptions;
+			buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
+
+			size_t tmpSize;
+			CHECK_HIPRT_ERROR(hiprtGetSceneBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
+			hiprtDevicePtr tmp = GetTemporaryBuffer(tmpSize);
+
+			CHECK_HIPRT_ERROR(hiprtCreateScene(hiprtCtx, buildInput, buildOptions, scene));
+			CHECK_HIPRT_ERROR(hiprtBuildScene(hiprtCtx, hiprtBuildOperationBuild,
+					buildInput, buildOptions, tmp, nullptr, scene));
+
+			// The build is asynchronous
+			hipDevice->FinishQueue();
+
+			// The scene has its own copy of the instances and frames
+			hipDevice->FreeBuffer(&instancesBuff);
+			hipDevice->FreeBuffer(&transformHeadersBuff);
+			hipDevice->FreeBuffer(&framesBuff);
+
+			hipDevice->AllocBufferRO(&instanceMeshesBuff, &instanceMeshes[0], sizeof(u_int) * instanceMeshes.size());
+		} else
+			LR_LOG(device.GetContext(), "HIPRT accelerator is a single geometry");
+
 		hipDevice->FreeBuffer(&tmpBuff);
 
 		// The traversal stack in global memory, used when the one in local
@@ -292,9 +381,14 @@ private:
 			scene = nullptr;
 		}
 
-		for (auto &g : geometries)
-			CHECK_HIPRT_ERROR(hiprtDestroyGeometry(hiprtCtx, g.second));
+		for (auto g : geometries)
+			CHECK_HIPRT_ERROR(hiprtDestroyGeometry(hiprtCtx, g));
 		geometries.clear();
+		instancedGeometries.clear();
+		mergedGeometry = nullptr;
+
+		hipDevice->FreeBuffer(&mergedTrianglesBuff);
+		hipDevice->FreeBuffer(&instanceMeshesBuff);
 	}
 
 	void CompileKernel() {
@@ -319,6 +413,10 @@ private:
 				dynamic_cast<const HIPDeviceDescription &>(hipDevice->GetDeviceDesc()).GetHIPArch());
 		opts.push_back("-D HIPRTACCEL_WORKGROUP_SIZE=" + ToString(kernelWorkGroupSize));
 		opts.push_back("-D HIPRTACCEL_SHARED_STACK_SIZE=" + ToString(SharedStackSize));
+		// Without instances or motion blur, there is only the merged geometry
+		// (or nothing for an empty DataSet)
+		if (!scene)
+			opts.push_back("-D HIPRTACCEL_GEOMETRY_ONLY");
 		vector<const char *> optsPtrs;
 		for (auto &o : opts)
 			optsPtrs.push_back(o.c_str());
@@ -353,8 +451,13 @@ private:
 	HIPIntersectionDevice *hipDevice;
 	hiprtContext hiprtCtx;
 
-	map<const TriangleMesh *, hiprtGeometry> geometries;
+	// All the geometries built
+	vector<hiprtGeometry> geometries;
+	map<const TriangleMesh *, hiprtGeometry> instancedGeometries;
+	hiprtGeometry mergedGeometry;
 	hiprtScene scene;
+	HardwareDeviceBuffer *mergedTrianglesBuff;
+	HardwareDeviceBuffer *instanceMeshesBuff;
 	HardwareDeviceBuffer *tmpBuff;
 	float rayTimeOffset;
 	hiprtGlobalStackBuffer stackBuffer;
@@ -365,12 +468,17 @@ private:
 
 void HiprtKernel::EnqueueTraceRayBuffer(HardwareDeviceBuffer *rayBuff,
 			HardwareDeviceBuffer *rayHitBuff, const unsigned int rayCount) {
-	device.SetKernelArg(kernel, 0, sizeof(hiprtScene), &scene);
+	if (scene)
+		device.SetKernelArg(kernel, 0, sizeof(hiprtScene), &scene);
+	else
+		device.SetKernelArg(kernel, 0, sizeof(hiprtGeometry), &mergedGeometry);
 	device.SetKernelArg(kernel, 1, sizeof(hiprtGlobalStackBuffer), &stackBuffer);
 	device.SetKernelArg(kernel, 2, rayTimeOffset);
-	device.SetKernelArg(kernel, 3, rayBuff);
-	device.SetKernelArg(kernel, 4, rayHitBuff);
-	device.SetKernelArg(kernel, 5, rayCount);
+	device.SetKernelArg(kernel, 3, instanceMeshesBuff);
+	device.SetKernelArg(kernel, 4, mergedTrianglesBuff);
+	device.SetKernelArg(kernel, 5, rayBuff);
+	device.SetKernelArg(kernel, 6, rayHitBuff);
+	device.SetKernelArg(kernel, 7, rayCount);
 
 	const u_int globalRange = RoundUp<u_int>(rayCount, kernelWorkGroupSize);
 	device.EnqueueKernel(kernel, HardwareDeviceRange(globalRange),

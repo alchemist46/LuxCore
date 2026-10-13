@@ -30,15 +30,27 @@
 // work groups of HIPRTACCEL_WORKGROUP_SIZE threads.
 typedef hiprtDynamicStack HiprtAccelStack;
 
-// The scene is a single level of instances, one for each mesh of the DataSet,
-// so the instance ID is the mesh index.
+// The meshes without a transformation are merged in a single geometry, so a
+// ray traverses a single BVH for all of them: mergedTriangles maps a
+// primitive of that geometry to the mesh and triangle index.
+//
+// With HIPRTACCEL_GEOMETRY_ONLY, there are only these meshes and the geometry
+// is traversed directly. Otherwise the scene has an instance for the merged
+// geometry and one for each instanced or motion blurred mesh: instanceMeshes
+// maps an instance to the mesh index (NULL_INDEX for the merged geometry).
 //
 // rayTimeOffset is subtracted from the ray time: HIPRT treats a time of 0 as
 // "use the first motion frame", so the frame times are shifted to be >= 1
 extern "C" __global__ void HiprtAccel_Intersect_RayBuffer(
+#if defined(HIPRTACCEL_GEOMETRY_ONLY)
+		hiprtGeometry geometry,
+#else
 		hiprtScene scene,
+#endif
 		hiprtGlobalStackBuffer globalStackBuffer,
 		const float rayTimeOffset,
+		const unsigned int *instanceMeshes,
+		const uint2 *mergedTriangles,
 		const Ray *rays,
 		RayHit *rayHits,
 		const unsigned int rayCount) {
@@ -57,7 +69,11 @@ extern "C" __global__ void HiprtAccel_Intersect_RayBuffer(
 	RayHit *rayHit = &rayHits[gid];
 
 	// The empty DataSet case
+#if defined(HIPRTACCEL_GEOMETRY_ONLY)
+	if (!geometry) {
+#else
 	if (!scene) {
+#endif
 		rayHit->t = ray->maxt;
 		rayHit->meshIndex = NULL_INDEX;
 		rayHit->triangleIndex = NULL_INDEX;
@@ -76,12 +92,17 @@ extern "C" __global__ void HiprtAccel_Intersect_RayBuffer(
 	__shared__ unsigned int sharedStackCache[HIPRTACCEL_SHARED_STACK_SIZE * HIPRTACCEL_WORKGROUP_SIZE];
 	hiprtSharedStackBuffer sharedStackBuffer{ HIPRTACCEL_SHARED_STACK_SIZE, sharedStackCache };
 	HiprtAccelStack stack(globalStackBuffer, sharedStackBuffer);
+
+#if defined(HIPRTACCEL_GEOMETRY_ONLY)
+	hiprtGeomTraversalClosestCustomStack<HiprtAccelStack> traversal(geometry, hipRay, stack);
+#else
 	// A single level of instancing
 	hiprtEmptyInstanceStack instanceStack;
 
 	hiprtSceneTraversalClosestCustomStack<HiprtAccelStack, hiprtEmptyInstanceStack> traversal(
 			scene, hipRay, stack, instanceStack, hiprtFullRayMask,
 			hiprtTraversalHintDefault, nullptr, nullptr, 0, ray->time - rayTimeOffset);
+#endif
 	const hiprtHit hit = traversal.getNextHit();
 
 	// Write result
@@ -91,8 +112,19 @@ extern "C" __global__ void HiprtAccel_Intersect_RayBuffer(
 		// LuxCore ones
 		rayHit->b1 = hit.uv.x;
 		rayHit->b2 = hit.uv.y;
-		rayHit->meshIndex = hit.instanceID;
-		rayHit->triangleIndex = hit.primID;
+
+#if !defined(HIPRTACCEL_GEOMETRY_ONLY)
+		const unsigned int meshIndex = instanceMeshes[hit.instanceID];
+		if (meshIndex != NULL_INDEX) {
+			rayHit->meshIndex = meshIndex;
+			rayHit->triangleIndex = hit.primID;
+		} else
+#endif
+		{
+			const uint2 meshTriangle = mergedTriangles[hit.primID];
+			rayHit->meshIndex = meshTriangle.x;
+			rayHit->triangleIndex = meshTriangle.y;
+		}
 	} else {
 		rayHit->t = ray->maxt;
 		rayHit->meshIndex = NULL_INDEX;
