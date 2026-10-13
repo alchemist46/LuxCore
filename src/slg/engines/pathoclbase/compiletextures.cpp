@@ -1932,7 +1932,7 @@ void CompiledScene::CompileTextures() {
 						tex->blenderVoronoi.distancemetric = slg::ocl::MINKOWSKI_FOUR;
 						break;
 					case MINKOWSKI:
-						tex->blenderVoronoi.distancemetric = slg::ocl::MANHATTAN;
+						tex->blenderVoronoi.distancemetric = slg::ocl::MINKOWSKI;
 						break;
 				}
 				break;
