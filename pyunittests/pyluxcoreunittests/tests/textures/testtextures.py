@@ -46,3 +46,15 @@ class ImageMapTexture(ImageTest):
     pass
 
 ImageMapTexture = AddTests(ImageMapTexture, TestImageMapTexture, GetTestCases())
+
+################################################################################
+# Blender procedural textures test
+################################################################################
+
+def TestBlenderTextures(cls, params):
+	StandardSceneTest(cls, params, "simple/texture-blender.cfg", "BlenderTextures")
+
+class BlenderTextures(ImageTest):
+    pass
+
+BlenderTextures = AddTests(BlenderTextures, TestBlenderTextures, GetTestCases())

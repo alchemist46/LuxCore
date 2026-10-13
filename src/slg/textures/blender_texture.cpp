@@ -16,15 +16,40 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <cmath>
 #include <limits>
 
 #include "slg/core/sdl.h"
 #include "slg/bsdf/bsdf.h"
 #include "slg/textures/blender_texture.h"
 
+// The Blender textures are evaluated with the kernel sources of the GPU
+// (see luxrays/devices/cpudevice_oclemul.h)
+namespace slg { namespace ocl { namespace {
+#include "luxrays/devices/cpudevice_oclemul.h"
+#include "luxrays/core/utils_funcs.cl"
+#include "slg/textures/texture_blender_noise_funcs.cl"
+#include "slg/textures/texture_blender_noise_funcs2.cl"
+#include "slg/textures/texture_blender_funcs.cl"
+} } }
+
 using namespace luxrays;
 using namespace slg;
 using namespace slg::blender;
+
+// The enums of the textures are cast to the kernel ones
+static_assert(int(TEX_RAD) == int(slg::ocl::TEX_RAD));
+static_assert(int(TEX_SHARPER) == int(slg::ocl::TEX_SHARPER));
+static_assert(int(TEX_HETERO_TERRAIN) == int(slg::ocl::TEX_HETERO_TERRAIN));
+static_assert(int(TEX_WALL_OUT) == int(slg::ocl::TEX_WALL_OUT));
+static_assert(int(RINGNOISE) == int(slg::ocl::RINGNOISE));
+static_assert(int(TEX_TRI) == int(slg::ocl::TEX_TRI));
+static_assert(int(MINKOWSKI) == int(slg::ocl::MINKOWSKI));
+static_assert(int(CELL_NOISE) == int(slg::ocl::CELL_NOISE));
+
+static inline slg::ocl::float3 ToFloat3(const Point &p) {
+	return slg::ocl::make_float3(p.x, p.y, p.z);
+}
 
 //------------------------------------------------------------------------------
 // Blender blend texture
@@ -44,50 +69,8 @@ BlenderBlendTexture::BlenderBlendTexture(TextureMapping3DUPtr&& mp, const std::s
 }
 
 float BlenderBlendTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	float result = 0.f;
-	Point P(mapping->Map(hitPoint));
-
-	float x, y, t;
-
-	if(!direction) {
-		//horizontal
-		x = P.x;
-		y = P.y;
-	} else {
-		//vertical
-		x = P.y;
-		y = P.x;
-	};
-
-    if (type == TEX_LIN) { /* lin */
-        result = (1.f + x) / 2.f;
-    } else if (type == TEX_QUAD) { /* quad */
-        result = (1.f + x) / 2.f;
-        if (result < 0.f) result = 0.f;
-        else result *= result;
-    } else if (type == TEX_EASE) { /* ease */
-        result = (1.f + x) / 2.f;
-        if (result <= 0.f) result = 0.f;
-        else if (result >= 1.f) result = 1.f;
-        else {
-            t = result * result;
-            result = (3.f * t - 2.f * t * result);
-        }
-    } else if (type == TEX_DIAG) { /* diag */
-        result = (2.f + x + y) / 4.f;
-    } else if (type == TEX_RAD) { /* radial */
-        result = (atan2f(y, x) / (2.f * M_PI) + 0.5f);
-    } else { /* sphere TEX_SPHERE */
-        result = 1.f - sqrt(x * x + y * y + P.z * P.z);
-        if (result < 0.f) result = 0.f;
-        if (type == TEX_HALO) result *= result; /* halo */
-    }
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-	return result;
+	return ocl::BlenderBlendTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::ProgressionType>(type), direction, contrast, bright);
 }
 
 Spectrum BlenderBlendTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -170,14 +153,9 @@ BlenderCloudsTexture::BlenderCloudsTexture(TextureMapping3DUPtr&& mp, const std:
 }
 
 float BlenderCloudsTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-
-	float clouds = BLI_gTurbulence(noisesize, P.x, P.y, P.z, noisedepth, hard, noisebasis);
-
-	clouds = (clouds - 0.5f) * contrast + bright - 0.5f;
-	clouds = Clamp(clouds, 0.f, 1.f);
-
-    return clouds;
+	return ocl::BlenderCloudsTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis), noisesize, noisedepth,
+			contrast, bright, hard);
 }
 
 Spectrum BlenderCloudsTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -295,20 +273,10 @@ BlenderDistortedNoiseTexture::BlenderDistortedNoiseTexture(TextureMapping3DUPtr&
 }
 
 float BlenderDistortedNoiseTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-	float result = 0.f;
-	float scale = 1.f;
-
-	if(fabs(noisesize) > 0.00001f) scale = (1.f/noisesize);
-	P *= scale;
-
-	result = mg_VLNoise(P.x, P.y, P.z, distortion, noisebasis, noisedistortion);
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-	return result;
+	return ocl::BlenderDistortedNoiseTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderNoiseBasis>(noisedistortion),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis), distortion, noisesize,
+			contrast, bright);
 }
 
 Spectrum BlenderDistortedNoiseTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -347,86 +315,10 @@ float BlenderMagicTexture::GetFloatValue(const HitPoint &hitPoint) const {
 }
 
 Spectrum BlenderMagicTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-	Spectrum s;
+	const ocl::float3 rgb = ocl::BlenderMagicTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			noisedepth, turbulence, contrast, bright);
 
-    float x, y, z, turb = 1.f;
-    float r, g, b;
-    int n;
-
-    n = noisedepth;
-    turb = turbulence / 5.f;
-
-    x = sin((P.x + P.y + P.z)*5.f);
-    y = cos((-P.x + P.y - P.z)*5.f);
-    z = -cos((-P.x - P.y + P.z)*5.f);
-    if (n > 0) {
-        x *= turb;
-        y *= turb;
-        z *= turb;
-        y = -cos(x - y + z);
-        y *= turb;
-        if (n > 1) {
-            x = cos(x - y - z);
-            x *= turb;
-            if (n > 2) {
-                z = sin(-x - y - z);
-                z *= turb;
-                if (n > 3) {
-                    x = -cos(-x + y - z);
-                    x *= turb;
-                    if (n > 4) {
-                        y = -sin(-x + y + z);
-                        y *= turb;
-                        if (n > 5) {
-                            y = -cos(-x + y + z);
-                            y *= turb;
-                            if (n > 6) {
-                                x = cos(x + y + z);
-                                x *= turb;
-                                if (n > 7) {
-                                    z = sin(x + y - z);
-                                    z *= turb;
-                                    if (n > 8) {
-                                        x = -cos(-x - y + z);
-                                        x *= turb;
-                                        if (n > 9) {
-                                            y = -sin(x - y + z);
-                                            y *= turb;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (turb != 0.f) {
-        turb *= 2.f;
-        x /= turb;
-        y /= turb;
-        z /= turb;
-    }
-    r = 0.5f - x;
-    g = 0.5f - y;
-    b = 0.5f - z;
-
-	r = (r - 0.5f) * contrast + bright - 0.5f;
-    if(r < 0.f) r = 0.f;
-	else if(r > 1.f) r = 1.f;
-
-	g = (g - 0.5f) * contrast + bright - 0.5f;
-    if(g < 0.f) g = 0.f;
-	else if(g > 1.f) g = 1.f;
-
-	b = (b - 0.5f) * contrast + bright - 0.5f;
-    if(b < 0.f) b = 0.f;
-	else if(b > 1.f) b = 1.f;
-
-	return Spectrum(RGBColor(r,g,b));
+	return Spectrum(RGBColor(rgb.x, rgb.y, rgb.z));
 }
 
 float BlenderMagicTexture::Y() const {
@@ -515,38 +407,11 @@ BlenderMarbleTexture::BlenderMarbleTexture(TextureMapping3DUPtr&& mp, const std:
 }
 
 float BlenderMarbleTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-
-    float (*waveform[3])(float); /* create array of pointers to waveform functions */
-    waveform[0] = tex_sin; /* assign address of tex_sin() function to pointer array */
-    waveform[1] = tex_saw;
-    waveform[2] = tex_tri;
-
-	u_int wf = 0;
-
-	if(noisebasis2 == TEX_SAW) {
-		wf = 1;
-	} else if(noisebasis2 == TEX_TRI)
-		wf = 2;
-
-	float result = 0.f;
-
-    const float n = 5.f * (P.x + P.y + P.z);
-
-    result = n + turbulence * BLI_gTurbulence(noisesize, P.x, P.y, P.z, noisedepth, hard, noisebasis);
-	result = waveform[wf](result);
-
-	if (type == TEX_SHARP) {
-		result = sqrtf(result);
-	} else if (type == TEX_SHARPER) {
-		result = sqrtf(sqrtf(result));
-	}
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-    return result;
+	return ocl::BlenderMarbleTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderMarbleType>(type),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis),
+			static_cast<ocl::BlenderNoiseBase>(noisebasis2), noisesize, turbulence,
+			noisedepth, contrast, bright, hard);
 }
 
 Spectrum BlenderMarbleTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -670,39 +535,10 @@ BlenderMusgraveTexture::BlenderMusgraveTexture(TextureMapping3DUPtr&& mp, const 
 }
 
 float BlenderMusgraveTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-
-	float scale = 1.f;
-	if(fabs(noisesize) > 0.00001f) scale = (1.f/noisesize);
-	P *= scale;
-
-	float result = 0.f;
-
-	switch (type) {
-		case TEX_MULTIFRACTAL:
-			result = mg_MultiFractal(P.x, P.y, P.z, dimension, lacunarity, octaves, noisebasis);
-			break;
-		case TEX_FBM:
-			result = mg_fBm(P.x, P.y, P.z, dimension, lacunarity, octaves, noisebasis);
-            break;
-		case TEX_RIDGED_MULTIFRACTAL:
-			result = mg_RidgedMultiFractal(P.x, P.y, P.z, dimension, lacunarity, octaves, offset, gain, noisebasis);
-			break;
-        case TEX_HYBRID_MULTIFRACTAL:
-			result = mg_HybridMultiFractal(P.x, P.y, P.z, dimension, lacunarity, octaves, offset, gain, noisebasis);
-			break;
-        case TEX_HETERO_TERRAIN:
-			result = mg_HeteroTerrain(P.x, P.y, P.z, dimension, lacunarity, octaves, offset, noisebasis);
-			break;
-    };
-
-	result *= intensity;
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-    return result;
+	return ocl::BlenderMusgraveTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderMusgraveType>(type),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis), dimension, intensity,
+			lacunarity, offset, gain, octaves, noisesize, contrast, bright);
 }
 
 Spectrum BlenderMusgraveTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -775,47 +611,8 @@ BlenderNoiseTexture::BlenderNoiseTexture(int noisedepth, float bright, float con
 }
 
 float BlenderNoiseTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	/* The original Blender code was not thread-safe
-	float result = 0.f;
-
-	float div = 3.f;
-    int val, ran, loop;
-
-    ran = BLI_rand();
-    val = (ran & 3);
-
-    loop = noisedepth;
-    while (loop--) {
-        ran = (ran >> 2);
-        val *= (ran & 3);
-        div *= 3.f;
-    }*/
-
-	float result = 0.f;
-
-	float div = 3.f;
-
-	float ran = hitPoint.passThroughEvent;
-	float val = Floor2UInt(ran * 4.f);
-	
-	int loop = noisedepth;
-    while (loop--) {
-		// I generate a new random variable starting from the previous one. I'm
-		// not really sure about the kind of correlation introduced by this
-		// trick.
-		ran = fabsf(ran - .5f) * 2.f;
-
-        val *= Floor2UInt(ran * 4.f);
-        div *= 3.f;		
-    }
-
-	result = ((float) val) / div;
-	
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-	return result;
+	return ocl::BlenderNoiseTexture_Evaluate(hitPoint.passThroughEvent, noisedepth,
+			bright, contrast);
 }
 
 Spectrum BlenderNoiseTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -875,31 +672,10 @@ BlenderStucciTexture::BlenderStucciTexture(TextureMapping3DUPtr&& mp, const std:
 }
 
 float BlenderStucciTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-
-	float result = 0.f;
-    float nor[3], b2, ofs;
-
-    b2 = BLI_gNoise(noisesize, P.x, P.y, P.z, hard, noisebasis);
-
-    ofs = turbulence / 200.f;
-
-	if (type != TEX_PLASTIC) ofs *= (b2 * b2);
-//	neo2068: only nor{2] is used
-//    nor[0] = BLI_gNoise(noisesize, P.x + ofs, P.y, P.z, hard, noisebasis);
-//    nor[1] = BLI_gNoise(noisesize, P.x, P.y + ofs, P.z, hard, noisebasis);
-    nor[2] = BLI_gNoise(noisesize, P.x, P.y, P.z + ofs, hard, noisebasis);
-
-    result = nor[2];
-
-    if (type == TEX_WALL_OUT)
-        result = 1.f - result;
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-    return result;
+	return ocl::BlenderStucciTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderStucciType>(type),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis), noisesize, turbulence,
+			contrast, bright, hard);
 }
 
 Spectrum BlenderStucciTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -1003,32 +779,10 @@ BlenderVoronoiTexture::BlenderVoronoiTexture(TextureMapping3DUPtr&& mp, const fl
 }
 
 float BlenderVoronoiTexture::GetFloatValue(const HitPoint &hitPoint) const {
-    float da[4], pa[12]; /* distance and point coordinate arrays of 4 nearest neighbours */
-	luxrays::Point P(mapping->Map(hitPoint));
-
-	float scale = 1.f;
-	if(fabs(noisesize) > 0.00001f) scale = (1.f/noisesize);
-	P *= scale;
-
-	const float aw1 = fabs(feature_weight1);
-    const float aw2 = fabs(feature_weight2);
-    const float aw3 = fabs(feature_weight3);
-    const float aw4 = fabs(feature_weight4);
-
-    float sc = (aw1 + aw2 + aw3 + aw4);
-
-    if (sc > 0.00001f) sc = intensity / sc;
-
-    float result = 1.f;
-
-	voronoi(P.x, P.y, P.z, da, pa, exponent, distancemetric);
-    result = sc * fabs(feature_weight1 * da[0] + feature_weight2 * da[1] + feature_weight3 * da[2] + feature_weight4 * da[3]);
-
-	result = (result - 0.5f) * contrast + bright - 0.5f;
-    if(result < 0.f) result = 0.f;
-	else if(result > 1.f) result = 1.f;
-
-    return result;
+	return ocl::BlenderVoronoiTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::DistanceMetric>(distancemetric), feature_weight1,
+			feature_weight2, feature_weight3, feature_weight4, noisesize, intensity,
+			exponent, contrast, bright);
 }
 
 Spectrum BlenderVoronoiTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -1133,43 +887,11 @@ BlenderWoodTexture::BlenderWoodTexture(TextureMapping3DUPtr&& mp, const std::str
 }
 
 float BlenderWoodTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	Point P(mapping->Map(hitPoint));
-
-    float (*waveform[3])(float); /* create array of pointers to waveform functions */
-    waveform[0] = tex_sin; /* assign address of tex_sin() function to pointer array */
-    waveform[1] = tex_saw;
-    waveform[2] = tex_tri;
-
-	u_int wf = 0;
-	if(noisebasis2 == TEX_SAW) {
-		wf = 1;
-	} else if(noisebasis2 == TEX_TRI)
-		wf = 2;
-
-	float wood = 0.f;
-	switch(type) {
-		case BANDS:
-			wood = waveform[wf]((P.x + P.y + P.z) * 10.f);
-			break;
-		case RINGS:
-			wood = waveform[wf](sqrtf(P.x*P.x + P.y*P.y + P.z*P.z) * 20.f);
-			break;
-		case BANDNOISE:
-			if(hard) wood = turbulence * fabs(2.f * BLI_gNoise(noisesize, P.x, P.y, P.z, hard, noisebasis) - 1.f);
-			else wood = turbulence * BLI_gNoise(noisesize, P.x, P.y, P.z, hard, noisebasis);
-			wood = waveform[wf]((P.x + P.y + P.z) * 10.f + wood);
-			break;
-		case RINGNOISE:
-			if(hard) wood = turbulence * fabs(2.f * BLI_gNoise(noisesize, P.x, P.y, P.z, hard, noisebasis) - 1.f);
-			else wood = turbulence * BLI_gNoise(noisesize, P.x, P.y, P.z, hard, noisebasis);
-			wood = waveform[wf](sqrtf(P.x*P.x + P.y*P.y + P.z*P.z) * 20.f + wood);
-			break;
-	}
-
-	wood = (wood - 0.5f) * contrast + bright - 0.5f;
-	wood = Clamp(wood, 0.f, 1.f);
-
-    return wood;
+	return ocl::BlenderWoodTexture_Evaluate(ToFloat3(mapping->Map(hitPoint)),
+			static_cast<ocl::BlenderWoodType>(type),
+			static_cast<ocl::BlenderNoiseBase>(noisebasis2),
+			static_cast<ocl::BlenderNoiseBasis>(noisebasis), noisesize, turbulence,
+			contrast, bright, hard);
 }
 
 Spectrum BlenderWoodTexture::GetSpectrumValue(const HitPoint &hitPoint) const {

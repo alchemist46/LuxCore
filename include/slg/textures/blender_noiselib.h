@@ -17,11 +17,12 @@
  ***************************************************************************/
 
 // Dade - sources imported from Blender with authors permission
+//
+// The enums of the Blender textures. The noise functions are in
+// texture_blender_noise_funcs.cl and texture_blender_noise_funcs2.cl.
 
 #ifndef _SLG_BLENDER_NOISELIB_H
 #define	_SLG_BLENDER_NOISELIB_H
-
-#include "luxrays/core/geometry/point.h"
 
 namespace slg {
 	
@@ -61,28 +62,6 @@ typedef enum {
     VORONOI_F1, VORONOI_F2, VORONOI_F3, VORONOI_F4, VORONOI_F2_F1,
     VORONOI_CRACKLE, CELL_NOISE
 } BlenderNoiseBasis;
-
-int BLI_rand(void);
-float BLI_hnoise(float noisesize, float x, float y, float z);
-float BLI_hnoisep(float noisesize, float x, float y, float z);
-float BLI_turbulence(float noisesize, float x, float y, float z, int nr);
-float BLI_turbulence1(float noisesize, float x, float y, float z, int nr);
-float BLI_gNoise(float noisesize, float x, float y, float z, int hard, BlenderNoiseBasis noisebasis);
-float BLI_gTurbulence(float noisesize, float x, float y, float z, int oct, int hard, BlenderNoiseBasis noisebasis);
-/* newnoise: musgrave functions */
-float mg_fBm(float x, float y, float z, float H, float lacunarity, float octaves, BlenderNoiseBasis noisebasis);
-float mg_MultiFractal(float x, float y, float z, float H, float lacunarity, float octaves, BlenderNoiseBasis noisebasis);
-float mg_VLNoise(float x, float y, float z, float distortion, BlenderNoiseBasis nbas1, BlenderNoiseBasis nbas2);
-float mg_HeteroTerrain(float x, float y, float z, float H, float lacunarity, float octaves, float offset, BlenderNoiseBasis noisebasis);
-float mg_HybridMultiFractal(float x, float y, float z, float H, float lacunarity, float octaves, float offset, float gain, BlenderNoiseBasis noisebasis);
-float mg_RidgedMultiFractal(float x, float y, float z, float H, float lacunarity, float octaves, float offset, float gain, BlenderNoiseBasis noisebasis);
-/* newnoise: voronoi */
-void voronoi(float x, float y, float z, float* da, float* pa, float me, DistanceMetric dtype);
-/* newnoise: cellNoise & cellNoiseV (for vector/point/color) */
-float cellNoise(float x, float y, float z);
-void cellNoiseV(float x, float y, float z, float *ca);
-
-float newPerlin(float x, float y, float z);
 
 } // namespace blender
 

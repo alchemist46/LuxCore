@@ -962,4 +962,12 @@ OPENCL_FORCE_NOT_INLINE float turbulencep(float noisesize, float x, float y, flo
 	nr++;
 	return turbulence_perlin(vec, 1.f, (float)(1<<nr));
 }
+
+// The helper macros of newPerlin() and noise3_perlin() (lerp() is used by
+// texture_bilerp_funcs.cl too)
+#undef npfade
+#undef DOT
+#undef setup
+#undef at
+#undef surve
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

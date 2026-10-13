@@ -301,7 +301,6 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/textures/bevel.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/textures/bilerp.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/textures/blackbody.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/textures/blender_noiselib.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/textures/blender_texture.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/textures/bombing.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/textures/brick.cpp

@@ -1,0 +1,55 @@
+scene.camera.lookat.orig = 7 -15 7
+scene.camera.lookat.target = -1.0 0.0 2.0
+################################################################################
+scene.textures.marble.type = blender_marble
+scene.textures.marble.marbletype = sharp
+scene.textures.marble.noisebasis = improved_perlin
+scene.textures.marble.noisebasis2 = saw
+scene.textures.marble.noisesize = 0.5
+scene.textures.marble.turbulence = 5.0
+scene.textures.marble.mapping.type = globalmapping3d
+scene.textures.clouds.type = blender_clouds
+scene.textures.clouds.noisebasis = voronoi_crackle
+scene.textures.clouds.noisetype = hard_noise
+scene.textures.clouds.noisesize = 0.4
+scene.textures.clouds.noisedepth = 3
+scene.textures.clouds.mapping.type = globalmapping3d
+scene.textures.wood.type = blender_wood
+scene.textures.wood.woodtype = ringnoise
+scene.textures.wood.noisebasis = original_perlin
+scene.textures.wood.noisebasis2 = tri
+scene.textures.wood.turbulence = 3.0
+scene.textures.wood.mapping.type = globalmapping3d
+scene.textures.voronoi.type = blender_voronoi
+scene.textures.voronoi.distmetric = minkowski
+scene.textures.voronoi.exponent = 1.5
+scene.textures.voronoi.noisesize = 0.5
+scene.textures.voronoi.mapping.type = globalmapping3d
+################################################################################
+scene.materials.whitematte.type = matte
+scene.materials.whitematte.kd = voronoi
+scene.materials.mat_cube.type = matte
+scene.materials.mat_cube.kd = marble
+scene.materials.blumatte.type = matte
+scene.materials.blumatte.kd = wood
+scene.materials.mat_sphere.type = glossy2
+scene.materials.mat_sphere.kd = clouds
+scene.materials.mat_sphere.ks = 0.5 0.5 0.5
+scene.materials.mat_sphere.uroughness = 0.3
+scene.materials.mat_sphere.vroughness = 0.3
+scene.materials.whitelight.type = matte
+scene.materials.whitelight.emission = 120.0 120.0 120.0
+scene.materials.whitelight.kd = 0.0 0.0 0.0
+################################################################################
+scene.objects.box1.ply = resources/scenes/simple/simple-mat-cube1.ply
+scene.objects.box1.material = mat_cube
+scene.objects.box2.ply = resources/scenes/simple/simple-mat-sphere1.ply
+scene.objects.box2.material = mat_sphere
+scene.objects.box3.ply = resources/scenes/simple/simple-mat-back2.ply
+scene.objects.box3.material = blumatte
+scene.objects.box4.ply = resources/scenes/simple/simple-mat-back.ply
+scene.objects.box4.material = whitematte
+################################################################################
+scene.lights.l1.type = point
+scene.lights.l1.position = 0.0 -2.0 6.0
+scene.lights.l1.gain = 1000 1000 1000

@@ -26,6 +26,8 @@
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_CPU_DEVICE)
+
 //------------------------------------------------------------------------------
 // get_global_id()
 //------------------------------------------------------------------------------
@@ -106,6 +108,8 @@ __forceinline__ void barrier(const uint flag) {
 	__syncthreads();
 }
 
+#endif
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -138,6 +142,8 @@ __forceinline__ float4 TO_FLOAT4(const float x) {
 // vload_half()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_CPU_DEVICE)
+
 #if !defined(LUXRAYS_HIP_DEVICE)
 // HIP already defines half and __half2float()
 typedef unsigned short half;
@@ -154,6 +160,8 @@ __forceinline__ float __half2float(const half a) {
 __forceinline__ float vload_half(const size_t offset, const half *p) {
 	return __half2float(p[offset]);
 }
+
+#endif
 
 //------------------------------------------------------------------------------
 // vloadn()
@@ -318,7 +326,7 @@ __forceinline__ int4 isinf(const float4 x) {
 // sqrt()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float sqrt(const float x) {
 	return sqrtf(x);
 }
@@ -328,7 +336,7 @@ __forceinline__ float sqrt(const float x) {
 // pow()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float pow(const float x, const float y) {
 	return powf(x, y);
 }
@@ -346,7 +354,7 @@ __forceinline__ float native_powr(const float x, const float y) {
 // exp()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float exp(const float x) {
 	return expf(x);
 }
@@ -364,7 +372,7 @@ __forceinline__ float native_exp(const float x) {
 // log()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float log(const float x) {
 	return logf(x);
 }
@@ -386,7 +394,7 @@ __forceinline__ float native_log(const float x) {
 // sin()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float sin(const float x) {
 	return sinf(x);
 }
@@ -396,7 +404,7 @@ __forceinline__ float sin(const float x) {
 // cos()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float cos(const float x) {
 	return cosf(x);
 }
@@ -406,7 +414,7 @@ __forceinline__ float cos(const float x) {
 // atan()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float atan(const float x) {
 	return atanf(x);
 }
@@ -416,7 +424,7 @@ __forceinline__ float atan(const float x) {
 // atan2()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float atan2(const float x, const float y) {
 	return atan2f(x, y);
 }
@@ -426,7 +434,7 @@ __forceinline__ float atan2(const float x, const float y) {
 // atanh()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float atanh(const float x) {
 	return atanhf(x);
 }
@@ -436,7 +444,7 @@ __forceinline__ float atanh(const float x) {
 // fabs()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float fabs(const float x) {
 	return fabsf(x);
 }
@@ -446,7 +454,7 @@ __forceinline__ float fabs(const float x) {
 // fmax()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float fmax(const float x, const float y) {
 	return fmaxf(x, y);
 }
@@ -461,7 +469,7 @@ __forceinline__ float3 fmax(const float3 x, const float3 y) {
 // fmin()
 //------------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_HIP_DEVICE)
+#if !defined(LUXRAYS_HIP_DEVICE) && !defined(LUXRAYS_CPU_DEVICE)
 __forceinline__ float fmin(const float x, const float y) {
 	return fminf(x, y);
 }
@@ -515,6 +523,8 @@ __forceinline__ float as_float(const T v) {
 // atomic_*()
 //------------------------------------------------------------------------------
 
+#if !defined(LUXRAYS_CPU_DEVICE)
+
 uint atomic_cmpxchg(uint *p, uint cmp, uint val) {
 	return atomicCAS(p, cmp, val);
 }
@@ -534,4 +544,6 @@ uint atomic_dec(uint *p) {
 int atomic_dec(int *p) {
 	return atomicSub(p, 1);
 }
+
+#endif
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
