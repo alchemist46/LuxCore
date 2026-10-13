@@ -12,6 +12,62 @@ import importlib
 from ctypes import CDLL, RTLD_GLOBAL, byref, c_int, ARRAY
 import os
 
+
+def _check_cpu():
+    """Check that the CPU runs the instructions the native module is built for.
+
+    The module is compiled for x86-64-v3 (AVX2, FMA, BMI2...) on x86_64 Linux
+    and macOS and for AVX on Windows (see build-system/conan). Without the
+    check, importing it on an older CPU kills the process with an illegal
+    instruction. LUXCORE_SKIP_CPU_CHECK=1 skips the check; it is also skipped
+    when the CPU features can't be read.
+    """
+    if os.environ.get("LUXCORE_SKIP_CPU_CHECK"):
+        return
+    system, machine = platform.system(), platform.machine().lower()
+    if machine not in ("x86_64", "amd64"):
+        return
+    missing = []
+    try:
+        if system == "Linux":
+            with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+                flags = set()
+                for line in f:
+                    if line.startswith("flags"):
+                        flags.update(line.split(":", 1)[1].split())
+                        break
+            if not flags:
+                return
+            # abm is the Linux name of lzcnt
+            needed = ("avx", "avx2", "fma", "bmi1", "bmi2", "f16c", "movbe", "abm")
+            missing = [n for n in needed if n not in flags]
+        elif system == "Darwin":
+            import subprocess
+            out = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.features", "machdep.cpu.leaf7_features"],
+                capture_output=True, text=True, check=True, timeout=5).stdout
+            features = {f.upper() for f in out.split()}
+            if not features:
+                return
+            needed = ("AVX1.0", "AVX2", "FMA", "BMI1", "BMI2", "F16C", "MOVBE")
+            missing = [n for n in needed if n not in features]
+        elif system == "Windows":
+            import ctypes
+            pf_avx = 39  # PF_AVX_INSTRUCTIONS_AVAILABLE
+            if not ctypes.windll.kernel32.IsProcessorFeaturePresent(pf_avx):
+                missing = ["avx"]
+    except Exception:  # pylint: disable=broad-except
+        return
+    if missing:
+        raise ImportError(
+            "pyluxcore is compiled for CPUs with "
+            + ("AVX" if system == "Windows" else "AVX2 and FMA (x86-64-v3)")
+            + f", and this CPU lacks: {', '.join(missing)}. "
+            "Set LUXCORE_SKIP_CPU_CHECK=1 to load it anyway.")
+
+
+_check_cpu()
+
 from .pyluxcore import *
 
 _LUXFOLDER = Path(pyluxcore.__file__).parent

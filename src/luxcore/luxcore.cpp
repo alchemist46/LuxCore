@@ -192,6 +192,11 @@ PropertiesUPtr luxcore::GetPlatformDesc() {
 #endif
 
 	props << Property("compile.LUXCORE_DISABLE_EMBREE_BVH_BUILDER")(false);
+#if defined(LUXCORE_ENABLE_LTO)
+	props << Property("compile.LUXCORE_ENABLE_LTO")(true);
+#else
+	props << Property("compile.LUXCORE_ENABLE_LTO")(false);
+#endif
 	props << Property("compile.LC_MESH_MAX_DATA_COUNT")(LC_MESH_MAX_DATA_COUNT);
 
 	API_RETURN("{}", ToArgString(props));

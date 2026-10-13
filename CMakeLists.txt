@@ -117,6 +117,38 @@ enable_language(CXX)
 STRING(JSON _LUXCORE_CXX_STANDARD GET "${settings_json}" Build cxx-luxcore)
 set(CMAKE_CXX_STANDARD ${_LUXCORE_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Optimization of LuxCore code (the dependencies are prebuilt). The target
+# architecture comes from the Conan profiles of build-system/conan: x86-64-v3
+# (AVX2, FMA, BMI2...) on x86_64 Linux and macOS, AVX on Windows. The wheels
+# are distributed, so it is never "native" by default: LUXCORE_X86_ARCH
+# overrides it for LuxCore code only, for a local build. The pyluxcore package
+# checks the CPU before loading the module (python/pyluxcore/__init__.py).
+set(LUXCORE_X86_ARCH "" CACHE STRING
+  "Override the -march of LuxCore code (e.g. native). Empty: the Conan profile one.")
+# Measured on 2026-10-13 (GCC 16, Ryzen 5 3600, PATHCPU): LTO is a net loss,
+# -4% to +4% depending on the scene, so it is off (see MODERNIZATION_PLAN.md)
+OPTION(LUXCORE_ENABLE_LTO "Link time optimization of the Release build" OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  # sqrt() and co. as plain instructions: nothing reads errno. Never
+  # -ffast-math: the film relies on the NaN/Inf checks.
+  add_compile_options(-fno-math-errno)
+  if(LUXCORE_X86_ARCH)
+    add_compile_options(-march=${LUXCORE_X86_ARCH})
+  endif()
+endif()
+if(LUXCORE_ENABLE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT _luxcore_lto_supported OUTPUT _luxcore_lto_output
+    LANGUAGES CXX)
+  if(_luxcore_lto_supported)
+    message(STATUS "LTO enabled for the Release build")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    add_compile_definitions($<$<CONFIG:Release>:LUXCORE_ENABLE_LTO>)
+  else()
+    message(STATUS "LTO not supported by the compiler: ${_luxcore_lto_output}")
+  endif()
+endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)  # Propagate Conan targets to subdirs
 set(CMAKE_VERBOSE_MAKEFILE ON)
