@@ -365,6 +365,14 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	//--------------------------------------------------------------------------
 
 	intersectionDevice.AllocBufferRW(&tasksStateBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTaskState) * taskCount, "GPUTaskState");
+
+	//--------------------------------------------------------------------------
+	// Allocate pathStatesBuff: the state of each path is kept in its own
+	// compact array, so the kernels can check it without touching the large
+	// GPUTaskState
+	//--------------------------------------------------------------------------
+
+	intersectionDevice.AllocBufferRW(&pathStatesBuff, nullptr, sizeof(slg::ocl::pathoclbase::PathState) * taskCount, "PathState");
 }
 
 void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
