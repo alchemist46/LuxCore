@@ -30,18 +30,41 @@ namespace slg {
 // SobolSequence
 //------------------------------------------------------------------------------
 
+// An Owen scrambled Sobol sequence (B. Burley, "Practical Hash-based Owen
+// Scrambling", JCGT 2020): each seed (i.e. one per pixel) has its own
+// randomization of the sequence, so the samples of a pixel are stratified
+// while the pixels are decorrelated.
+//
+// The same code is in sampler_sobol_funcs.cl: the two must be kept in sync.
+
 class SobolSequence {
 public:
 	SobolSequence();
 	~SobolSequence();
 	
 	void RequestSamples(const u_int size);
-	float GetSample(const u_int pass, const u_int index);
+	// pass is the index of the sample in the sequence of the seed
+	float GetSample(const u_int pass, const u_int index) const;
 
-	u_int rngPass;
-	float rng0, rng1;
+	// The scrambling seed of the sequence
+	u_int seed;
 
 	static void GenerateDirectionVectors(u_int *vectors, const u_int dimensions);
+
+	// A good quality integer hash (to build seeds)
+	static u_int Hash(u_int x) {
+		x ^= x >> 16;
+		x *= 0x7feb352du;
+		x ^= x >> 15;
+		x *= 0x846ca68bu;
+		x ^= x >> 16;
+		return x;
+	}
+
+	static u_int HashCombine(const u_int seed, const u_int v) {
+		return seed ^ (v + 0x9e3779b9u + (seed << 6) + (seed >> 2));
+	}
+
 private:
 	u_int SobolDimension(const u_int index, const u_int dimension) const;
 

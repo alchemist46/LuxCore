@@ -62,13 +62,11 @@ void TilePathSampler::RequestSamples(const SampleType smplType, const u_int size
 }
 
 void TilePathSampler::InitNewSample() {
-	// Initialize rng0, rng1 and rngPass
+	// Each pixel (and multi-pass) has its own scrambling of the Sobol sequence
 	const u_int pixelRngGenSeed = (tileWork->GetCoord().x + tileX + (tileWork->GetCoord().y + tileY) * film->GetWidth() + 1) *
 			(tileWork->multipassIndexToRender + 1);
 	TauswortheRandomGenerator pixelRngGen(pixelRngGenSeed);
-	sobolSequence.rngPass = pixelRngGen.uintValue();
-	sobolSequence.rng0 = pixelRngGen.floatValue();
-	sobolSequence.rng1 = pixelRngGen.floatValue();
+	sobolSequence.seed = pixelRngGen.uintValue();
 
 	// Initialize sample0 and sample1
 	const u_int *subRegion = film->GetSubRegion();

@@ -37,19 +37,61 @@ OPENCL_FORCE_INLINE uint SobolSequence_SobolDimension(
 	return result;
 }
 
+// An Owen scrambled Sobol sequence (B. Burley, "Practical Hash-based Owen
+// Scrambling", JCGT 2020). It is the same code of slg::SobolSequence: the two
+// must be kept in sync.
+
+OPENCL_FORCE_INLINE uint SobolSequence_Hash(uint x) {
+	x ^= x >> 16;
+	x *= 0x7feb352du;
+	x ^= x >> 15;
+	x *= 0x846ca68bu;
+	x ^= x >> 16;
+	return x;
+}
+
+OPENCL_FORCE_INLINE uint SobolSequence_HashCombine(const uint seed, const uint v) {
+	return seed ^ (v + 0x9e3779b9u + (seed << 6) + (seed >> 2));
+}
+
+OPENCL_FORCE_INLINE uint SobolSequence_ReverseBits(uint x) {
+	x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
+	x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
+	x = ((x >> 4) & 0x0f0f0f0fu) | ((x & 0x0f0f0f0fu) << 4);
+	x = ((x >> 8) & 0x00ff00ffu) | ((x & 0x00ff00ffu) << 8);
+	return (x >> 16) | (x << 16);
+}
+
+// The improved Laine-Karras permutation by N. Vegdahl ("Building a Better
+// LK Hash", 2021): it is an Owen scrambling of the reversed bits
+OPENCL_FORCE_INLINE uint SobolSequence_LaineKarrasPermutation(uint x, const uint seed) {
+	x ^= x * 0x3d20adeau;
+	x += seed;
+	x *= (seed >> 16) | 1u;
+	x ^= x * 0x05526c56u;
+	x ^= x * 0x53a22864u;
+	return x;
+}
+
+OPENCL_FORCE_INLINE uint SobolSequence_NestedUniformScramble(const uint x, const uint seed) {
+	return SobolSequence_ReverseBits(SobolSequence_LaineKarrasPermutation(SobolSequence_ReverseBits(x), seed));
+}
+
 OPENCL_FORCE_INLINE float SobolSequence_GetSample(
 		__global const uint* restrict sobolDirections,
-		const uint pass, const uint rngPass, const float rng0, const float rng1,
+		const uint pass, const uint seed,
 		const uint index) {
-	// I scramble pass too in order avoid correlations visible with LIGHTCPU and PATHCPU
-	const uint iResult = SobolSequence_SobolDimension(sobolDirections, pass + rngPass, index);
-	const float fResult = iResult * (1.f / 0xffffffffu);
+	// Shuffle the order of the samples (it keeps the stratification of the
+	// power of 2 sized prefixes of the sequence)
+	const uint shuffledPass = SobolSequence_NestedUniformScramble(pass, seed);
 
-	// Cranley-Patterson rotation to reduce visible regular patterns
-	const float shift = (index & 1) ? rng0 : rng1;
-	const float val = fResult + shift;
+	// Owen scramble each dimension with a different seed
+	const uint dimensionSeed = SobolSequence_Hash(SobolSequence_HashCombine(seed, index));
+	const uint iResult = SobolSequence_NestedUniformScramble(
+			SobolSequence_SobolDimension(sobolDirections, shuffledPass, index), dimensionSeed);
 
-	return val - floor(val);
+	// 24 bits to have a result in [0, 1)
+	return (iResult >> 8) * (1.f / 16777216.f);
 }
 
 //------------------------------------------------------------------------------
@@ -95,7 +137,7 @@ OPENCL_FORCE_INLINE float SobolSampler_GetSample(
 			__global SobolSample *samples = (__global SobolSample *)samplesBuff;
 			__global SobolSample *sample = &samples[gid];
 
-			return SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, index);	
+			return SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, index);
 		}
 	}
 }
@@ -154,7 +196,6 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 	uint pixelOffset = sample->pixelOffset;
 	uint passOffset = sample->passOffset;
 
-	Seed rngGeneratorSeed = sample->rngGeneratorSeed;
 	for (;;) {
 		passOffset++;
 		if (passOffset >= superSampling) {
@@ -170,8 +211,6 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 				sample->bucketIndex = bucketIndex;
 				pixelOffset = 0;
 				passOffset = 0;
-
-				Rnd_Init(bucketSeed, &rngGeneratorSeed);
 			}
 		}
 
@@ -216,12 +255,6 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 
 				if (Rnd_FloatValue(seed) > threshold) {
 					// Skip this pixel and try the next one
-
-					// Workaround for preserving random number distribution behavior
-					Rnd_UintValue(&rngGeneratorSeed);
-					Rnd_FloatValue(&rngGeneratorSeed);
-					Rnd_FloatValue(&rngGeneratorSeed);
-
 					continue;
 				}
 			}
@@ -250,22 +283,17 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 #endif
 		//----------------------------------------------------------------------
 
-		// Initialize rng0 and rng1
-
-		// Limit the number of pass skipped
-		sample->rngPass = Rnd_UintValue(&rngGeneratorSeed);
-		sample->rng0 = Rnd_FloatValue(&rngGeneratorSeed);
-		sample->rng1 = Rnd_FloatValue(&rngGeneratorSeed);
+		// Each pixel has its own scrambling of the Sobol sequence
+		sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(samplerSharedData->seedBase,
+				subRegionPixelX + subRegionPixelY * subRegionWidth));
 
 		// Initialize IDX_SCREEN_X and IDX_SCREEN_Y sample
 
 		__global const uint* restrict sobolDirections = SobolSampler_GetSobolDirectionsPtr(samplerSharedData);
-		samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_X);
-		samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_Y);
+		samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_X);
+		samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_Y);
 		break;
 	}
-	
-	sample->rngGeneratorSeed = rngGeneratorSeed;
 
 	// Save the new values
 	sample->pixelOffset = pixelOffset;

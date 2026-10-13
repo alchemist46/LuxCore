@@ -69,14 +69,13 @@ typedef struct {
 typedef struct {
 	unsigned int bucketIndex, pixelOffset, passOffset, pass;
 
-	Seed rngGeneratorSeed;
-	unsigned int rngPass;
-	float rng0, rng1;
+	// The Owen scrambling seed of the Sobol sequence of the pixel
+	unsigned int seed;
 } SobolSample;
 
 typedef struct {
-	unsigned int rngPass;
-	float rng0, rng1;
+	// The Owen scrambling seed of the Sobol sequence of the pixel
+	unsigned int seed;
 
 	unsigned int pass;
 } TilePathSample;
@@ -144,7 +143,9 @@ typedef struct {
 
 #define SOBOL_BITS 32
 #define SOBOL_MAX_DIMENSIONS 21201
-#define SOBOL_STARTOFFSET 32
+// With the Owen scrambling, the sequence can start from the first sample (and
+// the power of 2 sized prefixes of the samples of a pixel are stratified)
+#define SOBOL_STARTOFFSET 0
 
 #define SAMPLER_PARAM_DECL \
 		, Seed *seed \

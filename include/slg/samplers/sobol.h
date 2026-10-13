@@ -157,7 +157,6 @@ private:
 
 	std::shared_ptr<u_int> bucketIndex;
 	u_int pixelOffset, passOffset, pass;
-	luxrays::TauswortheRandomGenerator rngGenerator;
 
 	float sample0, sample1;
 };

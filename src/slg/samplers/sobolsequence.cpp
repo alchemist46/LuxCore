@@ -29,9 +29,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 SobolSequence::SobolSequence() : directions(NULL) {
-	rngPass = 0;
-	rng0 = 0.f;
-	rng1 = 0.f;
+	seed = 0;
 }
 
 SobolSequence::~SobolSequence() {
@@ -56,15 +54,40 @@ u_int SobolSequence::SobolDimension(const u_int index, const u_int dimension) co
 	return result;
 }
 
-float SobolSequence::GetSample(const u_int pass, const u_int index) {
-	// I scramble pass too in order avoid correlations visible with LIGHTCPU and BIDIRCPU
-	const u_int iResult = SobolDimension(pass + rngPass, index);
-	const float fResult = iResult * (1.f / 0xffffffffu);
-	
-	// Cranley-Patterson rotation to reduce visible regular patterns
-	const float shift = (index & 1) ? rng0 : rng1;
-	const float val = fResult + shift;
-
-	return val - floorf(val);
+static inline u_int ReverseBits(u_int x) {
+	x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
+	x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
+	x = ((x >> 4) & 0x0f0f0f0fu) | ((x & 0x0f0f0f0fu) << 4);
+	x = ((x >> 8) & 0x00ff00ffu) | ((x & 0x00ff00ffu) << 8);
+	return (x >> 16) | (x << 16);
 }
+
+// The improved Laine-Karras permutation by N. Vegdahl ("Building a Better
+// LK Hash", 2021): it is an Owen scrambling of the reversed bits
+static inline u_int LaineKarrasPermutation(u_int x, const u_int seed) {
+	x ^= x * 0x3d20adeau;
+	x += seed;
+	x *= (seed >> 16) | 1u;
+	x ^= x * 0x05526c56u;
+	x ^= x * 0x53a22864u;
+	return x;
+}
+
+static inline u_int NestedUniformScramble(const u_int x, const u_int seed) {
+	return ReverseBits(LaineKarrasPermutation(ReverseBits(x), seed));
+}
+
+float SobolSequence::GetSample(const u_int pass, const u_int index) const {
+	// Shuffle the order of the samples (it keeps the stratification of the
+	// power of 2 sized prefixes of the sequence)
+	const u_int shuffledPass = NestedUniformScramble(pass, seed);
+
+	// Owen scramble each dimension with a different seed
+	const u_int dimensionSeed = Hash(HashCombine(seed, index));
+	const u_int iResult = NestedUniformScramble(SobolDimension(shuffledPass, index), dimensionSeed);
+
+	// 24 bits to have a result in [0, 1)
+	return (iResult >> 8) * (1.f / 16777216.f);
+}
+
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

@@ -55,7 +55,7 @@ OPENCL_FORCE_INLINE float TilePathSampler_GetSample(
 			__global TilePathSample *sample = &samples[gid];
 
 			return SobolSequence_GetSample(sobolDirections, sample->pass + SOBOL_STARTOFFSET,
-					sample->rngPass, sample->rng0, sample->rng1, index);	
+					sample->seed, index);
 #endif
 		}
 	}
@@ -175,24 +175,22 @@ OPENCL_FORCE_INLINE bool TilePathSampler_Init(
 	if ((pixelX >= samplerSharedData->tileWidth) || (pixelY >= samplerSharedData->tileHeight))
 		return false;
 
-	// Initialize rng0, rng1 and rngPass
+	// Each pixel (and multi-pass) has its own scrambling of the Sobol sequence
 	const uint pixelRngGenSeed = (samplerSharedData->tileStartX + pixelX + (samplerSharedData->tileStartY + pixelY) * samplerSharedData->cameraFilmWidth + 1) *
 			(samplerSharedData->multipassIndexToRender + 1);
 	Seed pixelSeed;
 	Rnd_Init(pixelRngGenSeed, &pixelSeed);
 
-	sample->rngPass = Rnd_UintValue(&pixelSeed);
-	sample->rng0 = Rnd_FloatValue(&pixelSeed);
-	sample->rng1 = Rnd_FloatValue(&pixelSeed);
+	sample->seed = Rnd_UintValue(&pixelSeed);
 
 	sample->pass = samplerSharedData->tilePass * aaSamples2 + gid % aaSamples2;
 
 	__global const uint* restrict sobolDirections = TilePathSampler_GetSobolDirectionsPtr(samplerSharedData);
 
 	samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass + SOBOL_STARTOFFSET,
-			sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_X);
+			sample->seed, IDX_SCREEN_X);
 	samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass + SOBOL_STARTOFFSET,
-			sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_Y);
+			sample->seed, IDX_SCREEN_Y);
 #endif
 
 	return true;

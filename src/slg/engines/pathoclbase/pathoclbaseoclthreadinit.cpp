@@ -412,7 +412,10 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 		// Initialize SobolSamplerSharedData fields
 		slg::ocl::SobolSamplerSharedData *sssd = (slg::ocl::SobolSamplerSharedData *)buffer;
 
-		sssd->seedBase = renderEngine->seedBase;
+		// Each device must have its own seed: each one has its own pass
+		// counters so, with the same seed, all of them would render the
+		// same samples
+		sssd->seedBase = renderEngine->seedBase + threadIndex;
 		sssd->bucketIndex = 0;
 		sssd->filmRegionPixelCount = filmRegionPixelCount;
 

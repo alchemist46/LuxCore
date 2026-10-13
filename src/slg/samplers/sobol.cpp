@@ -178,14 +178,10 @@ void SobolSampler::InitNewSample() {
 
 			if (pixelOffset >= bucketSize) {
 				// Ask for a new bucket
-				auto [newBucketIndex, newBucketSeed] = sharedData->GetNewBucket(bucketCount);
-				*bucketIndex = newBucketIndex;
+				*bucketIndex = std::get<0>(sharedData->GetNewBucket(bucketCount));
 
 				pixelOffset = 0;
 				passOffset = 0;
-
-				// Initialize the rng0, rng1 and rngPass generator
-				rngGenerator.init(newBucketSeed);
 			}
 		}
 
@@ -232,30 +228,24 @@ void SobolSampler::InitNewSample() {
 				threshold = Max(threshold, 1.f - adaptiveStrength);
 
 				if (rndGen->floatValue() > threshold) {
-
-					// Workaround for preserving random number distribution behavior
-					rngGenerator.floatValue();
-					rngGenerator.floatValue();
-					rngGenerator.uintValue();
-
 					// Skip this pixel and try the next one
 					continue;
 				}
 			}
 
-			pass = sharedData->GetNewPixelPass(subRegionPixelX + subRegionPixelY * subRegionWidth);
+			const u_int pixelIndex = subRegionPixelX + subRegionPixelY * subRegionWidth;
+			pass = sharedData->GetNewPixelPass(pixelIndex);
+
+			// Each pixel has its own scrambling of the Sobol sequence
+			sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(*(sharedData->seedBase), pixelIndex));
 		} else {
 			pixelX = 0;
 			pixelY = 0;
 
 			pass = sharedData->GetNewPixelPass();
+
+			sobolSequence.seed = SobolSequence::Hash(*(sharedData->seedBase));
 		}
-
-		// Initialize rng0, rng1 and rngPass
-
-		sobolSequence.rng0 = rngGenerator.floatValue();
-		sobolSequence.rng1 = rngGenerator.floatValue();
-		sobolSequence.rngPass = rngGenerator.uintValue();
 
 		sample0 = pixelX +  sobolSequence.GetSample(pass, 0);
 		sample1 = pixelY +  sobolSequence.GetSample(pass, 1);
