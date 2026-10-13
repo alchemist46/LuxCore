@@ -57,7 +57,6 @@ namespace py = pybind11;
 
 using PropertyUPtr = std::unique_ptr<luxrays::Property>;
 using PropertyRPtr = const std::unique_ptr<luxrays::Property> &;
-using SceneImplPtr = std::unique_ptr<luxcore::detail::SceneImpl>;
 using PropertiesUPtr = std::unique_ptr<luxrays::Properties>;
 
 
@@ -957,13 +956,13 @@ static void Camera_Rotate(luxcore::detail::CameraImpl *camera, const float angle
 // Glue for Scene class
 //------------------------------------------------------------------------------
 
-static luxcore::detail::CameraImpl & Scene_GetCamera(const SceneImplPtr & scene) {
-  return dynamic_cast<luxcore::detail::CameraImpl &>(scene->GetCamera());
+static luxcore::detail::CameraImpl & Scene_GetCamera(luxcore::detail::SceneImpl &scene) {
+  return dynamic_cast<luxcore::detail::CameraImpl &>(scene.GetCamera());
 }
 
 
 static void Scene_DefineImageMap(
-	const SceneImplPtr & scene,
+	luxcore::detail::SceneImpl &scene,
 	const std::string &imgMapName,
     py::object &obj,
 	const float gamma,
@@ -976,7 +975,7 @@ static void Scene_DefineImageMap(
     if (!PyObject_GetBuffer(obj.ptr(), &view, PyBUF_SIMPLE)) {
       if ((size_t)view.len >= width * height * channels * sizeof(float)) {
         float *buffer = (float *)view.buf;
-        scene->DefineImageMap(imgMapName, buffer, gamma, channels,
+        scene.DefineImageMap(imgMapName, buffer, gamma, channels,
             width, height, Scene::DEFAULT, Scene::REPEAT);
 
         PyBuffer_Release(&view);
@@ -1130,7 +1129,7 @@ static std::optional<luxrays::ExtMeshProp<T>> translateProp(
 
 
 static void Scene_DefineMesh1(
-	const SceneImplPtr & scene,
+	luxcore::detail::SceneImpl &scene,
 	const std::string &meshName,
     const py::object &p, const py::object &vi,
     const py::object &n, const py::object &uv,
@@ -1231,11 +1230,11 @@ static void Scene_DefineMesh1(
   }
 
   mesh->SetName(meshName);
-  scene->DefineMesh(std::move(mesh));
+  scene.DefineMesh(std::move(mesh));
 }
 
 static void Scene_DefineMesh2(
-	const SceneImplPtr & scene,
+	luxcore::detail::SceneImpl &scene,
 	const std::string &meshName,
     const py::object &p, const py::object &vi,
     const py::object &n, const py::object &uv,
@@ -1245,7 +1244,7 @@ static void Scene_DefineMesh2(
 }
 
 static void Scene_DefineMeshExt1(
-	const SceneImplPtr & scene,
+	luxcore::detail::SceneImpl &scene,
 	const std::string &meshName,
     const py::object &p, const py::object &vi,
     const py::object &n, const py::object &uv,
@@ -1339,11 +1338,11 @@ static void Scene_DefineMeshExt1(
 	}
 
   mesh->SetName(meshName);
-  scene->DefineMesh(std::move(mesh));
+  scene.DefineMesh(std::move(mesh));
 }
 
 static void Scene_DefineMeshExt2(
-	const SceneImplPtr & scene,
+	luxcore::detail::SceneImpl &scene,
 	const std::string &meshName,
     const py::object &p, const py::object &vi,
     const py::object &n, const py::object &uv,
@@ -1510,7 +1509,7 @@ static std::optional<luxrays::ExtMeshProp<T>> propCopy(
 
 // Define Mesh from Numpy arrays
 static void Scene_DefineMeshExt3(
-	  const SceneImplPtr & scene,
+	  luxcore::detail::SceneImpl &scene,
 	  const std::string &meshName,
     const py_float_array p,
 	  const py::array_t<triangle_underlying_type, py::array::c_style > tri,
@@ -1565,22 +1564,22 @@ static void Scene_DefineMeshExt3(
 
 
 	// Insert mesh into the scene
-	scene->DefineMesh(std::move(newMesh));
+	scene.DefineMesh(std::move(newMesh));
 
 }
 
 static void Scene_SetMeshVertexAOV(
-	const SceneImplPtr & scene, const std::string &meshName,
+	luxcore::detail::SceneImpl &scene, const std::string &meshName,
     const size_t index, const py::object &data
 ) {
 	std::vector<float> v;
 	GetArray<float>(data, v);
 
-	scene->SetMeshVertexAOV(meshName, index, v);
+	scene.SetMeshVertexAOV(meshName, index, v);
 }
 
 static void Scene_SetMeshTriangleAOV(
-    const SceneImplPtr & scene,
+    luxcore::detail::SceneImpl &scene,
     const std::string &meshName,
     const size_t index,
     const py::object &data
@@ -1588,20 +1587,20 @@ static void Scene_SetMeshTriangleAOV(
   std::vector<float> t;
   GetArray<float>(data, t);
 
-  scene->SetMeshTriangleAOV(meshName, index, t);
+  scene.SetMeshTriangleAOV(meshName, index, t);
 }
 
 static void Scene_SetMeshAppliedTransformation(
-    const SceneImplPtr & scene,
+    luxcore::detail::SceneImpl &scene,
     const std::string &meshName,
     const py::object &transformation) {
   float mat[16];
   GetMatrix4x4(transformation, mat);
-  scene->SetMeshAppliedTransformation(meshName, mat);
+  scene.SetMeshAppliedTransformation(meshName, mat);
 }
 
 static void Scene_DefineStrands(
-    const SceneImplPtr & scene,
+    luxcore::detail::SceneImpl &scene,
     const std::string &shapeName,
     const py::int_ strandsCount,
     const py::int_ pointsCount,
@@ -1786,13 +1785,13 @@ static void Scene_DefineStrands(
   else
     throw std::runtime_error("Tessellation type unknown in method Scene.DefineStrands(): " + tessellationTypeStr);
 
-  scene->DefineStrands(shapeName, strands,
+  scene.DefineStrands(shapeName, strands,
       tessellationType, adaptiveMaxDepth, adaptiveError,
       solidSideCount, solidCapBottom, solidCapTop,
       useCameraPosition);
 }
 
-static void Scene_DuplicateObject(const SceneImplPtr & scene,
+static void Scene_DuplicateObject(luxcore::detail::SceneImpl &scene,
     const std::string &srcObjName,
     const std::string &dstObjName,
     const py::object &transformation,
@@ -1800,10 +1799,10 @@ static void Scene_DuplicateObject(const SceneImplPtr & scene,
   float mat[16];
   GetMatrix4x4(transformation, mat);
 
-  scene->DuplicateObject(srcObjName, dstObjName, mat, objectID);
+  scene.DuplicateObject(srcObjName, dstObjName, mat, objectID);
 }
 
-static void Scene_DuplicateObjectMulti(const SceneImplPtr & scene,
+static void Scene_DuplicateObjectMulti(luxcore::detail::SceneImpl &scene,
     const std::string &srcObjName,
     const std::string &dstObjNamePrefix,
     const unsigned int count,
@@ -1855,14 +1854,14 @@ static void Scene_DuplicateObjectMulti(const SceneImplPtr & scene,
   float *transformationsBuffer = (float *)transformationsView.buf;
   u_int *objectIDsBuffer = (u_int *)objectIDsView.buf;
 
-  scene->DuplicateObject(srcObjName, dstObjNamePrefix, count,
+  scene.DuplicateObject(srcObjName, dstObjNamePrefix, count,
       transformationsBuffer, objectIDsBuffer);
 
   PyBuffer_Release(&transformationsView);
   PyBuffer_Release(&objectIDsView);
 }
 
-static void Scene_DuplicateMotionObject(const SceneImplPtr & scene,
+static void Scene_DuplicateMotionObject(luxcore::detail::SceneImpl &scene,
     const std::string &srcObjName,
     const std::string &dstObjName,
     const size_t steps,
@@ -1890,14 +1889,14 @@ static void Scene_DuplicateMotionObject(const SceneImplPtr & scene,
           transVec[transIndex++] = mat[i];
       }
 
-      scene->DuplicateObject(srcObjName, dstObjName, steps, &timesVec[0], &transVec[0], objectID);
+      scene.DuplicateObject(srcObjName, dstObjName, steps, &timesVec[0], &transVec[0], objectID);
     } else
       throw std::runtime_error("Wrong data type for the list of transformation values of method Scene.DuplicateObject()");
   } else
     throw std::runtime_error("None times and/or transformations in Scene.DuplicateObject(): " + srcObjName);
 }
 
-static void Scene_DuplicateMotionObjectMulti(const SceneImplPtr & scene,
+static void Scene_DuplicateMotionObjectMulti(luxcore::detail::SceneImpl &scene,
     const std::string &srcObjName,
     const std::string &dstObjName,
     const unsigned int count,
@@ -1977,7 +1976,7 @@ static void Scene_DuplicateMotionObjectMulti(const SceneImplPtr & scene,
     float *timesBuffer = (float *)timesView.buf;
     float *transformationsBuffer = (float *)transformationsView.buf;
     u_int *objectIDsBuffer = (u_int *)objectIDsView.buf;
-    scene->DuplicateObject(srcObjName, dstObjName, count, steps, timesBuffer,
+    scene.DuplicateObject(srcObjName, dstObjName, count, steps, timesBuffer,
         transformationsBuffer, objectIDsBuffer);
 
     PyBuffer_Release(&timesView);
@@ -1985,7 +1984,7 @@ static void Scene_DuplicateMotionObjectMulti(const SceneImplPtr & scene,
     PyBuffer_Release(&objectIDsView);
 }
 
-static void Scene_DeleteObjects(const SceneImplPtr & scene,
+static void Scene_DeleteObjects(luxcore::detail::SceneImpl &scene,
     const py::list &l) {
   const py::ssize_t size = len(l);
   std::vector<std::string> names;
@@ -1999,10 +1998,10 @@ static void Scene_DeleteObjects(const SceneImplPtr & scene,
       throw std::runtime_error("Unsupported data type included in Scene.DeleteObjects() list: " + objType);
   }
 
-  scene->DeleteObjects(names);
+  scene.DeleteObjects(names);
 }
 
-static void Scene_DeleteLights(const SceneImplPtr & scene,
+static void Scene_DeleteLights(luxcore::detail::SceneImpl &scene,
     const py::list &l) {
   const py::ssize_t size = len(l);
   std::vector<std::string> names;
@@ -2016,16 +2015,16 @@ static void Scene_DeleteLights(const SceneImplPtr & scene,
       throw std::runtime_error("Unsupported data type included in Scene.DeleteLights() list: " + objType);
   }
 
-  scene->DeleteLights(names);
+  scene.DeleteLights(names);
 }
 
-static void Scene_UpdateObjectTransformation(const SceneImplPtr & scene,
+static void Scene_UpdateObjectTransformation(luxcore::detail::SceneImpl &scene,
     const std::string &objName,
     const py::object &transformation
 ) {
 	float mat[16];
 	GetMatrix4x4(transformation, mat);
-	scene->UpdateObjectTransformation(objName, mat);
+	scene.UpdateObjectTransformation(objName, mat);
 }
 
 //------------------------------------------------------------------------------
@@ -2051,10 +2050,10 @@ RenderConfig_LoadFile(const py::str &fileNameStr) {
   return config;
 }
 
-static const luxcore::detail::SceneImpl&
+static luxcore::detail::SceneImpl&
 RenderConfig_GetScene(luxcore::detail::RenderConfigImpl *renderConfig) {
 	auto& luxscene = renderConfig->GetScene();
-  return static_cast<const luxcore::detail::SceneImpl&>(luxscene);
+  return static_cast<luxcore::detail::SceneImpl&>(luxscene);
 }
 
 static py::tuple RenderConfig_GetFilmSize(luxcore::detail::RenderConfigImpl *renderConfig) {
@@ -2540,7 +2539,7 @@ PYBIND11_MODULE(pyluxcore, m) {
 		py::keep_alive<1, 2>()
 	)
     .def("ToProperties", &luxcore::detail::SceneImpl::ToProperties)
-    .def("GetCamera", &Scene_GetCamera)
+    .def("GetCamera", &Scene_GetCamera, py::return_value_policy::reference_internal)
     .def("GetLightCount", &luxcore::detail::SceneImpl::GetLightCount)
     .def("GetObjectCount", &luxcore::detail::SceneImpl::GetObjectCount)
     .def("DefineImageMap", &Scene_DefineImageMap)
@@ -2607,7 +2606,8 @@ PYBIND11_MODULE(pyluxcore, m) {
     //.def(py::init(&RenderConfig_LoadFile)) TODO
     .def("GetProperties", &luxcore::detail::RenderConfigImpl::GetProperties)
     .def("GetProperty", &luxcore::detail::RenderConfigImpl::GetProperty)
-    .def("GetScene", &RenderConfig_GetScene)
+    // The Scene is owned by the RenderConfig (and edited in place)
+    .def("GetScene", &RenderConfig_GetScene, py::return_value_policy::reference_internal)
     .def("HasCachedKernels", &luxcore::detail::RenderConfigImpl::HasCachedKernels)
     .def("Parse", &luxcore::detail::RenderConfigImpl::Parse)
     .def("Delete", &luxcore::detail::RenderConfigImpl::Delete)
