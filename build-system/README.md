@@ -1,7 +1,7 @@
 ## Helpers and other stuff for Build process
 
 Root contents:
-- `build-settings.json`: static settings for build process, including version of the dependencies. Used by CMake, Github Workflows and others.
+- `build-settings.json`: static settings for build process, including version of the dependencies. Used by CMake, Github Workflows and others. `Build.cxx` is the C++ standard of the dependencies (Conan `compiler.cppstd`), `Build.cxx-luxcore` the one of LuxCore code.
 - `ccache.conf`: configuration for ccache. Used by Github Workflows
 
 Folder contents:

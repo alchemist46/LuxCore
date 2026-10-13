@@ -110,7 +110,12 @@ ENDIF()
 # This boots up the generator:
 enable_language(C)
 enable_language(CXX)
-set(CMAKE_CXX_STANDARD 23)
+# The C++ standards are set in build-system/build-settings.json: "cxx" is the
+# one of the dependencies (their 'compiler.cppstd', it is also the one set by
+# the Conan toolchain) and "cxx-luxcore" the one of LuxCore code, which can be
+# more recent (the standard library ABI doesn't depend on it)
+STRING(JSON _LUXCORE_CXX_STANDARD GET "${settings_json}" Build cxx-luxcore)
+set(CMAKE_CXX_STANDARD ${_LUXCORE_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)  # Propagate Conan targets to subdirs
