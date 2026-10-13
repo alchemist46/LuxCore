@@ -487,7 +487,10 @@ __kernel void AdvancePaths_MK_RT_DL(
 	taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
 
 	int throughShadowTransparency = taskDirectLight->throughShadowTransparency;
-	const bool continueToTrace =
+	// With the any-hit shadow rays (nothing in the scene can let a shadow ray
+	// through: no transparency, no volume) the trace result is final and the
+	// BSDF of the blocker is not needed
+	const bool continueToTrace = scene->shadowRayAnyHit ? false :
 		Scene_Intersect(taskConfig,
 			EYE_RAY | SHADOW_RAY,
 			&throughShadowTransparency,
@@ -703,6 +706,11 @@ __kernel void AdvancePaths_MK_DL_SAMPLE_BSDF(
 		// Make a copy of current PathVolumeInfo for tracing the
 		// shadow ray
 		directLightVolInfos[gid] = pathInfo->volume;
+
+		// The shadow ray was initialized by Light_Illuminate(): flag it for
+		// an any-hit trace if the scene allows it
+		if (taskConfig->scene.shadowRayAnyHit)
+			rays[gid].flags |= RAY_FLAGS_SHADOW;
 
 		// I have to trace the shadow ray
 		taskState->state = MK_RT_DL;

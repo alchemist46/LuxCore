@@ -95,17 +95,35 @@ extern "C" __global__ void HiprtAccel_Intersect_RayBuffer(
 	hiprtSharedStackBuffer sharedStackBuffer{ HIPRTACCEL_SHARED_STACK_SIZE, sharedStackCache };
 	HiprtAccelStack stack(globalStackBuffer, sharedStackBuffer);
 
+	// A shadow ray only needs to know if something is hit: the any-hit
+	// traversal stops at the first intersection
+	const bool anyHit = flags & RAY_FLAGS_SHADOW;
+	hiprtHit hit;
 #if defined(HIPRTACCEL_GEOMETRY_ONLY)
-	hiprtGeomTraversalClosestCustomStack<HiprtAccelStack> traversal(geometry, hipRay, stack);
+	if (anyHit) {
+		hiprtGeomTraversalAnyHitCustomStack<HiprtAccelStack> traversal(geometry, hipRay, stack,
+				hiprtTraversalHintShadowRays);
+		hit = traversal.getNextHit();
+	} else {
+		hiprtGeomTraversalClosestCustomStack<HiprtAccelStack> traversal(geometry, hipRay, stack);
+		hit = traversal.getNextHit();
+	}
 #else
 	// A single level of instancing
 	hiprtEmptyInstanceStack instanceStack;
 
-	hiprtSceneTraversalClosestCustomStack<HiprtAccelStack, hiprtEmptyInstanceStack> traversal(
-			scene, hipRay, stack, instanceStack, hiprtFullRayMask,
-			hiprtTraversalHintDefault, nullptr, nullptr, 0, ray->time - rayTimeOffset);
+	if (anyHit) {
+		hiprtSceneTraversalAnyHitCustomStack<HiprtAccelStack, hiprtEmptyInstanceStack> traversal(
+				scene, hipRay, stack, instanceStack, hiprtFullRayMask,
+				hiprtTraversalHintShadowRays, nullptr, nullptr, 0, ray->time - rayTimeOffset);
+		hit = traversal.getNextHit();
+	} else {
+		hiprtSceneTraversalClosestCustomStack<HiprtAccelStack, hiprtEmptyInstanceStack> traversal(
+				scene, hipRay, stack, instanceStack, hiprtFullRayMask,
+				hiprtTraversalHintDefault, nullptr, nullptr, 0, ray->time - rayTimeOffset);
+		hit = traversal.getNextHit();
+	}
 #endif
-	const hiprtHit hit = traversal.getNextHit();
 
 	// Write result
 	if (hit.hasHit()) {

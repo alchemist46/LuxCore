@@ -208,6 +208,11 @@ PathOCLBaseRenderEngine::~PathOCLBaseRenderEngine() {
 void PathOCLBaseRenderEngine::InitGPUTaskConfiguration() {
 	// Scene configuration
 	taskConfig.scene.defaultVolumeIndex = compiledScene->defaultWorldVolumeIndex;
+	// The camera volume puts the eye paths (and their shadow rays) inside a
+	// volume too
+	taskConfig.scene.shadowRayAnyHit = !compiledScene->shadowRaysNeedBSDF &&
+			!renderConfig.GetScene().GetCamera().HasVolume() &&
+			renderConfig.GetProperty("pathocl.shadowray.anyhit.enable").Get<bool>();
 
 	// Sampler configuration
 	taskConfig.sampler = *oclSampler;
@@ -481,6 +486,8 @@ void PathOCLBaseRenderEngine::EndSceneEditLockLess(const EditActionList &editAct
 	if (lightSamplerSharedData)
 		lightSamplerSharedData->Reset();
 	compiledScene->Recompile(editActions);
+	if (compiledScene->wasCameraCompiled || compiledScene->wasMaterialsCompiled)
+		InitGPUTaskConfiguration();
 
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
 		renderOCLThreads[i]->intersectionDevice.PushThreadCurrentDevice();

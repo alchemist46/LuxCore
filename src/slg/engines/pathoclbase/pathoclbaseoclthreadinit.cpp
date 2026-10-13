@@ -332,6 +332,13 @@ void PathOCLBaseOCLRenderThread::InitImageMaps() {
 	}
 }
 
+void PathOCLBaseOCLRenderThread::UpdateGPUTaskConfigurationBuffer() {
+	// The scene configuration (default volume, shadow ray any-hit) depends on
+	// the camera volume and on the materials: re-upload it after their edit
+	intersectionDevice.AllocBufferRO(&taskConfigBuff, &renderEngine->taskConfig,
+			sizeof(slg::ocl::pathoclbase::GPUTaskConfiguration), "GPUTaskConfiguration");
+}
+
 void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	const u_int taskCount = renderEngine->taskCount;
 

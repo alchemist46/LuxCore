@@ -83,6 +83,9 @@ void RTPathOCLRenderThread::UpdateOCLBuffers(const EditActionList &updateActions
 		InitMaterials();
 	}
 
+	if (cscene->wasCameraCompiled || cscene->wasMaterialsCompiled)
+		UpdateGPUTaskConfigurationBuffer();
+
 	if (cscene->wasSceneObjectsCompiled) {
 		// Update Mesh <=> Material relation
 		InitSceneObjects();

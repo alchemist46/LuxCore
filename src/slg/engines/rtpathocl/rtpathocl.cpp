@@ -187,6 +187,8 @@ void RTPathOCLRenderEngine::EndFilmEdit(FilmRef flm, std::mutex *flmMutex) {
 	EditActionList a;
 	a.AddActions(CAMERA_EDIT);
 	compiledScene->Recompile(a);
+	if (compiledScene->wasCameraCompiled || compiledScene->wasMaterialsCompiled)
+		InitGPUTaskConfiguration();
 
 	// Re-start all rendering threads
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i)

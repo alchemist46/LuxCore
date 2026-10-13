@@ -135,7 +135,8 @@ extern "C" __global__ void __raygen__OptixAccel() {
             ray->maxt,
             ray->time,
             OptixVisibilityMask(1),
-            0,
+            // A shadow ray only needs to know if something is hit
+            (ray->flags & RAY_FLAGS_SHADOW) ? OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT : OPTIX_RAY_FLAG_NONE,
             0, 1, 0);
 }
 

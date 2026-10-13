@@ -290,6 +290,9 @@ void PathOCLBaseOCLRenderThread::EndSceneEdit(const EditActionList &editActions)
 		InitMaterials();
 	}
 
+	if (cscene->wasCameraCompiled || cscene->wasMaterialsCompiled)
+		UpdateGPUTaskConfigurationBuffer();
+
 	if (cscene->wasSceneObjectsCompiled) {
 		// Update Mesh <=> Material relation
 		InitSceneObjects();

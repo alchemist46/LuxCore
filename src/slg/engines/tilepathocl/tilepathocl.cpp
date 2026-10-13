@@ -239,6 +239,7 @@ PropertiesUPtr TilePathOCLRenderEngine::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("renderengine.type")) <<
 			// Force true
 			Property("pathocl.pixelatomics.enable")(true) <<
+			cfg.Get(GetDefaultProps()->Get("pathocl.shadowray.anyhit.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("tilepath.sampling.aa.size")) <<
 			cfg.Get(GetDefaultProps()->Get("tilepathocl.devices.maxtiles")) <<
 			PathTracer::ToProperties(cfg) <<
@@ -259,6 +260,7 @@ PropertiesUPtr TilePathOCLRenderEngine::GetDefaultProps() {
 			Property("renderengine.type")(GetObjectTag()) <<
 			// Force true
 			Property("pathocl.pixelatomics.enable")(true) <<
+			Property("pathocl.shadowray.anyhit.enable")(true) <<
 			Property("tilepath.sampling.aa.size")(3) <<
 			Property("tilepathocl.devices.maxtiles")(16) <<
 			PathTracer::GetDefaultProps() <<

@@ -1019,6 +1019,27 @@ void CompiledScene::CompileMaterials() {
 	defaultWorldVolumeIndex = scene.HasDefaultWorldVolume() ?
 		scene.GetMaterials().GetMaterialIndex(scene.GetDefaultWorldVolume()) : NULL_INDEX;
 
+	//--------------------------------------------------------------------------
+	// Shadow rays need the closest hit and its BSDF only if something can let
+	// them through (see Scene_Intersect()): a pass-through transparency (null
+	// and archglass materials, transparency textures), a shadow transparency
+	// or a volume (the volume priority system and the transmittance)
+	//--------------------------------------------------------------------------
+
+	shadowRaysNeedBSDF = (defaultWorldVolumeIndex != NULL_INDEX);
+	for (const slg::ocl::Material &mat : mats) {
+		if ((mat.type == slg::ocl::NULLMAT) || (mat.type == slg::ocl::ARCHGLASS) ||
+				(mat.frontTranspTexIndex != NULL_INDEX) || (mat.backTranspTexIndex != NULL_INDEX) ||
+				(mat.passThroughShadowTransparency.c[0] != 0.f) ||
+				(mat.passThroughShadowTransparency.c[1] != 0.f) ||
+				(mat.passThroughShadowTransparency.c[2] != 0.f) ||
+				(mat.interiorVolumeIndex != NULL_INDEX) || (mat.exteriorVolumeIndex != NULL_INDEX)) {
+			shadowRaysNeedBSDF = true;
+			break;
+		}
+	}
+	SLG_LOG("Shadow rays any-hit: " << (shadowRaysNeedBSDF ? "no (transparency or volumes)" : "yes"));
+
 	const double tEnd = WallClockTime();
 	SLG_LOG("Material compilation time: " << int((tEnd - tStart) * 1000.0) << "ms");
 }

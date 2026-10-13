@@ -165,6 +165,8 @@ void Accelerator_Intersect(
 
 	uint hitMeshIndex = NULL_INDEX;
 	uint hitTriangleIndex = NULL_INDEX;
+	// A shadow ray only needs to know if something is hit
+	const bool anyHit = ray->flags & RAY_FLAGS_SHADOW;
 
 	float b1, b2;
 	for (;;) {
@@ -253,6 +255,8 @@ void Accelerator_Intersect(
 				const uint triangleIndex = as_uint(data1.x);
 				Triangle_Intersect(currentRayOrig, currentRayDir, mint, &maxt, &hitMeshIndex, &hitTriangleIndex, &b1, &b2,
 					meshIndex, triangleIndex, p0, p1, p2);
+				if (anyHit && (hitMeshIndex != NULL_INDEX))
+					break;
 #if (MBVH_NODES_PAGE_COUNT == 1)
 				++currentNode;
 #else

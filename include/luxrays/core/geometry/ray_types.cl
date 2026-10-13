@@ -20,6 +20,9 @@
 
 #define RAY_FLAGS_NONE   0x00000000
 #define RAY_FLAGS_MASKED 0x00000001
+// A shadow ray that only needs to know if something is hit: the accelerators
+// can stop at the first hit instead of looking for the closest one
+#define RAY_FLAGS_SHADOW 0x00000002
 
 typedef struct {
 	Point o;

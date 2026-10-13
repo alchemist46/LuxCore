@@ -111,6 +111,9 @@ public:
 	// Expressed in float
 	u_int maxMaterialEvalStackSize;
 	u_int defaultWorldVolumeIndex;
+	// True if a shadow ray can be let through by a material or a volume, so
+	// Scene_Intersect() needs the closest hit and its BSDF
+	bool shadowRaysNeedBSDF;
 
 	// Compiled Textures
 	std::vector<slg::ocl::Texture> texs;

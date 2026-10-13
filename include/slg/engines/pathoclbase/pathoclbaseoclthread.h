@@ -170,6 +170,7 @@ protected:
 	void InitPhotonGI();
 	void InitKernels();
 	void InitGPUTaskBuffer();
+	void UpdateGPUTaskConfigurationBuffer();
 	void InitSamplerSharedDataBuffer();
 	void InitSamplesBuffer();
 	void InitSampleDataBuffer();

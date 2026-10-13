@@ -39,6 +39,10 @@ typedef int SceneRayType;
 
 typedef struct {
 	unsigned int defaultVolumeIndex;
+	// 1 if the shadow rays can be traced with an any-hit traversal and
+	// without the BSDF of the blocker: nothing in the scene can let a shadow
+	// ray through (no transparent material, no shadow transparency, no volume)
+	unsigned int shadowRayAnyHit;
 } Scene;
 
 #if defined(SLG_OPENCL_KERNEL)
