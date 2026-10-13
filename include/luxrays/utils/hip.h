@@ -24,6 +24,7 @@
 #include <stdexcept>
 
 #include <hipew.h>
+#include <hiprtew.h>
 
 #include "luxrays/utils/strutils.h"
 
@@ -44,6 +45,15 @@ inline void CheckHIPError(const hipError_t err, const char *file, const int line
 		throw std::runtime_error("HIP runtime API error " + std::string(errorNameStr) + " "
 				"(code: " + ToString(err) + ", file:" + std::string(file) + ", line: " + ToString(line) + ")"
 				": " + std::string(errorStr) + "\n");
+	}
+}
+
+#define CHECK_HIPRT_ERROR(err) CheckHIPRTError(err, __FILE__, __LINE__)
+
+inline void CheckHIPRTError(const hiprtError err, const char *file, const int line) {
+	if (err != hiprtSuccess) {
+		throw std::runtime_error("HIPRT error "
+				"(code: " + ToString(err) + ", file:" + std::string(file) + ", line: " + ToString(line) + ")\n");
 	}
 }
 

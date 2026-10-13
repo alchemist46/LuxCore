@@ -16,6 +16,7 @@ set(LUXRAYS_KERNELS
     include/luxrays/accelerators/mbvh.cl
     include/luxrays/accelerators/optixaccel.cl
     include/luxrays/accelerators/optixemptyaccel.cl
+    include/luxrays/accelerators/hiprtaccel.cl
     include/luxrays/core/exttrianglemesh_types.cl
     include/luxrays/core/exttrianglemesh_funcs.cl
     include/luxrays/core/randomgen_types.cl

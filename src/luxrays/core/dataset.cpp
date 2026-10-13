@@ -30,6 +30,7 @@
 #include "luxrays/accelerators/mbvhaccel.h"
 #include "luxrays/accelerators/embreeaccel.h"
 #include "luxrays/accelerators/optixaccel.h"
+#include "luxrays/accelerators/hiprtaccel.h"
 #include "luxrays/core/geometry/bsphere.h"
 
 using namespace luxrays;
@@ -138,6 +139,11 @@ AcceleratorConstSPtr DataSet::GetAccelerator(const AcceleratorType accelType) co
 #if !defined(LUXRAYS_DISABLE_CUDA)
 				case ACCEL_OPTIX:
 					accel = std::make_shared<OptixAccel>(context);
+					break;
+#endif
+#if !defined(LUXRAYS_DISABLE_HIP)
+				case ACCEL_HIPRT:
+					accel = std::make_shared<HiprtAccel>(context);
 					break;
 #endif
 				default:

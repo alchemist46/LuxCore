@@ -54,6 +54,7 @@ typedef enum hipError_t {
 } hipError_t;
 
 typedef int hipDevice_t;
+typedef struct ihipCtx_t *hipCtx_t;
 typedef void *hipDeviceptr_t;
 typedef struct ihipStream_t *hipStream_t;
 typedef struct ihipModule_t *hipModule_t;
@@ -113,6 +114,8 @@ typedef hipError_t HIPAPI thipGetDevicePropertiesR0600(void *prop, int deviceId)
 typedef hipError_t HIPAPI thipSetDevice(int deviceId);
 typedef hipError_t HIPAPI thipGetDevice(int *deviceId);
 typedef hipError_t HIPAPI thipDeviceSynchronize(void);
+typedef hipError_t HIPAPI thipDevicePrimaryCtxRetain(hipCtx_t *pctx, hipDevice_t dev);
+typedef hipError_t HIPAPI thipDevicePrimaryCtxRelease(hipDevice_t dev);
 typedef hipError_t HIPAPI thipMalloc(void **ptr, size_t size);
 typedef hipError_t HIPAPI thipMallocManaged(void **devPtr, size_t size, unsigned int flags);
 typedef hipError_t HIPAPI thipMemAdvise(const void *devPtr, size_t count, hipMemoryAdvise advice, int device);
@@ -145,6 +148,8 @@ extern thipGetDevicePropertiesR0600 *hipGetDevicePropertiesR0600;
 extern thipSetDevice *hipSetDevice;
 extern thipGetDevice *hipGetDevice;
 extern thipDeviceSynchronize *hipDeviceSynchronize;
+extern thipDevicePrimaryCtxRetain *hipDevicePrimaryCtxRetain;
+extern thipDevicePrimaryCtxRelease *hipDevicePrimaryCtxRelease;
 extern thipMalloc *hipMalloc;
 extern thipMallocManaged *hipMallocManaged;
 extern thipMemAdvise *hipMemAdvise;

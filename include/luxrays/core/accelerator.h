@@ -29,7 +29,7 @@
 namespace luxrays {
 
 typedef enum {
-	ACCEL_AUTO, ACCEL_BVH, ACCEL_MBVH, ACCEL_EMBREE, ACCEL_OPTIX
+	ACCEL_AUTO, ACCEL_BVH, ACCEL_MBVH, ACCEL_EMBREE, ACCEL_OPTIX, ACCEL_HIPRT
 } AcceleratorType;
 
 class IntersectionDevice;

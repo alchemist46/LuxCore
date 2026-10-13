@@ -48,10 +48,14 @@ void HIPIntersectionDevice::SetDataSet(DataSetSPtr newDataSet) {
 		if (accelType != ACCEL_AUTO) {
 			accel = dataSet->GetAccelerator(accelType);
 		} else {
-			if (dataSet->RequiresInstanceSupport() || dataSet->RequiresMotionBlurSupport())
-				accel = dataSet->GetAccelerator(ACCEL_MBVH);
-			else
-				accel = dataSet->GetAccelerator(ACCEL_BVH);
+			if (GetHIPRTContext())
+				accel = dataSet->GetAccelerator(ACCEL_HIPRT);
+			else {
+				if (dataSet->RequiresInstanceSupport() || dataSet->RequiresMotionBlurSupport())
+					accel = dataSet->GetAccelerator(ACCEL_MBVH);
+				else
+					accel = dataSet->GetAccelerator(ACCEL_BVH);
+			}
 		}
 	}
 }

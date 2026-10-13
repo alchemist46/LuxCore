@@ -39,6 +39,7 @@ extern std::string KernelSource_bvh;
 extern std::string KernelSource_mbvh;
 extern std::string KernelSource_optixaccel;
 extern std::string KernelSource_optixemptyaccel;
+extern std::string KernelSource_hiprtaccel;
 
 extern std::string KernelSource_trianglemesh_types;
 extern std::string KernelSource_exttrianglemesh_types;

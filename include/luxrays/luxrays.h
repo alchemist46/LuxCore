@@ -64,6 +64,7 @@ inline bool isOpenCLAvilable = true;
 inline bool isCudaAvilable = true;
 inline bool isOptixAvilable = true;
 inline bool isHipAvailable = true;
+inline bool isHiprtAvailable = true;
 inline std::locale cLocale("C");
 
 }

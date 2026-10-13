@@ -112,6 +112,8 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		throw runtime_error("EMBREE accelerator is not supported in PathOCLBaseRenderThread::InitKernels()");
 		case ACCEL_OPTIX:
 			break;
+		case ACCEL_HIPRT:
+			break;
 		default:
 			throw runtime_error("Unknown accelerator in PathOCLBaseRenderThread::InitKernels()");
 	}

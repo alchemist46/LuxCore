@@ -108,6 +108,9 @@ void Init() {
 		else if (err != hipErrorNoDevice)
 			std::cerr << "HIP disabled: hipInit() error " << err << "\n";
 	}
+
+	// HIPRT is optional: without it, HIP devices use the BVH/MBVH accelerators
+	isHiprtAvailable = isHipAvailable && (hiprtewInit() == HIPRTEW_SUCCESS);
 #endif
 }
 

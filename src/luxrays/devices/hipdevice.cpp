@@ -38,7 +38,7 @@ using namespace luxrays;
 
 HIPDeviceDescription::HIPDeviceDescription(hipDevice_t dev, const size_t devIndex) :
 		DeviceDescription("HIPInitializingDevice", DEVICE_TYPE_HIP_GPU),
-		hipDeviceIndex(devIndex), hipDevice(dev) {
+		hipDeviceIndex(devIndex), hipDevice(dev), useHIPRT(isHiprtAvailable) {
 	char buff[256];
 	CHECK_HIP_ERROR(hipDeviceGetName(buff, 256, hipDevice));
 	name = string(buff);
@@ -117,7 +117,7 @@ HIPDevice::HIPDevice(
 		HIPDeviceDescriptionConstRef desc,
 		const size_t devIndex) :
 		Device(context, devIndex),
-		deviceDesc(desc) {
+		deviceDesc(desc), hiprtCtx(nullptr), hiprtCtxInitialized(false) {
 	deviceName = (desc.GetName() + " HIPIntersect").c_str();
 
 	kernelCache = std::make_unique<hipKernelPersistentCache>("LUXRAYS_" LUXRAYS_VERSION, desc.GetHIPArch());
@@ -138,6 +138,51 @@ HIPDevice::~HIPDevice() {
 
 		PopThreadCurrentDevice();
 	}
+
+	if (hiprtCtx) {
+		// It unloads the trace kernel modules too
+		CHECK_HIPRT_ERROR(hiprtDestroyContext(hiprtCtx));
+		CHECK_HIP_ERROR(hipDevicePrimaryCtxRelease(deviceDesc.GetHIPDevice()));
+	}
+}
+
+hiprtContext HIPDevice::GetHIPRTContext() {
+	if (hiprtCtxInitialized)
+		return hiprtCtx;
+	hiprtCtxInitialized = true;
+
+	if (isHiprtAvailable && deviceDesc.useHIPRT) {
+		// HIPRT works with the driver API: give it the primary context, the
+		// one used by the runtime API calls of this device
+		hipCtx_t hipCtx;
+		CHECK_HIP_ERROR(hipDevicePrimaryCtxRetain(&hipCtx, deviceDesc.GetHIPDevice()));
+
+		hiprtContextCreationInput input;
+		input.ctxt = hipCtx;
+		input.device = deviceDesc.GetHIPDevice();
+		input.deviceType = hiprtDeviceAMD;
+
+		const hiprtError result = hiprtCreateContext(HIPRTEW_API_VERSION, input, hiprtCtx);
+		if (result != hiprtSuccess) {
+			LR_LOG(deviceContext, "WARNING unable to create HIPRT context for device " << deviceName <<
+					" (code: " << result << ")");
+			hiprtCtx = nullptr;
+
+			CHECK_HIP_ERROR(hipDevicePrimaryCtxRelease(deviceDesc.GetHIPDevice()));
+		} else {
+			// HIPRT logs to the standard output otherwise
+			CHECK_HIPRT_ERROR(hiprtSetLogLevel(hiprtCtx, hiprtLogLevelError));
+
+			// The trace kernels compiled by HIPRT are cached next to the
+			// ones of this device, so they are cleared together
+			const std::filesystem::path hiprtCacheDir =
+					hipKernelPersistentCache::GetCacheDir(kernelCache->GetApplicationName()) / "hiprt";
+			std::filesystem::create_directories(hiprtCacheDir);
+			CHECK_HIPRT_ERROR(hiprtSetCacheDirPath(hiprtCtx, hiprtCacheDir.string().c_str()));
+		}
+	}
+
+	return hiprtCtx;
 }
 
 void HIPDevice::PushThreadCurrentDevice() {
@@ -320,6 +365,15 @@ HardwareDeviceKernelUPtr HIPDevice::GetKernel(
 		hipModuleGetFunction(
 			&function, hipDeviceProgram.GetModule(), kernelName.c_str())
 		);
+
+	hipDeviceKernel.Set(function);
+
+	return std::move(kernel);
+}
+
+HardwareDeviceKernelUPtr HIPDevice::GetKernel(hipFunction_t function) {
+	auto [kernel, hipDeviceKernel] =
+		CreateUniquePtr<HardwareDeviceKernel, HIPDeviceKernel>();
 
 	hipDeviceKernel.Set(function);
 

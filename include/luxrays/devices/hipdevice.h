@@ -53,6 +53,8 @@ public:
 	// features, i.e. "gfx90a:sramecc+:xnack-")
 	const std::string &GetHIPArch() const { return arch; }
 	int GetHIPWarpSize() const;
+	void SetHIPUseHIPRT(const bool v) { useHIPRT = v; }
+	bool GetHIPUseHIPRT() const { return useHIPRT; }
 
 	friend class Context;
 	friend class HIPDevice;
@@ -63,6 +65,7 @@ protected:
 	size_t hipDeviceIndex;
 	hipDevice_t hipDevice;
 	std::string arch;
+	bool useHIPRT;
 };
 
 //------------------------------------------------------------------------------
@@ -217,8 +220,17 @@ public:
 	const std::unique_ptr<luxrays::hipKernelPersistentCache>&
 	GetHIPKernelCache() { return kernelCache; }
 
+	// nullptr if HIPRT isn't available or it isn't enabled for this device. The
+	// context is created by the first call: devices used only for the image
+	// pipeline don't need it.
+	hiprtContext GetHIPRTContext();
+
 	std::vector<std::string> AddKernelOpts(const std::vector<std::string> &programParameters);
 	std::string GetKernelSource(const std::string &kernelSource);
+
+	// Wraps a function of a module not loaded by this device (i.e. a HIPRT
+	// trace kernel), so it can be used with SetKernelArg()/EnqueueKernel()
+	HardwareDeviceKernelUPtr GetKernel(hipFunction_t function);
 
 	friend class Context;
 
@@ -232,6 +244,9 @@ protected:
 	std::vector<hipModule_t> loadedModules;
 
 	std::unique_ptr<luxrays::hipKernelPersistentCache> kernelCache;
+
+	hiprtContext hiprtCtx;
+	bool hiprtCtxInitialized;
 };
 
 }

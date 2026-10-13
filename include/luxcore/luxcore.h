@@ -212,6 +212,8 @@ CPP_EXPORT CPP_API void KernelCacheFill(
  * - compile.LUXRAYS_ENABLE_HIP and compile.LUXRAYS_DISABLE_HIP\n
  *		true or false if the sources has been compiled with LUXRAYS_ENABLE_HIP and
  *		HIP support (AMD GPUs) is available or not.
+ * - compile.LUXRAYS_ENABLE_HIPRT is true if HIPRT (AMD GPU ray tracing) is
+ *		available, false otherwise.
  * - compile.LUXCORE_DISABLE_EMBREE_BVH_BUILDER\n
  *		true or false if the sources has been compiled with LUXCORE_DISABLE_EMBREE_BVH_BUILDER and
  *		Embree BVH builder is used for OpenCL or not. This is now always false.

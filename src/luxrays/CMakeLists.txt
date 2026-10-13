@@ -76,6 +76,8 @@ set(LUXRAYS_SRCS
   ${PROJECT_SOURCE_DIR}/src/luxrays/accelerators/mbvhaccelhw.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/accelerators/optixaccel.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/accelerators/optixaccelhw.cpp
+  ${PROJECT_SOURCE_DIR}/src/luxrays/accelerators/hiprtaccel.cpp
+  ${PROJECT_SOURCE_DIR}/src/luxrays/accelerators/hiprtaccelhw.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/core/bvh/bvhbuild.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/core/bvh/bvhclassicbuild.cpp
   ${PROJECT_SOURCE_DIR}/src/luxrays/core/bvh/bvhembreebuild.cpp
@@ -134,6 +136,7 @@ set(LUXRAYS_SRCS
   ${PROJECT_SOURCE_DIR}/deps/cuew/src/cuew.cpp
   ${PROJECT_SOURCE_DIR}/deps/clew/src/clew.cpp
   ${PROJECT_SOURCE_DIR}/deps/hipew/src/hipew.cpp
+  ${PROJECT_SOURCE_DIR}/deps/hipew/src/hiprtew.cpp
 )
 SOURCE_GROUP("Source Files\\LuxRays Library" FILES ${LUXRAYS_SRCS})
 

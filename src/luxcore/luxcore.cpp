@@ -176,9 +176,11 @@ PropertiesUPtr luxcore::GetPlatformDesc() {
 #if !defined(LUXRAYS_DISABLE_HIP)
 	props << Property("compile.LUXRAYS_DISABLE_HIP")(!luxrays::isHipAvailable);
 	props << Property("compile.LUXRAYS_ENABLE_HIP")(luxrays::isHipAvailable);
+	props << Property("compile.LUXRAYS_ENABLE_HIPRT")(luxrays::isHiprtAvailable);
 #else
 	props << Property("compile.LUXRAYS_DISABLE_HIP")(true);
 	props << Property("compile.LUXRAYS_ENABLE_HIP")(false);
+	props << Property("compile.LUXRAYS_ENABLE_HIPRT")(false);
 #endif
 
 #if !defined(LUXCORE_DISABLE_OIDN)

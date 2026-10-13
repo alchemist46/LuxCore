@@ -34,6 +34,8 @@ string Accelerator::AcceleratorType2String(const AcceleratorType type) {
 			return "EMBREE";
 		case ACCEL_OPTIX:
 			return "OPTIX";
+		case ACCEL_HIPRT:
+			return "HIPRT";
 		default:
 			throw runtime_error("Unknown accelerator type in AcceleratorType2String(): " + ToString(type));
 	}
@@ -50,6 +52,8 @@ AcceleratorType Accelerator::String2AcceleratorType(const string &type) {
 		return ACCEL_EMBREE;
 	else if (type == "OPTIX")
 		return ACCEL_OPTIX;
+	else if (type == "HIPRT")
+		return ACCEL_HIPRT;
 	else
 		throw runtime_error("Unknown accelerator type in String2AcceleratorType(): " + type);
 }

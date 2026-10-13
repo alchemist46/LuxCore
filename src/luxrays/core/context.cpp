@@ -160,6 +160,12 @@ Context::Context(LuxRaysDebugHandler handler, PropertiesUPtr&& config)
 		CHECK_HIP_ERROR(hipGetDeviceCount(&devCount));
 		LR_LOG((*this), "HIP device count: " << devCount);
 
+		if (isHiprtAvailable) {
+			LR_LOG((*this), "HIPRT support: available (" << hiprtewLibraryName() << ")");
+		} else {
+			LR_LOG((*this), "HIPRT support: not available (" HIPRTEW_LIBRARY_NAME " not found or not usable)");
+		}
+
 		HIPDeviceDescription::AddDeviceDescs(deviceDescriptions);
 	} else
 		LR_LOG((*this), "HIP support: not available");

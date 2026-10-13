@@ -27,6 +27,7 @@
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 #include "luxrays/devices/ocldevice.h"
 #include "luxrays/devices/cudadevice.h"
+#include "luxrays/devices/hipdevice.h"
 #endif
 
 
@@ -55,6 +56,7 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 
 	const string oclDeviceConfig = cfg.Get(GetDefaultProps()->Get("opencl.devices.select")).Get<string>();
 	const string cudaOptixDeviceConfig = cfg.Get(GetDefaultProps()->Get("cuda.optix.devices.select")).Get<string>();
+	const string hipHiprtDeviceConfig = cfg.Get(GetDefaultProps()->Get("hip.hiprt.devices.select")).Get<string>();
 
 	const bool useOutOfCoreMemory = cfg.Get(Property("opencl.outofcore.enable")(false)).Get<bool>();
 	ctx->SetUseOutOfCoreBuffers(useOutOfCoreMemory);
@@ -96,6 +98,7 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 
 	bool hasCUDADevice = false;
 	size_t cudaDeviceCount = 0;
+	size_t hipDeviceCount = 0;
 	for (size_t i = 0; i < descs.size(); ++i) {
 		DeviceDescriptionRef desc = descs[i];
 
@@ -129,6 +132,8 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 			hasCUDADevice = true;
 			++cudaDeviceCount;
 		}
+		if (selected && (desc.GetType() & DEVICE_TYPE_HIP_ALL))
+			++hipDeviceCount;
 	}
 	
 #if !defined(LUXRAYS_DISABLE_CUDA)
@@ -152,6 +157,34 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 					cudaDesc.SetCUDAUseOptix(true);
 				} else if (v == '0') {
 					cudaDesc.SetCUDAUseOptix(false);
+				} else if (v == 'A') {
+					// Use the default setting
+				}
+			}
+		}
+	}
+#endif
+
+#if !defined(LUXRAYS_DISABLE_HIP)
+	// Enable/Disable HIPRT according hip.hiprt.devices.select string (one
+	// character for each HIP device, like cuda.optix.devices.select)
+	if ((hipDeviceCount > 0) && (hipHiprtDeviceConfig.length() > 0)) {
+		size_t hipDeviceIndex = 0;
+		for (size_t i = 0; i < descs.size(); ++i) {
+			DeviceDescriptionRef desc = descs[i];
+
+			if (desc.GetType() & DEVICE_TYPE_HIP_ALL) {
+				if (hipDeviceIndex >= hipHiprtDeviceConfig.length())
+					throw runtime_error("hip.hiprt.devices.select string is too short: " + hipHiprtDeviceConfig);
+
+				auto& hipDesc = dynamic_cast<luxrays::HIPDeviceDescriptionRef>(desc);
+
+				const char &v = hipHiprtDeviceConfig.at(hipDeviceIndex++);
+
+				if (v == '1') {
+					hipDesc.SetHIPUseHIPRT(true);
+				} else if (v == '0') {
+					hipDesc.SetHIPUseHIPRT(false);
 				} else if (v == 'A') {
 					// Use the default setting
 				}
@@ -194,7 +227,8 @@ PropertiesUPtr OCLRenderEngine::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("opencl.devices.select")) <<
 			cfg.Get(GetDefaultProps()->Get("opencl.native.threads.count")) <<
 			cfg.Get(GetDefaultProps()->Get("opencl.outofcore.enable")) <<
-			cfg.Get(GetDefaultProps()->Get("cuda.optix.devices.select"));
+			cfg.Get(GetDefaultProps()->Get("cuda.optix.devices.select")) <<
+			cfg.Get(GetDefaultProps()->Get("hip.hiprt.devices.select"));
 	return props;
 }
 
@@ -214,7 +248,8 @@ PropertiesUPtr OCLRenderEngine::GetDefaultProps() {
 			Property("opencl.splitkernels.enable")(true) <<
 			Property("opencl.native.threads.count")((u_int)GetHardwareThreadCount()) <<
 			Property("opencl.outofcore.enable")(false) <<
-			Property("cuda.optix.devices.select")("");
+			Property("cuda.optix.devices.select")("") <<
+			Property("hip.hiprt.devices.select")("");
 
 	return props;
 }

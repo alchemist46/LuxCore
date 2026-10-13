@@ -64,6 +64,8 @@ thipGetDevicePropertiesR0600 *hipGetDevicePropertiesR0600;
 thipSetDevice *hipSetDevice;
 thipGetDevice *hipGetDevice;
 thipDeviceSynchronize *hipDeviceSynchronize;
+thipDevicePrimaryCtxRetain *hipDevicePrimaryCtxRetain;
+thipDevicePrimaryCtxRelease *hipDevicePrimaryCtxRelease;
 thipMalloc *hipMalloc;
 thipMallocManaged *hipMallocManaged;
 thipMemAdvise *hipMemAdvise;
@@ -165,6 +167,8 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipSetDevice);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipGetDevice);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipDeviceSynchronize);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipDevicePrimaryCtxRetain);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipDevicePrimaryCtxRelease);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMalloc);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMallocManaged);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemAdvise);
