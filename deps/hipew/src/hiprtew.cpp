@@ -58,6 +58,7 @@ thiprtCreateGeometry *hiprtCreateGeometry;
 thiprtDestroyGeometry *hiprtDestroyGeometry;
 thiprtBuildGeometry *hiprtBuildGeometry;
 thiprtGetGeometryBuildTemporaryBufferSize *hiprtGetGeometryBuildTemporaryBufferSize;
+thiprtCompactGeometry *hiprtCompactGeometry;
 thiprtCreateScene *hiprtCreateScene;
 thiprtDestroyScene *hiprtDestroyScene;
 thiprtBuildScene *hiprtBuildScene;
@@ -146,6 +147,7 @@ void HiprtInit() {
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtDestroyGeometry);
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtBuildGeometry);
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtGetGeometryBuildTemporaryBufferSize);
+	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtCompactGeometry);
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtCreateScene);
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtDestroyScene);
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtBuildScene);

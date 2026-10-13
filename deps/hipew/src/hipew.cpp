@@ -70,6 +70,7 @@ thipMalloc *hipMalloc;
 thipMallocManaged *hipMallocManaged;
 thipMemAdvise *hipMemAdvise;
 thipFree *hipFree;
+thipMemGetInfo *hipMemGetInfo;
 thipMemcpyHtoD *hipMemcpyHtoD;
 thipMemcpyDtoH *hipMemcpyDtoH;
 thipMemcpyHtoDAsync *hipMemcpyHtoDAsync;
@@ -173,6 +174,7 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMallocManaged);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemAdvise);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipFree);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemGetInfo);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyHtoD);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyDtoH);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyHtoDAsync);

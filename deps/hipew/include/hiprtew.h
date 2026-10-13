@@ -270,6 +270,8 @@ typedef hiprtError HIPRTAPI thiprtBuildGeometry(hiprtContext context,
 typedef hiprtError HIPRTAPI thiprtGetGeometryBuildTemporaryBufferSize(hiprtContext context,
 	const hiprtGeometryBuildInput &buildInput, const hiprtBuildOptions buildOptions,
 	size_t &sizeOut);
+typedef hiprtError HIPRTAPI thiprtCompactGeometry(hiprtContext context,
+	hiprtApiStream stream, hiprtGeometry geometryIn, hiprtGeometry &geometryOut);
 typedef hiprtError HIPRTAPI thiprtCreateScene(hiprtContext context,
 	const hiprtSceneBuildInput &buildInput, const hiprtBuildOptions buildOptions,
 	hiprtScene &sceneOut);
@@ -302,6 +304,7 @@ extern thiprtCreateGeometry *hiprtCreateGeometry;
 extern thiprtDestroyGeometry *hiprtDestroyGeometry;
 extern thiprtBuildGeometry *hiprtBuildGeometry;
 extern thiprtGetGeometryBuildTemporaryBufferSize *hiprtGetGeometryBuildTemporaryBufferSize;
+extern thiprtCompactGeometry *hiprtCompactGeometry;
 extern thiprtCreateScene *hiprtCreateScene;
 extern thiprtDestroyScene *hiprtDestroyScene;
 extern thiprtBuildScene *hiprtBuildScene;

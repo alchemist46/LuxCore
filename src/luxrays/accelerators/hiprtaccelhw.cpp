@@ -110,14 +110,19 @@ private:
 
 		hiprtBuildOptions buildOptions;
 		buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
-
 		size_t tmpSize;
 		CHECK_HIPRT_ERROR(hiprtGetGeometryBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
+		if (!FitsInFreeMemory(tmpSize)) {
+			LR_LOG(device.GetContext(), "Not enough free memory for a high quality HIPRT build of " << triCount <<
+					" triangles (" << ToMemString(tmpSize) << " of temporary memory): using a balanced build");
+
+			buildOptions.buildFlags = hiprtBuildFlagBitPreferBalancedBuild;
+			CHECK_HIPRT_ERROR(hiprtGetGeometryBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
+		}
 		hiprtDevicePtr tmp = GetTemporaryBuffer(tmpSize);
 
 		hiprtGeometry geometry;
 		CHECK_HIPRT_ERROR(hiprtCreateGeometry(hiprtCtx, buildInput, buildOptions, geometry));
-		geometries.push_back(geometry);
 		CHECK_HIPRT_ERROR(hiprtBuildGeometry(hiprtCtx, hiprtBuildOperationBuild,
 				buildInput, buildOptions, tmp, nullptr, geometry));
 
@@ -126,6 +131,15 @@ private:
 
 		hipDevice->FreeBuffer(&vertsBuff);
 		hipDevice->FreeBuffer(&trisBuff);
+
+		// The memory allocated for the BVH is sized for the worst case (i.e. of
+		// the spatial splits): copy it in a buffer of the right size (the input
+		// geometry is destroyed). It halves the memory used by the high quality
+		// BVH, with the same performance.
+		hiprtGeometry compactGeometry;
+		CHECK_HIPRT_ERROR(hiprtCompactGeometry(hiprtCtx, nullptr, geometry, compactGeometry));
+		geometry = compactGeometry;
+		geometries.push_back(geometry);
 
 		return geometry;
 	}
@@ -256,6 +270,26 @@ private:
 				"HIPRT merged triangles");
 
 		return geometry;
+	}
+
+	// The high quality build (with spatial splits) traces rays ~15% faster
+	// than the balanced one but its temporary memory is ~17 times larger
+	// (~1.5KB per triangle instead of ~90 bytes): i.e. 11GB for 8M triangles.
+	// It is used only if the temporary memory (and the BVH, ~25% of it before
+	// the compaction) fits in the free memory, with a margin for the other
+	// applications and the render buffers allocated later.
+	//
+	// Note: the radix sort of the balanced build is compiled by Orochi, which
+	// caches it in "./cache" whatever hiprtSetCacheDirPath() is (HIPRT 3.1).
+	bool FitsInFreeMemory(const size_t tmpSize) const {
+		size_t freeMem, totalMem;
+		CHECK_HIP_ERROR(hipMemGetInfo(&freeMem, &totalMem));
+
+		// The temporary buffer is already allocated if it is large enough
+		const size_t tmpBuffSize = tmpBuff ? tmpBuff->GetSize() : 0;
+		const size_t required = ((tmpSize > tmpBuffSize) ? (tmpSize - tmpBuffSize) : 0) + tmpSize / 4;
+
+		return required <= freeMem / 4 * 3;
 	}
 
 	// The temporary buffer is shared by all builds
@@ -394,9 +428,15 @@ private:
 
 			hiprtBuildOptions buildOptions;
 			buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
-
 			size_t tmpSize;
 			CHECK_HIPRT_ERROR(hiprtGetSceneBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
+			if (!FitsInFreeMemory(tmpSize)) {
+				LR_LOG(device.GetContext(), "Not enough free memory for a high quality HIPRT build of " << instances.size() <<
+						" instances (" << ToMemString(tmpSize) << " of temporary memory): using a balanced build");
+
+				buildOptions.buildFlags = hiprtBuildFlagBitPreferBalancedBuild;
+				CHECK_HIPRT_ERROR(hiprtGetSceneBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
+			}
 			hiprtDevicePtr tmp = GetTemporaryBuffer(tmpSize);
 
 			CHECK_HIPRT_ERROR(hiprtCreateScene(hiprtCtx, buildInput, buildOptions, scene));
