@@ -167,3 +167,54 @@ if(WIN32)
 
 endif(WIN32)
 
+
+# HIPRT (optional): hiprtew loads the HIPRT library at run time, also from the
+# pyluxcore folder, so it can be shipped in the wheel. LUXRAYS_HIPRT_LIBRARY is
+# the path of the library built from
+# https://github.com/GPUOpen-LibrariesAndSDKs/HIPRT (i.e.
+# dist/bin/Release/libhiprt0300164.so). When empty, HIPRT isn't shipped and
+# it is looked for in the system.
+# It can also be set through the environment.
+if(NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE_HIP)
+  set(LUXRAYS_HIPRT_LIBRARY "" CACHE FILEPATH
+    "HIPRT library to ship next to pyluxcore. Leave empty to not ship HIPRT.")
+  if(NOT LUXRAYS_HIPRT_LIBRARY AND DEFINED ENV{LUXRAYS_HIPRT_LIBRARY})
+    file(TO_CMAKE_PATH "$ENV{LUXRAYS_HIPRT_LIBRARY}" LUXRAYS_HIPRT_LIBRARY)
+  endif()
+
+  if(LUXRAYS_HIPRT_LIBRARY)
+    if(NOT EXISTS "${LUXRAYS_HIPRT_LIBRARY}")
+      message(FATAL_ERROR "HIPRT library not found: ${LUXRAYS_HIPRT_LIBRARY}")
+    endif()
+
+    # hiprtew only looks for the library of the HIPRT version it implements
+    # (see HIPRTEW_LIBRARY_NAME): any other one would never be loaded
+    file(STRINGS "${PROJECT_SOURCE_DIR}/deps/hipew/include/hiprtew.h"
+      hiprtew_version_line REGEX "#define HIPRTEW_VERSION_STR ")
+    string(REGEX REPLACE ".*\"([0-9]+)\".*" "\\1"
+      hiprtew_version "${hiprtew_version_line}")
+    if(WIN32)
+      set(hiprt_library_name "hiprt${hiprtew_version}64.dll")
+    else()
+      set(hiprt_library_name "libhiprt${hiprtew_version}64.so")
+    endif()
+    get_filename_component(hiprt_file_name "${LUXRAYS_HIPRT_LIBRARY}" NAME)
+    if(NOT hiprt_file_name STREQUAL hiprt_library_name)
+      message(FATAL_ERROR
+        "HIPRT library '${LUXRAYS_HIPRT_LIBRARY}' doesn't match the HIPRT "
+        "version used by LuxCore: '${hiprt_library_name}' is required")
+    endif()
+
+    message(STATUS "Shipping HIPRT library: ${LUXRAYS_HIPRT_LIBRARY}")
+    install(
+      PROGRAMS "${LUXRAYS_HIPRT_LIBRARY}"
+      DESTINATION pyluxcore
+      COMPONENT pyluxcore
+    )
+    install(
+      FILES "${PROJECT_SOURCE_DIR}/deps/hipew/HIPRT-LICENSE.txt"
+      DESTINATION pyluxcore
+      COMPONENT pyluxcore
+    )
+  endif()
+endif()
