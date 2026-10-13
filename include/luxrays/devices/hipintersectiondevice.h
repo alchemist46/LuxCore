@@ -53,6 +53,9 @@ public:
 protected:
 	virtual void Update();
 
+	// The accelerator used when HIPRT isn't available
+	AcceleratorType GetFallbackAcceleratorType() const;
+
 	HardwareIntersectionKernelUPtr kernel;
 };
 

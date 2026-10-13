@@ -50,14 +50,17 @@ void HIPIntersectionDevice::SetDataSet(DataSetSPtr newDataSet) {
 		} else {
 			if (GetHIPRTContext())
 				accel = dataSet->GetAccelerator(ACCEL_HIPRT);
-			else {
-				if (dataSet->RequiresInstanceSupport() || dataSet->RequiresMotionBlurSupport())
-					accel = dataSet->GetAccelerator(ACCEL_MBVH);
-				else
-					accel = dataSet->GetAccelerator(ACCEL_BVH);
-			}
+			else
+				accel = dataSet->GetAccelerator(GetFallbackAcceleratorType());
 		}
 	}
+}
+
+AcceleratorType HIPIntersectionDevice::GetFallbackAcceleratorType() const {
+	if (dataSet->RequiresInstanceSupport() || dataSet->RequiresMotionBlurSupport())
+		return ACCEL_MBVH;
+	else
+		return ACCEL_BVH;
 }
 
 void HIPIntersectionDevice::Update() {
@@ -68,7 +71,21 @@ void HIPIntersectionDevice::Start() {
 	HIPDevice::Start();
 
 	// Compile required kernel
-	kernel = accel->NewHardwareIntersectionKernel(*this);
+	try {
+		kernel = accel->NewHardwareIntersectionKernel(*this);
+	} catch (const exception &e) {
+		// HIPRT is used by default: if it doesn't work (i.e. it isn't able to
+		// compile its kernels), fall back to the LuxCore accelerators instead
+		// of failing. An explicitly requested HIPRT accelerator still fails.
+		if ((accel->GetType() != ACCEL_HIPRT) || (dataSet->GetAcceleratorType() != ACCEL_AUTO))
+			throw;
+
+		accel = dataSet->GetAccelerator(GetFallbackAcceleratorType());
+		LR_LOG(deviceContext, "WARNING: unable to use HIPRT on device " << deviceName << ", using the " <<
+				Accelerator::AcceleratorType2String(accel->GetType()) << " accelerator: " << e.what());
+
+		kernel = accel->NewHardwareIntersectionKernel(*this);
+	}
 }
 
 void HIPIntersectionDevice::Stop() {
