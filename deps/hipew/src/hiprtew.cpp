@@ -37,7 +37,15 @@ typedef HMODULE DynamicLibrary;
 
 typedef void* DynamicLibrary;
 
-#  define dynamic_library_open(path)         dlopen(path, RTLD_NOW)
+// RTLD_DEEPBIND: the library must use its own symbols. A host application
+// can have another HIPRT version already loaded (i.e. Blender for Cycles) and
+// HIPRT calls its own exported functions: they would be resolved to the
+// other version (and crash)
+#  if defined(RTLD_DEEPBIND)
+#    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND)
+#  else
+#    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL)
+#  endif
 #  define dynamic_library_close(lib)         dlclose(lib)
 #  define dynamic_library_find(lib, symbol)  dlsym(lib, symbol)
 #endif
