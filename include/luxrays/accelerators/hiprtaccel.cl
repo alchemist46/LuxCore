@@ -30,14 +30,16 @@
 // work groups of HIPRTACCEL_WORKGROUP_SIZE threads.
 typedef hiprtDynamicStack HiprtAccelStack;
 
-// The meshes without a transformation are merged in a single geometry, so a
-// ray traverses a single BVH for all of them: mergedTriangles maps a
-// primitive of that geometry to the mesh and triangle index.
+// The meshes without a transformation (and most static instances, copied in
+// world space) are merged in a single geometry, so a ray traverses a single
+// BVH for all of them: mergedTriangles maps a primitive of that geometry to
+// the mesh and triangle index.
 //
 // With HIPRTACCEL_GEOMETRY_ONLY, there are only these meshes and the geometry
 // is traversed directly. Otherwise the scene has an instance for the merged
-// geometry and one for each instanced or motion blurred mesh: instanceMeshes
-// maps an instance to the mesh index (NULL_INDEX for the merged geometry).
+// geometry and one for each other instanced or motion blurred mesh:
+// instanceMeshes maps an instance to the mesh index (NULL_INDEX for the
+// merged geometry).
 //
 // rayTimeOffset is subtracted from the ray time: HIPRT treats a time of 0 as
 // "use the first motion frame", so the frame times are shifted to be >= 1

@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <limits>
+#include <algorithm>
 #include <map>
 
 #include "luxrays/core/context.h"
@@ -143,15 +144,64 @@ private:
 		return geometry;
 	}
 
-	// Merges all the meshes without a transformation (their vertices are
-	// already in world space) in a single geometry: a ray has to traverse a
-	// single BVH instead of the one of each mesh with an overlapping bounding
-	// box
+	static bool IsInstance(const Mesh *mesh) {
+		return (mesh->GetType() == TYPE_TRIANGLE_INSTANCE) || (mesh->GetType() == TYPE_EXT_TRIANGLE_INSTANCE);
+	}
+
+	// Selects the meshes merged in a single geometry: the ones without a
+	// transformation and the instances that can be copied in world space
+	// without using too much memory. Traversing a single BVH is faster than
+	// traversing the BVH of each instance with an overlapping bounding box
+	// (~20% faster on a scene with a few instances).
+	void SelectMergedMeshes(const HiprtAccel &hiprtAccel) {
+		const u_int meshCount = hiprtAccel.meshes.size();
+		mergedMeshes.assign(meshCount, false);
+
+		// The instances of each instanced mesh
+		map<const TriangleMesh *, vector<u_int>> meshInstances;
+		for (u_int i = 0; i < meshCount; ++i) {
+			auto mesh = hiprtAccel.meshes[i];
+
+			if ((mesh->GetType() == TYPE_TRIANGLE) || (mesh->GetType() == TYPE_EXT_TRIANGLE))
+				mergedMeshes[i] = true;
+			else if (IsInstance(mesh))
+				meshInstances[&dynamic_cast<const InstanceTriangleMesh &>(*mesh).GetTriangleMesh()].push_back(i);
+		}
+
+		// A mesh used by a single instance is copied for free (it doesn't need
+		// its own geometry anymore). The others are copied, starting from the
+		// ones requiring less memory, as long as the added triangles are
+		// within a budget.
+		vector<pair<u_longlong, const vector<u_int> *>> sharedMeshes;
+		for (auto &mi : meshInstances) {
+			const u_longlong addedTriangles = (mi.second.size() - 1) * (u_longlong)mi.first->GetTotalTriangleCount();
+			sharedMeshes.push_back(make_pair(addedTriangles, &mi.second));
+		}
+		sort(sharedMeshes.begin(), sharedMeshes.end(),
+				[](const auto &a, const auto &b) { return a.first < b.first; });
+
+		u_longlong totalAddedTriangles = 0;
+		for (auto &sm : sharedMeshes) {
+			if (totalAddedTriangles + sm.first > MergedInstancesTriangleBudget)
+				break;
+
+			totalAddedTriangles += sm.first;
+			for (auto i : *sm.second)
+				mergedMeshes[i] = true;
+		}
+	}
+
+	// Merges the meshes selected by SelectMergedMeshes() in a single geometry
+	// (in world space): a ray has to traverse a single BVH instead of the one
+	// of each mesh with an overlapping bounding box
 	hiprtGeometry BuildMergedGeometry(const HiprtAccel &hiprtAccel) {
+		SelectMergedMeshes(hiprtAccel);
+
 		u_longlong vertCount = 0;
 		u_longlong triCount = 0;
-		for (auto mesh : hiprtAccel.meshes) {
-			if ((mesh->GetType() == TYPE_TRIANGLE) || (mesh->GetType() == TYPE_EXT_TRIANGLE)) {
+		for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
+			auto mesh = hiprtAccel.meshes[i];
+			if (mergedMeshes[i]) {
 				vertCount += mesh->GetTotalVertexCount();
 				triCount += mesh->GetTotalTriangleCount();
 			}
@@ -172,16 +222,27 @@ private:
 
 		for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
 			auto mesh = hiprtAccel.meshes[i];
-			if ((mesh->GetType() != TYPE_TRIANGLE) && (mesh->GetType() != TYPE_EXT_TRIANGLE))
+			if (!mergedMeshes[i])
 				continue;
 
-			auto& tm = dynamic_cast<const TriangleMesh &>(*mesh);
-
 			const u_int vertOffset = verts.size();
-			verts.insert(verts.end(), tm.GetVertices().begin(), tm.GetVertices().end());
+			const TriangleMesh *tm;
+			if (IsInstance(mesh)) {
+				// Copy the vertices in world space
+				auto& itm = dynamic_cast<const InstanceTriangleMesh &>(*mesh);
+				tm = &itm.GetTriangleMesh();
 
-			const Triangle *meshTris = tm.GetTriangles().data();
-			for (u_int j = 0; j < tm.GetTotalTriangleCount(); ++j) {
+				Transform local2World;
+				itm.GetLocal2World(0.f, local2World);
+				for (auto &v : tm->GetVertices())
+					verts.push_back(local2World * v);
+			} else {
+				tm = &dynamic_cast<const TriangleMesh &>(*mesh);
+				verts.insert(verts.end(), tm->GetVertices().begin(), tm->GetVertices().end());
+			}
+
+			const Triangle *meshTris = tm->GetTriangles().data();
+			for (u_int j = 0; j < tm->GetTotalTriangleCount(); ++j) {
 				tris.push_back(Triangle(meshTris[j].v[0] + vertOffset,
 						meshTris[j].v[1] + vertOffset, meshTris[j].v[2] + vertOffset));
 				triMeshes.push_back(i);
@@ -231,13 +292,14 @@ private:
 		// the frame times are, so all frame times are shifted to be >= 1
 		float minMotionTime = numeric_limits<float>::infinity();
 		bool hasTransformedMeshes = false;
-		for (auto mesh : hiprtAccel.meshes) {
+		for (u_int i = 0; i < hiprtAccel.meshes.size(); ++i) {
+			auto mesh = hiprtAccel.meshes[i];
 			if ((mesh->GetType() == TYPE_TRIANGLE_MOTION) || (mesh->GetType() == TYPE_EXT_TRIANGLE_MOTION)) {
 				auto& mtm = dynamic_cast<const MotionTriangleMesh &>(*mesh);
 				minMotionTime = Min(minMotionTime, mtm.GetMotionSystem().times.front());
 			}
 
-			if ((mesh->GetType() != TYPE_TRIANGLE) && (mesh->GetType() != TYPE_EXT_TRIANGLE))
+			if (!mergedMeshes[i])
 				hasTransformedMeshes = true;
 		}
 		rayTimeOffset = std::isinf(minMotionTime) ? 0.f : (minMotionTime - 1.f);
@@ -269,11 +331,11 @@ private:
 				hiprtTransformHeader transformHeader;
 				transformHeader.frameIndex = frames.size();
 
+				// Already in the merged geometry
+				if (mergedMeshes[i])
+					continue;
+
 				switch (mesh->GetType()) {
-					case TYPE_TRIANGLE:
-					case TYPE_EXT_TRIANGLE:
-						// Already in the merged geometry
-						continue;
 					case TYPE_TRIANGLE_INSTANCE:
 					case TYPE_EXT_TRIANGLE_INSTANCE: {
 						auto& itm = dynamic_cast<const InstanceTriangleMesh &>(*mesh);
@@ -417,6 +479,12 @@ private:
 		// (or nothing for an empty DataSet)
 		if (!scene)
 			opts.push_back("-D HIPRTACCEL_GEOMETRY_ONLY");
+		// HIPRT doesn't use fast math for the trace kernels: it is ~12% faster
+		// with motion blur (the frame interpolation) and ~6% with instances,
+		// with the same results. Infinite values are still required: the ray
+		// maxt can be INFINITY.
+		opts.push_back("-ffast-math");
+		opts.push_back("-fno-finite-math-only");
 		vector<const char *> optsPtrs;
 		for (auto &o : opts)
 			optsPtrs.push_back(o.c_str());
@@ -447,6 +515,9 @@ private:
 	// The traversal stack sizes (the same of the HIPRT default stack)
 	static constexpr u_int StackSize = 64;
 	static constexpr u_int SharedStackSize = 16;
+	// The triangles that can be added to the merged geometry by copying the
+	// instances of a mesh (~100MB)
+	static constexpr u_longlong MergedInstancesTriangleBudget = 1000000;
 
 	HIPIntersectionDevice *hipDevice;
 	hiprtContext hiprtCtx;
@@ -454,6 +525,8 @@ private:
 	// All the geometries built
 	vector<hiprtGeometry> geometries;
 	map<const TriangleMesh *, hiprtGeometry> instancedGeometries;
+	// The meshes of the DataSet merged in a single geometry
+	vector<bool> mergedMeshes;
 	hiprtGeometry mergedGeometry;
 	hiprtScene scene;
 	HardwareDeviceBuffer *mergedTrianglesBuff;
