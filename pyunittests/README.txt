@@ -1,34 +1,15 @@
 Dependencies
 ============
 
+The tests run against the pyluxcore module installed in the Python
+environment. To test a local build:
+
+make wheel-test   (LUX_BUILD_TYPE=Release for a Release build)
+pip install out/install/<build type>/wheel/*.whl
+
 List of python packages required to run the tests and demos:
 
-- Pillow (to install "pip install pillow" (Linux) or "easy_install pillow" (Windows))
-
-Compile perceptualdiff on Linux:
---------------------------------
-
-cd deps/perceptualdiff-master
-cmake .
-make
-
-Compile perceptualdiff on Windows:
-----------------------------------
-
-1. Download FreeImage DLL from
-http://downloads.sourceforge.net/freeimage/FreeImage3180Win32Win64.zip
-
-2. Extract the content of FreeImage\Dist\x64 to deps/perceptualdiff-master:
-FreeImage.dll
-FreeImage.h
-FreeImage.lib
-
-3. Open the "x64 Native Tools Command Prompt for VS 2017" window and issue the following commands:
-
-cd deps/perceptualdiff-master
-cmake -G "Visual Studio 15 2017" -T v141,host=x64 -A x64 -D FREEIMAGE_ROOT=. .
-msbuild /toolsversion:15.0 /p:Configuration=Release /p:Platform=x64 perceptualdiff.sln
-copy Release\perceptualdiff.exe .
+- Pillow (to install "pip install pillow")
 
 Unit tests
 ==========
@@ -40,6 +21,10 @@ python3 unittests.py
 To run only a set of tests:
 
 python3 unittests.py --filter PATHCPU
+
+To run only the PATHCPU tests (the ones run on every CI build):
+
+python3 unittests.py --subset
 
 To have the list of options:
 
@@ -54,8 +39,22 @@ https://github.com/LuxCoreRender/LuxCoreTestScenes test scenes:
 
 luxcoretestscenes.directory = /home/david/projects/luxcorerender/LuxCoreTestScenes
 
+The *OCL engines tests are run only if a GPU device is available.
+
 Reference images
 ================
 
-To generate reference images, just run the tests once and they will automatically
-fill to referenceimages directory.
+The renderings are compared with the reference images in referenceimages
+directory. The comparison tolerates the Monte Carlo noise (see
+CompareImageNoisy() in pyluxcoreunittests/tests/utils.py); the result and a
+"diff-" image showing the different pixels are saved in images directory.
+
+A missing reference image is created from the current result (with --strict,
+used by the CI, it is an error instead).
+
+After an intended change of the renderings (i.e. a new sampler), update the
+reference images with:
+
+python3 unittests.py --update-references
+
+and commit them with the change.

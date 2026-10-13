@@ -123,6 +123,10 @@ class TimeLoggingTestResult(unittest.TextTestResult):
 def main():
 	logger.info("LuxCore Unit tests")
 
+	# All the paths (scenes, images, references) are relative to the
+	# pyunittests directory
+	os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 	try:
 		pyluxcore.Init(LuxCoreLogHandler)
 		logger.info("LuxCore %s" % pyluxcore.Version())
@@ -143,6 +147,10 @@ def main():
 			help='list all tests available tests')
 		parser.add_argument('--verbose', default=2,
 			help='set the verbosity level (i.e 0, 1, 2 or 3)')
+		parser.add_argument('--strict', action='store_true',
+			help='fail the tests with a missing reference image (instead of copying the result as reference)')
+		parser.add_argument('--update-references', action='store_true',
+			help='overwrite the reference images with the current results (after an intended change)')
 		args = parser.parse_args()
 
 		global printLuxCoreLog
@@ -162,8 +170,10 @@ def main():
 		if args.config:
 			pyluxcoreunittests.tests.utils.LuxCoreTest.customConfigProps.SetFromFile(args.config)
 
-		# Mostly used to save time (to not hit the cap) on Travis CI
+		# Mostly used to save time (to not hit the cap) on CI
 		pyluxcoreunittests.tests.utils.USE_SUBSET = args.subset
+		pyluxcoreunittests.tests.utils.FAIL_ON_MISSING_REFERENCE = args.strict
+		pyluxcoreunittests.tests.utils.UPDATE_REFERENCES = args.update_references
 
 		# Discover all tests
 

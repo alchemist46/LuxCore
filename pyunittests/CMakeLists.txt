@@ -22,20 +22,24 @@
 #
 #############################################################################
 
+# The tests run against the pyluxcore module installed in the Python
+# environment (i.e. the wheel built by 'make wheel-test' and installed with
+# pip, see README.txt), so they don't depend on the pyluxcore target
+
 add_custom_target(tests
-	COMMAND python3 unittests.py
-	DEPENDS pyluxcore
-	WORKING_DIRECTORY .
+	COMMAND ${Python_EXECUTABLE} unittests.py
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	USES_TERMINAL
 )
 
 add_custom_target(tests_resume
-	COMMAND python3 unittests.py --resume
-	DEPENDS pyluxcore
-	WORKING_DIRECTORY .
+	COMMAND ${Python_EXECUTABLE} unittests.py --resume
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	USES_TERMINAL
 )
 
 add_custom_target(tests_subset
-	COMMAND python3 unittests.py --subset
-	DEPENDS pyluxcore
-	WORKING_DIRECTORY .
+	COMMAND ${Python_EXECUTABLE} unittests.py --subset
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	USES_TERMINAL
 )

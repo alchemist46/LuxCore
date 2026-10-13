@@ -50,6 +50,7 @@ on:
         description: "The version actually built"
         value: ${{ jobs.build-wheels.outputs.version }}
   push:
+  pull_request:
 
 jobs:
   # The OpenCL kernels are pre-compiled in SPIR-V format once (the format
@@ -492,6 +493,79 @@ jobs:
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ matrix.python-minor }}
           path: ./wheelhouse/*.whl
+
+  # Unit tests (render diffs against the reference images) and benchmark of
+  # the Linux wheel. The runners have no GPU: only the CPU engines are tested.
+  unit-tests:
+    name: Unit tests and benchmark (Linux, CPU)
+    needs: [build-wheels]
+    # Run even if another leg of the wheel matrix failed
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_MINOR: 13
+      # The complete CPU test suite on demand, only PATHCPU otherwise
+      TESTS_SUBSET: ${{ github.event_name == 'workflow_dispatch' && '' || '--subset' }}
+
+    steps:
+      - name: Checkout main repository (standard context)
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout main repository (act context)
+        if: env.ACT
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.${{ env.PYTHON_MINOR }}
+
+      - name: Download the wheel
+        uses: actions/download-artifact@v5
+        with:
+          name: cibw-wheels-ubuntu-latest-${{ env.PYTHON_MINOR }}
+          path: wheel
+
+      - name: Install the wheel
+        shell: bash
+        run: |
+          python -m pip install wheel/*.whl pillow
+
+      - name: Run the unit tests
+        shell: bash
+        working-directory: pyunittests
+        run: |
+          # --strict: a missing reference image is an error
+          python unittests.py --strict ${{ env.TESTS_SUBSET }}
+
+      - name: Run the benchmark
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          # Shared runners are too noisy to fail on a regression: the results
+          # are only recorded (job summary and artifact)
+          python tests/benchmark/renderbench.py --engines PATHCPU \
+            --scenes cornell,luxball-hdr,classroom --time 10 --warmup 3 \
+            --output benchmark.json --markdown benchmark.md
+          cat benchmark.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the test images
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: unit-tests-images
+          path: pyunittests/images/*.png
+
+      - name: Upload the benchmark results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: benchmark-linux-cpu
+          path: benchmark.json
+          if-no-files-found: ignore
 
   attest-wheels:
     needs: [build-wheels]

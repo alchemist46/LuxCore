@@ -40,8 +40,9 @@ typedef void* DynamicLibrary;
 // RTLD_DEEPBIND: the library must use its own symbols. A host application
 // can have another HIPRT version already loaded (i.e. Blender for Cycles) and
 // HIPRT calls its own exported functions: they would be resolved to the
-// other version (and crash)
-#  if defined(RTLD_DEEPBIND)
+// other version (and crash). The sanitizer runtimes refuse to load a library
+// with RTLD_DEEPBIND: it isn't used in sanitized builds.
+#  if defined(RTLD_DEEPBIND) && !defined(__SANITIZE_ADDRESS__)
 #    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND)
 #  else
 #    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL)
