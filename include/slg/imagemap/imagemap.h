@@ -61,7 +61,8 @@ class ImageMapPixel : std::array<T, CHANNELS> {
 public:
 	using BaseType = std::array<T, CHANNELS>;
 
-	explicit ImageMapPixel(T v = 0) : BaseType{v} {}
+	// All the channels are set to v (BaseType{v} would set only the first one)
+	explicit ImageMapPixel(T v = 0) { this->fill(v); }
 
 	explicit ImageMapPixel(T cs[CHANNELS]) {
 		std::copy(std::begin(cs), std::end(cs), this->begin());
