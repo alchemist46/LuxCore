@@ -293,14 +293,12 @@ nRefinedVerts
 	std::vector<BufferPtr> vertAOVSsBuffers(EXTMESH_MAX_DATA_COUNT);
 	for (u_int i = 0; i < EXTMESH_MAX_DATA_COUNT; i++) {
 		if (srcMesh.HasVertexAOV(i)) {
-			for (u_int i = 0; i < EXTMESH_MAX_DATA_COUNT; i++) {
-				vertAOVSsBuffers[i] = BuildBuffer<1>(
-					stencilTable,
-					(const float *)srcMesh.GetVertexAOVs(i).get(),
-					nCoarseVerts,
-					nRefinedVerts
-				);
-			}
+			vertAOVSsBuffers[i] = BuildBuffer<1>(
+				stencilTable,
+				(const float *)srcMesh.GetVertexAOVs(i).get(),
+				nCoarseVerts,
+				nRefinedVerts
+			);
 		}
 	}
 
@@ -343,7 +341,8 @@ nRefinedVerts
 			newUVs[i] = std::make_shared<UV[]>(nRefinedVerts);
 
 			const float *refinedUVs = uvsBuffers[i]->BindCpuBuffer() + 2 * nCoarseVerts;
-			std::copy(refinedUVs, refinedUVs + 2 * nRefinedVerts, newUVs[i].get());
+			// The destination is the floats of the UVs, not the UVs
+			std::copy(refinedUVs, refinedUVs + 2 * nRefinedVerts, &newUVs[i][0].u);
 		} else
 			newUVs[i] = nullptr;
 	}
@@ -355,7 +354,8 @@ nRefinedVerts
 			newCols[i] = std::make_shared<Spectrum[]>(nRefinedVerts);
 
 			const float *refinedCols = colsBuffers[i]->BindCpuBuffer() + 3 * nCoarseVerts;
-			std::copy(refinedCols, refinedCols + 3 * nRefinedVerts, newCols[i].get());
+			// The destination is the floats of the colors, not the colors
+			std::copy(refinedCols, refinedCols + 3 * nRefinedVerts, &newCols[i][0].c[0]);
 		} else
 			newCols[i] = nullptr;
 	}
@@ -379,7 +379,7 @@ nRefinedVerts
 			SDL_LOG("Subdivision (enhanced) - Evaluating AOV layer #" << i);
 			newVertAOVs[i] = std::make_shared<float[]>(nRefinedVerts);
 
-			const float *refinedVertAOVs = alphasBuffers[i]->BindCpuBuffer() + 1 * nCoarseVerts;
+			const float *refinedVertAOVs = vertAOVSsBuffers[i]->BindCpuBuffer() + 1 * nCoarseVerts;
 			std::copy(refinedVertAOVs, refinedVertAOVs + 1 * nRefinedVerts, newVertAOVs[i].get());
 		} else
 			newVertAOVs[i] = nullptr;
