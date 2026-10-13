@@ -423,6 +423,10 @@ PropertiesUPtr RenderConfig::ToProperties(const Properties &cfg) {
 	props << cfg.Get(Property("accelerator.type")("AUTO"));
 	props << cfg.Get(Property("accelerator.instances.enable")(true));
 	props << cfg.Get(Property("accelerator.motionblur.enable")(true));
+	// Embree accelerator: a BVH for fast updates (and slower to trace) only for
+	// the real time engines, where the scene is edited while rendering
+	const string engineType = cfg.Get(Property("renderengine.type")(PathCPURenderEngine::GetObjectTag())).Get<string>();
+	props << cfg.Get(Property("accelerator.embree.dynamic")(boost::starts_with(engineType, "RTPATH")));
 	// (M)BVH accelerator
 	props << cfg.Get(Property("accelerator.bvh.builder.type")("EMBREE_BINNED_SAH"));
 	props << cfg.Get(Property("accelerator.bvh.treetype")(4));

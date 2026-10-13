@@ -38,6 +38,8 @@ EmbreeAccel::EmbreeAccel(const Context & context) :
 {
 	embreeDevice = rtcNewDevice(NULL);
 	embreeScene = NULL;
+
+	dynamicScene = ctx.GetConfig().Get(Property("accelerator.embree.dynamic")(false)).Get<bool>();
 }
 
 EmbreeAccel::~EmbreeAccel() {
@@ -153,7 +155,9 @@ void EmbreeAccel::Init(
 
 	embreeScene = rtcNewScene(embreeDevice);
 	rtcSetSceneBuildQuality(embreeScene, RTC_BUILD_QUALITY_HIGH);
-	rtcSetSceneFlags(embreeScene, RTC_SCENE_FLAG_DYNAMIC);
+	// The scene is updated (i.e. the instance transformations) by Update()
+	// both ways, a dynamic scene is faster to update and slower to trace
+	rtcSetSceneFlags(embreeScene, dynamicScene ? RTC_SCENE_FLAG_DYNAMIC : RTC_SCENE_FLAG_NONE);
 
 	for(auto* ptr: meshes) {
 		auto& mesh = *ptr;
@@ -175,6 +179,8 @@ void EmbreeAccel::Init(
 
 					// Create a new RTCScene
 					instScene = rtcNewScene(embreeDevice);
+					rtcSetSceneBuildQuality(instScene, RTC_BUILD_QUALITY_HIGH);
+					rtcSetSceneFlags(instScene, RTC_SCENE_FLAG_NONE);
 					ExportTriangleMesh(instScene, instancedMesh);
 					rtcCommitScene(instScene);
 

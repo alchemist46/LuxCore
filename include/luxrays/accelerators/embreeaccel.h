@@ -72,6 +72,8 @@ private:
 	std::map<const Mesh * , Matrix4x4, bool (*)(const Mesh * , const Mesh * )> uniqueInstMatrixByMesh;
 	// Used to normalize between 0.f and 1.f
 	float minTime, maxTime, timeScale;
+	// RTC_SCENE_FLAG_DYNAMIC for the scene (accelerator.embree.dynamic)
+	bool dynamicScene;
 };
 
 }
