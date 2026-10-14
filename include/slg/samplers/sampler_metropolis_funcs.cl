@@ -125,7 +125,7 @@ OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 		// sample
 
 		Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
-				sampleResult, 1.f
+				sampleResult, 1.f, false
 				FILM_PARAM);
 
 		sample->currentResult = *sampleResult;
@@ -213,7 +213,7 @@ OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 						norm, consecutiveRejects);*/
 
 			Film_AddSample(contrib->pixelX, contrib->pixelY,
-					contrib, norm
+					contrib, norm, false
 					FILM_PARAM);
 		}
 

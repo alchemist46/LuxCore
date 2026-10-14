@@ -68,7 +68,8 @@ RandomSampler::RandomSampler(const RandomGeneratorUPtr & rnd, FilmPtr flm,
 		Sampler(rnd, flm, flmSplatter, imgSamplesEnable),
 		sharedData(static_pointer_cast<RandomSamplerSharedData>(samplerSharedData)),
 		adaptiveStrength(adaptiveStr), adaptiveUserImportanceWeight(adaptiveUserImpWeight),
-		bucketSize(bucketSz), tileSize(tileSz), superSampling(superSmpl), overlapping(overlap) {
+		bucketSize(bucketSz), tileSize(tileSz), superSampling(superSmpl), overlapping(overlap),
+		halfSample(false) {
 }
 
 void RandomSampler::InitNewSample() {
@@ -89,6 +90,12 @@ void RandomSampler::InitNewSample() {
 		bucketCount = overlapping * (tiletWidthCount * tileSize * tileHeightCount * tileSize + bucketSize - 1) / bucketSize;
 	} else
 		bucketCount = 0xffffffffu;
+
+	// The pixels skipped by the adaptive sampling: when the noise threshold
+	// halt test has converged every pixel the loop must not spin forever (the
+	// engine stops the rendering after the next test)
+	u_int skippedPixels = 0;
+	const u_int maxSkippedPixels = doImageSamples ? (subRegionWidth * subRegionHeight) : 0;
 
 	// Update pixelIndexOffset
 
@@ -150,7 +157,7 @@ void RandomSampler::InitNewSample() {
 				// The floor for the pixel importance is given by the adaptiveness strength
 				threshold = Max(threshold, 1.f - adaptiveStrength);
 
-				if (rndGen->floatValue() > threshold) {
+				if ((rndGen->floatValue() > threshold) && (++skippedPixels < maxSkippedPixels)) {
 					// Skip this pixel and try the next one
 					continue;
 				}
@@ -159,6 +166,9 @@ void RandomSampler::InitNewSample() {
 			pixelX = 0;
 			pixelY = 0;
 		}
+
+		// The random samples are independent: the half is a random bit
+		halfSample = (rndGen->floatValue() < .5f);
 
 		sample0 = pixelX + rndGen->floatValue();
 		sample1 = pixelY + rndGen->floatValue();
@@ -209,7 +219,7 @@ void RandomSampler::NextSample(const vector<SampleResult> &sampleResults) {
 		}
 		GetFilm().AddSampleCount(threadIndex, pixelNormalizedCount, screenNormalizedCount);
 
-		AtomicAddSamplesToFilm(sampleResults);
+		AtomicAddSamplesToFilm(sampleResults, 1.f, halfSample);
 	}
 
 	InitNewSample();
@@ -250,7 +260,7 @@ SamplerUPtr RandomSampler::FromProperties(const Properties &cfg, const RandomGen
 		SamplerSharedDataSPtr sharedData) {
 	const bool imageSamplesEnable = cfg.Get(GetDefaultProps()->Get("sampler.imagesamples.enable")).Get<bool>();
 
-	const float adaptiveStrength = Clamp(cfg.Get(GetDefaultProps()->Get("sampler.random.adaptive.strength")).Get<double>(), 0.0, .95);
+	const float adaptiveStrength = AdaptiveStrength(cfg, GetDefaultProps()->Get("sampler.random.adaptive.strength"));
 	const float adaptiveUserImportanceWeight = cfg.Get(GetDefaultProps()->Get("sampler.random.adaptive.userimportanceweight")).Get<double>();
 	const float bucketSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.random.bucketsize")).Get<u_int>());
 	const float tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.random.tilesize")).Get<u_int>());
@@ -267,7 +277,7 @@ slg::ocl::Sampler *RandomSampler::FromPropertiesOCL(const Properties &cfg) {
 	slg::ocl::Sampler *oclSampler = new slg::ocl::Sampler();
 
 	oclSampler->type = slg::ocl::RANDOM;
-	oclSampler->random.adaptiveStrength = Clamp(cfg.Get(GetDefaultProps()->Get("sampler.random.adaptive.strength")).Get<double>(), 0.0, .95);
+	oclSampler->random.adaptiveStrength = AdaptiveStrength(cfg, GetDefaultProps()->Get("sampler.random.adaptive.strength"));
 	oclSampler->random.adaptiveUserImportanceWeight = cfg.Get(GetDefaultProps()->Get("sampler.random.adaptive.userimportanceweight")).Get<double>();
 	oclSampler->random.bucketSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.random.bucketsize")).Get<u_int>());
 	oclSampler->random.tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.random.tilesize")).Get<u_int>());
@@ -284,6 +294,8 @@ void RandomSampler::AddRequiredChannels(Film::FilmChannels &channels, const luxr
 
 	if (imageSamplesEnable && (str > 0.f))
 		channels.insert(Film::NOISE);
+	if (imageSamplesEnable && Film::IsHalfBufferHaltEnabled(cfg))
+		channels.insert(Film::RADIANCE_PER_PIXEL_NORMALIZED_HALF);
 }
 
 PropertiesUPtr RandomSampler::GetDefaultProps() {

@@ -109,6 +109,9 @@ private:
 
 	float sample0, sample1;
 	u_int bucketIndex, pixelOffset, passOffset, pass;
+	// The current sample belongs to the half of the sequence accumulated in
+	// the *_HALF film channels (see Film::AddSample())
+	bool halfSample;
 };
 
 }

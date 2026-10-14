@@ -61,6 +61,21 @@ public:
 	// 32 - 2 * digits bits
 	static u_int BlueNoiseMortonDigits(const u_int width, const u_int height);
 
+	// The samples of a pixel are split in two halves for the per-pixel error
+	// estimate of the noise threshold halt test (see FilmConvTest): the half
+	// is the parity of the odd bits of the sample index (the class A/B split
+	// of the (0, 2)-sequence, Christensen et al. 2018 section 10.2.1, as in
+	// Cycles), so both halves stay well stratified. The same function as
+	// Sampler_IsHalfSample() in sampler_types.cl.
+	static bool IsHalfSample(const u_int sampleIndex) {
+		u_int x = (sampleIndex >> 1) & 0x55555555u;
+		x ^= x >> 16;
+		x ^= x >> 8;
+		x ^= x >> 4;
+		x ^= x >> 2;
+		return (x & 1u) != 0u;
+	}
+
 	// The scrambling seed of the sequence
 	u_int seed;
 

@@ -85,7 +85,7 @@ OPENCL_FORCE_INLINE void TilePathSampler_SplatSample(
 				// px and py are unsigned so there is no need to check if they are >= 0
 				if ((px < filmWidth) && (py < filmHeight)) {
 					Film_AddSample(px, py,
-							sampleResult, .001f
+							sampleResult, .001f, false
 							FILM_PARAM);
 				}
 			}
@@ -93,7 +93,7 @@ OPENCL_FORCE_INLINE void TilePathSampler_SplatSample(
 	} else
 #endif
 		Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
-				sampleResult, 1.f
+				sampleResult, 1.f, false
 				FILM_PARAM);
 }
 

@@ -166,6 +166,9 @@ private:
 
 	std::shared_ptr<u_int> bucketIndex;
 	u_int pixelOffset, passOffset, pass;
+	// The current sample belongs to the half of the sequence accumulated in
+	// the *_HALF film channels (see Film::AddSample())
+	bool halfSample;
 
 	float sample0, sample1;
 };

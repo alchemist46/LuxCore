@@ -106,6 +106,10 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 	ar & channel_ALBEDO;
 	ar & channel_NOISE;
 	ar & channel_USER_IMPORTANCE;
+	if (version >= 29) {
+		ar & channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF;
+		ar & channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF;
+	}
 
 	ar & channels;
 	ar & width;
@@ -144,6 +148,10 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 		haltNoiseThresholdTolerance = 0.f;
 		haltNoiseThresholdPasses = 0;
 	}
+	if (version >= 29)
+		ar & haltNoiseThresholdHalfBuffer;
+	else
+		haltNoiseThresholdHalfBuffer = false;
 
 	ar & noiseEstimationWarmUp;
 	ar & noiseEstimationTestStep;
@@ -203,6 +211,8 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & channel_ALBEDO;
 	ar & channel_NOISE;
 	ar & channel_USER_IMPORTANCE;
+	ar & channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF;
+	ar & channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF;
 
 	ar & channels;
 	ar & width;
@@ -236,6 +246,7 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & haltNoiseThresholdStopRendering;
 	ar & haltNoiseThresholdTolerance;
 	ar & haltNoiseThresholdPasses;
+	ar & haltNoiseThresholdHalfBuffer;
 
 	ar & noiseEstimationWarmUp;
 	ar & noiseEstimationTestStep;

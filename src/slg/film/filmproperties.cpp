@@ -39,6 +39,9 @@ PropertiesUPtr Film::ToProperties(const Properties &cfg) {
 			cfg.Get(Property("batch.haltnoisethreshold.warmup")(64)) <<
 			cfg.Get(Property("batch.haltnoisethreshold.filter.enable")(true)) <<
 			cfg.Get(Property("batch.haltnoisethreshold.stoprendering.enable")(true)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.tolerance")(0.0)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.passes")(0u)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.halfbuffer.enable")(false)) <<
 			cfg.Get(Property("batch.halttime")(0.0)) <<
 			cfg.Get(Property("batch.haltspp")(0u)) <<
 			FilmOutputs::ToProperties(cfg);

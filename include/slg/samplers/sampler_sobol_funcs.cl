@@ -189,9 +189,13 @@ OPENCL_FORCE_INLINE void SobolSampler_SplatSample(
 		) {
 	const size_t gid = get_global_id(0);
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
+	__global SobolSample *samples = (__global SobolSample *)samplesBuff;
+	__global SobolSample *sample = &samples[gid];
 
+	// sample->pass is the index of the sample in its sequence (see
+	// SobolSampler_InitNewSample())
 	Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
-			sampleResult, 1.f
+			sampleResult, 1.f, Sampler_IsHalfSample(sample->pass)
 			FILM_PARAM);
 }
 
@@ -235,6 +239,11 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 	uint bucketIndex = sample->bucketIndex;
 	uint pixelOffset = sample->pixelOffset;
 	uint passOffset = sample->passOffset;
+
+	// The pixels skipped by the adaptive sampling: when the noise threshold
+	// halt test has converged every pixel the loop must not spin forever (the
+	// engine stops the rendering after the next test)
+	uint skippedPixels = 0;
 
 	for (;;) {
 		passOffset++;
@@ -293,7 +302,7 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 				// The floor for the pixel importance is given by the adaptiveness strength
 				threshold = fmax(threshold, 1.f - adaptiveStrength);
 
-				if (Rnd_FloatValue(seed) > threshold) {
+				if ((Rnd_FloatValue(seed) > threshold) && (++skippedPixels < SAMPLER_MAX_SKIPPED_PIXELS)) {
 					// Skip this pixel and try the next one
 					continue;
 				}

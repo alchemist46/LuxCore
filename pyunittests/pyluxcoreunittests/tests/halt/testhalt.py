@@ -68,6 +68,16 @@ class TestHalt(unittest.TestCase):
 		
 		self.RunHaltTest("Halt_Threshold", props)
 
+	def test_Halt_Threshold_PerPixel(self):
+		# The per-pixel error estimate from the half buffer (the converged
+		# pixels are skipped by the sampler) instead of the classic test
+		props = pyluxcore.Properties()
+		props.Set(pyluxcore.Property("batch.haltthreshold", 0.075))
+		props.Set(pyluxcore.Property("batch.haltthreshold.step", 16))
+		props.Set(pyluxcore.Property("batch.haltthreshold.halfbuffer.enable", True))
+		
+		self.RunHaltTest("Halt_Threshold_PerPixel", props)
+
 	def test_Halt_Time(self):
 		props = pyluxcore.Properties()
 		props.Set(pyluxcore.Property("batch.halttime", 20))

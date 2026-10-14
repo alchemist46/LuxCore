@@ -165,6 +165,10 @@ u_int Film::GetChannelCount(const FilmChannelType type) const {
 			return channel_NOISE ? 1 : 0;
 		case USER_IMPORTANCE:
 			return channel_USER_IMPORTANCE ? 1 : 0;
+		case RADIANCE_PER_PIXEL_NORMALIZED_HALF:
+			return channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF ? 1 : 0;
+		case RADIANCE_PER_SCREEN_NORMALIZED_HALF:
+			return channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF ? 1 : 0;
 		default:
 			throw runtime_error("Unknown FilmChannelType in Film::GetChannelCount(): " + ToString(type));
 	}
@@ -260,6 +264,10 @@ template<> float *Film::GetChannel<float>(const FilmChannelType type,
 			return channel_NOISE->GetPixels();
 		case USER_IMPORTANCE:
 			return channel_USER_IMPORTANCE->GetPixels();
+		case RADIANCE_PER_PIXEL_NORMALIZED_HALF:
+			return channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->GetPixels();
+		case RADIANCE_PER_SCREEN_NORMALIZED_HALF:
+			return channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF->GetPixels();
 		default:
 			throw runtime_error("Unknown FilmChannelType in Film::GetChannel<float>(): " + ToString(type));
 	}
@@ -528,6 +536,10 @@ Film::FilmChannelType Film::String2FilmChannelType(const string &type) {
 		return NOISE;
 	else if (type == "USER_IMPORTANCE")
 		return USER_IMPORTANCE;
+	else if (type == "RADIANCE_PER_PIXEL_NORMALIZED_HALF")
+		return RADIANCE_PER_PIXEL_NORMALIZED_HALF;
+	else if (type == "RADIANCE_PER_SCREEN_NORMALIZED_HALF")
+		return RADIANCE_PER_SCREEN_NORMALIZED_HALF;
 	else
 		throw runtime_error("Unknown film output type in Film::String2FilmChannelType(): " + type);
 }
@@ -616,6 +628,10 @@ const string Film::FilmChannelType2String(const Film::FilmChannelType type) {
 			return "NOISE";
 		case Film::USER_IMPORTANCE:
 			return "USER_IMPORTANCE";
+		case Film::RADIANCE_PER_PIXEL_NORMALIZED_HALF:
+			return "RADIANCE_PER_PIXEL_NORMALIZED_HALF";
+		case Film::RADIANCE_PER_SCREEN_NORMALIZED_HALF:
+			return "RADIANCE_PER_SCREEN_NORMALIZED_HALF";
 		default:
 			throw runtime_error("Unknown film output type in Film::FilmChannelType2String(): " + ToString(type));
 	}

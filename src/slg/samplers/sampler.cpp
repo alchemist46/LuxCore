@@ -128,6 +128,12 @@ string Sampler::SamplerType2String(const SamplerType type) {
 		throw runtime_error("Unknown sampler type in Sampler::SamplerType2String(): " + ToString(type));
 }
 
+float Sampler::AdaptiveStrength(const Properties &cfg, const Property &defaultProp) {
+	const float strength = Clamp(cfg.Get(defaultProp).Get<double>(), 0.0, .95);
+
+	return ((strength > 0.f) && Film::IsHalfBufferHaltEnabled(cfg)) ? 1.f : strength;
+}
+
 PropertiesUPtr Sampler::GetDefaultProps() {
 	auto props = std::make_unique<Properties>();
 	*props <<

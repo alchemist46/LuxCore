@@ -918,6 +918,12 @@ void Film::Parse(PropertiesRPtr props) {
 						props->Get(Property("batch.haltthreshold.passes")(0u)).Get<u_int>()
 					)).Get<u_int>();
 
+			// The per-pixel error estimate from the *_HALF channels (see
+			// FilmConvTest, an option); the classic test otherwise
+			haltNoiseThresholdHalfBuffer = props->Get(Property("batch.haltnoisethreshold.halfbuffer.enable")(
+						props->Get(Property("batch.haltthreshold.halfbuffer.enable")(false)).Get<bool>()
+					)).Get<bool>();
+
 			if (haltNoiseThresholdImagePipelineIndex >= GetImagePipelineCount()) {
 				SLG_LOG("WARNING: Halt thereshold image pipeline index not available. Reverting to first image pipeline");
 				haltNoiseThresholdImagePipelineIndex = 0;
@@ -927,7 +933,7 @@ void Film::Parse(PropertiesRPtr props) {
 				FilmPtr(this), haltNoiseThreshold, haltNoiseThresholdWarmUp,
 				haltNoiseThresholdTestStep, haltNoiseThresholdUseFilter,
 				haltNoiseThresholdImagePipelineIndex, haltNoiseThresholdTolerance,
-				haltNoiseThresholdPasses);
+				haltNoiseThresholdPasses, haltNoiseThresholdHalfBuffer);
 		}
 	}
 
@@ -978,5 +984,16 @@ void Film::Parse(PropertiesRPtr props) {
 			noiseEstimationImagePipelineIndex
 		);
 	}
+}
+
+bool Film::IsHalfBufferHaltEnabled(const Properties &cfg) {
+	const float threshold = cfg.Get(Property("batch.haltnoisethreshold")(
+			cfg.Get(Property("batch.haltthreshold")(-1.0)).Get<double>()
+			)).Get<double>();
+	const bool halfBuffer = cfg.Get(Property("batch.haltnoisethreshold.halfbuffer.enable")(
+			cfg.Get(Property("batch.haltthreshold.halfbuffer.enable")(false)).Get<bool>()
+			)).Get<bool>();
+
+	return (threshold > 0.f) && halfBuffer;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

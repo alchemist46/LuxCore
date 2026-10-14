@@ -48,9 +48,13 @@ OPENCL_FORCE_INLINE void RandomSampler_SplatSample(
 		) {
 	const size_t gid = get_global_id(0);
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
+	__global RandomSample *samples = (__global RandomSample *)samplesBuff;
+	__global RandomSample *sample = &samples[gid];
 
+	// The random samples are independent: the half is a random bit (see
+	// RandomSampler_NextSample())
 	Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
-			sampleResult, 1.f
+			sampleResult, 1.f, (sample->pass & 1u) != 0u
 			FILM_PARAM);
 }
 
@@ -91,6 +95,11 @@ OPENCL_FORCE_INLINE void RandomSampler_InitNewSample(__constant const GPUTaskCon
 	uint bucketIndex = sample->bucketIndex;
 	uint pixelOffset = sample->pixelOffset;
 	uint passOffset = sample->passOffset;
+
+	// The pixels skipped by the adaptive sampling: when the noise threshold
+	// halt test has converged every pixel the loop must not spin forever (the
+	// engine stops the rendering after the next test)
+	uint skippedPixels = 0;
 
 	for (;;) {
 		passOffset++;
@@ -148,7 +157,7 @@ OPENCL_FORCE_INLINE void RandomSampler_InitNewSample(__constant const GPUTaskCon
 				// The floor for the pixel importance is given by the adaptiveness strength
 				threshold = fmax(threshold, 1.f - adaptiveStrength);
 
-				if (Rnd_FloatValue(seed) > threshold) {
+				if ((Rnd_FloatValue(seed) > threshold) && (++skippedPixels < SAMPLER_MAX_SKIPPED_PIXELS)) {
 					// Skip this pixel and try the next one
 					continue;
 				}
@@ -165,6 +174,8 @@ OPENCL_FORCE_INLINE void RandomSampler_InitNewSample(__constant const GPUTaskCon
 	// Save the new values
 	sample->pixelOffset = pixelOffset;
 	sample->passOffset = passOffset;
+	// The half of the sample (see RandomSampler_SplatSample())
+	sample->pass = (Rnd_FloatValue(seed) < .5f) ? 1u : 0u;
 }
 
 OPENCL_FORCE_INLINE void RandomSampler_NextSample(

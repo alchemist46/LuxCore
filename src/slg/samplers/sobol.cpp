@@ -127,7 +127,8 @@ SobolSampler::SobolSampler(
 	blueNoiseSPP(blueNoiseSpp),
 	blueNoiseChunkBits(1),
 	sobolIndex(0),
-	bucketIndex(std::make_shared<u_int>(0))
+	bucketIndex(std::make_shared<u_int>(0)),
+	halfSample(false)
 {}
 SobolSampler::SobolSampler(
 	const RandomGeneratorUPtr & rnd,
@@ -159,7 +160,8 @@ SobolSampler::SobolSampler(
 	blueNoiseSPP(blueNoiseSpp),
 	blueNoiseChunkBits(1),
 	sobolIndex(0),
-	bucketIndex(std::make_shared<u_int>(0))
+	bucketIndex(std::make_shared<u_int>(0)),
+	halfSample(false)
 {}
 
 SobolSampler::~SobolSampler() {
@@ -183,6 +185,12 @@ void SobolSampler::InitNewSample() {
 		bucketCount = overlapping * (tiletWidthCount * tileSize * tileHeightCount * tileSize + bucketSize - 1) / bucketSize;
 	} else
 		bucketCount = 0xffffffffu;
+
+	// The pixels skipped by the adaptive sampling: when the noise threshold
+	// halt test has converged every pixel the loop must not spin forever (the
+	// engine stops the rendering after the next test)
+	u_int skippedPixels = 0;
+	const u_int maxSkippedPixels = doImageSamples ? (subRegionWidth * subRegionHeight) : 0;
 
 	// Update pixelIndexOffset
 
@@ -243,7 +251,7 @@ void SobolSampler::InitNewSample() {
 				// The floor for the pixel importance is given by the adaptiveness strength
 				threshold = Max(threshold, 1.f - adaptiveStrength);
 
-				if (rndGen->floatValue() > threshold) {
+				if ((rndGen->floatValue() > threshold) && (++skippedPixels < maxSkippedPixels)) {
 					// Skip this pixel and try the next one
 					continue;
 				}
@@ -303,6 +311,9 @@ void SobolSampler::InitNewSample() {
 			sobolSequence.seed = SobolSequence::Hash(*(sharedData->seedBase));
 		}
 
+		// The half of the sample is given by its index in its sequence
+		halfSample = SobolSequence::IsHalfSample((blueNoise && doImageSamples) ? sobolIndex : pass);
+
 		sample0 = pixelX + GetSobolSample(0);
 		sample1 = pixelY + GetSobolSample(1);
 		break;
@@ -358,7 +369,7 @@ void SobolSampler::NextSample(const vector<SampleResult> &sampleResults) {
 				throw runtime_error("Unknown sample type in SobolSampler::NextSample(): " + ToString(sampleType));
 		}
 
-		AtomicAddSamplesToFilm(sampleResults);
+		AtomicAddSamplesToFilm(sampleResults, 1.f, halfSample);
 	}
 
 	InitNewSample();
@@ -425,7 +436,7 @@ SamplerUPtr SobolSampler::FromProperties(const Properties &cfg, const RandomGene
 ) {
 	const bool imageSamplesEnable = cfg.Get(GetDefaultProps()->Get("sampler.imagesamples.enable")).Get<bool>();
 
-	const float adaptiveStrength = Clamp(cfg.Get(GetDefaultProps()->Get("sampler.sobol.adaptive.strength")).Get<double>(), 0.0, .95);
+	const float adaptiveStrength = AdaptiveStrength(cfg, GetDefaultProps()->Get("sampler.sobol.adaptive.strength"));
 	const float adaptiveUserImportanceWeight = cfg.Get(GetDefaultProps()->Get("sampler.sobol.adaptive.userimportanceweight")).Get<double>();
 	const float bucketSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.bucketsize")).Get<u_int>());
 	const float tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.tilesize")).Get<u_int>());
@@ -446,7 +457,7 @@ slg::ocl::Sampler *SobolSampler::FromPropertiesOCL(const Properties &cfg) {
 	slg::ocl::Sampler *oclSampler = new slg::ocl::Sampler();
 
 	oclSampler->type = slg::ocl::SOBOL;
-	oclSampler->sobol.adaptiveStrength = Clamp(cfg.Get(GetDefaultProps()->Get("sampler.sobol.adaptive.strength")).Get<double>(), 0.0, .95);
+	oclSampler->sobol.adaptiveStrength = AdaptiveStrength(cfg, GetDefaultProps()->Get("sampler.sobol.adaptive.strength"));
 	oclSampler->sobol.adaptiveUserImportanceWeight = cfg.Get(GetDefaultProps()->Get("sampler.sobol.adaptive.userimportanceweight")).Get<double>();
 	oclSampler->sobol.bucketSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.bucketsize")).Get<u_int>());
 	oclSampler->sobol.tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.tilesize")).Get<u_int>());
@@ -467,6 +478,8 @@ void SobolSampler::AddRequiredChannels(Film::FilmChannels &channels, const luxra
 
 	if (imageSamplesEnable && (str > 0.f))
 		channels.insert(Film::NOISE);
+	if (imageSamplesEnable && Film::IsHalfBufferHaltEnabled(cfg))
+		channels.insert(Film::RADIANCE_PER_PIXEL_NORMALIZED_HALF);
 }
 
 PropertiesUPtr SobolSampler::GetDefaultProps() {

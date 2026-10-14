@@ -182,7 +182,12 @@ public:
 		ALBEDO,
 		AVG_SHADING_NORMAL,
 		NOISE,
-		USER_IMPORTANCE
+		USER_IMPORTANCE,
+		// The samples of one half of the sample sequence (the sum of the
+		// radiance groups), for the per-pixel error estimate of the noise
+		// threshold halt test (see FilmConvTest)
+		RADIANCE_PER_PIXEL_NORMALIZED_HALF,
+		RADIANCE_PER_SCREEN_NORMALIZED_HALF
 	} FilmChannelType;
 
 	typedef std::unordered_set<FilmChannelType, std::hash<int> > FilmChannels;
@@ -344,6 +349,9 @@ public:
 
 	void ResetTests();
 	void RunTests();
+	// The noise threshold halt test estimates the error of each pixel from
+	// the *_HALF channels (the samplers then skip the converged pixels)
+	static bool IsHalfBufferHaltEnabled(const luxrays::Properties &cfg);
 	// Convergence can be set by external source (like TileRepository convergence test)
 	void SetConvergence(const float conv) { statsConvergence = conv; }
 	float GetConvergence() { return statsConvergence; }
@@ -366,19 +374,24 @@ public:
 			const double RADIANCE_PER_PIXEL_NORMALIZED_count,
 			const double RADIANCE_PER_SCREEN_NORMALIZED_count);
 
-	// Normal method versions
+	// Normal method versions. halfSample: the sample belongs to the half of
+	// the sequence accumulated in the *_HALF channels too
 	void AddSample(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight = 1.f);
+		const SampleResult &sampleResult, const float weight = 1.f,
+		const bool halfSample = false);
 	void AddSampleResultColor(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight);
+		const SampleResult &sampleResult, const float weight,
+		const bool halfSample = false);
 	void AddSampleResultData(const u_int x, const u_int y,
 		const SampleResult &sampleResult);
 	
 	// Atomic method versions
 	void AtomicAddSample(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight = 1.f) const;
+		const SampleResult &sampleResult, const float weight = 1.f,
+		const bool halfSample = false) const;
 	void AtomicAddSampleResultColor(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight) const;
+		const SampleResult &sampleResult, const float weight,
+		const bool halfSample = false) const;
 	void AtomicAddSampleResultData(const u_int x, const u_int y,
 		const SampleResult &sampleResult) const;
 
@@ -493,6 +506,8 @@ public:
 	std::unique_ptr<GenericFrameBuffer<4, 1, float>> channel_ALBEDO;
 	std::unique_ptr<GenericFrameBuffer<1, 0, float>> channel_NOISE;
 	std::unique_ptr<GenericFrameBuffer<1, 0, float>> channel_USER_IMPORTANCE;
+	std::unique_ptr<GenericFrameBuffer<4, 1, float>> channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF;
+	std::unique_ptr<GenericFrameBuffer<3, 0, float>> channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF;
 
 	// (Optional) LuxRays HardwareDevice context
 	bool hwEnable;
@@ -594,6 +609,8 @@ private:
 	u_int haltNoiseThresholdPasses;
 	u_int haltNoiseThresholdWarmUp, haltNoiseThresholdTestStep, haltNoiseThresholdImagePipelineIndex;
 	bool haltNoiseThresholdUseFilter, haltNoiseThresholdStopRendering;
+	// The per-pixel error estimate from the *_HALF channels (see FilmConvTest)
+	bool haltNoiseThresholdHalfBuffer;
 
 	// Adaptive sampling
 	FilmNoiseEstimation *noiseEstimation;
@@ -616,7 +633,7 @@ template<> void Film::GetOutput<u_int>(const FilmOutputs::FilmOutputType type, u
 
 }
 
-BOOST_CLASS_VERSION(slg::Film, 28)
+BOOST_CLASS_VERSION(slg::Film, 29)
 BOOST_CLASS_VERSION(slg::FilmSamplesCounts, 1)
 
 BOOST_CLASS_EXPORT_KEY(slg::Film)

@@ -38,11 +38,12 @@ public:
 	FilterConstRef GetFilter() const { return *filter; }
 	const FilterUPtr& GetFilterRPtr() const { return filter; }
 
-	// This method must be thread-safe.
+	// This method must be thread-safe. halfSample: see Film::AddSample()
 	void AtomicSplatSample(
 		FilmConstRef film,
 		const SampleResult &sampleResult,
-		const float weight
+		const float weight,
+		const bool halfSample = false
 	) const;
 
 	// Null singleton instance (do not use nullptr, use this instead)

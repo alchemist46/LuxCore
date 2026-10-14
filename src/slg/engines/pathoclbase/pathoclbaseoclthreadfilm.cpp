@@ -89,6 +89,7 @@ PathOCLBaseOCLRenderThread::ThreadFilm::ThreadFilm(PathOCLBaseOCLRenderThread *t
 	channel_AVG_SHADING_NORMAL_Buff = NULL;
 	channel_NOISE_Buff = NULL;
 	channel_USER_IMPORTANCE_Buff = NULL;
+	channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff = NULL;
 	
 	// Denoiser sample accumulator buffers
 	denoiser_NbOfSamplesImage_Buff = NULL;
@@ -119,6 +120,7 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::Init(FilmRef engineFlm,
 	// Engine film may have RADIANCE_PER_SCREEN_NORMALIZED channel because of
 	// hybrid back/forward path tracing
 	film->RemoveChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+	film->RemoveChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED_HALF);
 	film->Init();
 
 	//--------------------------------------------------------------------------
@@ -352,6 +354,11 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::Init(FilmRef engineFlm,
 		renderThread->intersectionDevice.AllocBuffer(&channel_USER_IMPORTANCE_Buff, memTypeFlags, nullptr, sizeof(float) * filmPixelCount, "USER_IMPORTANCE");
 	else
 		renderThread->intersectionDevice.FreeBuffer(&channel_USER_IMPORTANCE_Buff);
+	//--------------------------------------------------------------------------
+	if (film->HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED_HALF))
+		renderThread->intersectionDevice.AllocBuffer(&channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff, memTypeFlags, nullptr, sizeof(float[4]) * filmPixelCount, "RADIANCE_PER_PIXEL_NORMALIZED_HALF");
+	else
+		renderThread->intersectionDevice.FreeBuffer(&channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff);
 
 	//--------------------------------------------------------------------------
 	// Film denoiser sample accumulator buffers
@@ -426,6 +433,7 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::FreeAllOCLBuffers() {
 	renderThread->intersectionDevice.FreeBuffer(&channel_AVG_SHADING_NORMAL_Buff);
 	renderThread->intersectionDevice.FreeBuffer(&channel_NOISE_Buff);
 	renderThread->intersectionDevice.FreeBuffer(&channel_USER_IMPORTANCE_Buff);
+	renderThread->intersectionDevice.FreeBuffer(&channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff);
 
 	// Film denoiser sample accumulator buffers
 	renderThread->intersectionDevice.FreeBuffer(&denoiser_NbOfSamplesImage_Buff);
@@ -494,6 +502,7 @@ u_int PathOCLBaseOCLRenderThread::ThreadFilm::SetFilmKernelArgs(HardwareIntersec
 	intersectionDevice.SetKernelArg(kernel, argIndex++, channel_AVG_SHADING_NORMAL_Buff);
 	intersectionDevice.SetKernelArg(kernel, argIndex++, channel_NOISE_Buff);
 	intersectionDevice.SetKernelArg(kernel, argIndex++, channel_USER_IMPORTANCE_Buff);
+	intersectionDevice.SetKernelArg(kernel, argIndex++, channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff);
 
 	// Film denoiser sample accumulator parameters
 	FilmDenoiser &denoiser = film->GetDenoiser();
@@ -636,6 +645,8 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::RegisterHostBuffers() {
 		reg(channel_ALBEDO_Buff, film->channel_ALBEDO->GetPixels());
 	if (channel_AVG_SHADING_NORMAL_Buff)
 		reg(channel_AVG_SHADING_NORMAL_Buff, film->channel_AVG_SHADING_NORMAL->GetPixels());
+	if (channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff)
+		reg(channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff, film->channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->GetPixels());
 }
 
 void PathOCLBaseOCLRenderThread::ThreadFilm::UnregisterHostBuffers() {
@@ -937,6 +948,13 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::RecvFilm(HardwareIntersectionDevice
 			CL_FALSE,
 			channel_USER_IMPORTANCE_Buff->GetSize(),
 			engineFilm->channel_USER_IMPORTANCE->GetPixels());
+	}
+	if (channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff) {
+		intersectionDevice.EnqueueReadBuffer(
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff,
+			CL_FALSE,
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff->GetSize(),
+			film->channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->GetPixels());
 	}
 
 	// Async. transfer of the Film denoiser sample accumulator buffers
@@ -1263,6 +1281,13 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::SendFilm(HardwareIntersectionDevice
 			CL_FALSE,
 			channel_USER_IMPORTANCE_Buff->GetSize(),
 			engineFilm->channel_USER_IMPORTANCE->GetPixels());
+	}
+	if (channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff) {
+		intersectionDevice.EnqueueWriteBuffer(
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff,
+			CL_FALSE,
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF_Buff->GetSize(),
+			film->channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->GetPixels());
 	}
 
 	// Async. transfer of the Film denoiser sample accumulator buffers

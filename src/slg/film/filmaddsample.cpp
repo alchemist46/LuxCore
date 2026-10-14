@@ -39,19 +39,39 @@ using namespace slg;
 // Normal method versions
 //------------------------------------------------------------------------------
 
+// The sum of the radiance groups of a sample (the *_HALF channels accumulate
+// the image, not the groups)
+static inline Spectrum SampleRadianceSum(const SampleResult &sampleResult, const u_int groupCount) {
+	Spectrum c;
+	for (u_int i = 0; i < Min<u_int>(sampleResult.radiance.Size(), groupCount); ++i)
+		c += sampleResult.radiance[i];
+
+	return c;
+}
+
 void Film::AddSampleResultColor(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight)  {
+		const SampleResult &sampleResult, const float weight, const bool halfSample)  {
 	filmDenoiser->AddSample(x, y, sampleResult, weight);
 
 	if ((channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size() > 0) && sampleResult.HasChannel(RADIANCE_PER_PIXEL_NORMALIZED)) {
 		for (u_int i = 0; i < Min<u_int>(sampleResult.radiance.Size(), channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size()); ++i)
 			channel_RADIANCE_PER_PIXEL_NORMALIZEDs[i]->AddIfValidWeightedPixel(x, y, sampleResult.radiance[i].c, weight);
+
+		if (halfSample && channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF) {
+			const Spectrum c = SampleRadianceSum(sampleResult, channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size());
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->AddIfValidWeightedPixel(x, y, c.c, weight);
+		}
 	}
 
 	// Faster than HasChannel(channel_RADIANCE_PER_SCREEN_NORMALIZED)
 	if ((channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size() > 0) && sampleResult.HasChannel(RADIANCE_PER_SCREEN_NORMALIZED)) {
 		for (u_int i = 0; i < Min<u_int>(sampleResult.radiance.Size(), channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size()); ++i) {
 			channel_RADIANCE_PER_SCREEN_NORMALIZEDs[i]->AddIfValidWeightedPixel(x, y, sampleResult.radiance[i].c, weight);
+		}
+
+		if (halfSample && channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF) {
+			const Spectrum c = SampleRadianceSum(sampleResult, channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size());
+			channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF->AddIfValidWeightedPixel(x, y, c.c, weight);
 		}
 	}
 
@@ -247,8 +267,8 @@ void Film::AddSampleResultData(const u_int x, const u_int y,
 }
 
 void Film::AddSample(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight) {
-	AddSampleResultColor(x, y, sampleResult, weight);
+		const SampleResult &sampleResult, const float weight, const bool halfSample) {
+	AddSampleResultColor(x, y, sampleResult, weight, halfSample);
 	if (hasDataChannel)
 		AddSampleResultData(x, y, sampleResult);
 }
@@ -258,18 +278,28 @@ void Film::AddSample(const u_int x, const u_int y,
 //------------------------------------------------------------------------------
 
 void Film::AtomicAddSampleResultColor(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight) const {
+		const SampleResult &sampleResult, const float weight, const bool halfSample) const {
 	filmDenoiser->AddSample(x, y, sampleResult, weight);
 
 	if ((channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size() > 0) && sampleResult.HasChannel(RADIANCE_PER_PIXEL_NORMALIZED)) {
 		for (u_int i = 0; i < Min<u_int>(sampleResult.radiance.Size(), channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size()); ++i)
 			channel_RADIANCE_PER_PIXEL_NORMALIZEDs[i]->AtomicAddIfValidWeightedPixel(x, y, sampleResult.radiance[i].c, weight);
+
+		if (halfSample && channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF) {
+			const Spectrum c = SampleRadianceSum(sampleResult, channel_RADIANCE_PER_PIXEL_NORMALIZEDs.size());
+			channel_RADIANCE_PER_PIXEL_NORMALIZED_HALF->AtomicAddIfValidWeightedPixel(x, y, c.c, weight);
+		}
 	}
 
 	// Faster than HasChannel(channel_RADIANCE_PER_SCREEN_NORMALIZED)
 	if ((channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size() > 0) && sampleResult.HasChannel(RADIANCE_PER_SCREEN_NORMALIZED)) {
 		for (u_int i = 0; i < Min<u_int>(sampleResult.radiance.Size(), channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size()); ++i)
 			channel_RADIANCE_PER_SCREEN_NORMALIZEDs[i]->AtomicAddIfValidWeightedPixel(x, y, sampleResult.radiance[i].c, weight);
+
+		if (halfSample && channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF) {
+			const Spectrum c = SampleRadianceSum(sampleResult, channel_RADIANCE_PER_SCREEN_NORMALIZEDs.size());
+			channel_RADIANCE_PER_SCREEN_NORMALIZED_HALF->AtomicAddIfValidWeightedPixel(x, y, c.c, weight);
+		}
 	}
 
 	// Faster than HasChannel(ALPHA)
@@ -464,8 +494,8 @@ void Film::AtomicAddSampleResultData(const u_int x, const u_int y,
 }
 
 void Film::AtomicAddSample(const u_int x, const u_int y,
-		const SampleResult &sampleResult, const float weight) const {
-	AtomicAddSampleResultColor(x, y, sampleResult, weight);
+		const SampleResult &sampleResult, const float weight, const bool halfSample) const {
+	AtomicAddSampleResultColor(x, y, sampleResult, weight, halfSample);
 	if (hasDataChannel)
 		AtomicAddSampleResultData(x, y, sampleResult);
 }

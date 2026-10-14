@@ -136,23 +136,35 @@ public:
 protected:
 	static luxrays::PropertiesUPtr GetDefaultProps();
 
+	// The adaptive sampling strength of cfg (defaultProp holds the name and
+	// the default value): clamped to .95 (the converged pixels keep 5% of the
+	// samples), or 1 when the noise threshold halt test estimates the error
+	// per pixel, since its converged pixels are skipped for good
+	static float AdaptiveStrength(const luxrays::Properties &cfg,
+			const luxrays::Property &defaultProp);
 
+
+	// halfSample: the sample belongs to the half of the sequence accumulated
+	// in the *_HALF channels too (the per-pixel error estimate of the noise
+	// threshold halt test, see FilmConvTest)
 	void AtomicAddSampleToFilm(
-		const SampleResult &sampleResult, const float weight = 1.f
+		const SampleResult &sampleResult, const float weight = 1.f,
+		const bool halfSample = false
 	) const {
 		if (sampleResult.useFilmSplat && filmSplatter)
-			filmSplatter->AtomicSplatSample(GetFilm(), sampleResult, weight);
+			filmSplatter->AtomicSplatSample(GetFilm(), sampleResult, weight, halfSample);
 		else
 			GetFilm().AtomicAddSample(
-				sampleResult.pixelX, sampleResult.pixelY, sampleResult, weight
+				sampleResult.pixelX, sampleResult.pixelY, sampleResult, weight, halfSample
 			);
 	}
 
 	void AtomicAddSamplesToFilm(
-		const std::vector<SampleResult> &sampleResults, const float weight = 1.f
+		const std::vector<SampleResult> &sampleResults, const float weight = 1.f,
+		const bool halfSample = false
 	) const {
 		for (auto const &sr : sampleResults)
-			AtomicAddSampleToFilm(sr, weight);
+			AtomicAddSampleToFilm(sr, weight, halfSample);
 	}
 
 	u_int threadIndex;

@@ -43,7 +43,8 @@ FilmSampleSplatter::~FilmSampleSplatter() {
 	delete filterLUTs;
 }
 
-void FilmSampleSplatter::AtomicSplatSample(FilmConstRef film, const SampleResult &sampleResult, const float weight) const {
+void FilmSampleSplatter::AtomicSplatSample(FilmConstRef film, const SampleResult &sampleResult,
+		const float weight, const bool halfSample) const {
 	const u_int *subRegion = film.GetSubRegion();
 
 	if (!filter || (filter->GetType() == FILTER_NONE)) {
@@ -51,7 +52,7 @@ void FilmSampleSplatter::AtomicSplatSample(FilmConstRef film, const SampleResult
 		const int y = Floor2Int(sampleResult.filmY);
 
 		if ((x >= (int)subRegion[0]) && (x <= (int)subRegion[1]) && (y >= (int)subRegion[2]) && (y <= (int)subRegion[3])) {
-			film.AtomicAddSample(x, y, sampleResult, weight);
+			film.AtomicAddSample(x, y, sampleResult, weight, halfSample);
 		}
 	} else {
 		//----------------------------------------------------------------------
@@ -97,7 +98,7 @@ void FilmSampleSplatter::AtomicSplatSample(FilmConstRef film, const SampleResult
 					break;
 
 				const float filteredWeight = weight * filterWeight;
-				film.AtomicAddSampleResultColor(ix, iy, sampleResult, filteredWeight);
+				film.AtomicAddSampleResultColor(ix, iy, sampleResult, filteredWeight, halfSample);
 			}
 		}
 	}

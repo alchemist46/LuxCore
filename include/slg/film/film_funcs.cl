@@ -147,8 +147,11 @@ OPENCL_FORCE_INLINE void Film_AddIfValidWeightedPixel4(const bool usePixelAtomic
 	}*/
 }
 
+// halfSample: the sample belongs to the half of the sequence accumulated in
+// the RADIANCE_PER_PIXEL_NORMALIZED_HALF channel too (the per-pixel error
+// estimate of the noise threshold halt test, see FilmConvTest)
 OPENCL_FORCE_INLINE void Film_AddSampleResultColor(const uint x, const uint y,
-		__global SampleResult *sampleResult, const float weight
+		__global SampleResult *sampleResult, const float weight, const bool halfSample
 		FILM_PARAM_DECL) {
 	const bool usePixelAtomics = film->usePixelAtomics;
 
@@ -159,6 +162,16 @@ OPENCL_FORCE_INLINE void Film_AddSampleResultColor(const uint x, const uint y,
 	for (uint i = 0; i < FILM_MAX_RADIANCE_GROUP_COUNT; ++i) {
 		if (filmRadianceGroup[i])
 			Film_AddIfValidWeightedPixel4(usePixelAtomics, &((filmRadianceGroup[i])[index4]), sampleResult->radiancePerPixelNormalized[i].c, weight);
+	}
+
+	if (halfSample && filmRadianceHalf) {
+		// The sum of the radiance groups
+		float3 c = MAKE_FLOAT3(0.f, 0.f, 0.f);
+		for (uint i = 0; i < FILM_MAX_RADIANCE_GROUP_COUNT; ++i) {
+			if (filmRadianceGroup[i])
+				c += VLOAD3F(sampleResult->radiancePerPixelNormalized[i].c);
+		}
+		Film_AddIfValidWeightedPixel4Val(usePixelAtomics, &filmRadianceHalf[index4], c, weight);
 	}
 
 	if (film->hasChannelAlpha)
@@ -310,7 +323,7 @@ OPENCL_FORCE_NOT_INLINE
 #endif
 void Film_AddSample(
 		const uint x, const uint y,
-		__global SampleResult *sampleResult, const float weight
+		__global SampleResult *sampleResult, const float weight, const bool halfSample
 		FILM_PARAM_DECL) {
 	if (film->bcdDenoiserEnable) {
 		// Add the sample to film denoiser sample accumulator
@@ -320,7 +333,7 @@ void Film_AddSample(
 				FILM_DENOISER_PARAM);
 	}
 
-	Film_AddSampleResultColor(x, y, sampleResult, weight
+	Film_AddSampleResultColor(x, y, sampleResult, weight, halfSample
 			FILM_PARAM);
 	Film_AddSampleResultData(x, y, sampleResult
 			FILM_PARAM);
@@ -436,6 +449,7 @@ void Film_AddSample(
 		, __global float *filmAvgShadingNormal \
 		, __global float *filmNoise \
 		, __global float *filmUserImportance \
+		, __global float *filmRadianceHalf \
 		KERNEL_ARGS_FILM_DENOISER
 
 //------------------------------------------------------------------------------
@@ -624,6 +638,13 @@ __kernel void Film_Clear(
 
 	if (filmUserImportance)
 		filmUserImportance[gid] = 1.f;
+
+	if (filmRadianceHalf) {
+		filmRadianceHalf[gid * 4] = 0.f;
+		filmRadianceHalf[gid * 4 + 1] = 0.f;
+		filmRadianceHalf[gid * 4 + 2] = 0.f;
+		filmRadianceHalf[gid * 4 + 3] = 0.f;
+	}
 
 	//--------------------------------------------------------------------------
 	// Film denoiser buffers
