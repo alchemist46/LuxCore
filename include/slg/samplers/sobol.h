@@ -100,7 +100,10 @@ public:
 		const u_int tileSize,
 		const u_int superSampling,
 		const u_int overlapping,
-		SamplerSharedDataSPtr samplerSharedData
+		SamplerSharedDataSPtr samplerSharedData,
+		const bool blueNoiseEnable = false,
+		const bool blueNoiseFirst = false,
+		const u_int blueNoiseSPP = 256
 	);
 	SobolSampler(
 		const luxrays::RandomGeneratorUPtr & rnd,
@@ -113,7 +116,10 @@ public:
 		const u_int tileSize,
 		const u_int superSampling,
 		const u_int overlapping,
-		SamplerSharedDataSPtr samplerSharedData
+		SamplerSharedDataSPtr samplerSharedData,
+		const bool blueNoiseEnable = false,
+		const bool blueNoiseFirst = false,
+		const u_int blueNoiseSPP = 256
 	);
 	virtual ~SobolSampler();
 
@@ -154,6 +160,9 @@ private:
 	SobolSequence sobolSequence;
 	float adaptiveStrength, adaptiveUserImportanceWeight;
 	u_int bucketSize, tileSize, superSampling, overlapping;
+	// Blue-noise pixel ordering (see InitNewSample())
+	bool blueNoise, blueNoiseFirstSample;
+	u_int blueNoiseSPP, blueNoiseChunkBits, sobolIndex;
 
 	std::shared_ptr<u_int> bucketIndex;
 	u_int pixelOffset, passOffset, pass;

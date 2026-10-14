@@ -51,6 +51,20 @@ inline u_int Compact1By2(u_int x) {
 	return x;
 }
 
+// "Insert" a 0 bit after each of the 16 low bits of x
+inline u_int Part1By1(u_int x) {
+	x &= 0x0000ffff;					// x = ---- ---- ---- ---- fedc ba98 7654 3210
+	x = (x ^ (x << 8)) & 0x00ff00ff;	// x = ---- ---- fedc ba98 ---- ---- 7654 3210
+	x = (x ^ (x << 4)) & 0x0f0f0f0f;	// x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+	x = (x ^ (x << 2)) & 0x33333333;	// x = --fe --dc --ba --98 --76 --54 --32 --10
+	x = (x ^ (x << 1)) & 0x55555555;	// x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+	return x;
+}
+
+inline u_int EncodeMorton2(const u_int x, const u_int y) {
+	return (Part1By1(y) << 1) + Part1By1(x);
+}
+
 inline u_int DecodeMorton2X(const u_int code) {
 	return Compact1By1(code >> 0);
 }

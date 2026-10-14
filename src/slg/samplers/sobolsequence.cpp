@@ -18,6 +18,7 @@
 
 #include <math.h>
 
+#include "luxrays/utils/utils.h"
 #include "slg/samplers/sobolsequence.h"
 
 using namespace std;
@@ -83,22 +84,60 @@ static u_int NestedUniformScramble(const u_int x, const u_int seed) {
 	return ReverseBits(LaineKarrasPermutation(ReverseBits(x), seed));
 }
 
+float SobolSequence::Sample(const u_int sobolIndex, const u_int index) const {
+	// Owen scramble each dimension with a different seed
+	const u_int dimensionSeed = Hash(HashCombine(seed, index));
+	const u_int iResult = NestedUniformScramble(SobolDimension(sobolIndex, index), dimensionSeed);
+
+	// 24 bits to have a result in [0, 1)
+	return (iResult >> 8) * (1.f / 16777216.f);
+}
+
 float SobolSequence::GetSample(const u_int pass, const u_int index) const {
 	// Shuffle the order of the samples (it keeps the stratification of the
-	// power of 2 sized prefixes of the sequence)
+	// power of 2 sized prefixes of the sequence). The scramble of the pass
+	// is the same for all the dimensions of a sample: cache it.
 	if ((pass != cachedPass) || (seed != cachedSeed)) {
 		cachedPass = pass;
 		cachedSeed = seed;
 		cachedShuffledPass = NestedUniformScramble(pass, seed);
 	}
-	const u_int shuffledPass = cachedShuffledPass;
 
-	// Owen scramble each dimension with a different seed
-	const u_int dimensionSeed = Hash(HashCombine(seed, index));
-	const u_int iResult = NestedUniformScramble(SobolDimension(shuffledPass, index), dimensionSeed);
+	return Sample(cachedShuffledPass, index);
+}
 
-	// 24 bits to have a result in [0, 1)
-	return (iResult >> 8) * (1.f / 16777216.f);
+float SobolSequence::GetSampleAtIndex(const u_int sobolIndex, const u_int index) const {
+	return Sample(sobolIndex, index);
+}
+
+// The 24 permutations of the 4 values of a base-4 digit
+static const unsigned char base4Permutations[24][4] = {
+	{0, 1, 2, 3}, {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 2, 1}, {0, 3, 1, 2},
+	{1, 0, 2, 3}, {1, 0, 3, 2}, {1, 2, 0, 3}, {1, 2, 3, 0}, {1, 3, 2, 0}, {1, 3, 0, 2},
+	{2, 1, 0, 3}, {2, 1, 3, 0}, {2, 0, 1, 3}, {2, 0, 3, 1}, {2, 3, 0, 1}, {2, 3, 1, 0},
+	{3, 1, 2, 0}, {3, 1, 0, 2}, {3, 2, 1, 0}, {3, 2, 0, 1}, {3, 0, 2, 1}, {3, 0, 1, 2}
+};
+
+u_int SobolSequence::NestedUniformScrambleBase4(const u_int x, const u_int seed, const u_int digits) {
+	u_int result = 0;
+	for (int d = (int)digits - 1; d >= 0; --d) {
+		const u_int shift = 2 * d;
+		const u_int digit = (x >> shift) & 3u;
+		// The permutation depends on the higher digits (the node of the tree)
+		const u_int higher = (d < 15) ? (x >> (shift + 2)) : 0u;
+		const u_int p = (Hash(HashCombine(HashCombine(seed, higher), d)) >> 24) % 24;
+		result |= u_int(base4Permutations[p][digit]) << shift;
+	}
+	return result;
+}
+
+u_int SobolSequence::BlueNoiseMortonDigits(const u_int width, const u_int height) {
+	const u_int maxSize = Max(width, height);
+	u_int bits = 0;
+	while ((1u << bits) < maxSize)
+		++bits;
+	// At least 1 bit for the pixel samples
+	return Clamp(bits, 1u, 15u);
 }
 
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

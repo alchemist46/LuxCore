@@ -108,7 +108,10 @@ SobolSampler::SobolSampler(
 	const u_int tileSz,
 	const u_int superSmpl,
 	const u_int overlap,
-	SamplerSharedDataSPtr samplerSharedData
+	SamplerSharedDataSPtr samplerSharedData,
+	const bool blueNoiseEnable,
+	const bool blueNoiseFirst,
+	const u_int blueNoiseSpp
 ) :
 	Sampler(rnd, flm, flmSplatter, imgSamplesEnable),
 	sharedData(static_pointer_cast<SobolSamplerSharedData>(samplerSharedData)),
@@ -119,6 +122,11 @@ SobolSampler::SobolSampler(
 	tileSize(tileSz),
 	superSampling(superSmpl),
 	overlapping(overlap),
+	blueNoise(blueNoiseEnable),
+	blueNoiseFirstSample(blueNoiseFirst),
+	blueNoiseSPP(blueNoiseSpp),
+	blueNoiseChunkBits(1),
+	sobolIndex(0),
 	bucketIndex(std::make_shared<u_int>(0))
 {}
 SobolSampler::SobolSampler(
@@ -132,7 +140,10 @@ SobolSampler::SobolSampler(
 	const u_int tileSz,
 	const u_int superSmpl,
 	const u_int overlap,
-	SamplerSharedDataSPtr samplerSharedData
+	SamplerSharedDataSPtr samplerSharedData,
+	const bool blueNoiseEnable,
+	const bool blueNoiseFirst,
+	const u_int blueNoiseSpp
 ) :
 	Sampler(rnd, FilmPtr(std::addressof(flm)), flmSplatter, imgSamplesEnable),
 	sharedData(static_pointer_cast<SobolSamplerSharedData>(samplerSharedData)),
@@ -143,6 +154,11 @@ SobolSampler::SobolSampler(
 	tileSize(tileSz),
 	superSampling(superSmpl),
 	overlapping(overlap),
+	blueNoise(blueNoiseEnable),
+	blueNoiseFirstSample(blueNoiseFirst),
+	blueNoiseSPP(blueNoiseSpp),
+	blueNoiseChunkBits(1),
+	sobolIndex(0),
 	bucketIndex(std::make_shared<u_int>(0))
 {}
 
@@ -236,8 +252,48 @@ void SobolSampler::InitNewSample() {
 			const u_int pixelIndex = subRegionPixelX + subRegionPixelY * subRegionWidth;
 			pass = sharedData->GetNewPixelPass(pixelIndex);
 
-			// Each pixel has its own scrambling of the Sobol sequence
-			sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(*(sharedData->seedBase), pixelIndex));
+			if (blueNoise) {
+				// Blue-noise pixel ordering (Ahmed & Wonka 2020, as pbrt-v4's
+				// ZSobolSampler and Cycles 4.2): one Owen scrambled sequence
+				// for the whole film, each pixel taking a chunk of consecutive
+				// indices at its hierarchically scrambled Morton code. The
+				// scramble covers the sample digits too, so each pixel walks
+				// its chunk in its own order (the n-th samples of the pixels
+				// don't all share the same strata). Once the chunks are used
+				// up, neighbouring pixels have taken consecutive stretches of
+				// the sequence, which are well stratified together: the error
+				// is high frequency. The chunk is sized from the halt spp, so
+				// the chunks are full at the end of the render; past it, a
+				// pixel moves to a new sequence.
+				u_int spp = GetFilm().GetHaltSPP_PixelNormalized() ? GetFilm().GetHaltSPP_PixelNormalized() :
+					(GetFilm().GetHaltSPP() ? GetFilm().GetHaltSPP() : blueNoiseSPP);
+				spp = RoundUpPow2(Max(spp, 2u));
+				const u_int mortonDigits = SobolSequence::BlueNoiseMortonDigits(subRegionWidth, subRegionHeight);
+				blueNoiseChunkBits = Clamp(Log2Int(spp), 1, (int)(32u - 2u * mortonDigits));
+				const u_int morton = EncodeMorton2(subRegionPixelX, subRegionPixelY);
+				const u_int seedBase = *(sharedData->seedBase);
+				if (blueNoiseFirstSample && (pass == 0)) {
+					// "Blue noise first": the first sample of every pixel from
+					// a separate 1 sample per pixel sequence, so the property
+					// holds at 1 spp and when the adaptive sampling gives the
+					// pixels different sample counts (the first sample is then
+					// not stratified with the following ones)
+					sobolIndex = SobolSequence::NestedUniformScrambleBase4(morton,
+							SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb1u)), mortonDigits);
+					sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb2u));
+				} else {
+					const u_int p = blueNoiseFirstSample ? (pass - 1) : pass;
+					const u_int block = p >> blueNoiseChunkBits;
+					const u_int blockSeed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb3u + block));
+					sobolIndex = SobolSequence::NestedUniformScrambleBase4(
+							(morton << blueNoiseChunkBits) | (p & ((1u << blueNoiseChunkBits) - 1u)),
+							blockSeed, mortonDigits + (blueNoiseChunkBits + 1u) / 2u);
+					sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(blockSeed, 0xb4u));
+				}
+			} else {
+				// Each pixel has its own scrambling of the Sobol sequence
+				sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(*(sharedData->seedBase), pixelIndex));
+			}
 		} else {
 			pixelX = 0;
 			pixelY = 0;
@@ -247,8 +303,8 @@ void SobolSampler::InitNewSample() {
 			sobolSequence.seed = SobolSequence::Hash(*(sharedData->seedBase));
 		}
 
-		sample0 = pixelX +  sobolSequence.GetSample(pass, 0);
-		sample1 = pixelY +  sobolSequence.GetSample(pass, 1);
+		sample0 = pixelX + GetSobolSample(0);
+		sample1 = pixelY + GetSobolSample(1);
 		break;
 	}
 }
@@ -273,8 +329,15 @@ float SobolSampler::GetSample(const u_int index) {
 		case 1:
 			return sample1;
 		default:
-			return sobolSequence.GetSample(pass, index);
+			return GetSobolSample(index);
 	}
+}
+
+float SobolSampler::GetSobolSample(const u_int index) {
+	// The blue-noise ordering applies to the image samples only
+	return (blueNoise && imageSamplesEnable && film) ?
+		sobolSequence.GetSampleAtIndex(sobolIndex, index) :
+		sobolSequence.GetSample(pass, index);
 }
 
 void SobolSampler::NextSample(const vector<SampleResult> &sampleResults) {
@@ -328,7 +391,10 @@ PropertiesUPtr SobolSampler::ToProperties() const {
 			Property("sampler.sobol.bucketsize")(bucketSize) <<
 			Property("sampler.sobol.tilesize")(tileSize) <<
 			Property("sampler.sobol.supersampling")(superSampling) <<
-			Property("sampler.sobol.overlapping")(overlapping);
+			Property("sampler.sobol.overlapping")(overlapping) <<
+			Property("sampler.sobol.bluenoise.enable")(blueNoise) <<
+			Property("sampler.sobol.bluenoise.first")(blueNoiseFirstSample) <<
+			Property("sampler.sobol.bluenoise.spp")(blueNoiseSPP);
 	return props_ptr;
 }
 
@@ -346,7 +412,10 @@ PropertiesUPtr SobolSampler::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("sampler.sobol.bucketsize")) <<
 			cfg.Get(GetDefaultProps()->Get("sampler.sobol.tilesize")) <<
 			cfg.Get(GetDefaultProps()->Get("sampler.sobol.supersampling")) <<
-			cfg.Get(GetDefaultProps()->Get("sampler.sobol.overlapping"));
+			cfg.Get(GetDefaultProps()->Get("sampler.sobol.overlapping")) <<
+			cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.enable")) <<
+			cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.first")) <<
+			cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.spp"));
 	return props;
 }
 
@@ -362,11 +431,14 @@ SamplerUPtr SobolSampler::FromProperties(const Properties &cfg, const RandomGene
 	const float tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.tilesize")).Get<u_int>());
 	const float superSampling = cfg.Get(GetDefaultProps()->Get("sampler.sobol.supersampling")).Get<u_int>();
 	const float overlapping = cfg.Get(GetDefaultProps()->Get("sampler.sobol.overlapping")).Get<u_int>();
+	const bool blueNoise = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.enable")).Get<bool>();
+	const bool blueNoiseFirst = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.first")).Get<bool>();
+	const u_int blueNoiseSpp = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.spp")).Get<u_int>();
 
 	return std::make_unique<SobolSampler>(rndGen, film, flmSplatter, imageSamplesEnable,
 			adaptiveStrength, adaptiveUserImportanceWeight,
 			bucketSize, tileSize, superSampling, overlapping,
-			dynamic_pointer_cast<SobolSamplerSharedData>(sharedData)
+			dynamic_pointer_cast<SobolSamplerSharedData>(sharedData), blueNoise, blueNoiseFirst, blueNoiseSpp
 	);
 }
 
@@ -380,6 +452,10 @@ slg::ocl::Sampler *SobolSampler::FromPropertiesOCL(const Properties &cfg) {
 	oclSampler->sobol.tileSize = RoundUpPow2(cfg.Get(GetDefaultProps()->Get("sampler.sobol.tilesize")).Get<u_int>());
 	oclSampler->sobol.superSampling = cfg.Get(GetDefaultProps()->Get("sampler.sobol.supersampling")).Get<u_int>();
 	oclSampler->sobol.overlapping = cfg.Get(GetDefaultProps()->Get("sampler.sobol.overlapping")).Get<u_int>();
+	oclSampler->sobol.blueNoise = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.enable")).Get<bool>();
+	oclSampler->sobol.blueNoiseFirst = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.first")).Get<bool>();
+	// The chunk bits are set by the engine from the halt spp (InitGPUTaskConfiguration)
+	oclSampler->sobol.blueNoiseChunkBits = Log2Int(RoundUpPow2(Max(cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.spp")).Get<u_int>(), 2u)));
 
 	return oclSampler;
 }
@@ -403,7 +479,10 @@ PropertiesUPtr SobolSampler::GetDefaultProps() {
 			Property("sampler.sobol.bucketsize")(16) <<
 			Property("sampler.sobol.tilesize")(16) <<
 			Property("sampler.sobol.supersampling")(1) <<
-			Property("sampler.sobol.overlapping")(1);
+			Property("sampler.sobol.overlapping")(1) <<
+			Property("sampler.sobol.bluenoise.enable")(true) <<
+			Property("sampler.sobol.bluenoise.first")(false) <<
+			Property("sampler.sobol.bluenoise.spp")(256);
 
 	return props;
 }

@@ -77,6 +77,19 @@ OPENCL_FORCE_INLINE uint SobolSequence_NestedUniformScramble(const uint x, const
 	return SobolSequence_ReverseBits(SobolSequence_LaineKarrasPermutation(SobolSequence_ReverseBits(x), seed));
 }
 
+OPENCL_FORCE_INLINE float SobolSequence_Sample(
+		__global const uint* restrict sobolDirections,
+		const uint sobolIndex, const uint seed,
+		const uint index) {
+	// Owen scramble each dimension with a different seed
+	const uint dimensionSeed = SobolSequence_Hash(SobolSequence_HashCombine(seed, index));
+	const uint iResult = SobolSequence_NestedUniformScramble(
+			SobolSequence_SobolDimension(sobolDirections, sobolIndex, index), dimensionSeed);
+
+	// 24 bits to have a result in [0, 1)
+	return (iResult >> 8) * (1.f / 16777216.f);
+}
+
 OPENCL_FORCE_INLINE float SobolSequence_GetSample(
 		__global const uint* restrict sobolDirections,
 		const uint pass, const uint seed,
@@ -85,13 +98,38 @@ OPENCL_FORCE_INLINE float SobolSequence_GetSample(
 	// power of 2 sized prefixes of the sequence)
 	const uint shuffledPass = SobolSequence_NestedUniformScramble(pass, seed);
 
-	// Owen scramble each dimension with a different seed
-	const uint dimensionSeed = SobolSequence_Hash(SobolSequence_HashCombine(seed, index));
-	const uint iResult = SobolSequence_NestedUniformScramble(
-			SobolSequence_SobolDimension(sobolDirections, shuffledPass, index), dimensionSeed);
+	return SobolSequence_Sample(sobolDirections, shuffledPass, seed, index);
+}
 
-	// 24 bits to have a result in [0, 1)
-	return (iResult >> 8) * (1.f / 16777216.f);
+// The 24 permutations of the 4 values of a base-4 digit
+__constant uchar SobolSequence_base4Permutations[24][4] = {
+	{0, 1, 2, 3}, {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 2, 1}, {0, 3, 1, 2},
+	{1, 0, 2, 3}, {1, 0, 3, 2}, {1, 2, 0, 3}, {1, 2, 3, 0}, {1, 3, 2, 0}, {1, 3, 0, 2},
+	{2, 1, 0, 3}, {2, 1, 3, 0}, {2, 0, 1, 3}, {2, 0, 3, 1}, {2, 3, 0, 1}, {2, 3, 1, 0},
+	{3, 1, 2, 0}, {3, 1, 0, 2}, {3, 2, 1, 0}, {3, 2, 0, 1}, {3, 0, 2, 1}, {3, 0, 1, 2}
+};
+
+// The nested uniform scramble of the base-4 digits of x: the hierarchical
+// pixel ordering of Ahmed & Wonka 2020 when x is the Morton code of the pixel
+// (the same code as SobolSequence::NestedUniformScrambleBase4())
+OPENCL_FORCE_INLINE uint SobolSequence_NestedUniformScrambleBase4(const uint x, const uint seed, const uint digits) {
+	uint result = 0;
+	for (int d = (int)digits - 1; d >= 0; --d) {
+		const uint shift = 2 * d;
+		const uint digit = (x >> shift) & 3u;
+		const uint higher = (d < 15) ? (x >> (shift + 2)) : 0u;
+		const uint p = (SobolSequence_Hash(SobolSequence_HashCombine(SobolSequence_HashCombine(seed, higher), d)) >> 24) % 24;
+		result |= ((uint)SobolSequence_base4Permutations[p][digit]) << shift;
+	}
+	return result;
+}
+
+OPENCL_FORCE_INLINE uint SobolSequence_BlueNoiseMortonDigits(const uint width, const uint height) {
+	const uint maxSize = max(width, height);
+	uint bits = 0;
+	while ((1u << bits) < maxSize)
+		++bits;
+	return clamp(bits, 1u, 15u);
 }
 
 //------------------------------------------------------------------------------
@@ -137,7 +175,9 @@ OPENCL_FORCE_INLINE float SobolSampler_GetSample(
 			__global SobolSample *samples = (__global SobolSample *)samplesBuff;
 			__global SobolSample *sample = &samples[gid];
 
-			return SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, index);
+			return taskConfig->sampler.sobol.blueNoise ?
+				SobolSequence_Sample(sobolDirections, sample->pass, sample->seed, index) :
+				SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, index);
 		}
 	}
 }
@@ -283,15 +323,42 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 #endif
 		//----------------------------------------------------------------------
 
-		// Each pixel has its own scrambling of the Sobol sequence
-		sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(samplerSharedData->seedBase,
-				subRegionPixelX + subRegionPixelY * subRegionWidth));
-
-		// Initialize IDX_SCREEN_X and IDX_SCREEN_Y sample
-
 		__global const uint* restrict sobolDirections = SobolSampler_GetSobolDirectionsPtr(samplerSharedData);
-		samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_X);
-		samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_Y);
+		const uint seedBase = samplerSharedData->seedBase;
+		if (taskConfig->sampler.sobol.blueNoise) {
+			// Blue-noise pixel ordering (see SobolSampler::InitNewSample() on
+			// the CPU): from here on sample->pass is the index in the sequence
+			// and sample->seed the seed of the sequence
+			const uint mortonDigits = SobolSequence_BlueNoiseMortonDigits(subRegionWidth, subRegionHeight);
+			const uint chunkBits = clamp(taskConfig->sampler.sobol.blueNoiseChunkBits, 1u, 32u - 2u * mortonDigits);
+			const uint morton = EncodeMorton2(subRegionPixelX, subRegionPixelY);
+			const uint pass = sample->pass;
+			const bool first = taskConfig->sampler.sobol.blueNoiseFirst;
+			if (first && (pass == 0)) {
+				sample->pass = SobolSequence_NestedUniformScrambleBase4(morton,
+						SobolSequence_Hash(SobolSequence_HashCombine(seedBase, 0xb1u)), mortonDigits);
+				sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(seedBase, 0xb2u));
+			} else {
+				const uint p = first ? (pass - 1) : pass;
+				const uint block = p >> chunkBits;
+				const uint blockSeed = SobolSequence_Hash(SobolSequence_HashCombine(seedBase, 0xb3u + block));
+				sample->pass = SobolSequence_NestedUniformScrambleBase4(
+						(morton << chunkBits) | (p & ((1u << chunkBits) - 1u)),
+						blockSeed, mortonDigits + (chunkBits + 1u) / 2u);
+				sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(blockSeed, 0xb4u));
+			}
+
+			samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_Sample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_X);
+			samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_Sample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_Y);
+		} else {
+			// Each pixel has its own scrambling of the Sobol sequence
+			sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(seedBase,
+					subRegionPixelX + subRegionPixelY * subRegionWidth));
+
+			// Initialize IDX_SCREEN_X and IDX_SCREEN_Y sample
+			samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_X);
+			samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_Y);
+		}
 		break;
 	}
 

@@ -45,6 +45,21 @@ public:
 	void RequestSamples(const u_int size);
 	// pass is the index of the sample in the sequence of the seed
 	float GetSample(const u_int pass, const u_int index) const;
+	// The sample at an index of the sequence (the index is used as it is,
+	// without the shuffling of GetSample())
+	float GetSampleAtIndex(const u_int sobolIndex, const u_int index) const;
+
+	// The nested uniform scramble of the base-4 digits of x (one random
+	// permutation of the 4 digit values per node of the digit tree): the
+	// hierarchical pixel ordering of Ahmed & Wonka 2020 (pbrt-v4's
+	// ZSobolSampler, Cycles 4.2), when x is the Morton code of the pixel
+	// The scramble permutes the `digits` low base-4 digits of x only: the
+	// result stays below 4^digits
+	static u_int NestedUniformScrambleBase4(const u_int x, const u_int seed, const u_int digits);
+	// The number of base-4 digits of the Morton codes of a film of this size
+	// (the bits per axis); the pixel sample index gets the remaining
+	// 32 - 2 * digits bits
+	static u_int BlueNoiseMortonDigits(const u_int width, const u_int height);
 
 	// The scrambling seed of the sequence
 	u_int seed;
@@ -67,6 +82,7 @@ public:
 
 private:
 	u_int SobolDimension(const u_int index, const u_int dimension) const;
+	float Sample(const u_int sobolIndex, const u_int index) const;
 
 	u_int *directions;
 

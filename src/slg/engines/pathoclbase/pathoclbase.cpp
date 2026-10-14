@@ -216,6 +216,12 @@ void PathOCLBaseRenderEngine::InitGPUTaskConfiguration() {
 
 	// Sampler configuration
 	taskConfig.sampler = *oclSampler;
+	if (taskConfig.sampler.type == slg::ocl::SOBOL) {
+		// The blue-noise chunk is sized from the halt spp when there is one
+		const u_int haltSPP = film->GetHaltSPP_PixelNormalized() ? film->GetHaltSPP_PixelNormalized() : film->GetHaltSPP();
+		if (haltSPP > 0)
+			taskConfig.sampler.sobol.blueNoiseChunkBits = Log2Int(RoundUpPow2(Max(haltSPP, 2u)));
+	}
 
 	// Path Tracer configuration
 	taskConfig.pathTracer = compiledScene->compiledPathTracer;

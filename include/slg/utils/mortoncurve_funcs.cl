@@ -46,6 +46,19 @@ OPENCL_FORCE_INLINE uint Compact1By2(uint x) {
 	return x;
 }
 
+OPENCL_FORCE_INLINE uint Part1By1(uint x) {
+	x &= 0x0000ffff;
+	x = (x ^ (x << 8)) & 0x00ff00ff;
+	x = (x ^ (x << 4)) & 0x0f0f0f0f;
+	x = (x ^ (x << 2)) & 0x33333333;
+	x = (x ^ (x << 1)) & 0x55555555;
+	return x;
+}
+
+OPENCL_FORCE_INLINE uint EncodeMorton2(const uint x, const uint y) {
+	return (Part1By1(y) << 1) + Part1By1(x);
+}
+
 OPENCL_FORCE_INLINE uint DecodeMorton2X(const uint code) {
 	return Compact1By1(code >> 0);
 }

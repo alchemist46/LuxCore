@@ -133,6 +133,9 @@ typedef struct {
 		struct {
 			float adaptiveStrength, adaptiveUserImportanceWeight;
 			unsigned int bucketSize, tileSize, superSampling, overlapping;
+			// Blue-noise pixel ordering (see SobolSampler_NextSample())
+			int blueNoise, blueNoiseFirst;
+			unsigned int blueNoiseChunkBits;
 		} sobol;
 		struct {
 			float largeMutationProbability, imageMutationRange;
