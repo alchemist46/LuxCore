@@ -271,20 +271,20 @@ u_int PathOCLRenderEngine::GetTotalEyeSPP() const {
 	return (u_int)(GetThreadFilmsEyeSampleCount() / GetFilm().GetPixelCount());
 }
 
-bool PathOCLRenderEngine::HaltSPPReached() const {
+u_int PathOCLRenderEngine::GetEyeHaltSPP() const {
 	// The same conditions as Film::RunTests() for an engine with eye samples
 	// only (the screen normalized ones never apply)
 	const Film &engineFilm = GetFilm();
-	const u_int haltSPP = (engineFilm.GetHaltSPP_PixelNormalized() > 0) ?
+	return (engineFilm.GetHaltSPP_PixelNormalized() > 0) ?
 		engineFilm.GetHaltSPP_PixelNormalized() :
 		((engineFilm.GetHaltSPP_ScreenNormalized() == 0) ? engineFilm.GetHaltSPP() : 0);
-	if (haltSPP == 0)
-		return false;
+}
 
-	const u_int *subRegion = engineFilm.GetSubRegion();
+double PathOCLRenderEngine::GetThreadFilmsEyeSPP() const {
+	const u_int *subRegion = GetFilm().GetSubRegion();
 	const u_int regionPixelsCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
 
-	return GetThreadFilmsEyeSampleCount() / regionPixelsCount > haltSPP;
+	return GetThreadFilmsEyeSampleCount() / regionPixelsCount;
 }
 
 //------------------------------------------------------------------------------

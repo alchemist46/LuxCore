@@ -119,6 +119,16 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	u_int iterations = 4;
 	u_int totalIterations = 0;
 
+	// The halt spp: the transfers predict when the next batch of kernels
+	// reaches it, from the spp done per kernel iteration (see below)
+	const u_int haltSPP = engine->GetEyeHaltSPP();
+	double haltCheckSPP = 0.0, sppPerIteration = 0.0;
+	u_int iterationsSinceHaltCheck = 0;
+	// The first transfer with samples: the spp per iteration is averaged from
+	// there (before, the first paths are not done yet)
+	double rateStartSPP = -1.0;
+	u_int rateStartIterations = 0;
+
 	double totalTransferTime = 0.0;
 	double totalKernelTime = 0.0;
 	u_int transferCount = 0;
@@ -147,7 +157,25 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		// rendering kernels. This is very important when rendering very high
 		// resolution images (for instance at 4961x3508). The host buffers are
 		// pinned on CUDA and HIP, so the copies are real DMA transfers.
-		const bool transfer = (totalTransferTime < totalKernelTime * (1.0 / 100.0));
+		bool transfer = (totalTransferTime < totalKernelTime * (1.0 / 100.0));
+
+		// With a halt spp, the film is also transferred (and the halt
+		// checked) before a batch that would reach it. With the time rule
+		// alone, a small film ran many batches between two transfers and
+		// went far past the halt (96x96 at batch.haltspp = 64: 1844 spp).
+		// The film is transferred at every batch until the spp per iteration
+		// is known, then when the batches since the last transfer would have
+		// done half of the samples still missing: each check halves the
+		// distance to the halt, so an estimate up to 2x too low (it is low
+		// while the first paths finish) doesn't overshoot it.
+		if (haltSPP > 0) {
+			if (sppPerIteration > 0.0) {
+				const double halfIterationsLeft = .5 * (haltSPP - haltCheckSPP) / sppPerIteration;
+				transfer = transfer || (iterationsSinceHaltCheck + iterations >= halfIterationsLeft);
+			} else
+				transfer = true;
+		}
+
 		if (transfer) {
 			const double timeTransferStart = WallClockTime();
 
@@ -177,6 +205,33 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 			++transferCount;
 
 			//SLG_LOG("[DEBUG] film transferred");
+
+			if (haltSPP > 0) {
+				// The halt spp is checked here on the thread films: the host
+				// may poll the statistics (and run the film tests) rarely,
+				// and a GPU renders well past the halt point in the meantime
+				const double spp = engine->GetThreadFilmsEyeSPP();
+				if (rateStartSPP < 0.0) {
+					if (spp > 0.0) {
+						rateStartSPP = spp;
+						rateStartIterations = totalIterations;
+					}
+				} else if (totalIterations > rateStartIterations)
+					sppPerIteration = Max(0.0, (spp - rateStartSPP) / (totalIterations - rateStartIterations));
+				haltCheckSPP = spp;
+				iterationsSinceHaltCheck = 0;
+
+				if (spp > haltSPP)
+					break;
+			}
+		}
+
+		// Near the halt spp, the batch is cut to the next check (half of the
+		// samples still missing)
+		u_int batchIterations = iterations;
+		if ((haltSPP > 0) && (sppPerIteration > 0.0)) {
+			const double halfIterationsLeft = .5 * (haltSPP - haltCheckSPP) / sppPerIteration;
+			batchIterations = (u_int)Clamp(ceil(halfIterationsLeft - iterationsSinceHaltCheck), 1.0, (double)iterations);
 		}
 
 		//------------------------------------------------------------------
@@ -189,14 +244,15 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 			SetAllAdvancePathsKernelArgs(0);
 		}
 
-		for (u_int i = 0; i < iterations; ++i) {
+		for (u_int i = 0; i < batchIterations; ++i) {
 			// Trace rays
 			intersectionDevice.EnqueueTraceRayBuffer(raysBuff, hitsBuff, taskCount);
 
 			// Advance to next path state
 			EnqueueAdvancePathsKernel();
 		}
-		totalIterations += iterations;
+		totalIterations += batchIterations;
+		iterationsSinceHaltCheck += batchIterations;
 
 		intersectionDevice.FinishQueue();
 		const double timeKernelEnd = WallClockTime();
@@ -213,13 +269,8 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		else
 			iterations = Min<u_int>(iterations + 1, 128);
 
-		// Check halt conditions
+		// Check halt conditions (the halt spp is checked after the transfers)
 		if (engine->GetFilm().GetConvergence() == 1.f)
-			break;
-		// The halt spp is checked here too, on the thread films: the host
-		// may poll the statistics (and run the film tests) rarely, and a
-		// GPU renders well past the halt point in the meantime
-		if (transfer && engine->HaltSPPReached())
 			break;
 
 		if (engine->photonGICache) {
