@@ -90,6 +90,8 @@ typedef struct {
 
 	// The Owen scrambling seed of the Sobol sequence of the pixel
 	unsigned int seed;
+	// The sample belongs to the half accumulated in the *_HALF film channels
+	unsigned int half;
 } SobolSample;
 
 typedef struct {
@@ -115,8 +117,16 @@ typedef struct {
 	// of SobolSamplerSharedData
 	unsigned int filmRegionPixelCount;
 
+	// The per-pixel noise threshold halt test: the pixels still to converge
+	// (0: no list) and the buckets to draw from: the ones of the list plus a
+	// sweep of the whole film, so a few pixels left don't get every sample
+	// (see SobolSampler_InitNewSample()). The list is at todoPixelsOffset
+	// uints after the end of SobolSamplerSharedData.
+	unsigned int todoPixelCount, todoBucketCount, todoPixelsOffset;
+
 	// Plus the a pass field for each pixel
 	// Plus Sobol directions array
+	// Plus the list of the pixels to converge (with the per-pixel halt test)
 } SobolSamplerSharedData;
 
 typedef struct {
@@ -155,6 +165,9 @@ typedef struct {
 			// Blue-noise pixel ordering (see SobolSampler_NextSample())
 			int blueNoise, blueNoiseFirst;
 			unsigned int blueNoiseChunkBits;
+			// The two replicas of the per-pixel error estimate (see
+			// SobolSampler_InitNewSample())
+			int halfReplicas;
 		} sobol;
 		struct {
 			float largeMutationProbability, imageMutationRange;

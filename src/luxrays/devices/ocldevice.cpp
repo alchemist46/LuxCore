@@ -518,6 +518,19 @@ void OpenCLDevice::EnqueueWriteBuffer(const HardwareDeviceBuffer *buff,
 			blocking, 0, size, ptr, 0, nullptr, nullptr));
 }
 
+void OpenCLDevice::EnqueueWriteBufferRange(const HardwareDeviceBuffer *buff,
+		const bool blocking, const size_t offset, const size_t size, const void *ptr) {
+	assert (buff);
+	assert (!buff->IsNull());
+
+	const OpenCLDeviceBuffer *oclDeviceBuff = dynamic_cast<const OpenCLDeviceBuffer *>(buff);
+	assert (oclDeviceBuff);
+	assert (!oclDeviceBuff->IsNull());
+
+	CHECK_OCL_ERROR(clEnqueueWriteBuffer(oclQueue, oclDeviceBuff->oclBuff,
+			blocking, offset, size, ptr, 0, nullptr, nullptr));
+}
+
 void OpenCLDevice::FlushQueue() {
 	if (oclQueue)
 		CHECK_OCL_ERROR(clFlush(oclQueue));

@@ -111,7 +111,8 @@ SobolSampler::SobolSampler(
 	SamplerSharedDataSPtr samplerSharedData,
 	const bool blueNoiseEnable,
 	const bool blueNoiseFirst,
-	const u_int blueNoiseSpp
+	const u_int blueNoiseSpp,
+	const bool halfRepl
 ) :
 	Sampler(rnd, flm, flmSplatter, imgSamplesEnable),
 	sharedData(static_pointer_cast<SobolSamplerSharedData>(samplerSharedData)),
@@ -128,6 +129,7 @@ SobolSampler::SobolSampler(
 	blueNoiseChunkBits(1),
 	sobolIndex(0),
 	bucketIndex(std::make_shared<u_int>(0)),
+	halfReplicas(halfRepl),
 	halfSample(false)
 {}
 SobolSampler::SobolSampler(
@@ -144,7 +146,8 @@ SobolSampler::SobolSampler(
 	SamplerSharedDataSPtr samplerSharedData,
 	const bool blueNoiseEnable,
 	const bool blueNoiseFirst,
-	const u_int blueNoiseSpp
+	const u_int blueNoiseSpp,
+	const bool halfRepl
 ) :
 	Sampler(rnd, FilmPtr(std::addressof(flm)), flmSplatter, imgSamplesEnable),
 	sharedData(static_pointer_cast<SobolSamplerSharedData>(samplerSharedData)),
@@ -161,6 +164,7 @@ SobolSampler::SobolSampler(
 	blueNoiseChunkBits(1),
 	sobolIndex(0),
 	bucketIndex(std::make_shared<u_int>(0)),
+	halfReplicas(halfRepl),
 	halfSample(false)
 {}
 
@@ -201,8 +205,19 @@ void SobolSampler::InitNewSample() {
 			passOffset = 0;
 
 			if (pixelOffset >= bucketSize) {
+				// With the per-pixel noise threshold halt test, the buckets
+				// are taken from the list of the pixels still to converge
+				// instead of skipping the converged ones (the list is
+				// replaced by each test)
+				if (halfReplicas && doImageSamples) {
+					todoPixels = GetFilm().GetHalfBufferTodoPixels();
+					if (todoPixels && todoPixels->empty())
+						todoPixels.reset();
+				}
+
 				// Ask for a new bucket
-				*bucketIndex = std::get<0>(sharedData->GetNewBucket(bucketCount));
+				*bucketIndex = std::get<0>(sharedData->GetNewBucket(todoPixels ?
+						((todoPixels->size() + bucketSize - 1) / bucketSize) : bucketCount));
 
 				pixelOffset = 0;
 				passOffset = 0;
@@ -215,15 +230,28 @@ void SobolSampler::InitNewSample() {
 		if (doImageSamples) {
 			// Transform the bucket index in a pixel coordinate
 
-			const u_int pixelBucketIndex = (*bucketIndex / overlapping) * bucketSize + pixelOffset;
-			const u_int mortonCurveOffset = pixelBucketIndex % (tileSize * tileSize);
-			const u_int pixelTileIndex = pixelBucketIndex / (tileSize * tileSize);
+			u_int subRegionPixelX, subRegionPixelY;
+			if (todoPixels) {
+				const u_int listIndex = *bucketIndex * bucketSize + pixelOffset;
+				if (listIndex >= todoPixels->size()) {
+					// The end of the last bucket
+					continue;
+				}
 
-			const u_int subRegionPixelX = (pixelTileIndex % tiletWidthCount) * tileSize + DecodeMorton2X(mortonCurveOffset);
-			const u_int subRegionPixelY = (pixelTileIndex / tiletWidthCount) * tileSize + DecodeMorton2Y(mortonCurveOffset);
-			if ((subRegionPixelX >= subRegionWidth) || (subRegionPixelY >= subRegionHeight)) {
-				// Skip the pixels out of the film sub region
-				continue;
+				const u_int p = (*todoPixels)[listIndex];
+				subRegionPixelX = p % subRegionWidth;
+				subRegionPixelY = p / subRegionWidth;
+			} else {
+				const u_int pixelBucketIndex = (*bucketIndex / overlapping) * bucketSize + pixelOffset;
+				const u_int mortonCurveOffset = pixelBucketIndex % (tileSize * tileSize);
+				const u_int pixelTileIndex = pixelBucketIndex / (tileSize * tileSize);
+
+				subRegionPixelX = (pixelTileIndex % tiletWidthCount) * tileSize + DecodeMorton2X(mortonCurveOffset);
+				subRegionPixelY = (pixelTileIndex / tiletWidthCount) * tileSize + DecodeMorton2Y(mortonCurveOffset);
+				if ((subRegionPixelX >= subRegionWidth) || (subRegionPixelY >= subRegionHeight)) {
+					// Skip the pixels out of the film sub region
+					continue;
+				}
 			}
 
 			pixelX = filmSubRegion[0] + subRegionPixelX;
@@ -232,8 +260,9 @@ void SobolSampler::InitNewSample() {
 			// Check if the current pixel is over or under the convergence threshold
 			auto& film = sharedData->GetEngineFilm();
 			if ((adaptiveStrength > 0.f) && GetFilm().HasChannel(Film::NOISE)) {
-				// Pixels are sampled in accordance with how far from convergence they are
-				const float noise = *(GetFilm().channel_NOISE->GetPixel(pixelX, pixelY));
+				// Pixels are sampled in accordance with how far from convergence
+				// they are (the pixels of the list are all to be sampled)
+				const float noise = todoPixels ? 1.f : *(GetFilm().channel_NOISE->GetPixel(pixelX, pixelY));
 
 				// Factor user driven importance sampling too
 				float threshold;
@@ -260,6 +289,29 @@ void SobolSampler::InitNewSample() {
 			const u_int pixelIndex = subRegionPixelX + subRegionPixelY * subRegionWidth;
 			pass = sharedData->GetNewPixelPass(pixelIndex);
 
+			// The per-pixel error estimate of the noise threshold halt test
+			// compares the image with the image of one half of the samples
+			// (see FilmConvTest). Here the samples of a pixel alternate
+			// between two independently scrambled sequences (two randomized
+			// QMC replicas) and the half is the second one, so the difference
+			// is an unbiased estimate of the error. The class A/B split of
+			// one sequence keeps both halves stratified in the first two
+			// dimensions only, so their difference is much larger than the
+			// error of the whole sequence where it converges well (measured
+			// on luxball-hdr at 256 spp: 1-8x the actual error on 8x8 pixel
+			// blocks; 0.8-1.35x with the replicas, the spread of the estimate
+			// itself, as with the RANDOM sampler). The cost: the two replicas
+			// are not stratified together (measured with uniform sampling:
+			// no difference on the CPU, 7-21% more error at 128-1024 spp on
+			// the GPU, cornell 640x480).
+			u_int seedBase = *(sharedData->seedBase);
+			if (halfReplicas) {
+				halfSample = (pass & 1u) != 0u;
+				pass >>= 1;
+				if (halfSample)
+					seedBase = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0x4a1fu));
+			}
+
 			if (blueNoise) {
 				// Blue-noise pixel ordering (Ahmed & Wonka 2020, as pbrt-v4's
 				// ZSobolSampler and Cycles 4.2): one Owen scrambled sequence
@@ -273,13 +325,25 @@ void SobolSampler::InitNewSample() {
 				// is high frequency. The chunk is sized from the halt spp, so
 				// the chunks are full at the end of the render; past it, a
 				// pixel moves to a new sequence.
-				u_int spp = GetFilm().GetHaltSPP_PixelNormalized() ? GetFilm().GetHaltSPP_PixelNormalized() :
-					(GetFilm().GetHaltSPP() ? GetFilm().GetHaltSPP() : blueNoiseSPP);
+				const u_int haltSPP = GetFilm().GetHaltSPP_PixelNormalized() ? GetFilm().GetHaltSPP_PixelNormalized() :
+					GetFilm().GetHaltSPP();
+				u_int spp = haltSPP ? haltSPP : blueNoiseSPP;
+				// Each replica gets half of the samples
+				if (halfReplicas)
+					spp = (spp + 1) / 2;
 				spp = RoundUpPow2(Max(spp, 2u));
 				const u_int mortonDigits = SobolSequence::BlueNoiseMortonDigits(subRegionWidth, subRegionHeight);
-				blueNoiseChunkBits = Clamp(Log2Int(spp), 1, (int)(32u - 2u * mortonDigits));
+				const int maxChunkBits = (int)(32u - 2u * mortonDigits);
+				// With the per-pixel noise threshold halt and no halt spp, the
+				// pixels end at very different sample counts: a pixel moving
+				// to a new sequence every blueNoiseSPP samples loses the
+				// stratification across them (measured on the GPU, 640x480:
+				// 1-15% more error than uniform sampling at the same spp on
+				// cornell and kitchen with the 256 default; 0-8% less with
+				// one sequence per pixel). The chunks are then as long as
+				// the Morton code leaves room for.
+				blueNoiseChunkBits = (halfReplicas && !haltSPP) ? maxChunkBits : Clamp(Log2Int(spp), 1, maxChunkBits);
 				const u_int morton = EncodeMorton2(subRegionPixelX, subRegionPixelY);
-				const u_int seedBase = *(sharedData->seedBase);
 				if (blueNoiseFirstSample && (pass == 0)) {
 					// "Blue noise first": the first sample of every pixel from
 					// a separate 1 sample per pixel sequence, so the property
@@ -300,7 +364,7 @@ void SobolSampler::InitNewSample() {
 				}
 			} else {
 				// Each pixel has its own scrambling of the Sobol sequence
-				sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(*(sharedData->seedBase), pixelIndex));
+				sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, pixelIndex));
 			}
 		} else {
 			pixelX = 0;
@@ -311,8 +375,10 @@ void SobolSampler::InitNewSample() {
 			sobolSequence.seed = SobolSequence::Hash(*(sharedData->seedBase));
 		}
 
-		// The half of the sample is given by its index in its sequence
-		halfSample = SobolSequence::IsHalfSample((blueNoise && doImageSamples) ? sobolIndex : pass);
+		// Without the replicas, the half of the sample is given by its index
+		// in its sequence
+		if (!(halfReplicas && doImageSamples))
+			halfSample = SobolSequence::IsHalfSample((blueNoise && doImageSamples) ? sobolIndex : pass);
 
 		sample0 = pixelX + GetSobolSample(0);
 		sample1 = pixelY + GetSobolSample(1);
@@ -449,7 +515,8 @@ SamplerUPtr SobolSampler::FromProperties(const Properties &cfg, const RandomGene
 	return std::make_unique<SobolSampler>(rndGen, film, flmSplatter, imageSamplesEnable,
 			adaptiveStrength, adaptiveUserImportanceWeight,
 			bucketSize, tileSize, superSampling, overlapping,
-			dynamic_pointer_cast<SobolSamplerSharedData>(sharedData), blueNoise, blueNoiseFirst, blueNoiseSpp
+			dynamic_pointer_cast<SobolSamplerSharedData>(sharedData), blueNoise, blueNoiseFirst, blueNoiseSpp,
+			imageSamplesEnable && Film::IsHalfBufferHaltEnabled(cfg)
 	);
 }
 
@@ -467,6 +534,13 @@ slg::ocl::Sampler *SobolSampler::FromPropertiesOCL(const Properties &cfg) {
 	oclSampler->sobol.blueNoiseFirst = cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.first")).Get<bool>();
 	// The chunk bits are set by the engine from the halt spp (InitGPUTaskConfiguration)
 	oclSampler->sobol.blueNoiseChunkBits = Log2Int(RoundUpPow2(Max(cfg.Get(GetDefaultProps()->Get("sampler.sobol.bluenoise.spp")).Get<u_int>(), 2u)));
+	// The two replicas of the per-pixel error estimate (see InitNewSample())
+	oclSampler->sobol.halfReplicas = cfg.Get(GetDefaultProps()->Get("sampler.imagesamples.enable")).Get<bool>() &&
+			Film::IsHalfBufferHaltEnabled(cfg);
+	// Without a halt spp, the chunks are as long as the Morton code leaves room
+	// for (the kernel clamps the bits, see InitNewSample())
+	if (oclSampler->sobol.halfReplicas)
+		oclSampler->sobol.blueNoiseChunkBits = 31u;
 
 	return oclSampler;
 }

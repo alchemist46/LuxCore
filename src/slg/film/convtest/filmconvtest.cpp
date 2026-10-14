@@ -29,6 +29,7 @@
 #include "slg/film/film.h"
 #include "slg/film/convtest/filmconvtest.h"
 #include "slg/film/imagepipeline/plugins/gaussianblur3x3.h"
+#include "slg/utils/mortoncurve.h"
 
 using namespace std;
 using namespace luxrays;
@@ -83,6 +84,7 @@ void FilmConvTest::Reset() {
 	lastSamplesCount = 0.0;
 	firstTest = true;
 	convergedPixels.assign(todoPixelsCount, 0);
+	todoPixels.store(nullptr);
 
 	// The samplers skip the pixels with NOISE 0: after a reset every pixel
 	// is to be sampled again (the film could have not been initialized yet)
@@ -155,29 +157,24 @@ void FilmConvTest::TestHalfBuffer() {
 	const bool hasConvChannel = film.HasChannel(Film::CONVERGENCE);
 	const bool hasNoiseChannel = film.HasChannel(Film::NOISE);
 	unsigned char *converged = &convergedPixels[0];
-	const float thr = threshold;
 
-	// The error of each pixel and the pixels under the threshold
+	auto inRegion = [&](const int x, const int y) {
+		return (x >= static_cast<int>(subRegion[0])) && (x <= static_cast<int>(subRegion[1])) &&
+				(y >= static_cast<int>(subRegion[2])) && (y <= static_cast<int>(subRegion[3]));
+	};
+
+	// The error of each pixel and its sample weight (the filter weights of the
+	// samples, proportional to the sample count). The converged pixels get no
+	// new samples, their error is computed again from the same sums.
 	vector<float> pixelError(pixelsCount);
-	vector<unsigned char> passed(pixelsCount);
+	vector<float> pixelWeight(pixelsCount);
 
 	tbb::parallel_for(tbb::blocked_range<u_int>(0, pixelsCount),
 			[&](const tbb::blocked_range<u_int> &range) {
 		for (u_int i = range.begin(); i < range.end(); ++i) {
-			const u_int x = i % width;
-			const u_int y = i / width;
-
-			if ((x < subRegion[0]) || (x > subRegion[1]) || (y < subRegion[2]) || (y > subRegion[3])) {
-				// Outside the rendered region: nothing to converge
+			if (!inRegion(i % width, i / width)) {
 				pixelError[i] = 0.f;
-				passed[i] = 1;
-				continue;
-			}
-
-			if (converged[i]) {
-				// Converged for good (unless a neighbour reopens it below)
-				pixelError[i] = 0.f;
-				passed[i] = 1;
+				pixelWeight[i] = 0.f;
 				continue;
 			}
 
@@ -191,6 +188,7 @@ void FilmConvTest::TestHalfBuffer() {
 					hasSamples = true;
 				}
 			}
+			pixelWeight[i] = (groupCount > 0) ? film.channel_RADIANCE_PER_PIXEL_NORMALIZEDs[0]->GetPixel(i)[3] : 0.f;
 
 			// The image of the half
 			const float *hp = &half[i * 4];
@@ -229,53 +227,125 @@ void FilmConvTest::TestHalfBuffer() {
 			}
 
 			pixelError[i] = error;
-			passed[i] = (error < thr) ? 1 : 0;
+		}
+	});
+
+	// The standard deviation of a sample of each pixel, in the same units:
+	// sigma_i = error_i * sqrt(N_i), with the sample weight for N_i (the
+	// scale doesn't matter, only the ratios below). Negative: no estimate.
+	vector<float> pixelSigma(pixelsCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, pixelsCount),
+			[&](const tbb::blocked_range<u_int> &range) {
+		for (u_int i = range.begin(); i < range.end(); ++i) {
+			const float error = pixelError[i];
+			pixelSigma[i] = (inRegion(i % width, i / width) && !isinf(error) && !isnan(error)) ?
+				(error * sqrtf(Max(pixelWeight[i], 0.f))) : -1.f;
 		}
 	});
 
 	if (useFilter) {
 		// The difference of two halves of a single pixel is a very noisy
-		// estimate of its error (pixels would stop anywhere between half and
-		// twice the threshold): the average over the 3x3 neighbours (smaller
-		// at the borders) is 3 times less noisy, and a pixel that passed by
-		// chance next to noisy ones keeps getting samples. The converged
-		// pixels (a sticky state) keep their 0 error.
+		// estimate of its error: the standard deviation is averaged over the
+		// 5x5 neighbours inside the rendered region (the ones with an
+		// estimate), and the error of the pixel is that average divided by
+		// the square root of its own sample count. Averaging the error itself
+		// would let the frozen errors of the converged neighbours hold a
+		// pixel above its threshold whatever its sample count. Simulated
+		// against 1024 independent 2 spp renders: 5x5 is a few % more
+		// efficient than 3x3, unfiltered loses 20-35%.
+		const int r = 2;
 		vector<float> rowSums(pixelsCount);
+		vector<float> rowCounts(pixelsCount);
+		vector<float> filtered(pixelsCount);
 		tbb::parallel_for(tbb::blocked_range<int>(0, height),
 				[&](const tbb::blocked_range<int> &range) {
 			for (int y = range.begin(); y < range.end(); ++y) {
-				const float *row = &pixelError[y * width];
-				float *out = &rowSums[y * width];
+				const float *row = &pixelSigma[y * width];
 				for (int x = 0; x < width; ++x) {
-					float acc = row[x];
-					if (x > 0)
-						acc += row[x - 1];
-					if (x < width - 1)
-						acc += row[x + 1];
-					out[x] = acc;
+					const int x0 = Max(x - r, 0);
+					const int x1 = Min(x + r, width - 1);
+					float acc = 0.f, count = 0.f;
+					for (int nx = x0; nx <= x1; ++nx) {
+						if (row[nx] >= 0.f) {
+							acc += row[nx];
+							count += 1.f;
+						}
+					}
+					rowSums[x + y * width] = acc;
+					rowCounts[x + y * width] = count;
 				}
 			}
 		});
 		tbb::parallel_for(tbb::blocked_range<int>(0, height),
 				[&](const tbb::blocked_range<int> &range) {
 			for (int y = range.begin(); y < range.end(); ++y) {
-				const int y0 = Max(y - 1, 0);
-				const int y1 = Min(y + 1, height - 1);
+				const int y0 = Max(y - r, 0);
+				const int y1 = Min(y + r, height - 1);
 				for (int x = 0; x < width; ++x) {
 					const u_int i = x + y * width;
-					if (converged[i])
+					if (pixelSigma[i] < 0.f) {
+						filtered[i] = -1.f;
 						continue;
+					}
 
-					float acc = 0.f;
-					for (int ny = y0; ny <= y1; ++ny)
+					float acc = 0.f, count = 0.f;
+					for (int ny = y0; ny <= y1; ++ny) {
 						acc += rowSums[x + ny * width];
-					const int x0 = Max(x - 1, 0);
-					const int x1 = Min(x + 1, width - 1);
-					passed[i] = (acc / ((y1 - y0 + 1) * (x1 - x0 + 1)) < thr) ? 1 : 0;
+						count += rowCounts[x + ny * width];
+					}
+					filtered[i] = acc / count;
+				}
+			}
+		});
+		pixelSigma.swap(filtered);
+
+		tbb::parallel_for(tbb::blocked_range<u_int>(0, pixelsCount),
+				[&](const tbb::blocked_range<u_int> &range) {
+			for (u_int i = range.begin(); i < range.end(); ++i) {
+				if (pixelSigma[i] >= 0.f) {
+					const float w = pixelWeight[i];
+					pixelError[i] = (w > 0.f) ? (pixelSigma[i] / sqrtf(w)) : numeric_limits<float>::infinity();
 				}
 			}
 		});
 	}
+
+	// The stop rule. Stopping every pixel at the same error gives each pixel
+	// a sample count proportional to its variance, and the image the same
+	// mean squared error as uniform sampling at the same total sample count.
+	// The allocation that minimizes the mean squared error gives each pixel a
+	// sample count proportional to its standard deviation sigma_i instead: a
+	// pixel is converged when
+	//
+	//   error_i <= threshold * sqrt(sigma_i / mean(sigma))
+	//
+	// i.e. when N_i >= sigma_i * mean(sigma) / threshold^2. The threshold is
+	// then the RMS error of the image (in the error metric above). The
+	// allowed error of a pixel is capped at 2 * threshold (it changed no
+	// result in the simulations nor in the renders: it only bounds the worst
+	// pixel). Simulated against 1024 independent 2 spp renders of cornell
+	// and luxball-hdr, at equal sample count: 1.31-1.40x more efficient than
+	// uniform sampling, where the same error for every pixel is 1.15-1.25x
+	// (the bound, the optimal allocation with the exact standard deviations,
+	// is 1.36-1.57x). Measured in renders: see MODERNIZATION_PLAN.md.
+	struct MeanAcc { double sum; double count; };
+	const MeanAcc meanAcc = tbb::parallel_reduce(
+			tbb::blocked_range<u_int>(0, pixelsCount), MeanAcc{0.0, 0.0},
+			[&](const tbb::blocked_range<u_int> &range, MeanAcc acc) {
+				for (u_int i = range.begin(); i < range.end(); ++i) {
+					if (pixelSigma[i] >= 0.f) {
+						acc.sum += pixelSigma[i];
+						acc.count += 1.0;
+					}
+				}
+				return acc;
+			},
+			[](const MeanAcc &a, const MeanAcc &b) {
+				return MeanAcc{a.sum + b.sum, a.count + b.count};
+			});
+	const float meanSigma = (meanAcc.count > 0.0) ? static_cast<float>(meanAcc.sum / meanAcc.count) : 0.f;
+	const float thr = threshold;
+	const float maxScale = 2.f;
 
 	// The converged pixels are skipped by the samplers
 	struct TestResult { u_int todoPixelsCount; float maxError; };
@@ -286,16 +356,26 @@ void FilmConvTest::TestHalfBuffer() {
 					for (int x = 0; x < width; ++x) {
 						const u_int i = x + y * width;
 
-						const bool conv = passed[i];
-						converged[i] = conv ? 1 : 0;
 						const float error = pixelError[i];
+						float pixelThr = 0.f;
+						if (!inRegion(x, y)) {
+							// Outside the rendered region: nothing to converge
+							converged[i] = 1;
+						} else if (!converged[i] && (pixelSigma[i] >= 0.f) && !isinf(error)) {
+							// A pixel that passed stays converged until the film is reset
+							pixelThr = thr * ((meanSigma > 0.f) ? Min(sqrtf(pixelSigma[i] / meanSigma), maxScale) : 1.f);
+							if (error <= pixelThr)
+								converged[i] = 1;
+						}
+
+						const bool conv = converged[i];
 						if (!conv) {
 							++res.todoPixelsCount;
 							res.maxError = Max(res.maxError, error);
 						}
 
 						if (hasConvChannel)
-							*(film.channel_CONVERGENCE->GetPixel(i)) = conv ? 0.f : Max(error - thr, 0.f);
+							*(film.channel_CONVERGENCE->GetPixel(i)) = conv ? 0.f : Max(error - pixelThr, 0.f);
 						if (hasNoiseChannel)
 							*(film.channel_NOISE->GetPixel(i)) = conv ? 0.f : 1.f;
 					}
@@ -307,6 +387,32 @@ void FilmConvTest::TestHalfBuffer() {
 			});
 	todoPixelsCount = result.todoPixelsCount;
 	maxError = result.maxError;
+
+	// The list of the pixels still to converge for the samplers, in the order
+	// of their buckets (16x16 tiles, Morton order inside a tile, the default
+	// sampler.sobol.tilesize) so neighbouring samples hit neighbouring pixels
+	{
+		const u_int regionWidth = subRegion[1] - subRegion[0] + 1;
+		const u_int regionHeight = subRegion[3] - subRegion[2] + 1;
+		const u_int tileSize = 16;
+		const u_int tileWidthCount = (regionWidth + tileSize - 1) / tileSize;
+		const u_int tileHeightCount = (regionHeight + tileSize - 1) / tileSize;
+
+		auto list = std::make_shared<vector<u_int>>();
+		list->reserve(todoPixelsCount);
+		for (u_int tile = 0; tile < tileWidthCount * tileHeightCount; ++tile) {
+			const u_int tileX = (tile % tileWidthCount) * tileSize;
+			const u_int tileY = (tile / tileWidthCount) * tileSize;
+			for (u_int m = 0; m < tileSize * tileSize; ++m) {
+				const u_int x = tileX + DecodeMorton2X(m);
+				const u_int y = tileY + DecodeMorton2Y(m);
+				if ((x < regionWidth) && (y < regionHeight) &&
+						!converged[(subRegion[0] + x) + (subRegion[2] + y) * width])
+					list->push_back(x + y * regionWidth);
+			}
+		}
+		todoPixels.store(std::move(list));
+	}
 
 	SLG_LOG("Convergence test: ToDo Pixels = " << todoPixelsCount << ", Max. Error = " << maxError);
 

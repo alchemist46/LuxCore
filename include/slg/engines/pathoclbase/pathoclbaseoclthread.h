@@ -177,6 +177,9 @@ protected:
 	void InitGPUTaskBuffer();
 	void UpdateGPUTaskConfigurationBuffer();
 	void InitSamplerSharedDataBuffer();
+	// Uploads the list of the pixels to converge of the per-pixel noise
+	// threshold halt test, when it has changed
+	void UpdateSamplerTodoPixels();
 	void InitSamplesBuffer();
 	void InitSampleDataBuffer();
 	void InitSampleResultsBuffer();
@@ -264,6 +267,8 @@ protected:
 	luxrays::HardwareDeviceBuffer *tasksStateBuff;
 	luxrays::HardwareDeviceBuffer *pathStatesBuff;
 	luxrays::HardwareDeviceBuffer *samplerSharedDataBuff;
+	// The last list uploaded by UpdateSamplerTodoPixels()
+	std::shared_ptr<const std::vector<u_int>> uploadedTodoPixels;
 	luxrays::HardwareDeviceBuffer *samplesBuff;
 	luxrays::HardwareDeviceBuffer *sampleDataBuff;
 	luxrays::HardwareDeviceBuffer *sampleResultsBuff;

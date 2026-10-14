@@ -212,6 +212,9 @@ public:
 			const bool blocking, const size_t size, void *ptr) = 0;
 	virtual void EnqueueWriteBuffer(const HardwareDeviceBuffer *buff,
 			const bool blocking, const size_t size, const void *ptr) = 0;
+	// Writes size bytes at offset bytes from the start of the buffer
+	virtual void EnqueueWriteBufferRange(const HardwareDeviceBuffer *buff,
+			const bool blocking, const size_t offset, const size_t size, const void *ptr) = 0;
 	virtual void FlushQueue() = 0;
 	virtual void FinishQueue() = 0;
 

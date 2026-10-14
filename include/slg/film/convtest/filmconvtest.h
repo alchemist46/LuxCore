@@ -19,6 +19,10 @@
 #ifndef _SLG_FILMCONVTEST_H
 #define	_SLG_FILMCONVTEST_H
 
+#include <atomic>
+#include <memory>
+#include <vector>
+
 #include "luxrays/usings.h"
 #include "luxrays/utils/properties.h"
 #include "luxrays/utils/serializationutils.h"
@@ -37,18 +41,28 @@ namespace slg {
 // - the per-pixel estimate (halfBuffer, an option; Cycles' model after
 //   Dammertz et al. 2010 and Christensen et al. 2018 section 10.2.1): the
 //   samplers accumulate one half of the samples of each pixel in the *_HALF
-//   film channels too, and the error of a pixel is the difference between the
-//   image and the image of that half, on the linear radiance:
-//   (|dR| + |dG| + |dB|) / max(sqrt(I), I) with I = R + G + B, averaged over
-//   the 3x3 neighbours with useFilter (the estimate of a single pixel is very
-//   noisy). A pixel under the threshold is converged (until the film is
-//   reset), the samplers then skip it (NOISE channel 0) and the rendering
-//   stops when every pixel is converged (minus the tolerance). It reads the
+//   film channels too (with SOBOL, the samples of a pixel alternate between
+//   two independently scrambled sequences and the half is the second one),
+//   and the error of a pixel is the difference between the image and the
+//   image of that half, on the linear radiance: (|dR| + |dG| + |dB|) /
+//   max(sqrt(I), I) with I = R + G + B. The standard deviation of a sample
+//   (error * sqrt(N)) is averaged over the 5x5 neighbours with useFilter (the
+//   estimate of a single pixel is very noisy). A pixel is converged when its
+//   error is under threshold * sqrt(sigma / mean(sigma)) (at most twice the
+//   threshold): each pixel then gets a sample count proportional to its
+//   standard deviation, the allocation with the lowest mean squared error,
+//   and the threshold is the RMS error of the image. A converged pixel stays
+//   converged until the film is reset, the SOBOL sampler draws its pixels
+//   from the list of the unconverged ones (GetTodoPixels(); RANDOM skips the
+//   converged ones) and the rendering stops when every pixel is converged
+//   (minus the tolerance). It reads the
 //   radiance channels, not the image pipeline output. Used when the film has
-//   the half channel (the SOBOL and RANDOM samplers add it), the classic test
-//   otherwise. Measured on 2026-10-14 (see MODERNIZATION_PLAN.md): bounded
-//   and predictable, but at equal time its error is higher than the classic
-//   test's on the benchmark scenes, so the classic test stays the default.
+//   the half channel (the SOBOL and RANDOM samplers add it), the classic
+//   test otherwise. Measured on 2026-10-14 (see MODERNIZATION_PLAN.md): about
+//   the classic test's quality at the same render time where the classic
+//   test does well, much better where its halt time explodes, and always
+//   bounded and predictable; it is not the default (the threshold has a
+//   different meaning).
 //
 // - the classic test (the default): the difference between two snapshots of the image
 //   pipeline output `testStep` samples apart, the rendering stops when no
@@ -86,6 +100,13 @@ public:
 	// The halt tolerates this fraction of unconverged pixels
 	bool IsConverged() const;
 
+	// The per-pixel test only: the pixels still to converge, as indices
+	// x + y * width relative to the film sub-region, in the order of the
+	// samplers' buckets (16x16 tiles in rows, Morton order inside a tile).
+	// The samplers take their pixels from it instead of skipping the
+	// converged ones. nullptr until the first test (and after a reset).
+	std::shared_ptr<const std::vector<u_int>> GetTodoPixels() const { return todoPixels.load(); }
+
 	FilmConstRef GetFilm() const { return *film; }
 
 	friend class boost::serialization::access;
@@ -119,6 +140,8 @@ private:
 	// Classic test: the consecutive passes of each pixel (>= passes:
 	// converged, sticky). Per-pixel test: 1 for the converged pixels.
 	std::vector<unsigned char> convergedPixels;
+	// Written by the test, read by the rendering threads (not serialized)
+	std::atomic<std::shared_ptr<const std::vector<u_int>>> todoPixels;
 };
 
 }

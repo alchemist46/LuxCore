@@ -352,6 +352,10 @@ public:
 	// The noise threshold halt test estimates the error of each pixel from
 	// the *_HALF channels (the samplers then skip the converged pixels)
 	static bool IsHalfBufferHaltEnabled(const luxrays::Properties &cfg);
+	// The pixels the per-pixel noise threshold halt test still has to
+	// converge (see FilmConvTest::GetTodoPixels()), nullptr when there is no
+	// such list
+	std::shared_ptr<const std::vector<u_int>> GetHalfBufferTodoPixels() const;
 	// Convergence can be set by external source (like TileRepository convergence test)
 	void SetConvergence(const float conv) { statsConvergence = conv; }
 	float GetConvergence() { return statsConvergence; }

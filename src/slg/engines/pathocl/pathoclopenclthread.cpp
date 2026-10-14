@@ -153,6 +153,9 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 			// Async. transfer of the Film buffers
 			threadFilms[0]->RecvFilm(intersectionDevice);
+			// The pixels to converge of the per-pixel noise threshold halt
+			// test (uploaded with the NOISE channel, by RecvFilm())
+			UpdateSamplerTodoPixels();
 
 			// Async. transfer of GPU task statistics
 			intersectionDevice.EnqueueReadBuffer(

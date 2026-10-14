@@ -548,6 +548,22 @@ void HIPDevice::EnqueueWriteBuffer(const HardwareDeviceBuffer *buff,
 	}
 }
 
+void HIPDevice::EnqueueWriteBufferRange(const HardwareDeviceBuffer *buff,
+		const bool blocking, const size_t offset, const size_t size, const void *ptr) {
+	assert (buff);
+	assert (!buff->IsNull());
+
+	const HIPDeviceBuffer *hipDeviceBuff = dynamic_cast<const HIPDeviceBuffer *>(buff);
+	assert (hipDeviceBuff);
+
+	hipDeviceptr_t dst = (hipDeviceptr_t)((char *)hipDeviceBuff->hipBuff + offset);
+	if (blocking) {
+		CHECK_HIP_ERROR(hipMemcpyHtoD(dst, ptr, size));
+	} else {
+		CHECK_HIP_ERROR(hipMemcpyHtoDAsync(dst, ptr, size, nullptr));
+	}
+}
+
 void HIPDevice::FlushQueue() {
 }
 

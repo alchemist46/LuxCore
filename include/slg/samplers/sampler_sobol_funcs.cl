@@ -192,10 +192,9 @@ OPENCL_FORCE_INLINE void SobolSampler_SplatSample(
 	__global SobolSample *samples = (__global SobolSample *)samplesBuff;
 	__global SobolSample *sample = &samples[gid];
 
-	// sample->pass is the index of the sample in its sequence (see
-	// SobolSampler_InitNewSample())
+	// sample->half is set by SobolSampler_InitNewSample()
 	Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
-			sampleResult, 1.f, Sampler_IsHalfSample(sample->pass)
+			sampleResult, 1.f, sample->half != 0u
 			FILM_PARAM);
 }
 
@@ -245,6 +244,19 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 	// engine stops the rendering after the next test)
 	uint skippedPixels = 0;
 
+	// The per-pixel noise threshold halt test lists the pixels still to
+	// converge: the buckets are taken from the list instead of skipping the
+	// converged pixels (a GPU task can otherwise loop over thousands of
+	// pixels, with an atomic per bucket, for one sample). Past the buckets of
+	// the list come the buckets of a sweep of the whole film (no pixel is
+	// skipped), so the few pixels left at the end don't get every sample of
+	// every task until the host runs the next test. The buckets of the list
+	// have the 0x80000000 flag.
+	const uint todoPixelCount = sampler->sobol.halfReplicas ? samplerSharedData->todoPixelCount : 0u;
+	const uint todoListBucketCount = (todoPixelCount + bucketSize - 1) / bucketSize;
+	const uint todoBucketCount = todoPixelCount ? max(samplerSharedData->todoBucketCount, todoListBucketCount) : 0u;
+	__global const uint *todoPixels = SobolSampler_GetPassesPtr(samplerSharedData) + samplerSharedData->todoPixelsOffset;
+
 	for (;;) {
 		passOffset++;
 		if (passOffset >= superSampling) {
@@ -253,9 +265,21 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 
 			if (pixelOffset >= bucketSize) {
 				// Ask for a new bucket
-				uint bucketSeed;
-				SobolSamplerSharedData_GetNewBucket(samplerSharedData, bucketCount,
-						&bucketIndex, &bucketSeed);
+				if (todoBucketCount) {
+					const uint counter = atomic_inc(&samplerSharedData->bucketIndex);
+					const uint b = counter % todoBucketCount;
+					if (b < todoListBucketCount)
+						bucketIndex = b | 0x80000000u;
+					else {
+						// The sweep of the whole film
+						const uint sweepBucketCount = todoBucketCount - todoListBucketCount;
+						bucketIndex = ((counter / todoBucketCount) * sweepBucketCount + (b - todoListBucketCount)) % bucketCount;
+					}
+				} else {
+					uint bucketSeed;
+					SobolSamplerSharedData_GetNewBucket(samplerSharedData, bucketCount,
+							&bucketIndex, &bucketSeed);
+				}
 
 				sample->bucketIndex = bucketIndex;
 				pixelOffset = 0;
@@ -265,15 +289,28 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 
 		// Transform the bucket index in a pixel coordinate
 
-		const uint pixelBucketIndex = (bucketIndex / overlapping) * bucketSize + pixelOffset;
-		const uint mortonCurveOffset = pixelBucketIndex % (tileSize * tileSize);
-		const uint pixelTileIndex = pixelBucketIndex / (tileSize * tileSize);
+		uint subRegionPixelX, subRegionPixelY;
+		if (bucketIndex & 0x80000000u) {
+			const uint listIndex = (bucketIndex & 0x7fffffffu) * bucketSize + pixelOffset;
+			if (listIndex >= todoPixelCount) {
+				// The end of the last bucket (or of an older list)
+				continue;
+			}
 
-		const uint subRegionPixelX = (pixelTileIndex % tiletWidthCount) * tileSize + DecodeMorton2X(mortonCurveOffset);
-		const uint subRegionPixelY = (pixelTileIndex / tiletWidthCount) * tileSize + DecodeMorton2Y(mortonCurveOffset);
-		if ((subRegionPixelX >= subRegionWidth) || (subRegionPixelY >= subRegionHeight)) {
-			// Skip the pixels out of the film sub region
-			continue;
+			const uint p = todoPixels[listIndex];
+			subRegionPixelX = p % subRegionWidth;
+			subRegionPixelY = p / subRegionWidth;
+		} else {
+			const uint pixelBucketIndex = (bucketIndex / overlapping) * bucketSize + pixelOffset;
+			const uint mortonCurveOffset = pixelBucketIndex % (tileSize * tileSize);
+			const uint pixelTileIndex = pixelBucketIndex / (tileSize * tileSize);
+
+			subRegionPixelX = (pixelTileIndex % tiletWidthCount) * tileSize + DecodeMorton2X(mortonCurveOffset);
+			subRegionPixelY = (pixelTileIndex / tiletWidthCount) * tileSize + DecodeMorton2Y(mortonCurveOffset);
+			if ((subRegionPixelX >= subRegionWidth) || (subRegionPixelY >= subRegionHeight)) {
+				// Skip the pixels out of the film sub region
+				continue;
+			}
 		}
 
 		const uint pixelX = filmSubRegion0 + subRegionPixelX;
@@ -283,8 +320,10 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 			const float adaptiveStrength = sampler->sobol.adaptiveStrength;
 
 			if (adaptiveStrength > 0.f) {
-				// Pixels are sampled in accordance with how far from convergence they are
-				const float noise = filmNoise[pixelX + pixelY * filmWidth];
+				// Pixels are sampled in accordance with how far from
+				// convergence they are (with the list, every pixel is to be
+				// sampled)
+				const float noise = todoBucketCount ? 1.f : filmNoise[pixelX + pixelY * filmWidth];
 
 				// Factor user driven importance sampling too
 				float threshold;
@@ -332,8 +371,20 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 #endif
 		//----------------------------------------------------------------------
 
+		// The two replicas of the per-pixel error estimate of the noise
+		// threshold halt: the samples of a pixel alternate between two
+		// independently scrambled sequences, the half is the second one (see
+		// SobolSampler::InitNewSample() on the CPU)
+		uint seedBase = samplerSharedData->seedBase;
+		uint half = 0u;
+		if (taskConfig->sampler.sobol.halfReplicas) {
+			half = sample->pass & 1u;
+			sample->pass >>= 1;
+			if (half)
+				seedBase = SobolSequence_Hash(SobolSequence_HashCombine(seedBase, 0x4a1fu));
+		}
+
 		__global const uint* restrict sobolDirections = SobolSampler_GetSobolDirectionsPtr(samplerSharedData);
-		const uint seedBase = samplerSharedData->seedBase;
 		if (taskConfig->sampler.sobol.blueNoise) {
 			// Blue-noise pixel ordering (see SobolSampler::InitNewSample() on
 			// the CPU): from here on sample->pass is the index in the sequence
@@ -368,6 +419,10 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 			samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_X);
 			samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->seed, IDX_SCREEN_Y);
 		}
+
+		// Without the replicas, the half of the sample is given by its index
+		// in its sequence (sample->pass)
+		sample->half = taskConfig->sampler.sobol.halfReplicas ? half : (Sampler_IsHalfSample(sample->pass) ? 1u : 0u);
 		break;
 	}
 

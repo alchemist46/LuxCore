@@ -889,12 +889,21 @@ void Film::Parse(PropertiesRPtr props) {
 				)).Get<double>();
 
 		if (haltNoiseThreshold > 0.f) {
+			// The per-pixel error estimate from the *_HALF channels (see
+			// FilmConvTest, an option); the classic test otherwise
+			haltNoiseThresholdHalfBuffer = props->Get(Property("batch.haltnoisethreshold.halfbuffer.enable")(
+						props->Get(Property("batch.haltthreshold.halfbuffer.enable")(false)).Get<bool>()
+					)).Get<bool>();
+
+			// The per-pixel test stops each pixel on its own, so it can start
+			// early and test often (16 and 8 spp: the most efficient in the
+			// simulations, see FilmConvTest::TestHalfBuffer())
 			haltNoiseThresholdWarmUp = props->Get(Property("batch.haltnoisethreshold.warmup")(
-						props->Get(Property("batch.haltthreshold.warmup")(64)).Get<u_int>()
+						props->Get(Property("batch.haltthreshold.warmup")(haltNoiseThresholdHalfBuffer ? 16 : 64)).Get<u_int>()
 					)).Get<u_int>();
 
 			haltNoiseThresholdTestStep = props->Get(Property("batch.haltnoisethreshold.step")(
-						props->Get(Property("batch.haltthreshold.step")(64)).Get<u_int>()
+						props->Get(Property("batch.haltthreshold.step")(haltNoiseThresholdHalfBuffer ? 8 : 64)).Get<u_int>()
 					)).Get<u_int>();
 
 			haltNoiseThresholdUseFilter = props->Get(Property("batch.haltnoisethreshold.filter.enable")(
@@ -917,12 +926,6 @@ void Film::Parse(PropertiesRPtr props) {
 			haltNoiseThresholdPasses = props->Get(Property("batch.haltnoisethreshold.passes")(
 						props->Get(Property("batch.haltthreshold.passes")(0u)).Get<u_int>()
 					)).Get<u_int>();
-
-			// The per-pixel error estimate from the *_HALF channels (see
-			// FilmConvTest, an option); the classic test otherwise
-			haltNoiseThresholdHalfBuffer = props->Get(Property("batch.haltnoisethreshold.halfbuffer.enable")(
-						props->Get(Property("batch.haltthreshold.halfbuffer.enable")(false)).Get<bool>()
-					)).Get<bool>();
 
 			if (haltNoiseThresholdImagePipelineIndex >= GetImagePipelineCount()) {
 				SLG_LOG("WARNING: Halt thereshold image pipeline index not available. Reverting to first image pipeline");
@@ -995,5 +998,8 @@ bool Film::IsHalfBufferHaltEnabled(const Properties &cfg) {
 			)).Get<bool>();
 
 	return (threshold > 0.f) && halfBuffer;
+}
+std::shared_ptr<const std::vector<u_int>> Film::GetHalfBufferTodoPixels() const {
+	return (convTest && convTest->UsesHalfBuffer()) ? convTest->GetTodoPixels() : nullptr;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

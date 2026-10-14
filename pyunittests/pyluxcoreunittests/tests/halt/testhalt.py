@@ -25,13 +25,13 @@ from pyluxcoreunittests.tests.utils import *
 from pyluxcoreunittests.tests.imagetest import *
 
 class TestHalt(unittest.TestCase):
-	def RunHaltTest(self, testName, haltProps):
+	def RunHaltTest(self, testName, haltProps, samplerType = "RANDOM"):
 		# Load the configuration from file
 		props = pyluxcore.Properties("resources/scenes/simple/simple.cfg")
 
 		# Change the render engine to PATHCPU
 		props.Set(pyluxcore.Property("renderengine.type", ["PATHCPU"]))
-		props.Set(pyluxcore.Property("sampler.type", ["RANDOM"]))
+		props.Set(pyluxcore.Property("sampler.type", [samplerType]))
 		props.Set(GetDefaultEngineProperties("PATHCPU"))
 
 		# Replace halt condition
@@ -77,6 +77,16 @@ class TestHalt(unittest.TestCase):
 		props.Set(pyluxcore.Property("batch.haltthreshold.halfbuffer.enable", True))
 		
 		self.RunHaltTest("Halt_Threshold_PerPixel", props)
+
+	def test_Halt_Threshold_PerPixel_Sobol(self):
+		# The same with the SOBOL sampler: the two replicas of the half buffer
+		# and the list of the pixels to converge
+		props = pyluxcore.Properties()
+		props.Set(pyluxcore.Property("batch.haltthreshold", 0.075))
+		props.Set(pyluxcore.Property("batch.haltthreshold.step", 16))
+		props.Set(pyluxcore.Property("batch.haltthreshold.halfbuffer.enable", True))
+		
+		self.RunHaltTest("Halt_Threshold_PerPixel_Sobol", props, "SOBOL")
 
 	def test_Halt_Time(self):
 		props = pyluxcore.Properties()

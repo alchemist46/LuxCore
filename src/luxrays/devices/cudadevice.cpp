@@ -517,6 +517,21 @@ void CUDADevice::EnqueueWriteBuffer(const HardwareDeviceBuffer *buff,
 	}
 }
 
+void CUDADevice::EnqueueWriteBufferRange(const HardwareDeviceBuffer *buff,
+		const bool blocking, const size_t offset, const size_t size, const void *ptr) {
+	assert (buff);
+	assert (!buff->IsNull());
+
+	const CUDADeviceBuffer *cudaDeviceBuff = dynamic_cast<const CUDADeviceBuffer *>(buff);
+	assert (cudaDeviceBuff);
+
+	if (blocking) {
+		CHECK_CUDA_ERROR(cuMemcpyHtoD(cudaDeviceBuff->cudaBuff + offset, ptr, size));
+	} else {
+		CHECK_CUDA_ERROR(cuMemcpyHtoDAsync(cudaDeviceBuff->cudaBuff + offset, ptr, size, 0));
+	}
+}
+
 void CUDADevice::FlushQueue() {
 }
 

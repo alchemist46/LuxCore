@@ -103,7 +103,8 @@ public:
 		SamplerSharedDataSPtr samplerSharedData,
 		const bool blueNoiseEnable = false,
 		const bool blueNoiseFirst = false,
-		const u_int blueNoiseSPP = 256
+		const u_int blueNoiseSPP = 256,
+		const bool halfReplicas = false
 	);
 	SobolSampler(
 		const luxrays::RandomGeneratorUPtr & rnd,
@@ -119,7 +120,8 @@ public:
 		SamplerSharedDataSPtr samplerSharedData,
 		const bool blueNoiseEnable = false,
 		const bool blueNoiseFirst = false,
-		const u_int blueNoiseSPP = 256
+		const u_int blueNoiseSPP = 256,
+		const bool halfReplicas = false
 	);
 	virtual ~SobolSampler();
 
@@ -166,8 +168,16 @@ private:
 
 	std::shared_ptr<u_int> bucketIndex;
 	u_int pixelOffset, passOffset, pass;
-	// The current sample belongs to the half of the sequence accumulated in
-	// the *_HALF film channels (see Film::AddSample())
+	// The samples of each pixel alternate between two independently scrambled
+	// sequences, the second one accumulated in the *_HALF film channels too
+	// (the per-pixel error estimate of the noise threshold halt, see
+	// InitNewSample())
+	bool halfReplicas;
+	// The pixels of the current bucket come from this list of the per-pixel
+	// noise threshold halt test, when there is one (see InitNewSample())
+	std::shared_ptr<const std::vector<u_int>> todoPixels;
+	// The current sample belongs to the half accumulated in the *_HALF film
+	// channels (see Film::AddSample())
 	bool halfSample;
 
 	float sample0, sample1;

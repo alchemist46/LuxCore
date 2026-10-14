@@ -202,6 +202,8 @@ public:
 			const bool blocking, const size_t size, void *ptr) override;
 	virtual void EnqueueWriteBuffer(const HardwareDeviceBuffer *buff,
 			const bool blocking, const size_t size, const void *ptr) override;
+	virtual void EnqueueWriteBufferRange(const HardwareDeviceBuffer *buff,
+			const bool blocking, const size_t offset, const size_t size, const void *ptr) override;
 	virtual void FlushQueue() override;
 	virtual void FinishQueue() override;
 	virtual void RegisterHostMemory(void *ptr, const size_t size) override;

@@ -18,6 +18,8 @@
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
+#include <cstddef>
+
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string/replace.hpp>
 
@@ -392,6 +394,11 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 
 		// Plus the Sobol directions array
 		size += sizeof(u_int) * renderEngine->pathTracer.eyeSampleSize * SOBOL_BITS;
+
+		// Plus the list of the pixels to converge of the per-pixel noise
+		// threshold halt test
+		if (renderEngine->oclSampler->sobol.halfReplicas)
+			size += sizeof(u_int) * filmRegionPixelCount;
 	} else if (renderEngine->oclSampler->type == slg::ocl::TILEPATHSAMPLER) {
 		size += sizeof(slg::ocl::TilePathSamplerSharedData);
 
@@ -433,6 +440,10 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 		sssd->seedBase = renderEngine->seedBase + threadIndex;
 		sssd->bucketIndex = 0;
 		sssd->filmRegionPixelCount = filmRegionPixelCount;
+		sssd->todoPixelCount = 0;
+		sssd->todoBucketCount = 0;
+		sssd->todoPixelsOffset = filmRegionPixelCount + renderEngine->pathTracer.eyeSampleSize * SOBOL_BITS;
+		uploadedTodoPixels.reset();
 
 		// Initialize all pass values. The pass buffer is attached at the
 		// end of slg::ocl::SobolSamplerSharedData
@@ -470,6 +481,42 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 						ToString(renderEngine->GetType()));
 		}
 	}
+}
+
+void PathOCLBaseOCLRenderThread::UpdateSamplerTodoPixels() {
+	// The list of the pixels to converge of the per-pixel noise threshold
+	// halt test, read by SobolSampler_InitNewSample()
+	if (!samplerSharedDataBuff || (renderEngine->oclSampler->type != slg::ocl::SOBOL) ||
+			!renderEngine->oclSampler->sobol.halfReplicas)
+		return;
+
+	std::shared_ptr<const std::vector<u_int>> todoPixels = renderEngine->GetFilm().GetHalfBufferTodoPixels();
+	if (todoPixels == uploadedTodoPixels)
+		return;
+	uploadedTodoPixels = todoPixels;
+
+	const u_int *subRegion = renderEngine->GetFilm().GetSubRegion();
+	const u_int filmRegionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+
+	u_int counts[2] = { 0, 0 };
+	if (todoPixels && !todoPixels->empty() && (todoPixels->size() <= filmRegionPixelCount)) {
+		const u_int bucketSize = renderEngine->oclSampler->sobol.bucketSize;
+		const u_int listBucketCount = (todoPixels->size() + bucketSize - 1) / bucketSize;
+		// Each pixel of the list gets at most about 64 of the samples of a
+		// round of all the tasks; the rest sweep the whole film
+		const u_int minBucketCount = (renderEngine->taskCount + 64 * bucketSize - 1) / (64 * bucketSize);
+
+		counts[0] = todoPixels->size();
+		counts[1] = Max(listBucketCount, minBucketCount);
+
+		const size_t listOffset = sizeof(slg::ocl::SobolSamplerSharedData) +
+				sizeof(u_int) * (filmRegionPixelCount + renderEngine->pathTracer.eyeSampleSize * SOBOL_BITS);
+		intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+				listOffset, sizeof(u_int) * todoPixels->size(), todoPixels->data());
+	}
+
+	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+			offsetof(slg::ocl::SobolSamplerSharedData, todoPixelCount), sizeof(counts), counts);
 }
 
 void PathOCLBaseOCLRenderThread::InitSamplesBuffer() {
