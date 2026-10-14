@@ -116,6 +116,10 @@ protected:
 	void UpdateTaskCount();
 
 	u_int GetTotalEyeSPP() const;
+	// The halt spp condition on the thread films, without waiting for the
+	// host to merge them (the render threads stop themselves on it)
+	bool HaltSPPReached() const;
+	double GetThreadFilmsEyeSampleCount() const;
 
 	FilmSampleSplatterUPtr lightSampleSplatter;
 	std::shared_ptr<SamplerSharedData> eyeSamplerSharedData;

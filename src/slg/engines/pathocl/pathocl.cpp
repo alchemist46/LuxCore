@@ -242,16 +242,15 @@ void PathOCLRenderEngine::UpdateTaskCount() {
 		SLG_LOG("[PathOCLRenderEngine] OpenCL task count: " << taskCount);
 }
 
-u_int PathOCLRenderEngine::GetTotalEyeSPP() const {
-	u_int spp = 0;
+double PathOCLRenderEngine::GetThreadFilmsEyeSampleCount() const {
+	double count = 0.0;
 
 	// I can access rendering threads film only after all have been started
 	if (allRenderingThreadsStarted) {
 		for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
 			if (renderOCLThreads[i]) {
 				const PathOCLOpenCLRenderThread *thread = (const PathOCLOpenCLRenderThread *)renderOCLThreads[i];
-				FilmConstRef film = thread->threadFilms[0]->GetFilm();
-				spp += GetFilm().GetTotalEyeSampleCount() / GetFilm().GetPixelCount();
+				count += thread->threadFilms[0]->GetFilm().GetTotalEyeSampleCount();
 			}
 		}
 
@@ -259,13 +258,33 @@ u_int PathOCLRenderEngine::GetTotalEyeSPP() const {
 			// All threads use the film of the first one
 			if (renderNativeThreads[0]) {
 				const PathOCLNativeRenderThread *thread = (const PathOCLNativeRenderThread *)renderNativeThreads[0];
-				FilmConstRef film = *thread->threadFilm;
-				spp += GetFilm().GetTotalEyeSampleCount() / GetFilm().GetPixelCount();
+				count += thread->threadFilm->GetTotalEyeSampleCount();
 			}
 		}
 	}
 
-	return spp;
+	return count;
+}
+
+u_int PathOCLRenderEngine::GetTotalEyeSPP() const {
+	// It used to sum the spp of the engine film once per thread
+	return (u_int)(GetThreadFilmsEyeSampleCount() / GetFilm().GetPixelCount());
+}
+
+bool PathOCLRenderEngine::HaltSPPReached() const {
+	// The same conditions as Film::RunTests() for an engine with eye samples
+	// only (the screen normalized ones never apply)
+	const Film &engineFilm = GetFilm();
+	const u_int haltSPP = (engineFilm.GetHaltSPP_PixelNormalized() > 0) ?
+		engineFilm.GetHaltSPP_PixelNormalized() :
+		((engineFilm.GetHaltSPP_ScreenNormalized() == 0) ? engineFilm.GetHaltSPP() : 0);
+	if (haltSPP == 0)
+		return false;
+
+	const u_int *subRegion = engineFilm.GetSubRegion();
+	const u_int regionPixelsCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+
+	return GetThreadFilmsEyeSampleCount() / regionPixelsCount > haltSPP;
 }
 
 //------------------------------------------------------------------------------

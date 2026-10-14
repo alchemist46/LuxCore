@@ -83,6 +83,9 @@ public:
 			luxrays::HardwareDeviceKernelRPtr filmClearKernel,
 			const size_t filmClearWorkGroupSize);
 		void RecvFilm(luxrays::HardwareIntersectionDeviceRef intersectionDevice);
+		// Pinned host memory for the buffers read back by RecvFilm()
+		void RegisterHostBuffers();
+		void UnregisterHostBuffers();
 		void SendFilm(luxrays::HardwareIntersectionDeviceRef intersectionDevice);
 
 		FilmRef GetFilm() { return *film; }
@@ -139,6 +142,7 @@ public:
 
 	private:
 		FilmUPtr film;
+		std::vector<void *> registeredHostBuffers;
 		FilmPtr engineFilm;
 		PathOCLBaseOCLRenderThread *renderThread;
 	};

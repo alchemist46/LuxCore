@@ -555,6 +555,21 @@ void HIPDevice::FinishQueue() {
 	CHECK_HIP_ERROR(hipStreamSynchronize(nullptr));
 }
 
+void HIPDevice::RegisterHostMemory(void *ptr, const size_t size) {
+	// LUXRAYS_DISABLE_PINNED_MEMORY: for the A/B measurements of the transfers
+	if (getenv("LUXRAYS_DISABLE_PINNED_MEMORY"))
+		return;
+
+	// Not fatal: the transfers just stay staged through pageable memory
+	const hipError_t err = hipHostRegister(ptr, size, 0);
+	if (err != hipSuccess)
+		LR_LOG(deviceContext, "[" << GetName() << "] WARNING: hipHostRegister() failed: " << hipGetErrorString(err));
+}
+
+void HIPDevice::UnregisterHostMemory(void *ptr) {
+	hipHostUnregister(ptr);
+}
+
 //------------------------------------------------------------------------------
 // Memory management for hardware (aka GPU) only applications
 //------------------------------------------------------------------------------

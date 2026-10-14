@@ -75,6 +75,8 @@ thipMemcpyHtoD *hipMemcpyHtoD;
 thipMemcpyDtoH *hipMemcpyDtoH;
 thipMemcpyHtoDAsync *hipMemcpyHtoDAsync;
 thipMemcpyDtoHAsync *hipMemcpyDtoHAsync;
+thipHostRegister *hipHostRegister;
+thipHostUnregister *hipHostUnregister;
 thipMemGetAddressRange *hipMemGetAddressRange;
 thipStreamSynchronize *hipStreamSynchronize;
 thipModuleLoadData *hipModuleLoadData;
@@ -180,6 +182,8 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyDtoH);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyHtoDAsync);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpyDtoHAsync);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipHostRegister);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipHostUnregister);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemGetAddressRange);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipStreamSynchronize);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLoadData);

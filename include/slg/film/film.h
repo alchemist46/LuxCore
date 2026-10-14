@@ -309,6 +309,10 @@ public:
 	u_int GetHeight() const { return height; }
 	u_int GetPixelCount() const { return pixelCount; }
 	const u_int *GetSubRegion() const { return subRegion; }
+	// The halt conditions (0 when not set)
+	u_int GetHaltSPP() const { return haltSPP; }
+	u_int GetHaltSPP_PixelNormalized() const { return haltSPP_PixelNormalized; }
+	u_int GetHaltSPP_ScreenNormalized() const { return haltSPP_ScreenNormalized; }
 	double GetTotalSampleCount() const {
 		return samplesCounts.GetSampleCount();
 	}

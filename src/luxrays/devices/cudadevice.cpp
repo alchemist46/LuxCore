@@ -524,6 +524,24 @@ void CUDADevice::FinishQueue() {
 	CHECK_CUDA_ERROR(cuStreamSynchronize(0));
 }
 
+void CUDADevice::RegisterHostMemory(void *ptr, const size_t size) {
+	// LUXRAYS_DISABLE_PINNED_MEMORY: for the A/B measurements of the transfers
+	if (getenv("LUXRAYS_DISABLE_PINNED_MEMORY"))
+		return;
+
+	// Not fatal: the transfers just stay staged through pageable memory
+	const CUresult err = cuMemHostRegister(ptr, size, 0);
+	if (err != CUDA_SUCCESS) {
+		const char *errStr = nullptr;
+		cuGetErrorString(err, &errStr);
+		LR_LOG(deviceContext, "[" << GetName() << "] WARNING: cuMemHostRegister() failed: " << (errStr ? errStr : "?"));
+	}
+}
+
+void CUDADevice::UnregisterHostMemory(void *ptr) {
+	cuMemHostUnregister(ptr);
+}
+
 //------------------------------------------------------------------------------
 // Memory management for hardware (aka GPU) only applications
 //------------------------------------------------------------------------------

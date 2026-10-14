@@ -121,6 +121,7 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 	double totalTransferTime = 0.0;
 	double totalKernelTime = 0.0;
+	u_int transferCount = 0;
 
 	const std::function<void()> pgicUpdateCallBack = std::bind(PGICUpdateCallBack, engine->compiledScene);
 
@@ -140,13 +141,16 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 		//------------------------------------------------------------------
 
-		const double timeTransferStart = WallClockTime();
+		//------------------------------------------------------------------
 
 		// Transfer the film only if I have already spent enough time running
 		// rendering kernels. This is very important when rendering very high
-		// resolution images (for instance at 4961x3508)
+		// resolution images (for instance at 4961x3508). The host buffers are
+		// pinned on CUDA and HIP, so the copies are real DMA transfers.
+		const bool transfer = (totalTransferTime < totalKernelTime * (1.0 / 100.0));
+		if (transfer) {
+			const double timeTransferStart = WallClockTime();
 
-		if (totalTransferTime < totalKernelTime * (1.0 / 100.0)) {
 			// Async. transfer of the Film buffers
 			threadFilms[0]->RecvFilm(intersectionDevice);
 
@@ -166,10 +170,11 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 				totalCount += gpuTaskStats[i].sampleCount;
 			threadFilms[0]->GetFilm().SetSampleCount(totalCount, totalCount, 0.0);
 
+			totalTransferTime += WallClockTime() - timeTransferStart;
+			++transferCount;
+
 			//SLG_LOG("[DEBUG] film transferred");
 		}
-		const double timeTransferEnd = WallClockTime();
-		totalTransferTime += timeTransferEnd - timeTransferStart;
 
 		//------------------------------------------------------------------
 
@@ -192,21 +197,26 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 		intersectionDevice.FinishQueue();
 		const double timeKernelEnd = WallClockTime();
-		totalKernelTime += timeKernelEnd - timeKernelStart;
+		const double kernelTime = timeKernelEnd - timeKernelStart;
+		totalKernelTime += kernelTime;
 
 		/*if (threadIndex == 0)
-			SLG_LOG("[DEBUG] transfer time: " << (timeTransferEnd - timeTransferStart) * 1000.0 << "ms "
-					"kernel time: " << (timeKernelEnd - timeKernelStart) * 1000.0 << "ms "
+			SLG_LOG("[DEBUG] kernel time: " << kernelTime * 1000.0 << "ms "
 					"iterations: " << iterations << " #"<< taskCount << ")");*/
 
 		// Check if I have to adjust the number of kernel enqueued
-		if (timeKernelEnd - timeKernelStart > targetTime)
+		if (kernelTime > targetTime)
 			iterations = Max<u_int>(iterations - 1, 1);
 		else
 			iterations = Min<u_int>(iterations + 1, 128);
 
 		// Check halt conditions
 		if (engine->GetFilm().GetConvergence() == 1.f)
+			break;
+		// The halt spp is checked here too, on the thread films: the host
+		// may poll the statistics (and run the film tests) rarely, and a
+		// GPU renders well past the halt point in the meantime
+		if (transfer && engine->HaltSPPReached())
 			break;
 
 		if (engine->photonGICache) {
@@ -221,8 +231,13 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
         if (stop_token.stop_requested())
 		SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] Rendering thread halted");
 
+	const double timeFinalTransferStart = WallClockTime();
 	threadFilms[0]->RecvFilm(intersectionDevice);
 	intersectionDevice.FinishQueue();
+	SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] Film transfers: " << transferCount <<
+			" in " << int(totalTransferTime * 1000.0) << "ms, the last one in " <<
+			int((WallClockTime() - timeFinalTransferStart) * 1000.0) << "ms, kernels " <<
+			int(totalKernelTime * 1000.0) << "ms");
 	
 	threadDone = true;
 

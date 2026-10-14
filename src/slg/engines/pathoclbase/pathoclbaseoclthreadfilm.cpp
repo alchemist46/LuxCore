@@ -109,6 +109,7 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::Init(FilmRef engineFlm,
 		const u_int threadFilmWidth, const u_int threadFilmHeight,
 		const u_int *threadFilmSubRegion) {
 	engineFilm = &engineFlm;
+	UnregisterHostBuffers();
 
 	const u_int filmPixelCount = threadFilmWidth * threadFilmHeight;
 
@@ -375,9 +376,13 @@ void PathOCLBaseOCLRenderThread::ThreadFilm::Init(FilmRef engineFlm,
 		renderThread->intersectionDevice.FreeBuffer(&denoiser_CovarImage_Buff);
 		renderThread->intersectionDevice.FreeBuffer(&denoiser_HistoImage_Buff);
 	}
+
+	RegisterHostBuffers();
 }
 
 void PathOCLBaseOCLRenderThread::ThreadFilm::FreeAllOCLBuffers() {
+	UnregisterHostBuffers();
+
 	// Film buffers
 	for (u_int i = 0; i < channel_RADIANCE_PER_PIXEL_NORMALIZEDs_Buff.size(); ++i)
 		renderThread->intersectionDevice.FreeBuffer(&channel_RADIANCE_PER_PIXEL_NORMALIZEDs_Buff[i]);
@@ -545,6 +550,98 @@ u_int PathOCLBaseOCLRenderThread::ThreadFilm::SetFilmKernelArgs(HardwareIntersec
 	}
 
 	return argIndex;
+}
+
+void PathOCLBaseOCLRenderThread::ThreadFilm::RegisterHostBuffers() {
+	// The same buffers RecvFilm() reads back (generated from it)
+	HardwareIntersectionDeviceRef intersectionDevice = renderThread->intersectionDevice;
+	// The film channel pointers are only valid when the device buffer exists
+	auto reg = [&](HardwareDeviceBuffer *buff, void *ptr) {
+		intersectionDevice.RegisterHostMemory(ptr, buff->GetSize());
+		registeredHostBuffers.push_back(ptr);
+	};
+
+	for (u_int i = 0; i < channel_RADIANCE_PER_PIXEL_NORMALIZEDs_Buff.size(); ++i)
+		if (channel_RADIANCE_PER_PIXEL_NORMALIZEDs_Buff[i])
+			reg(channel_RADIANCE_PER_PIXEL_NORMALIZEDs_Buff[i], film->channel_RADIANCE_PER_PIXEL_NORMALIZEDs[i]->GetPixels());
+	if (channel_ALPHA_Buff)
+		reg(channel_ALPHA_Buff, film->channel_ALPHA->GetPixels());
+	if (channel_DEPTH_Buff)
+		reg(channel_DEPTH_Buff, film->channel_DEPTH->GetPixels());
+	if (channel_POSITION_Buff)
+		reg(channel_POSITION_Buff, film->channel_POSITION->GetPixels());
+	if (channel_GEOMETRY_NORMAL_Buff)
+		reg(channel_GEOMETRY_NORMAL_Buff, film->channel_GEOMETRY_NORMAL->GetPixels());
+	if (channel_SHADING_NORMAL_Buff)
+		reg(channel_SHADING_NORMAL_Buff, film->channel_SHADING_NORMAL->GetPixels());
+	if (channel_MATERIAL_ID_Buff)
+		reg(channel_MATERIAL_ID_Buff, film->channel_MATERIAL_ID->GetPixels());
+	if (channel_DIRECT_DIFFUSE_Buff)
+		reg(channel_DIRECT_DIFFUSE_Buff, film->channel_DIRECT_DIFFUSE->GetPixels());
+	if (channel_DIRECT_DIFFUSE_REFLECT_Buff)
+		reg(channel_DIRECT_DIFFUSE_REFLECT_Buff, film->channel_DIRECT_DIFFUSE_REFLECT->GetPixels());
+	if (channel_DIRECT_DIFFUSE_TRANSMIT_Buff)
+		reg(channel_DIRECT_DIFFUSE_TRANSMIT_Buff, film->channel_DIRECT_DIFFUSE_TRANSMIT->GetPixels());
+	if (channel_DIRECT_GLOSSY_Buff)
+		reg(channel_DIRECT_GLOSSY_Buff, film->channel_DIRECT_GLOSSY->GetPixels());
+	if (channel_DIRECT_GLOSSY_REFLECT_Buff)
+		reg(channel_DIRECT_GLOSSY_REFLECT_Buff, film->channel_DIRECT_GLOSSY_REFLECT->GetPixels());
+	if (channel_DIRECT_GLOSSY_TRANSMIT_Buff)
+		reg(channel_DIRECT_GLOSSY_TRANSMIT_Buff, film->channel_DIRECT_GLOSSY_TRANSMIT->GetPixels());
+	if (channel_EMISSION_Buff)
+		reg(channel_EMISSION_Buff, film->channel_EMISSION->GetPixels());
+	if (channel_INDIRECT_DIFFUSE_Buff)
+		reg(channel_INDIRECT_DIFFUSE_Buff, film->channel_INDIRECT_DIFFUSE->GetPixels());
+	if (channel_INDIRECT_DIFFUSE_REFLECT_Buff)
+		reg(channel_INDIRECT_DIFFUSE_REFLECT_Buff, film->channel_INDIRECT_DIFFUSE_REFLECT->GetPixels());
+	if (channel_INDIRECT_DIFFUSE_TRANSMIT_Buff)
+		reg(channel_INDIRECT_DIFFUSE_TRANSMIT_Buff, film->channel_INDIRECT_DIFFUSE_TRANSMIT->GetPixels());
+	if (channel_INDIRECT_GLOSSY_Buff)
+		reg(channel_INDIRECT_GLOSSY_Buff, film->channel_INDIRECT_GLOSSY->GetPixels());
+	if (channel_INDIRECT_GLOSSY_REFLECT_Buff)
+		reg(channel_INDIRECT_GLOSSY_REFLECT_Buff, film->channel_INDIRECT_GLOSSY_REFLECT->GetPixels());
+	if (channel_INDIRECT_GLOSSY_TRANSMIT_Buff)
+		reg(channel_INDIRECT_GLOSSY_TRANSMIT_Buff, film->channel_INDIRECT_GLOSSY_TRANSMIT->GetPixels());
+	if (channel_INDIRECT_SPECULAR_Buff)
+		reg(channel_INDIRECT_SPECULAR_Buff, film->channel_INDIRECT_SPECULAR->GetPixels());
+	if (channel_INDIRECT_SPECULAR_REFLECT_Buff)
+		reg(channel_INDIRECT_SPECULAR_REFLECT_Buff, film->channel_INDIRECT_SPECULAR_REFLECT->GetPixels());
+	if (channel_INDIRECT_SPECULAR_TRANSMIT_Buff)
+		reg(channel_INDIRECT_SPECULAR_TRANSMIT_Buff, film->channel_INDIRECT_SPECULAR_TRANSMIT->GetPixels());
+	if (channel_MATERIAL_ID_MASK_Buff)
+		reg(channel_MATERIAL_ID_MASK_Buff, film->channel_MATERIAL_ID_MASKs[0]->GetPixels());
+	if (channel_DIRECT_SHADOW_MASK_Buff)
+		reg(channel_DIRECT_SHADOW_MASK_Buff, film->channel_DIRECT_SHADOW_MASK->GetPixels());
+	if (channel_INDIRECT_SHADOW_MASK_Buff)
+		reg(channel_INDIRECT_SHADOW_MASK_Buff, film->channel_INDIRECT_SHADOW_MASK->GetPixels());
+	if (channel_UV_Buff)
+		reg(channel_UV_Buff, film->channel_UV->GetPixels());
+	if (channel_RAYCOUNT_Buff)
+		reg(channel_RAYCOUNT_Buff, film->channel_RAYCOUNT->GetPixels());
+	if (channel_BY_MATERIAL_ID_Buff)
+		reg(channel_BY_MATERIAL_ID_Buff, film->channel_BY_MATERIAL_IDs[0]->GetPixels());
+	if (channel_IRRADIANCE_Buff)
+		reg(channel_IRRADIANCE_Buff, film->channel_IRRADIANCE->GetPixels());
+	if (channel_OBJECT_ID_Buff)
+		reg(channel_OBJECT_ID_Buff, film->channel_OBJECT_ID->GetPixels());
+	if (channel_OBJECT_ID_MASK_Buff)
+		reg(channel_OBJECT_ID_MASK_Buff, film->channel_OBJECT_ID_MASKs[0]->GetPixels());
+	if (channel_BY_OBJECT_ID_Buff)
+		reg(channel_BY_OBJECT_ID_Buff, film->channel_BY_OBJECT_IDs[0]->GetPixels());
+	if (channel_SAMPLECOUNT_Buff)
+		reg(channel_SAMPLECOUNT_Buff, film->channel_SAMPLECOUNT->GetPixels());
+	if (channel_MATERIAL_ID_COLOR_Buff)
+		reg(channel_MATERIAL_ID_COLOR_Buff, film->channel_MATERIAL_ID_COLOR->GetPixels());
+	if (channel_ALBEDO_Buff)
+		reg(channel_ALBEDO_Buff, film->channel_ALBEDO->GetPixels());
+	if (channel_AVG_SHADING_NORMAL_Buff)
+		reg(channel_AVG_SHADING_NORMAL_Buff, film->channel_AVG_SHADING_NORMAL->GetPixels());
+}
+
+void PathOCLBaseOCLRenderThread::ThreadFilm::UnregisterHostBuffers() {
+	for (void *ptr : registeredHostBuffers)
+		renderThread->intersectionDevice.UnregisterHostMemory(ptr);
+	registeredHostBuffers.clear();
 }
 
 void PathOCLBaseOCLRenderThread::ThreadFilm::RecvFilm(HardwareIntersectionDeviceRef intersectionDevice) {

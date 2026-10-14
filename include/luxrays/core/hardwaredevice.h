@@ -215,6 +215,12 @@ public:
 	virtual void FlushQueue() = 0;
 	virtual void FinishQueue() = 0;
 
+	// Pinned host memory: a registered host buffer makes the asynchronous
+	// transfers to and from it real DMA transfers (CUDA and HIP; a no-op on
+	// the other devices). The buffer must be unregistered before it is freed.
+	virtual void RegisterHostMemory(void *ptr, const size_t size) { }
+	virtual void UnregisterHostMemory(void *ptr) { }
+
 	//--------------------------------------------------------------------------
 	// Memory management for hardware (aka GPU) only applications
 	//--------------------------------------------------------------------------

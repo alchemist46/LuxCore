@@ -125,6 +125,8 @@ typedef hipError_t HIPAPI thipMemcpyHtoD(hipDeviceptr_t dst, const void *src, si
 typedef hipError_t HIPAPI thipMemcpyDtoH(void *dst, hipDeviceptr_t src, size_t sizeBytes);
 typedef hipError_t HIPAPI thipMemcpyHtoDAsync(hipDeviceptr_t dst, const void *src, size_t sizeBytes, hipStream_t stream);
 typedef hipError_t HIPAPI thipMemcpyDtoHAsync(void *dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream);
+typedef hipError_t HIPAPI thipHostRegister(void *hostPtr, size_t sizeBytes, unsigned int flags);
+typedef hipError_t HIPAPI thipHostUnregister(void *hostPtr);
 typedef hipError_t HIPAPI thipMemGetAddressRange(hipDeviceptr_t *pbase, size_t *psize, hipDeviceptr_t dptr);
 typedef hipError_t HIPAPI thipStreamSynchronize(hipStream_t stream);
 typedef hipError_t HIPAPI thipModuleLoadData(hipModule_t *module, const void *image);
@@ -174,6 +176,8 @@ extern thipMemcpyHtoD *hipMemcpyHtoD;
 extern thipMemcpyDtoH *hipMemcpyDtoH;
 extern thipMemcpyHtoDAsync *hipMemcpyHtoDAsync;
 extern thipMemcpyDtoHAsync *hipMemcpyDtoHAsync;
+extern thipHostRegister *hipHostRegister;
+extern thipHostUnregister *hipHostUnregister;
 extern thipMemGetAddressRange *hipMemGetAddressRange;
 extern thipStreamSynchronize *hipStreamSynchronize;
 extern thipModuleLoadData *hipModuleLoadData;
