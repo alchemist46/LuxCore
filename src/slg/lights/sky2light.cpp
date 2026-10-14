@@ -147,6 +147,7 @@ SkyLight2::SkyLight2() : localSunDir(0.f, 0.f, 1.f), turbidity(2.2f),
 		hasGround(false), hasGroundAutoScale(true),
 		distributionWidth(512), distributionHeight(256),
 		skyDistribution(nullptr), visibilityMapCache(nullptr) {
+	misCompensation = false;
 }
 
 SkyLight2::~SkyLight2() {
@@ -218,6 +219,13 @@ void SkyLight2::Preprocess() {
 	}
 
 	skyDistribution = std::make_unique<Distribution2D>(data, distributionWidth, distributionHeight);
+
+	skyDistributionMIS.reset();
+	if (misCompensation) {
+		vector<float> dataMIS = MISCompensatedMap(data, distributionWidth, distributionHeight);
+		if (dataMIS.size() > 0)
+			skyDistributionMIS = std::make_unique<Distribution2D>(dataMIS, distributionWidth, distributionHeight);
+	}
 }
 
 std::tuple<luxrays::Distribution2DRef, EnvLightVisibilityCacheRPtr>
@@ -344,7 +352,7 @@ Spectrum SkyLight2::GetRadiance(SceneConstRef scene,
 		else if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(*bsdf)) {
 			*directPdfA =  visibilityMapCache->Pdf(*bsdf, u, v) * latLongMappingPdf;
 		} else
-			*directPdfA = distPdf * latLongMappingPdf;
+			*directPdfA = GetMISDistribution().Pdf(u, v) * latLongMappingPdf;
 	}
 
 	if (emissionPdfW) {
@@ -412,7 +420,7 @@ Spectrum SkyLight2::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(bsdf))
 		visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf);
 	else
-		skyDistribution->SampleContinuous(u0, u1, uv, &distPdf);
+		GetMISDistribution().SampleContinuous(u0, u1, uv, &distPdf);
 	if (distPdf == 0.f)
 		return Spectrum();
 
@@ -445,7 +453,7 @@ Spectrum SkyLight2::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	assert (!isnan(directPdfW) && !isinf(directPdfW) && (directPdfW > 0.f));
 	
 	if (emissionPdfW)
-		*emissionPdfW = distPdf * latLongMappingPdf / (M_PI * envRadius * envRadius);
+		*emissionPdfW = skyDistribution->Pdf(uv[0], uv[1]) * latLongMappingPdf / (M_PI * envRadius * envRadius);
 
 	shadowRay = Ray(shadowRayOrig, shadowRayDir, 0.f, shadowRayDistance, time);
 
@@ -503,6 +511,7 @@ PropertiesUPtr SkyLight2::ToProperties(const ImageMapCache &imgMapCache, const b
 	props->Set(Property(prefix + ".distribution.height")(distributionHeight));
 
 	props->Set(Property(prefix + ".visibilitymapcache.enable")(useVisibilityMapCache));
+	props->Set(Property(prefix + ".miscompensation.enable")(misCompensation));
 	if (useVisibilityMapCache)
 		*props << EnvLightVisibilityCache::Params2Props(prefix, visibilityMapCacheParams);
 	

@@ -31,7 +31,9 @@ typedef enum {
 
 typedef struct {
 	unsigned int imageMapIndex;
-	unsigned int distributionOffset;
+	// The emission distribution and the one of the light sampling (MIS
+	// compensated, or the same offset)
+	unsigned int distributionOffset, misDistributionOffset;
 	int useVisibilityMapCache;
 } InfiniteLightParam;
 
@@ -41,7 +43,7 @@ typedef struct {
 		gTerm, hTerm, iTerm, radianceTerm;
 	int hasGround, isGroundBlack;
 	Spectrum scaledGroundColor;
-	unsigned int distributionOffset;
+	unsigned int distributionOffset, misDistributionOffset;
 	int useVisibilityMapCache;
 } SkyLight2Param;
 

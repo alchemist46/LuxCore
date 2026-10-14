@@ -238,6 +238,11 @@ public:
 			float *directPdfA = NULL, float *emissionPdfW = NULL) const = 0;
 
 	static void ToLatLongMapping(const Vector &w, float *s, float *t, float *pdf = NULL);
+	// MIS compensation (Karlik et al. 2019): the importance map with its
+	// (solid angle weighted) average subtracted and clamped at 0, for the
+	// light sampling technique only: it then covers what the BSDF sampling
+	// can't. Returns an empty vector when the map is constant.
+	static std::vector<float> MISCompensatedMap(const std::vector<float> &data, const u_int width, const u_int height);
 	static void FromLatLongMapping(const float s, const float t, Vector *w, float *pdf = NULL);
 };
 

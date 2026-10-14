@@ -399,6 +399,17 @@ void CompiledScene::CompileLights() {
 					distributionSize4,
 					envLightDistributions.begin() + size);
 				oclLight->notIntersectable.infinite.distributionOffset = size;
+
+				// The MIS compensated distribution of the light sampling
+				oclLight->notIntersectable.infinite.misDistributionOffset = size;
+				if (&il.GetMISDistribution() != &dist) {
+					auto [misDistribution, misDistributionSize] = CompileDistribution2D(il.GetMISDistribution());
+					const u_int misDistributionSize4 = misDistributionSize / sizeof(float);
+					const u_int misSize = envLightDistributions.size();
+					envLightDistributions.resize(misSize + misDistributionSize4);
+					std::copy_n(misDistribution.begin(), misDistributionSize4, envLightDistributions.begin() + misSize);
+					oclLight->notIntersectable.infinite.misDistributionOffset = misSize;
+				}
 				break;
 			}
 			case TYPE_IL_SKY2: {
@@ -460,6 +471,17 @@ void CompiledScene::CompileLights() {
 					envLightDistributions.begin() + size
 				);
 				oclLight->notIntersectable.sky2.distributionOffset = size;
+
+				// The MIS compensated distribution of the light sampling
+				oclLight->notIntersectable.sky2.misDistributionOffset = size;
+				if (&sl.GetMISDistribution() != &dist) {
+					auto [misDistribution, misDistributionSize] = CompileDistribution2D(sl.GetMISDistribution());
+					const u_int misDistributionSize4 = misDistributionSize / sizeof(float);
+					const u_int misSize = envLightDistributions.size();
+					envLightDistributions.resize(misSize + misDistributionSize4);
+					std::copy_n(misDistribution.begin(), misDistributionSize4, envLightDistributions.begin() + misSize);
+					oclLight->notIntersectable.sky2.misDistributionOffset = misSize;
+				}
 				break;
 			}
 			case TYPE_SUN: {

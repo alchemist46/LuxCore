@@ -153,7 +153,8 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_GetRadiance(__global const LightSource 
 			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
 		*directPdfA = EnvLightVisibilityCache_Pdf(bsdf, u, v LIGHTS_PARAM) * latLongMappingPdf;
 	} else {
-		__global const float *infiniteLightDist = &envLightDistribution[infiniteLight->notIntersectable.infinite.distributionOffset];
+		// The pdf of the light sampling technique (MIS compensated)
+		__global const float *infiniteLightDist = &envLightDistribution[infiniteLight->notIntersectable.infinite.misDistributionOffset];
 
 		const float distPdf = Distribution2D_Pdf(infiniteLightDist, u, v);
 		*directPdfA = distPdf * latLongMappingPdf;
@@ -180,7 +181,7 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_Illuminate(__global const LightSource *
 			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
 		EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM);
 	} else {
-		__global const float *infiniteLightDistribution = &envLightDistribution[infiniteLight->notIntersectable.infinite.distributionOffset];
+		__global const float *infiniteLightDistribution = &envLightDistribution[infiniteLight->notIntersectable.infinite.misDistributionOffset];
 
 		Distribution2D_SampleContinuous(infiniteLightDistribution, u0, u1, &sampleUV, &distPdf);
 	}
@@ -295,7 +296,7 @@ OPENCL_FORCE_INLINE float3 Sky2Light_GetRadiance(__global const LightSource *sky
 			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
 		*directPdfA = EnvLightVisibilityCache_Pdf(bsdf, u, v LIGHTS_PARAM) * latLongMappingPdf;
 	} else {
-		__global const float *skyLightDist = &envLightDistribution[sky2Light->notIntersectable.sky2.distributionOffset];
+		__global const float *skyLightDist = &envLightDistribution[sky2Light->notIntersectable.sky2.misDistributionOffset];
 
 		const float distPdf = Distribution2D_Pdf(skyLightDist, u, v);
 		*directPdfA = distPdf * latLongMappingPdf;
@@ -316,7 +317,7 @@ OPENCL_FORCE_INLINE float3 Sky2Light_Illuminate(__global const LightSource *sky2
 			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
 		EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM);
 	} else {
-		__global const float *skyLightDistribution = &envLightDistribution[sky2Light->notIntersectable.sky2.distributionOffset];
+		__global const float *skyLightDistribution = &envLightDistribution[sky2Light->notIntersectable.sky2.misDistributionOffset];
 
 		Distribution2D_SampleContinuous(skyLightDistribution, u0, u1, &sampleUV, &distPdf);
 	}

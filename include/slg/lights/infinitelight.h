@@ -67,13 +67,19 @@ public:
 
 	ImageMapConstPtr imageMap;
 	bool sampleUpperHemisphereOnly;
+	// MIS compensation of the light sampling (see EnvLightSource::MISCompensatedMap())
+	bool misCompensation;
+
+	// The distribution of the light sampling technique (the compensated one
+	// when enabled and the map is not constant)
+	const luxrays::Distribution2D &GetMISDistribution() const { return imageMapDistributionMIS ? *imageMapDistributionMIS : *imageMapDistribution; }
 
 	// Visibility map cache options
 	ELVCParams visibilityMapCacheParams;
 	bool useVisibilityMapCache;
 
 private:
-	std::unique_ptr<luxrays::Distribution2D> imageMapDistribution;
+	std::unique_ptr<luxrays::Distribution2D> imageMapDistribution, imageMapDistributionMIS;
 
 	std::unique_ptr<EnvLightVisibilityCache> visibilityMapCache;
 };

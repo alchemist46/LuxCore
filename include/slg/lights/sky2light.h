@@ -76,6 +76,10 @@ public:
 	// Visibility map cache options
 	ELVCParams visibilityMapCacheParams;
 	bool useVisibilityMapCache;
+	// MIS compensation of the light sampling (see EnvLightSource::MISCompensatedMap())
+	bool misCompensation;
+
+	const luxrays::Distribution2D &GetMISDistribution() const { return skyDistributionMIS ? *skyDistributionMIS : *skyDistribution; }
 
 private:
 	luxrays::Vector SampleSkyDome(const float u0, const float u1) const;
@@ -92,7 +96,7 @@ private:
 
 	bool isGroundBlack;
 
-	luxrays::Distribution2DUPtr skyDistribution;
+	luxrays::Distribution2DUPtr skyDistribution, skyDistributionMIS;
 
 	EnvLightVisibilityCacheUPtr visibilityMapCache;
 };

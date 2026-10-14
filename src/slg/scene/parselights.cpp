@@ -256,6 +256,7 @@ LightSourceUPtr Scene::CreateLightSource(const string &name, const luxrays::Prop
 
 		// Visibility map cache related options
 		sl->useVisibilityMapCache = props.Get(Property(propName + ".visibilitymapcache.enable")(false)).Get<bool>();
+		sl->misCompensation = props.Get(Property(propName + ".miscompensation.enable")(false)).Get<bool>();
 		if (sl->useVisibilityMapCache)
 			sl->visibilityMapCacheParams = EnvLightVisibilityCache::Properties2Params(propName, props);
 
@@ -279,6 +280,7 @@ LightSourceUPtr Scene::CreateLightSource(const string &name, const luxrays::Prop
 
 		// Visibility map cache related options
 		il->useVisibilityMapCache = props.Get(Property(propName + ".visibilitymapcache.enable")(false)).Get<bool>();
+		il->misCompensation = props.Get(Property(propName + ".miscompensation.enable")(false)).Get<bool>();
 		if (il->useVisibilityMapCache)
 			il->visibilityMapCacheParams = EnvLightVisibilityCache::Properties2Params(propName, props);
 

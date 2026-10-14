@@ -114,6 +114,30 @@ PropertiesUPtr InfiniteLightSource::ToProperties(const ImageMapCache &imgMapCach
 // InfiniteLightSource
 //------------------------------------------------------------------------------
 
+std::vector<float> EnvLightSource::MISCompensatedMap(const std::vector<float> &data, const u_int width, const u_int height) {
+	// The lat-long map covers the sphere with a sin(theta) density: the
+	// average over the solid angle weights each row by it
+	double sum = 0.0, weightSum = 0.0;
+	for (u_int y = 0; y < height; ++y) {
+		const double w = sin(M_PI * (y + .5) / height);
+		for (u_int x = 0; x < width; ++x)
+			sum += w * data[x + y * width];
+		weightSum += w * width;
+	}
+	const float average = (weightSum > 0.0) ? (float)(sum / weightSum) : 0.f;
+
+	std::vector<float> result(data.size());
+	bool allZero = true;
+	for (u_int i = 0; i < data.size(); ++i) {
+		result[i] = Max(data[i] - average, 0.f);
+		allZero = allZero && (result[i] == 0.f);
+	}
+
+	if (allZero)
+		result.clear();
+	return result;
+}
+
 void EnvLightSource::ToLatLongMapping(const Vector &w, float *s, float *t, float *pdf) {
 	const float theta = SphericalTheta(w);
 

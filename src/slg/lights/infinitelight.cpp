@@ -34,6 +34,7 @@ using namespace slg;
 
 InfiniteLight::InfiniteLight() :
 	imageMap(nullptr), imageMapDistribution(nullptr), visibilityMapCache(nullptr) {
+	misCompensation = false;
 }
 
 InfiniteLight::~InfiniteLight() {
@@ -72,6 +73,13 @@ void InfiniteLight::Preprocess() {
 			imageMap->GetWidth(),
 			imageMap->GetHeight()
 		);
+
+	imageMapDistributionMIS.reset();
+	if (misCompensation) {
+		std::vector<float> dataMIS = MISCompensatedMap(data, imageMap->GetWidth(), imageMap->GetHeight());
+		if (dataMIS.size() > 0)
+			imageMapDistributionMIS = std::make_unique<Distribution2D>(dataMIS, imageMap->GetWidth(), imageMap->GetHeight());
+	}
 }
 
 
@@ -113,7 +121,7 @@ Spectrum InfiniteLight::GetRadiance(SceneConstRef scene,
 		else if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(*bsdf)) {
 			*directPdfA = visibilityMapCache->Pdf(*bsdf, u, v) * latLongMappingPdf;
 		} else
-			*directPdfA = distPdf * latLongMappingPdf;
+			*directPdfA = GetMISDistribution().Pdf(u, v) * latLongMappingPdf;
 	}
 
 	if (emissionPdfW) {
@@ -181,7 +189,7 @@ Spectrum InfiniteLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(bsdf))
 		visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf);
 	else
-		imageMapDistribution->SampleContinuous(u0, u1, uv, &distPdf);
+		GetMISDistribution().SampleContinuous(u0, u1, uv, &distPdf);
 	if (distPdf == 0.f)
 		return Spectrum();
 
@@ -216,7 +224,7 @@ Spectrum InfiniteLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	assert (!isnan(directPdfW) && !isinf(directPdfW) && (directPdfW > 0.f));
 
 	if (emissionPdfW)
-		*emissionPdfW = distPdf * latLongMappingPdf / (M_PI * envRadius * envRadius);
+		*emissionPdfW = imageMapDistribution->Pdf(uv[0], uv[1]) * latLongMappingPdf / (M_PI * envRadius * envRadius);
 
 	const Spectrum result = temperatureScale * gain * imageMap->GetSpectrum(UV(uv[0], uv[1]));
 	assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
@@ -257,6 +265,7 @@ PropertiesUPtr InfiniteLight::ToProperties(const ImageMapCache &imgMapCache, con
 	props->Set(imageMap->ToProperties(prefix, false));
 	props->Set(Property(prefix + ".gamma")(1.f));
 	props->Set(Property(prefix + ".sampleupperhemisphereonly")(sampleUpperHemisphereOnly));
+	props->Set(Property(prefix + ".miscompensation.enable")(misCompensation));
 
 	props->Set(Property(prefix + ".visibilitymapcache.enable")(useVisibilityMapCache));
 	if (useVisibilityMapCache)
