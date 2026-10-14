@@ -134,6 +134,8 @@ public:
 
 	void SetMicrofacetDistribution(const MicrofacetDistributionType type) { microfacetDistribution = type; }
 	MicrofacetDistributionType GetMicrofacetDistribution() const { return microfacetDistribution; }
+	void SetMultiscattering(const bool enabled) { multiscattering = enabled; }
+	bool IsMultiscattering() const { return multiscattering; }
 
     void SetBumpSampleDistance(const float dist) { bumpSampleDistance = dist; }
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
@@ -307,6 +309,7 @@ protected:
 		isHoldout;
 
 	MicrofacetDistributionType microfacetDistribution;
+	bool multiscattering;
 };
 
 //------------------------------------------------------------------------------
@@ -389,14 +392,40 @@ extern float Microfacet_PdfReflect(const MicrofacetDistributionType dist, const 
 	const luxrays::Vector &wo, const luxrays::Vector &wi);
 
 //------------------------------------------------------------------------------
+// Multiple-scattering energy compensation of the GGX lobes (property
+// "multiscattering", GGX_DISTRIBUTION only): the directional albedo tables of
+// microfacet_energy_tables.cl (shared with the GPU) and the scale of a
+// reflection lobe, 1 + Fms * (1 - E(mu)) / E(mu) with the average Fresnel
+// reflectance Fss of the lobe (Kulla & Conty 2017, Turquin 2019). mu is the
+// cosine of the viewing direction.
+//------------------------------------------------------------------------------
+
+extern float GGXEnergy_E(const float u, const float v, const float mu, const bool separable);
+extern float GGXEnergy_Eavg(const float u, const float v, const bool separable);
+extern float GGXEnergy_GlassE(const float u, const float v, const float mu, const float eta);
+extern float GGXEnergy_ReflectScale(const float u, const float v, const float mu,
+	const float Fss, const bool separable);
+extern luxrays::Spectrum GGXEnergy_ReflectScale(const float u, const float v, const float mu,
+	const luxrays::Spectrum &Fss, const bool separable);
+// The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
+extern float SchlickFresnel_Average(const float F0);
+extern luxrays::Spectrum SchlickFresnel_Average(const luxrays::Spectrum &F0);
+// The scale of a Microfacet_* reflection lobe: 1 unless multiscattering is
+// enabled and the distribution is GGX
+extern luxrays::Spectrum Microfacet_MSScale(const MicrofacetDistributionType dist, const bool multiscattering,
+	const float u, const float v, const float mu, const luxrays::Spectrum &Fss);
+
+//------------------------------------------------------------------------------
 // SchlickBSDF related functions (the coating lobe)
 //------------------------------------------------------------------------------
 extern float SchlickBSDF_CoatingWeight(const luxrays::Spectrum &ks, const luxrays::Vector &localFixedDir);
 extern luxrays::Spectrum SchlickBSDF_CoatingF(const bool fromLight, const luxrays::Spectrum &ks,
 	const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
+	const bool multiscattering,
 	const luxrays::Vector &localFixedDir,	const luxrays::Vector &localSampledDir);
 extern luxrays::Spectrum SchlickBSDF_CoatingSampleF(const bool fromLight, const luxrays::Spectrum ks,
 	const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
+	const bool multiscattering,
 	const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 	float u0, float u1, float *pdf);
 extern float SchlickBSDF_CoatingPdf(const MicrofacetDistributionType dist, const float u, const float v,

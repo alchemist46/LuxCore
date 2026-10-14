@@ -81,7 +81,8 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	{
 		const float r1 = R1->GetFloatValue(hitPoint);
 		result += (Microfacet_D(dist, m1, m1, H) * Microfacet_G(dist, m1, m1, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks1 * FresnelTexture::SchlickEvaluate(r1, Dot(localEyeDir, H)));
+				(ks1 * FresnelTexture::SchlickEvaluate(r1, Dot(localEyeDir, H))) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m1, m1, coso, Spectrum(SchlickFresnel_Average(r1)));
 		pdf += Microfacet_PdfReflect(dist, m1, m1, localFixedDir, localSampledDir);
 		pdfR += Microfacet_PdfReflect(dist, m1, m1, localSampledDir, localFixedDir);
 		++n;
@@ -92,7 +93,8 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	{
 		const float r2 = R2->GetFloatValue(hitPoint);
 		result += (Microfacet_D(dist, m2, m2, H) * Microfacet_G(dist, m2, m2, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks2 * FresnelTexture::SchlickEvaluate(r2, Dot(localEyeDir, H)));
+				(ks2 * FresnelTexture::SchlickEvaluate(r2, Dot(localEyeDir, H))) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m2, m2, coso, Spectrum(SchlickFresnel_Average(r2)));
 		pdf += Microfacet_PdfReflect(dist, m2, m2, localFixedDir, localSampledDir);
 		pdfR += Microfacet_PdfReflect(dist, m2, m2, localSampledDir, localFixedDir);
 		++n;
@@ -103,7 +105,8 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	{
 		const float r3 = R3->GetFloatValue(hitPoint);
 		result += (Microfacet_D(dist, m3, m3, H) * Microfacet_G(dist, m3, m3, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks3 * FresnelTexture::SchlickEvaluate(r3, Dot(localEyeDir, H)));
+				(ks3 * FresnelTexture::SchlickEvaluate(r3, Dot(localEyeDir, H))) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m3, m3, coso, Spectrum(SchlickFresnel_Average(r3)));
 		pdf += Microfacet_PdfReflect(dist, m3, m3, localFixedDir, localSampledDir);
 		pdfR += Microfacet_PdfReflect(dist, m3, m3, localSampledDir, localFixedDir);
 		++n;
@@ -160,7 +163,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 
 	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 	Vector wh;
-	float cosWH;
+	float cosWH, cosEye;
 	if (passThroughEvent < 1.f / n) {
 		// Sample diffuse layer
 		*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, &pdf);
@@ -181,6 +184,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 		if (wh.z < 0.f)
 			wh = -wh;
 		cosWH = AbsDot(localFixedDir, wh);
+		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
 	} else if (passThroughEvent < 2.f / n && l1) {
 		// Sample 1st glossy layer
 		sampled = 1;
@@ -197,8 +201,11 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 		if (wh.z < 0.f)
 			wh = -wh;
 		cosWH = AbsDot(localFixedDir, wh);
+		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
 
-		result = ks1 * FresnelTexture::SchlickEvaluate(R1->GetFloatValue(hitPoint), cosWH);
+		const float r1 = R1->GetFloatValue(hitPoint);
+		result = ks1 * FresnelTexture::SchlickEvaluate(r1, cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m1, m1, cosEye, Spectrum(SchlickFresnel_Average(r1)));
 
 		const float d = Microfacet_D(dist, m1, m1, wh);
 		const float G = Microfacet_G(dist, m1, m1, localFixedDir, *localSampledDir);
@@ -225,8 +232,11 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 		if (wh.z < 0.f)
 			wh = -wh;
 		cosWH = AbsDot(localFixedDir, wh);
+		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
 
-		result = ks2 * FresnelTexture::SchlickEvaluate(R2->GetFloatValue(hitPoint), cosWH);
+		const float r2 = R2->GetFloatValue(hitPoint);
+		result = ks2 * FresnelTexture::SchlickEvaluate(r2, cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m2, m2, cosEye, Spectrum(SchlickFresnel_Average(r2)));
 
 		const float d = Microfacet_D(dist, m2, m2, wh);
 		const float G = Microfacet_G(dist, m2, m2, localFixedDir, *localSampledDir);
@@ -252,8 +262,11 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 		if (wh.z < 0.f)
 			wh = -wh;
 		cosWH = AbsDot(localFixedDir, wh);
+		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
 
-		result = ks3 * FresnelTexture::SchlickEvaluate(R3->GetFloatValue(hitPoint), cosWH);
+		const float r3 = R3->GetFloatValue(hitPoint);
+		result = ks3 * FresnelTexture::SchlickEvaluate(r3, cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m3, m3, cosEye, Spectrum(SchlickFresnel_Average(r3)));
 
 		const float d = Microfacet_D(dist, m3, m3, wh);
 		const float G = Microfacet_G(dist, m3, m3, localFixedDir, *localSampledDir);
@@ -290,7 +303,8 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 			result += ks1 * (d1 *
 				Microfacet_G(dist, m1, m1, localFixedDir, *localSampledDir) /
 				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R1->GetFloatValue(hitPoint), cosWH);
+				FresnelTexture::SchlickEvaluate(R1->GetFloatValue(hitPoint), cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m1, m1, cosEye, Spectrum(SchlickFresnel_Average(R1->GetFloatValue(hitPoint))));
 			pdf += pdf1;
 		}
 	}
@@ -302,7 +316,8 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 			result += ks2 * (d2 *
 				Microfacet_G(dist, m2, m2, localFixedDir, *localSampledDir) /
 				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R2->GetFloatValue(hitPoint), cosWH);
+				FresnelTexture::SchlickEvaluate(R2->GetFloatValue(hitPoint), cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m2, m2, cosEye, Spectrum(SchlickFresnel_Average(R2->GetFloatValue(hitPoint))));
 			pdf += pdf2;
 		}
 	}
@@ -314,7 +329,8 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 			result += ks3 * (d3 *
 				Microfacet_G(dist, m3, m3, localFixedDir, *localSampledDir) /
 				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R3->GetFloatValue(hitPoint), cosWH);
+				FresnelTexture::SchlickEvaluate(R3->GetFloatValue(hitPoint), cosWH) *
+				Microfacet_MSScale(dist, IsMultiscattering(), m3, m3, cosEye, Spectrum(SchlickFresnel_Average(R3->GetFloatValue(hitPoint))));
 			pdf += pdf3;
 		}
 	}
@@ -457,6 +473,7 @@ PropertiesUPtr CarPaintMaterial::ToProperties(const ImageMapCache &imgMapCache, 
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

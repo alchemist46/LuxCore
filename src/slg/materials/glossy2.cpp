@@ -123,7 +123,7 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector H(Normalize(localFixedDir + localSampledDir));
 	const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localSampledDir, H));
 
-	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, localFixedDir, localSampledDir);
+	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(), localFixedDir, localSampledDir);
 
 	// Blend in base layer Schlick style
 	// assumes coating bxdf takes fresnel factor S into account
@@ -182,11 +182,11 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 		baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
 
 		// Evaluate coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, localFixedDir, *localSampledDir);
+		coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(), localFixedDir, *localSampledDir);
 		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, *localSampledDir);
 	} else {
 		// Sample coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce,
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
 				localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		if (coatingF.Black())
 			return Spectrum();
@@ -320,6 +320,7 @@ PropertiesUPtr Glossy2Material::ToProperties(const ImageMapCache &imgMapCache, c
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".index")(index->GetSDLValue()));

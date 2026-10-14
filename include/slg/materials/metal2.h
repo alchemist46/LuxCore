@@ -42,6 +42,10 @@ public:
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
+	luxrays::Spectrum EvaluateFresnel(const HitPoint &hitPoint, const float cosi) const;
+	luxrays::Spectrum MSScale(const HitPoint &hitPoint, const float u, const float v,
+		const luxrays::Vector &localEyeDir) const;
+
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,
 		float *directPdfW = NULL, float *reversePdfW = NULL) const;

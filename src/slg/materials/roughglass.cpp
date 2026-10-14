@@ -43,6 +43,19 @@ RoughGlassMaterial::RoughGlassMaterial(TextureConstPtr frontTransp, TextureConst
 	glossiness = ComputeGlossiness(nu, nv);
 }
 
+// The multiple-scattering scale of the whole interface seen from localEyeDir:
+// 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
+// other side over the eye side as relative IOR), as in Cycles
+static float RoughGlass_MSScale(const MicrofacetDistributionType dist, const bool multiscattering,
+		const float u, const float v, const Vector &localEyeDir, const float ntc) {
+	if (!multiscattering || (dist != GGX_DISTRIBUTION))
+		return 1.f;
+
+	const float eta = (localEyeDir.z > 0.f) ? ntc : 1.f / ntc;
+
+	return 1.f / Max(GGXEnergy_GlassE(u, v, fabsf(localEyeDir.z), eta), 1e-3f);
+}
+
 Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
@@ -63,6 +76,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
+	const float msScale = RoughGlass_MSScale(dist, IsMultiscattering(), u, v, localEyeDir, ntc);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
 		// Transmit
 
@@ -95,7 +109,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 
 		const Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
-			kt * (1.f - F);
+			kt * (1.f - F) * msScale;
 
 		*event = GLOSSY | TRANSMIT;
 
@@ -126,7 +140,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 		if (reversePdfW)
 			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localSampledDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
-		const Spectrum result = (D * G / (4.f * cosThetaI)) * kr * F;
+		const Spectrum result = (D * G / (4.f * cosThetaI)) * kr * F * msScale;
 
 		*event = GLOSSY | REFLECT;
 		
@@ -250,7 +264,8 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		*event = GLOSSY | REFLECT;
 	}
 
-	return result;
+	return result * RoughGlass_MSScale(dist, IsMultiscattering(), u, v,
+			hitPoint.fromLight ? *localSampledDir : localFixedDir, ntc);
 }
 
 void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
@@ -383,6 +398,7 @@ PropertiesUPtr RoughGlassMaterial::ToProperties(const ImageMapCache &imgMapCache
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	if (filmThickness)
 		props->Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));
 	if (filmIor)

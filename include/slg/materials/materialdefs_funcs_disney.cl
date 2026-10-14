@@ -207,7 +207,7 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_DisneySubsurface(const float3 color,
 	return M_1_PI_F * ss * color;
 }
 
-OPENCL_FORCE_INLINE float3 DisneyMaterial_DisneyMetallic(const float3 color,
+OPENCL_FORCE_INLINE float3 DisneyMaterial_DisneyMetallic(const int multiscattering, const float3 color,
 		const float specular, const float specularTint, const float metallic,
 		const float anisotropic, const float roughness,
 		const float NdotL, const float NdotV, const float NdotH,
@@ -232,7 +232,14 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_DisneyMetallic(const float3 color,
 
 	const float Gs = Gl * Gv;
 
-	return Gs * Fs * Ds;
+	float3 result = Gs * Fs * Ds;
+
+	// Multiple-scattering energy compensation (the separable Smith masking of
+	// this lobe has its own albedo table)
+	if (multiscattering)
+		result *= GGXEnergy_ReflectScale3(ax, ay, NdotV, SchlickFresnel_Average(Cspec0), true);
+
+	return result;
 }
 
 OPENCL_FORCE_INLINE float DisneyMaterial_DisneyClearCoat(const float clearcoat,
@@ -259,7 +266,7 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_DisneySheen(const float3 color,
 }
 
 OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateImpl(
-		__global const HitPoint *hitPoint, const float3 lightDir, const float3 eyeDir,
+		const int multiscattering, __global const HitPoint *hitPoint, const float3 lightDir, const float3 eyeDir,
 		BSDFEvent *event, float *directPdfW,
 		const float3 colorVal, const float subsurfaceVal, const float roughnessVal,
 		const float metallicVal, const float specularVal, const float specularTintVal,
@@ -299,7 +306,7 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateImpl(
 
 	const float3 subsurfaceEval = DisneyMaterial_DisneySubsurface(color, roughness, NdotL, NdotV, LdotH);
 
-	float3 metallicEval = DisneyMaterial_DisneyMetallic(color, specular, specularTint, metallic, anisotropicGloss, roughness,
+	float3 metallicEval = DisneyMaterial_DisneyMetallic(multiscattering, color, specular, specularTint, metallic, anisotropicGloss, roughness,
 														NdotL, NdotV, NdotH, LdotH, VdotH, wi, wo, H);
 	if (localFilmThickness > 0.f) {
 		const float3 metallicWithFilmColor = metallicEval * CalcFilmColor(wo, localFilmThickness, localFilmIor);
@@ -343,7 +350,7 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Evaluate(__global const Material* restri
 
 	BSDFEvent event;
 	float directPdfW;
-	const float3 result = DisneyMaterial_EvaluateImpl(hitPoint, lightDir, eyeDir,
+	const float3 result = DisneyMaterial_EvaluateImpl(material->multiscattering, hitPoint, lightDir, eyeDir,
 		&event, &directPdfW,
 		Texture_GetSpectrumValue(material->disney.baseColorTexIndex, hitPoint TEXTURES_PARAM),
 		Texture_GetFloatValue(material->disney.subsurfaceTexIndex, hitPoint TEXTURES_PARAM),
@@ -356,9 +363,10 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Evaluate(__global const Material* restri
 		Texture_GetFloatValue(material->disney.anisotropicTexIndex, hitPoint TEXTURES_PARAM),
 		Texture_GetFloatValue(material->disney.sheenTexIndex, hitPoint TEXTURES_PARAM),
 		Texture_GetFloatValue(material->disney.sheenTintTexIndex, hitPoint TEXTURES_PARAM),
-		localFilmAmount, localFilmThickness, localFilmIor)
-		// Evaluate() follows LuxRender habit to return the result multiplied by cosThetaToLight
-		* fabs(CosTheta(lightDir));
+		localFilmAmount, localFilmThickness, localFilmIor);
+	// DisneyMaterial_EvaluateImpl() already follows the LuxRender habit of
+	// returning the result multiplied by cosThetaToLight (it was multiplied
+	// twice before, so every light-sampled contribution was too dark)
 
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
@@ -486,7 +494,7 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Sample(__global const Material* restrict
 							   ? Texture_GetFloatValue(material->disney.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
 
 	BSDFEvent event;
-	const float3 f = DisneyMaterial_EvaluateImpl(hitPoint, localLightDir, localEyeDir, &event, NULL,
+	const float3 f = DisneyMaterial_EvaluateImpl(material->multiscattering, hitPoint, localLightDir, localEyeDir, &event, NULL,
 			colorVal, subsurfaceVal, roughnessVal, metallicVal, specularVal, specularTintVal,
 			clearcoatVal, clearcoatGlossVal, anisotropicGlossVal, sheenVal, sheenTintVal,
 			localFilmAmount, localFilmThickness, localFilmIor);

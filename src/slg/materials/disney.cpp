@@ -109,11 +109,12 @@ Spectrum DisneyMaterial::Evaluate(
 	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
+	// DisneyEvaluate() already follows the LuxRender habit of returning the
+	// result multiplied by cosThetaToLight (it was multiplied twice before, so
+	// every light-sampled contribution of this material was too dark)
 	return DisneyEvaluate(hitPoint.fromLight, color, subsurface, roughness, metallic, specular, specularTint,
 			clearcoat, clearcoatGloss, anisotropicGloss, sheen, sheenTint, localFilmAmount, localFilmThickness, 
-			localFilmIor, localLightDir, localEyeDir, event, directPdfW, reversePdfW)
-			// Evaluate() follows LuxRender habit to return the result multiplied by cosThetaToLight
-			* fabsf(CosTheta(localLightDir));
+			localFilmIor, localLightDir, localEyeDir, event, directPdfW, reversePdfW);
 }
 
 Spectrum DisneyMaterial::DisneyEvaluate(
@@ -228,7 +229,14 @@ Spectrum DisneyMaterial::DisneyMetallic(const Spectrum &color,
 
 	const float Gs = Gl * Gv;
 
-	return Gs * Fs * Ds;
+	Spectrum result = Gs * Fs * Ds;
+
+	// Multiple-scattering energy compensation (the separable Smith masking of
+	// this lobe has its own albedo table)
+	if (IsMultiscattering())
+		result *= GGXEnergy_ReflectScale(ax, ay, NdotV, SchlickFresnel_Average(Cspec0), true);
+
+	return result;
 }
 
 float DisneyMaterial::DisneyClearCoat(const float clearcoat, const float clearcoatGloss,
@@ -540,6 +548,7 @@ PropertiesUPtr DisneyMaterial::ToProperties(const ImageMapCache &imgMapCache, co
 	props->Set(Property("scene.materials." + name + ".basecolor")(BaseColor->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".subsurface")(Subsurface->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".roughness")(Roughness->GetSDLValue()));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".metallic")(Metallic->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".specular")(Specular->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".speculartint")(SpecularTint->GetSDLValue()));

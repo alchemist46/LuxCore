@@ -59,6 +59,19 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_GetEmittedRadiance(__global const Ma
 	DefaultMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 }
 
+// The multiple-scattering scale of the whole interface seen from eyeDir:
+// 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
+// other side over the eye side as relative IOR), as in Cycles
+OPENCL_FORCE_INLINE float RoughGlassMaterial_MSScale(__global const Material* restrict material,
+		const float u, const float v, const float3 eyeDir, const float ntc) {
+	if (!material->multiscattering || (material->microfacetDistribution != GGX_DISTRIBUTION))
+		return 1.f;
+
+	const float eta = (eyeDir.z > 0.f) ? ntc : 1.f / ntc;
+
+	return 1.f / fmax(GGXEnergy_GlassE(u, v, fabs(eyeDir.z), eta), 1e-3f);
+}
+
 OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -123,7 +136,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 
 		result = (fabs(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
-			kt * (1.f - F);
+			kt * (1.f - F) * RoughGlassMaterial_MSScale(material, u, v, eyeDir, ntc);
 
         event = GLOSSY | TRANSMIT;
 	} else {
@@ -152,7 +165,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 		//if (reversePdfW)
 		//	*reversePdfW = (1.f - threshold) * specPdf / (4.f * fabs(dot(lightDir, wh));
 
-		result = (D * G / (4.f * cosThetaI)) * kr * F;
+		result = (D * G / (4.f * cosThetaI)) * kr * F * RoughGlassMaterial_MSScale(material, u, v, eyeDir, ntc);
 		
 		const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
 										 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
@@ -304,6 +317,8 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		pdfW *= (1.f - threshold);
 		event = GLOSSY | REFLECT;
 	}
+
+	result *= RoughGlassMaterial_MSScale(material, u, v, fixedDir, ntc);
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

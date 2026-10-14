@@ -67,6 +67,38 @@ Metal2Material::Metal2Material(
 	glossiness = ComputeGlossiness(nu, nv);
 }
 
+Spectrum Metal2Material::EvaluateFresnel(const HitPoint &hitPoint, const float cosi) const {
+	Spectrum F;
+	if (fresnelTex)
+		F = fresnelTex->Evaluate(hitPoint, cosi);
+	else {
+		// For compatibility with the past
+		const Spectrum etaVal = n->GetSpectrumValue(hitPoint).Clamp(.001f);
+		const Spectrum kVal = k->GetSpectrumValue(hitPoint).Clamp(.001f);
+		F = FresnelTexture::GeneralEvaluate(etaVal, kVal, cosi);
+	}
+	F.Clamp(0.f, 1.f);
+
+	return F;
+}
+
+// The multiple-scattering scale of the lobe seen from localEyeDir: the average
+// Fresnel reflectance 2 * integral F(mu) mu dmu by a 4-point Gauss-Legendre
+// quadrature on [0, 1]
+Spectrum Metal2Material::MSScale(const HitPoint &hitPoint, const float u, const float v,
+		const Vector &localEyeDir) const {
+	if (!IsMultiscattering() || (GetMicrofacetDistribution() != GGX_DISTRIBUTION))
+		return Spectrum(1.f);
+
+	static const float nodes[4] = { .069431844f, .330009478f, .669990522f, .930568156f };
+	static const float weights[4] = { .173927423f, .326072577f, .326072577f, .173927423f };
+	Spectrum Fss;
+	for (u_int i = 0; i < 4; ++i)
+		Fss += (2.f * weights[i] * nodes[i]) * EvaluateFresnel(hitPoint, nodes[i]);
+
+	return GGXEnergy_ReflectScale(u, v, fabsf(localEyeDir.z), Fss.Clamp(0.f, 1.f), false);
+}
+
 Spectrum Metal2Material::Albedo(const HitPoint &hitPoint) const {
 	Spectrum F;
 	if (fresnelTex)
@@ -114,7 +146,8 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
 
 	*event = GLOSSY | REFLECT;
-	return (Microfacet_D(dist, u, v, wh) * G / (4.f * fabsf(localEyeDir.z))) * F;
+	return (Microfacet_D(dist, u, v, wh) * G / (4.f * fabsf(localEyeDir.z))) * F *
+			MSScale(hitPoint, u, v, localEyeDir);
 }
 
 Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
@@ -164,7 +197,7 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 
 	*event = GLOSSY | REFLECT;
 
-	return factor * F;
+	return factor * F * MSScale(hitPoint, u, v, hitPoint.fromLight ? *localSampledDir : localFixedDir);
 }
 
 void Metal2Material::Pdf(const HitPoint &hitPoint,
@@ -235,6 +268,7 @@ PropertiesUPtr Metal2Material::ToProperties(const ImageMapCache &imgMapCache, co
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

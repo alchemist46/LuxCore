@@ -364,6 +364,9 @@ typedef struct {
 	int isDelta; 
 
 	MicrofacetDistributionType microfacetDistribution;
+	// Multiple-scattering energy compensation (GGX_DISTRIBUTION only; EON for
+	// RoughMatte)
+	int multiscattering;
 
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;

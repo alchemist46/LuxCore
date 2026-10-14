@@ -411,6 +411,36 @@ OPENCL_FORCE_INLINE float Microfacet_PdfReflect(const MicrofacetDistributionType
 }
 
 //------------------------------------------------------------------------------
+// Multiple-scattering energy compensation of the GGX lobes (property
+// "multiscattering", GGX_DISTRIBUTION only), see microfacet_energy_tables.cl
+//------------------------------------------------------------------------------
+
+// The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
+OPENCL_FORCE_INLINE float3 SchlickFresnel_Average(const float3 F0) {
+	return F0 + (WHITE - F0) * (1.f / 21.f);
+}
+
+OPENCL_FORCE_INLINE float3 GGXEnergy_ReflectScale3(const float u, const float v, const float mu,
+		const float3 Fss, const bool separable) {
+	const float E = GGXEnergy_E(u, v, mu, separable);
+	const float Eavg = GGXEnergy_Eavg(u, v, separable);
+
+	return MAKE_FLOAT3(GGXEnergy_ReflectScale(E, Eavg, Fss.x),
+			GGXEnergy_ReflectScale(E, Eavg, Fss.y),
+			GGXEnergy_ReflectScale(E, Eavg, Fss.z));
+}
+
+// The scale of a Microfacet_* reflection lobe seen with the cosine mu: 1 unless
+// multiscattering is enabled and the distribution is GGX
+OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const MicrofacetDistributionType dist, const int multiscattering,
+		const float u, const float v, const float mu, const float3 Fss) {
+	if (multiscattering && (dist == GGX_DISTRIBUTION))
+		return GGXEnergy_ReflectScale3(u, v, mu, Fss, false);
+	else
+		return WHITE;
+}
+
+//------------------------------------------------------------------------------
 // Schlick BSDF (the coating lobe)
 //------------------------------------------------------------------------------
 
@@ -425,7 +455,7 @@ OPENCL_FORCE_INLINE float SchlickBSDF_CoatingWeight(const float3 ks, const float
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
 		const MicrofacetDistributionType dist, const float u, const float v,
-		const int multibounce, const float3 fixedDir,
+		const int multibounce, const int multiscattering, const float3 fixedDir,
 		const float3 sampledDir) {
 	const float coso = fabs(fixedDir.z);
 	const float cosi = fabs(sampledDir.z);
@@ -445,12 +475,13 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
 	//	factor = factor / (4.f * cosi) + 
 	//			(multibounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) : 0.f);
 
-	return factor * S;
+	// Multiple-scattering energy compensation (fixedDir is the eye direction)
+	return factor * S * Microfacet_MSScale(dist, multiscattering, u, v, coso, SchlickFresnel_Average(ks));
 }
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 		const MicrofacetDistributionType dist, const float u, const float v,
-		const int multibounce, const float3 fixedDir, float3 *sampledDir,
+		const int multibounce, const int multiscattering, const float3 fixedDir, float3 *sampledDir,
 		float u0, float u1, float *pdf) {
 	*pdf = Microfacet_SampleReflect(dist, u, v, fixedDir, u0, u1, sampledDir);
 
@@ -475,7 +506,8 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 	S *= (d / *pdf) * G / (4.f * coso) + 
 			(multibounce ? cosi * clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) / *pdf : 0.f);
 
-	return S;
+	// Multiple-scattering energy compensation (fixedDir is the eye direction)
+	return S * Microfacet_MSScale(dist, multiscattering, u, v, coso, SchlickFresnel_Average(ks));
 }
 
 OPENCL_FORCE_INLINE float SchlickBSDF_CoatingPdf(const MicrofacetDistributionType dist, const float u, const float v,

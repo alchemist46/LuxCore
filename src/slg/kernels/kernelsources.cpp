@@ -123,6 +123,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_texture_funcs;
 
 	ssKernel <<
+			slg::ocl::KernelSource_microfacet_energy_tables <<
 			slg::ocl::KernelSource_materialdefs_funcs_generic <<
 			slg::ocl::KernelSource_materialdefs_funcs_default <<
 			slg::ocl::KernelSource_materialdefs_funcs_thinfilmcoating <<

@@ -45,6 +45,31 @@ OPENCL_FORCE_INLINE void Metal2Material_GetNK(__global const Material* restrict 
 	}
 }
 
+// The multiple-scattering scale of the lobe seen with the cosine cosEye: the
+// average Fresnel reflectance 2 * integral F(mu) mu dmu by a 4-point
+// Gauss-Legendre quadrature on [0, 1]
+__constant float Metal2Material_GLNodes[4] = { .069431844f, .330009478f, .669990522f, .930568156f };
+__constant float Metal2Material_GLWeights[4] = { .173927423f, .326072577f, .326072577f, .173927423f };
+
+OPENCL_FORCE_INLINE float3 Metal2Material_MSScale(__global const Material* restrict material, __global const HitPoint *hitPoint,
+		const float u, const float v, const float cosEye
+		MATERIALS_PARAM_DECL) {
+	if (!material->multiscattering || (material->microfacetDistribution != GGX_DISTRIBUTION))
+		return WHITE;
+
+	float3 n, k;
+	Metal2Material_GetNK(material, hitPoint,
+			&n, &k
+			MATERIALS_PARAM);
+
+	float3 Fss = BLACK;
+	for (uint i = 0; i < 4; ++i)
+		Fss += (2.f * Metal2Material_GLWeights[i] * Metal2Material_GLNodes[i]) *
+				Spectrum_Clamp(FresnelGeneral_Evaluate(n, k, Metal2Material_GLNodes[i]));
+
+	return GGXEnergy_ReflectScale3(u, v, cosEye, Spectrum_Clamp(Fss), false);
+}
+
 OPENCL_FORCE_INLINE void Metal2Material_Albedo(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -118,7 +143,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 	const float G = Microfacet_G(dist, u, v, lightDir, eyeDir);
 
 	const BSDFEvent event = GLOSSY | REFLECT;
-	const float3 result = (Microfacet_D(dist, u, v, wh) * G / (4.f * fabs(eyeDir.z))) * F;
+	const float3 result = (Microfacet_D(dist, u, v, wh) * G / (4.f * fabs(eyeDir.z))) * F *
+			Metal2Material_MSScale(material, hitPoint, u, v, fabs(eyeDir.z) MATERIALS_PARAM);
 	
 	EvalStack_PushFloat3(result);
 	EvalStack_PushBSDFEvent(event);
@@ -183,7 +209,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 
 	const BSDFEvent event = GLOSSY | REFLECT;
 
-	const float3 result = factor * F;
+	const float3 result = factor * F *
+			Metal2Material_MSScale(material, hitPoint, u, v, coso MATERIALS_PARAM);
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

@@ -242,6 +242,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glossycoating.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glossytranslucent.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/material.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/materials/microfacet_energy.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/materialdefs.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/matte.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/mattetranslucent.cpp

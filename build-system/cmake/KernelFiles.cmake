@@ -108,6 +108,7 @@ set(SLG_KERNELS
     include/slg/bsdf/hitpoint_types.cl
     include/slg/bsdf/hitpoint_funcs.cl
     include/slg/materials/material_types.cl
+    include/slg/materials/microfacet_energy_tables.cl
     include/slg/materials/materialdefs_funcs_generic.cl
     include/slg/materials/materialdefs_funcs_default.cl
     include/slg/materials/materialdefs_funcs_archglass.cl

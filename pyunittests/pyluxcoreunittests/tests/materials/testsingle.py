@@ -240,3 +240,87 @@ class RoughGlassGGXMaterial(ImageTest):
     pass
 
 RoughGlassGGXMaterial = AddTests(RoughGlassGGXMaterial, TestRoughGlassGGXMaterial, GetTestCases())
+
+################################################################################
+# Metal2MS material test
+################################################################################
+
+def TestMetal2MSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-metal2-ms-area.cfg", "Metal2MSMaterial")
+
+class Metal2MSMaterial(ImageTest):
+    pass
+
+Metal2MSMaterial = AddTests(Metal2MSMaterial, TestMetal2MSMaterial, GetTestCases())
+
+################################################################################
+# RoughGlassMS material test
+################################################################################
+
+def TestRoughGlassMSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-roughglass-ms-area.cfg", "RoughGlassMSMaterial")
+
+class RoughGlassMSMaterial(ImageTest):
+    pass
+
+RoughGlassMSMaterial = AddTests(RoughGlassMSMaterial, TestRoughGlassMSMaterial, GetTestCases())
+
+################################################################################
+# Glossy2MS material test
+################################################################################
+
+def TestGlossy2MSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-glossy2-ms-area.cfg", "Glossy2MSMaterial")
+
+class Glossy2MSMaterial(ImageTest):
+    pass
+
+Glossy2MSMaterial = AddTests(Glossy2MSMaterial, TestGlossy2MSMaterial, GetTestCases())
+
+################################################################################
+# CarPaintMS material test
+################################################################################
+
+def TestCarPaintMSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-carpaint-ms-area.cfg", "CarPaintMSMaterial")
+
+class CarPaintMSMaterial(ImageTest):
+    pass
+
+CarPaintMSMaterial = AddTests(CarPaintMSMaterial, TestCarPaintMSMaterial, GetTestCases())
+
+################################################################################
+# DisneyMS material test
+################################################################################
+
+def TestDisneyMSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-disney-ms-area.cfg", "DisneyMSMaterial")
+
+class DisneyMSMaterial(ImageTest):
+    pass
+
+DisneyMSMaterial = AddTests(DisneyMSMaterial, TestDisneyMSMaterial, GetTestCases())
+
+################################################################################
+# RoughMatte material test
+################################################################################
+
+def TestRoughMatteMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-roughmatte-area.cfg", "RoughMatteMaterial")
+
+class RoughMatteMaterial(ImageTest):
+    pass
+
+RoughMatteMaterial = AddTests(RoughMatteMaterial, TestRoughMatteMaterial, GetTestCases())
+
+################################################################################
+# RoughMatteMS material test
+################################################################################
+
+def TestRoughMatteMSMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-roughmatte-ms-area.cfg", "RoughMatteMSMaterial")
+
+class RoughMatteMSMaterial(ImageTest):
+    pass
+
+RoughMatteMSMaterial = AddTests(RoughMatteMSMaterial, TestRoughMatteMSMaterial, GetTestCases())

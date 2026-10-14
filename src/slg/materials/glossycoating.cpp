@@ -158,7 +158,7 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const Vector H(Normalize(localLightDir + localEyeDir));
 		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localEyeDir, H));
 
-		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, dist, u, v, multibounce,
+		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, dist, u, v, multibounce, IsMultiscattering(),
 			localLightDir, localEyeDir);
 
 		// Blend in base layer Schlick style
@@ -274,7 +274,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 		// Don't add the coating scattering if the base sampled
 		// component is specular	
 		if (!(*event & SPECULAR)) {
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce,
+			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
 				localFixedDir, *localSampledDir);
 			assert (coatingF.IsValid());
 
@@ -284,7 +284,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			coatingPdf = 0.f;
 	} else {
 		// Sample coating BxDF
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce,
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
 			localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		assert (coatingF.IsValid());
 
@@ -486,6 +486,7 @@ PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCa
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
+	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".index")(index->GetSDLValue()));

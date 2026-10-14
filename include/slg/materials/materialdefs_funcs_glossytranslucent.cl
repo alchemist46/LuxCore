@@ -190,7 +190,7 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Evaluate(__global const Mater
 		const float3 H = normalize(fixedDir + sampledDir);
 		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce, fixedDir, sampledDir);
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce, material->multiscattering, fixedDir, sampledDir);
 
 		// Blend in base layer Schlick style
 		// assumes coating bxdf takes fresnel factor S into account
@@ -293,13 +293,13 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 			baseF = Spectrum_Clamp(kdVal) * M_1_PI_F * absCosSampledDir;
 
 			// Evaluate coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce,
+			coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce, material->multiscattering,
 				fixedDir, sampledDir);
 			coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
 
 		} else {
 			// Sample coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v, mbounce,
+			coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v, mbounce, material->multiscattering,
 				fixedDir, &sampledDir, u0, u1, &coatingPdf);
 			if (Spectrum_IsBlack(coatingF)) {
 				MATERIAL_SAMPLE_RETURN_BLACK;

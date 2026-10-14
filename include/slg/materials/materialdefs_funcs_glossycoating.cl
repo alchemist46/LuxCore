@@ -213,7 +213,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
 		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
-				material->glossycoating.multibounce, fixedDir, sampledDir);
+				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
 
 		// Blend in base layer Schlick style
 		// assumes coating bxdf takes fresnel factor S into account
@@ -372,7 +372,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 		float3 sampledDir;
 		float coatingPdf;
 		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v,
-				material->glossycoating.multibounce, fixedDir, &sampledDir, u0, u1, &coatingPdf);
+				material->glossycoating.multibounce, material->multiscattering, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 
 		// Save coatingF, coatingPdf and sampledDir
 		EvalStack_PushFloat3(coatingF);
@@ -535,7 +535,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	float coatingPdf;
 	if (!(event & SPECULAR)) {
 		coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
-				material->glossycoating.multibounce, fixedDir, sampledDir);
+				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
 		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
 	} else {
 		coatingF = BLACK;
