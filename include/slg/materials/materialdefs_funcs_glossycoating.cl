@@ -192,16 +192,13 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
 		const float u = clamp(nuVal, 1e-9f, 1.f);
 		const float v = clamp(nvVal, 1e-9f, 1.f);
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
 		const float wBase = 1.f - wCoating;
 
 		directPdfW = wBase * directPdfW +
-				wCoating * SchlickBSDF_CoatingPdf(roughness, anisotropy, fixedDir, sampledDir);
+				wCoating * SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
 
 		// Absorption
 		const float cosi = fabs(sampledDir.z);
@@ -215,7 +212,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 H = normalize(fixedDir + sampledDir);
 		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, roughness, anisotropy,
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
 				material->glossycoating.multibounce, fixedDir, sampledDir);
 
 		// Blend in base layer Schlick style
@@ -321,14 +318,11 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 	const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
-	// Save roughness and anisotropy
-	EvalStack_PushFloat(roughness);
-	EvalStack_PushFloat(anisotropy);
+	// Save u and v
+	EvalStack_PushFloat(u);
+	EvalStack_PushFloat(v);
 
 	// Coating is used only on the front face
 	const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, fixedDir) : 0.f;
@@ -377,7 +371,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 		// Sample coating BSDF (Schlick BSDF)
 		float3 sampledDir;
 		float coatingPdf;
-		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, roughness, anisotropy,
+		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v,
 				material->glossycoating.multibounce, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 
 		// Save coatingF, coatingPdf and sampledDir
@@ -506,10 +500,11 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	EvalStack_PopFloat(wCoating);
 	const float wBase = 1.f - wCoating;
 
-	// Pop roughness and anisotropy
-	float roughness, anisotropy;
-	EvalStack_PopFloat(anisotropy);
-	EvalStack_PopFloat(roughness);
+	// Pop u and v
+	float u, v;
+	EvalStack_PopFloat(v);
+	EvalStack_PopFloat(u);
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Pop ks
 	float3 ks;
@@ -539,9 +534,9 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	float3 coatingF;
 	float coatingPdf;
 	if (!(event & SPECULAR)) {
-		coatingF = SchlickBSDF_CoatingF(ks, roughness, anisotropy,
+		coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
 				material->glossycoating.multibounce, fixedDir, sampledDir);
-		coatingPdf = SchlickBSDF_CoatingPdf(roughness, anisotropy, fixedDir, sampledDir);
+		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
 	} else {
 		coatingF = BLACK;
 		coatingPdf = 0.f;
@@ -594,10 +589,11 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 	EvalStack_PopFloat(wCoating);
 	const float wBase = 1.f - wCoating;
 
-	// Pop roughness and anisotropy
-	float roughness, anisotropy;
-	EvalStack_PopFloat(anisotropy);
-	EvalStack_PopFloat(roughness);
+	// Pop u and v
+	float u, v;
+	EvalStack_PopFloat(v);
+	EvalStack_PopFloat(u);
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Pop ks
 	float3 ks;

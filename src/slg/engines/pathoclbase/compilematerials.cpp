@@ -640,6 +640,9 @@ void CompiledScene::CompileMaterials() {
 		mat->eventTypes = m.GetEventTypes();
 		mat->isDelta = m.IsDelta();
 
+		mat->microfacetDistribution = (m.GetMicrofacetDistribution() == GGX_DISTRIBUTION) ?
+				slg::ocl::GGX_DISTRIBUTION : slg::ocl::SCHLICK_DISTRIBUTION;
+
 		// Material specific parameters
 		switch (m.GetType()) {
 			case MATTE: {

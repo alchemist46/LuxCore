@@ -55,6 +55,18 @@ typedef enum {
 	DLS_ENABLED, DLS_DISABLED, DLS_AUTO
 } MaterialEmissionDLSType;
 
+// The microfacet distribution of Metal2, RoughGlass, CarPaint and of the
+// coating of Glossy2, GlossyCoating and GlossyTranslucent (property
+// "distribution"). SCHLICK_DISTRIBUTION is the Schlick 1994 model inherited
+// from LuxRender, GGX_DISTRIBUTION the anisotropic GGX with Smith masking and
+// visible-normal sampling (see Microfacet_* below).
+typedef enum {
+	SCHLICK_DISTRIBUTION, GGX_DISTRIBUTION
+} MicrofacetDistributionType;
+
+extern MicrofacetDistributionType String2MicrofacetDistributionType(const std::string &type);
+extern std::string MicrofacetDistributionType2String(const MicrofacetDistributionType type);
+
 class SampleableSphericalFunction;
 class Volume;
 
@@ -119,6 +131,9 @@ public:
 
 	void SetHoldout(const bool enabled) { isHoldout = enabled; }
 	bool IsHoldout() const { return isHoldout; }
+
+	void SetMicrofacetDistribution(const MicrofacetDistributionType type) { microfacetDistribution = type; }
+	MicrofacetDistributionType GetMicrofacetDistribution() const { return microfacetDistribution; }
 
     void SetBumpSampleDistance(const float dist) { bumpSampleDistance = dist; }
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
@@ -290,6 +305,8 @@ protected:
 	bool isVisibleIndirectDiffuse, isVisibleIndirectGlossy, isVisibleIndirectSpecular,
 		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled,
 		isHoldout;
+
+	MicrofacetDistributionType microfacetDistribution;
 };
 
 //------------------------------------------------------------------------------
@@ -321,15 +338,68 @@ extern float SchlickDistribution_G(const float roughness, const luxrays::Vector 
 	const luxrays::Vector &localSampledDir);
 
 //------------------------------------------------------------------------------
-// SchlickBSDF related functions
+// GGX distribution with the Smith masking, alpha = (alphaU, alphaV)
+//------------------------------------------------------------------------------
+
+extern float GGXDistribution_D(const float alphaU, const float alphaV, const luxrays::Vector &wh);
+extern float GGXDistribution_Lambda(const float alphaU, const float alphaV, const luxrays::Vector &w);
+extern float GGXDistribution_G1(const float alphaU, const float alphaV, const luxrays::Vector &w);
+extern float GGXDistribution_G(const float alphaU, const float alphaV,
+	const luxrays::Vector &wo, const luxrays::Vector &wi);
+extern float GGXDistribution_PdfVisibleH(const float alphaU, const float alphaV,
+	const luxrays::Vector &wo, const luxrays::Vector &wh);
+extern void GGXDistribution_SampleVisibleH(const float alphaU, const float alphaV, const luxrays::Vector &wo,
+	const float u0, const float u1, luxrays::Vector *wh);
+extern void GGXDistribution_SampleBoundedReflect(const float alphaU, const float alphaV, const luxrays::Vector &wo,
+	const float u0, const float u1, luxrays::Vector *wi);
+extern float GGXDistribution_PdfBoundedReflect(const float alphaU, const float alphaV,
+	const luxrays::Vector &wo, const luxrays::Vector &wi);
+
+//------------------------------------------------------------------------------
+// Microfacet lobe shared by Metal2, RoughGlass, CarPaint and the coating of
+// Glossy2, GlossyCoating and GlossyTranslucent
+//
+// u and v are the roughness values along the tangent and the bitangent, in
+// [1e-9, 1]. With SCHLICK_DISTRIBUTION the isotropic NDF is the GGX one with
+// alpha^2 = u * v, the anisotropy and the masking are Schlick's and the half
+// vector is sampled from the NDF (with the pdf LuxRender always used). With
+// GGX_DISTRIBUTION the NDF is the anisotropic GGX with alpha = (u, v), the
+// masking is the height-correlated Smith one and the half vector is sampled
+// from the visible normals (Dupuy & Benyoub 2023, "Sampling visible GGX normals
+// with spherical caps"), bounded for the reflection lobes (Eto & Tokuyoshi 2023,
+// "Bounded VNDF sampling for the Smith-GGX BRDF").
+//------------------------------------------------------------------------------
+
+extern float Microfacet_D(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wh);
+extern float Microfacet_G(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wo, const luxrays::Vector &wi);
+// Samples a half vector in the upper hemisphere (wo can be on either side).
+// d is D(wh) and pdfH the pdf of wh over the solid angle.
+extern void Microfacet_SampleH(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wo, const float u0, const float u1,
+	luxrays::Vector *wh, float *d, float *pdfH);
+extern float Microfacet_PdfH(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wo, const luxrays::Vector &wh);
+// Reflection lobe: samples wi on the same side as wo and returns its pdf over
+// the solid angle (0 when the sample is not usable)
+extern float Microfacet_SampleReflect(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wo, const float u0, const float u1, luxrays::Vector *wi);
+extern float Microfacet_PdfReflect(const MicrofacetDistributionType dist, const float u, const float v,
+	const luxrays::Vector &wo, const luxrays::Vector &wi);
+
+//------------------------------------------------------------------------------
+// SchlickBSDF related functions (the coating lobe)
 //------------------------------------------------------------------------------
 extern float SchlickBSDF_CoatingWeight(const luxrays::Spectrum &ks, const luxrays::Vector &localFixedDir);
-extern luxrays::Spectrum SchlickBSDF_CoatingF(const bool fromLight, const luxrays::Spectrum &ks, const float roughness, const float anisotropy, const bool mbounce,
+extern luxrays::Spectrum SchlickBSDF_CoatingF(const bool fromLight, const luxrays::Spectrum &ks,
+	const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
 	const luxrays::Vector &localFixedDir,	const luxrays::Vector &localSampledDir);
 extern luxrays::Spectrum SchlickBSDF_CoatingSampleF(const bool fromLight, const luxrays::Spectrum ks,
-	const float roughness, const float anisotropy, const bool mbounce, const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
+	const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
+	const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 	float u0, float u1, float *pdf);
-extern float SchlickBSDF_CoatingPdf(const float roughness, const float anisotropy,
+extern float SchlickBSDF_CoatingPdf(const MicrofacetDistributionType dist, const float u, const float v,
 	const luxrays::Vector &localFixedDir, const luxrays::Vector &localSampledDir);
 
 }  // namespace slg

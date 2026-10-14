@@ -60,10 +60,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
@@ -84,16 +81,17 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 		const float cosThetaIH = AbsDot(localEyeDir, wh);
 		const float cosThetaOH = Dot(localLightDir, wh);
 
-		const float D = SchlickDistribution_D(roughness, wh, anisotropy);
-		const float G = SchlickDistribution_G(roughness, localLightDir, localEyeDir);
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
+		const float D = Microfacet_D(dist, u, v, wh);
+		const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
 
+		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 		if (directPdfW)
-			*directPdfW = threshold * specPdf * (hitPoint.fromLight ? fabsf(cosThetaIH) : (fabsf(cosThetaOH) * eta * eta)) / lengthSquared;
+			*directPdfW = threshold * Microfacet_PdfH(dist, u, v, localFixedDir, wh) * (hitPoint.fromLight ? fabsf(cosThetaIH) : (fabsf(cosThetaOH) * eta * eta)) / lengthSquared;
 
 		if (reversePdfW)
-			*reversePdfW = threshold * specPdf * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
+			*reversePdfW = threshold * Microfacet_PdfH(dist, u, v, localSampledDir, wh) * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
 
 		const Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
@@ -116,16 +114,17 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 			wh = -wh;
 
 		float cosThetaH = Dot(localEyeDir, wh);
-		const float D = SchlickDistribution_D(roughness, wh, anisotropy);
-		const float G = SchlickDistribution_G(roughness, localLightDir, localEyeDir);
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
+		const float D = Microfacet_D(dist, u, v, wh);
+		const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaH);
 
+		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 		if (directPdfW)
-			*directPdfW = (1.f - threshold) * specPdf / (4.f * AbsDot(localLightDir, wh));
+			*directPdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localFixedDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		if (reversePdfW)
-			*reversePdfW = (1.f - threshold) * specPdf / (4.f * AbsDot(localLightDir, wh));
+			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localSampledDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		const Spectrum result = (D * G / (4.f * cosThetaI)) * kr * F;
 
@@ -157,14 +156,11 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	Vector wh;
 	float d, specPdf;
-	SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &specPdf);
+	Microfacet_SampleH(dist, u, v, localFixedDir, u0, u1, &wh, &d, &specPdf);
 	if (wh.z < 0.f)
 		wh = -wh;
 	const float cosThetaOH = Dot(localFixedDir, wh);
@@ -212,7 +208,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 
 		const float cosi = fabsf(localSampledDir->z);
 
-		const float G = SchlickDistribution_G(roughness, localFixedDir, *localSampledDir);
+		const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / threshold;
 
 		if (!hitPoint.fromLight) {
@@ -237,7 +233,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 			return Spectrum();
 
-		const float G = SchlickDistribution_G(roughness, localFixedDir, *localSampledDir);
+		const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / (1.f - threshold);
 
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
@@ -279,10 +275,7 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
@@ -303,13 +296,11 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 		const float cosThetaIH = AbsDot(localEyeDir, wh);
 		const float cosThetaOH = AbsDot(localLightDir, wh);
 
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
-
 		if (directPdfW)
-			*directPdfW = threshold * specPdf * cosThetaIH / lengthSquared;
+			*directPdfW = threshold * Microfacet_PdfH(dist, u, v, localLightDir, wh) * cosThetaIH / lengthSquared;
 
 		if (reversePdfW)
-			*reversePdfW = threshold * specPdf * cosThetaOH * eta * eta / lengthSquared;
+			*reversePdfW = threshold * Microfacet_PdfH(dist, u, v, localEyeDir, wh) * cosThetaOH * eta * eta / lengthSquared;
 	} else {
 		// Reflect
 		const float cosThetaO = fabsf(CosTheta(localLightDir));
@@ -324,13 +315,11 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 		if (wh.z < 0.f)
 			wh = -wh;
 
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
-
 		if (directPdfW)
-			*directPdfW = (1.f - threshold) * specPdf / (4.f * AbsDot(localLightDir, wh));
+			*directPdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localLightDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		if (reversePdfW)
-			*reversePdfW = (1.f - threshold) * specPdf / (4.f * AbsDot(localLightDir, wh));
+			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localEyeDir, wh) / (4.f * AbsDot(localLightDir, wh));
 	}
 }
 
@@ -393,6 +382,7 @@ PropertiesUPtr RoughGlassMaterial::ToProperties(const ImageMapCache &imgMapCache
 		props->Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
+	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	if (filmThickness)
 		props->Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));
 	if (filmIor)

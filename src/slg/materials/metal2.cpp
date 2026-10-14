@@ -87,19 +87,18 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	float *directPdfW, float *reversePdfW) const {
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const Vector wh(Normalize(localLightDir + localEyeDir));
 	const float cosWH = Dot(localLightDir, wh);
 
+	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 	if (directPdfW)
-		*directPdfW = SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * cosWH);
+		*directPdfW = Microfacet_PdfReflect(dist, u, v, localFixedDir, localSampledDir);
 
 	if (reversePdfW)
-		*reversePdfW = SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * cosWH);
+		*reversePdfW = Microfacet_PdfReflect(dist, u, v, localSampledDir, localFixedDir);
 
 	Spectrum F;
 	if (fresnelTex)
@@ -112,10 +111,10 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	}
 	F.Clamp(0.f, 1.f);
 
-	const float G = SchlickDistribution_G(roughness, localLightDir, localEyeDir);
+	const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
 
 	*event = GLOSSY | REFLECT;
-	return (SchlickDistribution_D(roughness, wh, anisotropy) * G / (4.f * fabsf(localEyeDir.z))) * F;
+	return (Microfacet_D(dist, u, v, wh) * G / (4.f * fabsf(localEyeDir.z))) * F;
 }
 
 Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
@@ -127,27 +126,23 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
-	Vector wh;
-	float d, specPdf;
-	SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &specPdf);
-	const float cosWH = Dot(localFixedDir, wh);
-	*localSampledDir = 2.f * cosWH * wh - localFixedDir;
+	*pdfW = Microfacet_SampleReflect(dist, u, v, localFixedDir, u0, u1, localSampledDir);
 
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir->z);
 	if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 		return Spectrum();
 
-	*pdfW = specPdf / (4.f * fabsf(cosWH));
 	if (*pdfW <= 0.f)
 		return Spectrum();
 
-	const float G = SchlickDistribution_G(roughness, localFixedDir, *localSampledDir);
+	const Vector wh(Normalize(localFixedDir + *localSampledDir));
+	const float cosWH = AbsDot(localFixedDir, wh);
+
+	const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
+	const float d = Microfacet_D(dist, u, v, wh);
 
 	Spectrum F;
 	if (fresnelTex)
@@ -160,7 +155,8 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 	}
 	F.Clamp(0.f, 1.f);
 
-	float factor = (d / specPdf) * G * fabsf(cosWH);
+	// f * |cos(sampled)| / pdf
+	float factor = d * G / (4.f * *pdfW);
 	if (!hitPoint.fromLight)
 		factor /= coso;
 	else
@@ -176,18 +172,16 @@ void Metal2Material::Pdf(const HitPoint &hitPoint,
 		float *directPdfW, float *reversePdfW) const {
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
-	const Vector wh(Normalize(localLightDir + localEyeDir));
+	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 
 	if (directPdfW)
-		*directPdfW = SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * AbsDot(localLightDir, wh));
+		*directPdfW = Microfacet_PdfReflect(dist, u, v, localFixedDir, localSampledDir);
 
 	if (reversePdfW)
-		*reversePdfW = SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * AbsDot(localLightDir, wh));
+		*reversePdfW = Microfacet_PdfReflect(dist, u, v, localSampledDir, localFixedDir);
 }
 
 void Metal2Material::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {
@@ -240,6 +234,7 @@ PropertiesUPtr Metal2Material::ToProperties(const ImageMapCache &imgMapCache, co
 		props->Set(Property("scene.materials." + name + ".k")(k->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
+	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

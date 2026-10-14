@@ -65,6 +65,12 @@ typedef struct {
 // Materials
 //------------------------------------------------------------------------------
 
+// The microfacet distribution of the Metal2, RoughGlass, CarPaint, Glossy2,
+// GlossyCoating and GlossyTranslucent materials
+typedef enum {
+	SCHLICK_DISTRIBUTION, GGX_DISTRIBUTION
+} MicrofacetDistributionType;
+
 typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
@@ -356,6 +362,8 @@ typedef struct {
 	BSDFEvent eventTypes;
 	// The result of calling Material::IsDelta()
 	int isDelta; 
+
+	MicrofacetDistributionType microfacetDistribution;
 
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;

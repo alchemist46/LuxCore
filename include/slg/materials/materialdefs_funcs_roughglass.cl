@@ -86,10 +86,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	float directPdfW;
 	BSDFEvent event;
@@ -114,9 +111,9 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 		const float cosThetaIH = fabs(dot(eyeDir, wh));
 		const float cosThetaOH = dot(lightDir, wh);
 
-		const float D = SchlickDistribution_D(roughness, wh, anisotropy);
-		const float G = SchlickDistribution_G(roughness, lightDir, eyeDir);
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
+		const float D = Microfacet_D(dist, u, v, wh);
+		const float G = Microfacet_G(dist, u, v, lightDir, eyeDir);
+		const float specPdf = Microfacet_PdfH(dist, u, v, eyeDir, wh);
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
 
 		directPdfW = threshold * specPdf * (fabs(cosThetaOH) * eta * eta) / lengthSquared;
@@ -145,9 +142,9 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 			wh = -wh;
 
 		float cosThetaH = dot(eyeDir, wh);
-		const float D = SchlickDistribution_D(roughness, wh, anisotropy);
-		const float G = SchlickDistribution_G(roughness, lightDir, eyeDir);
-		const float specPdf = SchlickDistribution_Pdf(roughness, wh, anisotropy);
+		const float D = Microfacet_D(dist, u, v, wh);
+		const float G = Microfacet_G(dist, u, v, lightDir, eyeDir);
+		const float specPdf = Microfacet_PdfH(dist, u, v, eyeDir, wh);
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaH);
 
 		directPdfW = (1.f - threshold) * specPdf / (4.f * fabs(dot(lightDir, wh)));
@@ -203,14 +200,11 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	float3 wh;
 	float d, specPdf;
-	SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &specPdf);
+	Microfacet_SampleH(dist, u, v, fixedDir, u0, u1, &wh, &d, &specPdf);
 	if (wh.z < 0.f)
 		wh = -wh;
 	const float cosThetaOH = dot(fixedDir, wh);
@@ -264,7 +258,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 
 		const float cosi = fabs(sampledDir.z);
 
-		const float G = SchlickDistribution_G(roughness, fixedDir, sampledDir);
+		const float G = Microfacet_G(dist, u, v, fixedDir, sampledDir);
 		float factor = (d / specPdf) * G * fabs(cosThetaOH) / threshold;
 
 		//if (!hitPoint.fromLight) {
@@ -291,7 +285,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 			MATERIAL_SAMPLE_RETURN_BLACK;
 		}
 
-		const float G = SchlickDistribution_G(roughness, fixedDir, sampledDir);
+		const float G = Microfacet_G(dist, u, v, fixedDir, sampledDir);
 		float factor = (d / specPdf) * G * fabs(cosThetaOH) / (1.f - threshold);
 
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaOH);

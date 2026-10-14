@@ -717,6 +717,7 @@ MaterialUPtr Scene::CreateMaterial(
 
 	mat->SetID(props.Get(Property(propName + ".id")(defaultMatID)).Get<u_int>());
 	mat->SetBumpSampleDistance(bumpSampleDistance);
+	mat->SetMicrofacetDistribution(String2MicrofacetDistributionType(parseString("distribution", "schlick")));
 
 	// Gain is not really a color so I avoid to use GetColor()
 	mat->SetEmittedGain(props.Get(Property(propName + ".emission.gain")(Spectrum(1.f))).Get<Spectrum>());

@@ -175,16 +175,13 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Evaluate(__global const Mater
 		}
 		ks = Spectrum_Clamp(ks);
 
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
 		const float wBase = 1.f - wCoating;
 
 		directPdfW = .5f * (wBase * fabs(sampledDir.z * M_1_PI_F) +
-			wCoating * SchlickBSDF_CoatingPdf(roughness, anisotropy, fixedDir, sampledDir));
+			wCoating * SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir));
 
 		// Absorption
 		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, depth);
@@ -193,7 +190,7 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Evaluate(__global const Mater
 		const float3 H = normalize(fixedDir + sampledDir);
 		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, roughness, anisotropy, mbounce, fixedDir, sampledDir);
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce, fixedDir, sampledDir);
 
 		// Blend in base layer Schlick style
 		// assumes coating bxdf takes fresnel factor S into account
@@ -275,10 +272,7 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 		}
 		ks = Spectrum_Clamp(ks);
 
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
 		const float wBase = 1.f - wCoating;
@@ -299,13 +293,13 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 			baseF = Spectrum_Clamp(kdVal) * M_1_PI_F * absCosSampledDir;
 
 			// Evaluate coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingF(ks, roughness, anisotropy, mbounce,
+			coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, mbounce,
 				fixedDir, sampledDir);
-			coatingPdf = SchlickBSDF_CoatingPdf(roughness, anisotropy, fixedDir, sampledDir);
+			coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
 
 		} else {
 			// Sample coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingSampleF(ks, roughness, anisotropy, mbounce,
+			coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v, mbounce,
 				fixedDir, &sampledDir, u0, u1, &coatingPdf);
 			if (Spectrum_IsBlack(coatingF)) {
 				MATERIAL_SAMPLE_RETURN_BLACK;

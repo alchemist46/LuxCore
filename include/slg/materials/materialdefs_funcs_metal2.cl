@@ -100,15 +100,12 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 
 	const float u = clamp(uVal, 1e-9f, 1.f);
 	const float v = clamp(vVal, 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	const float3 wh = normalize(lightDir + eyeDir);
 	const float cosWH = dot(lightDir, wh);
 
-	const float directPdfW = SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * cosWH);
+	const float directPdfW = Microfacet_PdfReflect(dist, u, v, eyeDir, lightDir);
 
 	float3 nVal, kVal;
 	Metal2Material_GetNK(material, hitPoint,
@@ -118,10 +115,10 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 	const float3 F = FresnelGeneral_Evaluate(nVal, kVal, cosWH);
 	Spectrum_Clamp(F);
 
-	const float G = SchlickDistribution_G(roughness, lightDir, eyeDir);
+	const float G = Microfacet_G(dist, u, v, lightDir, eyeDir);
 
 	const BSDFEvent event = GLOSSY | REFLECT;
-	const float3 result = (SchlickDistribution_D(roughness, wh, anisotropy) * G / (4.f * fabs(eyeDir.z))) * F;
+	const float3 result = (Microfacet_D(dist, u, v, wh) * G / (4.f * fabs(eyeDir.z))) * F;
 	
 	EvalStack_PushFloat3(result);
 	EvalStack_PushBSDFEvent(event);
@@ -148,16 +145,10 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 
 	const float u = clamp(uVal, 1e-9f, 1.f);
 	const float v = clamp(vVal, 1e-9f, 1.f);
-	const float u2 = u * u;
-	const float v2 = v * v;
-	const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	const float roughness = u * v;
+	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
-	float3 wh;
-	float d, specPdf;
-	SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &specPdf);
-	const float cosWH = dot(fixedDir, wh);
-	const float3 sampledDir = 2.f * cosWH * wh - fixedDir;
+	float3 sampledDir;
+	const float pdfW = Microfacet_SampleReflect(dist, u, v, fixedDir, u0, u1, &sampledDir);
 
 	const float coso = fabs(fixedDir.z);
 	const float cosi = fabs(sampledDir.z);
@@ -165,12 +156,15 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	const float pdfW = specPdf / (4.f * fabs(cosWH));
 	if (pdfW <= 0.f) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	const float G = SchlickDistribution_G(roughness, fixedDir, sampledDir);
+	const float3 wh = normalize(fixedDir + sampledDir);
+	const float cosWH = fabs(dot(fixedDir, wh));
+
+	const float G = Microfacet_G(dist, u, v, fixedDir, sampledDir);
+	const float d = Microfacet_D(dist, u, v, wh);
 
 	float3 nVal, kVal;
 	Metal2Material_GetNK(material, hitPoint,
@@ -180,7 +174,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 	const float3 F = FresnelGeneral_Evaluate(nVal, kVal, cosWH);
 	Spectrum_Clamp(F);
 
-	float factor = (d / specPdf) * G * fabs(cosWH);
+	// f * |cos(sampled)| / pdf
+	float factor = d * G / (4.f * pdfW);
 	//if (!fromLight)
 		factor /= coso;
 	//else

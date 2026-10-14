@@ -128,17 +128,14 @@ Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 		if (directPdfW) {
 			const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = .5f * (wBase * fabsf(localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf(roughness, anisotropy, localFixedDir, localSampledDir));
+				wCoating * SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, localSampledDir));
 		}
 
 		if (reversePdfW) {
@@ -146,7 +143,7 @@ Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = .5f * (wBaseR * fabsf(localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf(roughness, anisotropy, localSampledDir, localFixedDir));
+				wCoatingR * SchlickBSDF_CoatingPdf(dist, u, v, localSampledDir, localFixedDir));
 		}
 
 		// Absorption
@@ -156,7 +153,7 @@ Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 		const Vector H(Normalize(localFixedDir + localSampledDir));
 		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localSampledDir, H));
 
-		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, roughness, anisotropy, mbounce,
+		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, mbounce,
 			localFixedDir, localSampledDir);
 
 		// Blend in base layer Schlick style
@@ -202,10 +199,7 @@ Spectrum GlossyTranslucentMaterial::Sample(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 		const float wBase = 1.f - wCoating;
@@ -224,12 +218,12 @@ Spectrum GlossyTranslucentMaterial::Sample(const HitPoint &hitPoint,
 			baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
 
 			// Evaluate coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, roughness, anisotropy, mbounce,
+			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, mbounce,
 				localFixedDir, *localSampledDir);
-			coatingPdf = SchlickBSDF_CoatingPdf(roughness, anisotropy, localFixedDir, *localSampledDir);
+			coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, *localSampledDir);
 		} else {
 			// Sample coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, roughness, anisotropy, mbounce,
+			coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, mbounce,
 				localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 			if (coatingF.Black())
 				return Spectrum();
@@ -324,17 +318,14 @@ void GlossyTranslucentMaterial::Pdf(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		const float u2 = u * u;
-		const float v2 = v * v;
-		const float anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-		const float roughness = u * v;
+		const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 		if (directPdfW) {
 			const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = .5f * (wBase * fabsf(localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf(roughness, anisotropy, localFixedDir, localSampledDir));
+				wCoating * SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, localSampledDir));
 		}
 
 		if (reversePdfW) {
@@ -342,7 +333,7 @@ void GlossyTranslucentMaterial::Pdf(const HitPoint &hitPoint,
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = .5f * (wBaseR * fabsf(localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf(roughness, anisotropy, localSampledDir, localFixedDir));
+				wCoatingR * SchlickBSDF_CoatingPdf(dist, u, v, localSampledDir, localFixedDir));
 		}
 	} else {
 		if (directPdfW)
@@ -428,6 +419,7 @@ PropertiesUPtr GlossyTranslucentMaterial::ToProperties(const ImageMapCache &imgM
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness_bf")(nu_bf->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
+	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Property("scene.materials." + name + ".vroughness_bf")(nv_bf->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".ka_bf")(Ka_bf->GetSDLValue()));
