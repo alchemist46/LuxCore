@@ -22,7 +22,7 @@
 // Texture_GetFloatValue()
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float Texture_GetFloatValueSlowPath(const uint texIndex,
+OPENCL_HOT_FUNCTION float Texture_GetFloatValueSlowPath(const uint texIndex,
 		__global const HitPoint *hitPoint
 		TEXTURES_PARAM_DECL) {
 #if defined(DEBUG_PRINTF_TEXTURE_EVAL)
@@ -93,7 +93,7 @@ OPENCL_FORCE_INLINE float Texture_GetFloatValue(const uint texIndex,
 // Texture_GetSpectrumValue()
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float3 Texture_GetSpectrumValueSlowPath(const uint texIndex,
+OPENCL_HOT_FUNCTION float3 Texture_GetSpectrumValueSlowPath(const uint texIndex,
 		__global const HitPoint *hitPoint
 		TEXTURES_PARAM_DECL) {
 #if defined(DEBUG_PRINTF_TEXTURE_EVAL)
@@ -165,7 +165,7 @@ OPENCL_FORCE_INLINE float3 Texture_GetSpectrumValue(const uint texIndex,
 // Texture_Bump()
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float3 Texture_Bump(const uint texIndex,
+OPENCL_HOT_FUNCTION float3 Texture_Bump(const uint texIndex,
 		__global HitPoint *hitPoint,
 		const float sampleDistance
 		TEXTURES_PARAM_DECL) {

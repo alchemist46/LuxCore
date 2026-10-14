@@ -21,6 +21,7 @@
 #if !defined(LUXRAYS_DISABLE_HIP)
 
 #include <chrono>
+#include <fstream>
 #include <cstring>
 
 #include <boost/algorithm/string/replace.hpp>
@@ -228,6 +229,23 @@ vector<string> HIPDevice::AddKernelOpts(const vector<string> &programParameters)
 	return hipProgramParameters;
 }
 
+// Debugging aid: with LUXRAYS_KERNEL_DUMP_DIR set, the source of each program
+// is written there (with its compiler options on the first line), so it can be
+// compiled offline, e.g. with the ROCm clang and warnings enabled
+static void DumpKernelSource(const vector<string> &params, const string &source,
+		const string &programName) {
+	const char *dir = getenv("LUXRAYS_KERNEL_DUMP_DIR");
+	if (!dir)
+		return;
+
+	string fileName = programName;
+	for (char &c : fileName)
+		if (!isalnum(c))
+			c = '_';
+	ofstream file((string(dir) + "/" + fileName + ".hip").c_str());
+	file << "// " << oclKernelPersistentCache::ToOptsString(params) << "\n" << source;
+}
+
 string HIPDevice::GetKernelSource(const string &kernelSource) {
 	// The pragma only covers functions: file scope tables (always declared at
 	// the start of a line as "__constant <type> <name>[] = { ... }", while the
@@ -261,6 +279,7 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 	auto startTime = std::chrono::high_resolution_clock::now();
 
 	const string hipProgramSource = GetKernelSource(programSource);
+	DumpKernelSource(hipProgramParameters, hipProgramSource, programName);
 
 	bool cached;
 	string error;
@@ -305,6 +324,7 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 
 		kernels.push_back(std::make_tuple(hipProgramParameters,
 			GetKernelSource(request.source), request.name));
+		DumpKernelSource(hipProgramParameters, std::get<1>(kernels.back()), request.name);
 	}
 
 	LR_LOG(deviceContext, "[" << requests.size() << " programs] Compiling kernels in parallel for " << deviceDesc.GetHIPArch());
@@ -365,6 +385,11 @@ HardwareDeviceKernelUPtr HIPDevice::GetKernel(
 		hipModuleGetFunction(
 			&function, hipDeviceProgram.GetModule(), kernelName.c_str())
 		);
+
+	int numRegs = 0, scratchBytes = 0;
+	if ((hipFuncGetAttribute(&numRegs, HIP_FUNC_ATTRIBUTE_NUM_REGS, function) == hipSuccess) &&
+			(hipFuncGetAttribute(&scratchBytes, HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, function) == hipSuccess))
+		LR_LOG(deviceContext, "[" << kernelName << "] " << numRegs << " VGPRs, " << scratchBytes << " bytes of scratch");
 
 	hipDeviceKernel.Set(function);
 

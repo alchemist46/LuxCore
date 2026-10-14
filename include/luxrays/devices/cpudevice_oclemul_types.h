@@ -31,6 +31,7 @@
 
 #define OPENCL_FORCE_NOT_INLINE inline
 #define OPENCL_FORCE_INLINE inline
+#define OPENCL_HOT_FUNCTION inline
 
 // Used by cudadevice_math.cl and cudadevice_oclemul_funcs.cl
 #define __device__

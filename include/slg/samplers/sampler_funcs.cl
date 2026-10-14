@@ -70,7 +70,7 @@ OPENCL_FORCE_INLINE void Sampler_SplatSample(
 	}
 }
 
-OPENCL_FORCE_NOT_INLINE void Sampler_NextSample(
+OPENCL_HOT_FUNCTION void Sampler_NextSample(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global float *filmNoise,
 		__global float *filmUserImportance,

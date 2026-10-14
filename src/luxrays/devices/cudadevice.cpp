@@ -372,6 +372,11 @@ HardwareDeviceKernelUPtr CUDADevice::GetKernel(
 			&function, cudaDeviceProgram.GetModule(), kernelName.c_str())
 		);
 
+	int numRegs = 0, localBytes = 0;
+	if ((cuFuncGetAttribute(&numRegs, CU_FUNC_ATTRIBUTE_NUM_REGS, function) == CUDA_SUCCESS) &&
+			(cuFuncGetAttribute(&localBytes, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, function) == CUDA_SUCCESS))
+		LR_LOG(deviceContext, "[" << kernelName << "] " << numRegs << " registers, " << localBytes << " bytes of local memory");
+
 	cudaDeviceKernel.Set(function);
 
 	return std::move(kernel);

@@ -141,7 +141,7 @@ OPENCL_FORCE_INLINE float2 UVRandomMapping2D_MapDuv(__global const TextureMappin
 // TextureMapping2D
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float2 TextureMapping2D_Map(__global const TextureMapping2D *mapping,
+OPENCL_HOT_FUNCTION float2 TextureMapping2D_Map(__global const TextureMapping2D *mapping,
 		__global const HitPoint *hitPoint TEXTURES_PARAM_DECL) {
 	switch (mapping->type) {
 		case UVMAPPING2D:
@@ -153,7 +153,7 @@ OPENCL_FORCE_NOT_INLINE float2 TextureMapping2D_Map(__global const TextureMappin
 	}
 }
 
-OPENCL_FORCE_NOT_INLINE float2 TextureMapping2D_MapDuv(__global const TextureMapping2D *mapping,
+OPENCL_HOT_FUNCTION float2 TextureMapping2D_MapDuv(__global const TextureMapping2D *mapping,
 		__global const HitPoint *hitPoint, float2 *ds, float2 *dt TEXTURES_PARAM_DECL) {
 	switch (mapping->type) {
 		case UVMAPPING2D:
@@ -285,7 +285,7 @@ OPENCL_FORCE_INLINE float3 LocalRandomMapping3D_Map(__global const TextureMappin
 
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float3 TextureMapping3D_Map(__global const TextureMapping3D *mapping,
+OPENCL_HOT_FUNCTION float3 TextureMapping3D_Map(__global const TextureMapping3D *mapping,
 		__global const HitPoint *hitPoint, float3 *shadeN TEXTURES_PARAM_DECL) {
 	switch (mapping->type) {
 		case UVMAPPING3D:

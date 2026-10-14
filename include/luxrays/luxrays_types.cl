@@ -31,6 +31,12 @@
 #define OPENCL_FORCE_INLINE
 #endif
 
+// Hot functions with one or two callers: the device prelude decides whether
+// they are inlined
+#if !defined(OPENCL_HOT_FUNCTION)
+#define OPENCL_HOT_FUNCTION OPENCL_FORCE_NOT_INLINE
+#endif
+
 #define NULL 0
 
 OPENCL_FORCE_INLINE float2 VLOAD2F(const __global float *p) {

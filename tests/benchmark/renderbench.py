@@ -115,6 +115,15 @@ def render(scene_cfg, engine, args, device_select):
         props.Set(pyluxcore.Property("opencl.devices.select", device_select))
     if args.threshold:
         props.Set(pyluxcore.Property("batch.haltthreshold", args.threshold))
+    else:
+        # Raw throughput: no adaptive sampling. With it, the samplers skip the
+        # converged pixels at a rate that depends on the timing of the noise
+        # estimation, and a skipped sample counts as a sample without tracing a
+        # ray, so samples/sec would measure the skip rate as much as the
+        # renderer (seen on manylights: -14% samples/sec for a build that was
+        # +5% at equal spp).
+        props.Set(pyluxcore.Property("sampler.sobol.adaptive.strength", 0.0))
+        props.Set(pyluxcore.Property("sampler.random.adaptive.strength", 0.0))
     for define in args.define or []:
         props.Set(pyluxcore.Properties().SetFromString(define))
 

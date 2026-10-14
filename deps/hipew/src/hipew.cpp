@@ -80,6 +80,7 @@ thipStreamSynchronize *hipStreamSynchronize;
 thipModuleLoadData *hipModuleLoadData;
 thipModuleUnload *hipModuleUnload;
 thipModuleGetFunction *hipModuleGetFunction;
+thipFuncGetAttribute *hipFuncGetAttribute;
 thipModuleLaunchKernel *hipModuleLaunchKernel;
 
 thiprtcGetErrorString *hiprtcGetErrorString;
@@ -184,6 +185,7 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLoadData);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleUnload);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleGetFunction);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipFuncGetAttribute);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLaunchKernel);
 
 	hipLib.result = missingSymbol ? HIPEW_ERROR_MISSING_SYMBOL : HIPEW_SUCCESS;

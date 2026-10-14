@@ -130,6 +130,20 @@ typedef hipError_t HIPAPI thipStreamSynchronize(hipStream_t stream);
 typedef hipError_t HIPAPI thipModuleLoadData(hipModule_t *module, const void *image);
 typedef hipError_t HIPAPI thipModuleUnload(hipModule_t module);
 typedef hipError_t HIPAPI thipModuleGetFunction(hipFunction_t *function, hipModule_t module, const char *kname);
+typedef enum hipFunction_attribute {
+	HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 0,
+	HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = 1,
+	HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES = 2,
+	HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES = 3,
+	HIP_FUNC_ATTRIBUTE_NUM_REGS = 4,
+	HIP_FUNC_ATTRIBUTE_PTX_VERSION = 5,
+	HIP_FUNC_ATTRIBUTE_BINARY_VERSION = 6,
+	HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA = 7,
+	HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = 8,
+	HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = 9,
+	HIP_FUNC_ATTRIBUTE_MAX
+} hipFunction_attribute;
+typedef hipError_t HIPAPI thipFuncGetAttribute(int *value, hipFunction_attribute attrib, hipFunction_t hfunc);
 typedef hipError_t HIPAPI thipModuleLaunchKernel(hipFunction_t f,
 	unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
 	unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
@@ -165,6 +179,7 @@ extern thipStreamSynchronize *hipStreamSynchronize;
 extern thipModuleLoadData *hipModuleLoadData;
 extern thipModuleUnload *hipModuleUnload;
 extern thipModuleGetFunction *hipModuleGetFunction;
+extern thipFuncGetAttribute *hipFuncGetAttribute;
 extern thipModuleLaunchKernel *hipModuleLaunchKernel;
 
 //------------------------------------------------------------------------------

@@ -21,6 +21,7 @@
 // This is a workaround to long compilation time
 #define OPENCL_FORCE_NOT_INLINE __attribute__((noinline))
 #define OPENCL_FORCE_INLINE __attribute__((always_inline))
+#define OPENCL_HOT_FUNCTION OPENCL_FORCE_NOT_INLINE
 
 //------------------------------------------------------------------------------
 // MAKE_FLOATn()

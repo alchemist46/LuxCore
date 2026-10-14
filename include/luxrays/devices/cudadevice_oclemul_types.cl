@@ -27,6 +27,13 @@
 // This is a workaround to long compilation time
 #define OPENCL_FORCE_NOT_INLINE __noinline__
 #define OPENCL_FORCE_INLINE __forceinline__
+#if defined(LUXRAYS_HIP_DEVICE)
+// The hot functions with one or two callers are left to the compiler on HIP
+// (inlining everything is 4x slower to compile and spills registers)
+#define OPENCL_HOT_FUNCTION
+#else
+#define OPENCL_HOT_FUNCTION __noinline__
+#endif
 
 typedef unsigned char uchar;
 typedef unsigned short ushort;

@@ -492,7 +492,7 @@ OPENCL_FORCE_INLINE void StereoCamera_GenerateRay(
 // Generic function
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE void Camera_GenerateRay(
+OPENCL_HOT_FUNCTION void Camera_GenerateRay(
 		__global const Camera* restrict camera,
 		__global const float* restrict cameraBokehDistribution,
 		const uint filmWidth, const uint filmHeight,
