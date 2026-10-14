@@ -46,6 +46,7 @@
 #include "slg/renderconfig.h"
 #include "slg/film/filters/filter.h"
 #include "slg/scene/scene.h"
+#include "slg/samplers/sobolsequence.h"
 
 #include "luxcore/cfg.h"
 
@@ -222,7 +223,14 @@ void PathOCLBaseRenderEngine::InitGPUTaskConfiguration() {
 		if (haltSPP > 0) {
 			// Each replica of the per-pixel error estimate gets half of the samples
 			const u_int spp = taskConfig.sampler.sobol.halfReplicas ? ((haltSPP + 1) / 2) : haltSPP;
-			taskConfig.sampler.sobol.blueNoiseChunkBits = Log2Int(RoundUpPow2(Max(spp, 2u)));
+			const u_int chunkBits = Log2Int(RoundUpPow2(Max(spp, 2u)));
+			// A halt spp larger than the chunks the Morton code leaves room
+			// for: 0, the pixels use their own sequence from the first sample
+			// (see SobolSampler::InitNewSample())
+			const u_int *subRegion = film->GetSubRegion();
+			const u_int mortonDigits = SobolSequence::BlueNoiseMortonDigits(
+					subRegion[1] - subRegion[0] + 1, subRegion[3] - subRegion[2] + 1);
+			taskConfig.sampler.sobol.blueNoiseChunkBits = (chunkBits > 32u - 2u * mortonDigits) ? 0u : chunkBits;
 		}
 	}
 

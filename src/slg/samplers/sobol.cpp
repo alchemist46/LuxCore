@@ -323,8 +323,9 @@ void SobolSampler::InitNewSample() {
 				// up, neighbouring pixels have taken consecutive stretches of
 				// the sequence, which are well stratified together: the error
 				// is high frequency. The chunk is sized from the halt spp, so
-				// the chunks are full at the end of the render; past it, a
-				// pixel moves to a new sequence.
+				// the chunks are full at the end of the render. Past its
+				// chunk, a pixel continues with a sequence of its own (see
+				// below).
 				const u_int haltSPP = GetFilm().GetHaltSPP_PixelNormalized() ? GetFilm().GetHaltSPP_PixelNormalized() :
 					GetFilm().GetHaltSPP();
 				u_int spp = haltSPP ? haltSPP : blueNoiseSPP;
@@ -343,6 +344,14 @@ void SobolSampler::InitNewSample() {
 				// one sequence per pixel). The chunks are then as long as
 				// the Morton code leaves room for.
 				blueNoiseChunkBits = (halfReplicas && !haltSPP) ? maxChunkBits : Clamp(Log2Int(spp), 1, maxChunkBits);
+				// A halt spp larger than the chunks the Morton code leaves room
+				// for (over 1024 spp at 1920x1080, 256 at 3840x2160): the
+				// pixels use their own sequence from the first sample. A
+				// chunk followed by a sequence of its own costs 17-24% more
+				// error than one sequence at 4x the chunk (the two parts are
+				// not stratified together; cornell and luxball-hdr), for a
+				// blue-noise effect that is gone at such sample counts.
+				const u_int chunkSize = (haltSPP && (Log2Int(spp) > maxChunkBits)) ? 0u : (1u << blueNoiseChunkBits);
 				const u_int morton = EncodeMorton2(subRegionPixelX, subRegionPixelY);
 				if (blueNoiseFirstSample && (pass == 0)) {
 					// "Blue noise first": the first sample of every pixel from
@@ -355,12 +364,25 @@ void SobolSampler::InitNewSample() {
 					sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb2u));
 				} else {
 					const u_int p = blueNoiseFirstSample ? (pass - 1) : pass;
-					const u_int block = p >> blueNoiseChunkBits;
-					const u_int blockSeed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb3u + block));
-					sobolIndex = SobolSequence::NestedUniformScrambleBase4(
-							(morton << blueNoiseChunkBits) | (p & ((1u << blueNoiseChunkBits) - 1u)),
-							blockSeed, mortonDigits + (blueNoiseChunkBits + 1u) / 2u);
-					sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(blockSeed, 0xb4u));
+					if (p < chunkSize) {
+						const u_int chunkSeed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb3u));
+						sobolIndex = SobolSequence::NestedUniformScrambleBase4(
+								(morton << blueNoiseChunkBits) | p,
+								chunkSeed, mortonDigits + (blueNoiseChunkBits + 1u) / 2u);
+						sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(chunkSeed, 0xb4u));
+					} else {
+						// Past its chunk (no halt spp, a halt spp over the
+						// chunk size the Morton code leaves room for, or the
+						// overshoot of the halt), a pixel continues with one
+						// sequence of its own, as without the blue-noise
+						// ordering: the samples past the chunk stay
+						// stratified together. Moving to a new chunk every
+						// chunk size samples made a pixel at N spp the mean
+						// of N / chunk size independent short sequences.
+						sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(
+								SobolSequence::HashCombine(seedBase, 0xb5u), pixelIndex));
+						sobolIndex = SobolSequence::ShuffledIndex(p - chunkSize, sobolSequence.seed);
+					}
 				}
 			} else {
 				// Each pixel has its own scrambling of the Sobol sequence
@@ -569,7 +591,14 @@ PropertiesUPtr SobolSampler::GetDefaultProps() {
 			Property("sampler.sobol.overlapping")(1) <<
 			Property("sampler.sobol.bluenoise.enable")(true) <<
 			Property("sampler.sobol.bluenoise.first")(false) <<
-			Property("sampler.sobol.bluenoise.spp")(256);
+			// The chunk without a halt spp. Past its chunk a pixel continues
+			// with a sequence of its own, which is not stratified with the
+			// chunk: measured on cornell and luxball-hdr (PATHCPU), against
+			// one sequence per pixel, 64 costs up to 6% more error at 1024
+			// spp and 1% at 4096 (256: 17-24% and 7%), is 3% better at 256
+			// spp and keeps the error blue around 64 spp, where the blue
+			// noise is visible
+			Property("sampler.sobol.bluenoise.spp")(64);
 
 	return props;
 }

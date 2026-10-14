@@ -87,11 +87,14 @@ typedef struct {
 
 typedef struct {
 	unsigned int bucketIndex, pixelOffset, passOffset, pass;
+	// The first pixel of the bucket walked by the task (the tasks sharing a
+	// bucket start at different pixels)
+	unsigned int bucketPixelStart;
 
 	// The Owen scrambling seed of the Sobol sequence of the pixel
 	unsigned int seed;
 	// The sample belongs to the half accumulated in the *_HALF film channels
-	unsigned int half;
+	unsigned int isHalf;
 } SobolSample;
 
 typedef struct {
@@ -164,6 +167,7 @@ typedef struct {
 			unsigned int bucketSize, tileSize, superSampling, overlapping;
 			// Blue-noise pixel ordering (see SobolSampler_NextSample())
 			int blueNoise, blueNoiseFirst;
+			// 0: no blue-noise chunk, the pixels use their own sequence
 			unsigned int blueNoiseChunkBits;
 			// The two replicas of the per-pixel error estimate (see
 			// SobolSampler_InitNewSample())

@@ -48,6 +48,8 @@ public:
 	// The sample at an index of the sequence (the index is used as it is,
 	// without the shuffling of GetSample())
 	float GetSampleAtIndex(const u_int sobolIndex, const u_int index) const;
+	// The index in the sequence of the sample GetSample() returns for a pass
+	static u_int ShuffledIndex(const u_int pass, const u_int seed);
 
 	// The nested uniform scramble of the base-4 digits of x (one random
 	// permutation of the 4 digit values per node of the digit tree): the

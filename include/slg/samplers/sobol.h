@@ -103,7 +103,7 @@ public:
 		SamplerSharedDataSPtr samplerSharedData,
 		const bool blueNoiseEnable = false,
 		const bool blueNoiseFirst = false,
-		const u_int blueNoiseSPP = 256,
+		const u_int blueNoiseSPP = 64,
 		const bool halfReplicas = false
 	);
 	SobolSampler(
@@ -120,7 +120,7 @@ public:
 		SamplerSharedDataSPtr samplerSharedData,
 		const bool blueNoiseEnable = false,
 		const bool blueNoiseFirst = false,
-		const u_int blueNoiseSPP = 256,
+		const u_int blueNoiseSPP = 64,
 		const bool halfReplicas = false
 	);
 	virtual ~SobolSampler();

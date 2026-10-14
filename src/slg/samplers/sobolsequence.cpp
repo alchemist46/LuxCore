@@ -110,6 +110,10 @@ float SobolSequence::GetSampleAtIndex(const u_int sobolIndex, const u_int index)
 	return Sample(sobolIndex, index);
 }
 
+u_int SobolSequence::ShuffledIndex(const u_int pass, const u_int seed) {
+	return NestedUniformScramble(pass, seed);
+}
+
 // The 24 permutations of the 4 values of a base-4 digit
 static const unsigned char base4Permutations[24][4] = {
 	{0, 1, 2, 3}, {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 2, 1}, {0, 3, 1, 2},
