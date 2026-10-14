@@ -42,7 +42,9 @@ public:
 		const u_int warmup,
 		const u_int testStep,
 		const bool useFilter,
-		const u_int imagePipelineIndex
+		const u_int imagePipelineIndex,
+		const float tolerance = 0.f,
+		const u_int passes = 0
 	);
 	~FilmConvTest();
 
@@ -51,8 +53,13 @@ public:
 	void Reset();
 	u_int Test();
 
+	// The pixels still above the threshold (a pixel that passed once stays
+	// converged until the film is reset)
 	u_int todoPixelsCount;
 	float maxError;
+
+	// The halt tolerates this fraction of unconverged pixels
+	bool IsConverged() const;
 
 	FilmConstRef GetFilm() const { return *film; }
 
@@ -69,6 +76,10 @@ private:
 	u_int testStep;
 	bool useFilter;
 	u_int imagePipelineIndex;
+	float tolerance;
+	// The consecutive tests a pixel has to pass to stay converged (0: every
+	// pixel has to pass in the same test, the classic behaviour)
+	u_int passes;
 
 	FilmConstPtr film;  // This could be a const ref, but due to
 								   // boost serialization, it isn't...
@@ -76,11 +87,13 @@ private:
 	GenericFrameBuffer<3, 0, float> *referenceImage;
 	double lastSamplesCount;
 	bool firstTest;
+	// The consecutive passes of each pixel (>= passes: converged, sticky)
+	std::vector<unsigned char> convergedPixels;
 };
 
 }
 
-BOOST_CLASS_VERSION(slg::FilmConvTest, 2)
+BOOST_CLASS_VERSION(slg::FilmConvTest, 3)
 
 BOOST_CLASS_EXPORT_KEY(slg::FilmConvTest)
 

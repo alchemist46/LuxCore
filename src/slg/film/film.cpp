@@ -105,6 +105,8 @@ Film::Film() {
 	haltSPP_PixelNormalized = 0;
 	haltSPP_ScreenNormalized = 0;
 	haltNoiseThreshold = 0.f;
+	haltNoiseThresholdTolerance = 0.f;
+	haltNoiseThresholdPasses = 0;
 
 	isAsyncImagePipelineRunning = false;
 	imagePipelineThread = nullptr;
@@ -181,6 +183,8 @@ Film::Film(Private p, const u_int w, const u_int h, const u_int * sr)
 
 	// Noise halt threshold related variables
 	haltNoiseThreshold = .02f;
+	haltNoiseThresholdTolerance = 0.f;
+	haltNoiseThresholdPasses = 0;
 	haltNoiseThresholdWarmUp = 64;
 	haltNoiseThresholdTestStep = 64;
 	haltNoiseThresholdUseFilter = true;
@@ -250,6 +254,8 @@ void Film::CopyHaltSettings(const Film &film) {
 	haltSPP_ScreenNormalized = film.haltSPP_ScreenNormalized;
 
 	haltNoiseThreshold = film.haltNoiseThreshold;
+	haltNoiseThresholdTolerance = film.haltNoiseThresholdTolerance;
+	haltNoiseThresholdPasses = film.haltNoiseThresholdPasses;
 	haltNoiseThresholdWarmUp = film.haltNoiseThresholdWarmUp;
 	haltNoiseThresholdTestStep = film.haltNoiseThresholdTestStep;
 	haltNoiseThresholdImagePipelineIndex = film.haltNoiseThresholdImagePipelineIndex;
@@ -269,7 +275,8 @@ void Film::CopyHaltSettings(const Film &film) {
 		convTest = new FilmConvTest(
 			FilmPtr(this), haltNoiseThreshold, haltNoiseThresholdWarmUp,
 			haltNoiseThresholdTestStep, haltNoiseThresholdUseFilter,
-			haltNoiseThresholdImagePipelineIndex
+			haltNoiseThresholdImagePipelineIndex, haltNoiseThresholdTolerance,
+			haltNoiseThresholdPasses
 		);
 	}
 
@@ -312,7 +319,9 @@ void Film::Init() {
 			haltNoiseThresholdWarmUp,
 			haltNoiseThresholdTestStep,
 			haltNoiseThresholdUseFilter,
-			haltNoiseThresholdImagePipelineIndex
+			haltNoiseThresholdImagePipelineIndex,
+			haltNoiseThresholdTolerance,
+			haltNoiseThresholdPasses
 		);
 	}
 
@@ -1428,9 +1437,11 @@ void Film::RunTests() {
 		// Run the convergence test
 		const u_int testResult = convTest->Test();
 
-		// Set statsConvergence only if haltNoiseThreshold is enabled
+		// Set statsConvergence only if haltNoiseThreshold is enabled. The
+		// halt tolerates a fraction of unconverged pixels (a few fireflies
+		// must not hold the whole render)
 		if (haltNoiseThreshold > 0.f)
-			statsConvergence = 1.f - testResult / static_cast<float>(pixelCount);
+			statsConvergence = convTest->IsConverged() ? 1.f : (1.f - testResult / static_cast<float>(pixelCount));
 	}
 
 	if (noiseEstimationRequired) {

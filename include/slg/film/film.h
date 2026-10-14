@@ -590,7 +590,8 @@ private:
 	double haltTime;
 	u_int haltSPP, haltSPP_PixelNormalized, haltSPP_ScreenNormalized;
 
-	float haltNoiseThreshold;
+	float haltNoiseThreshold, haltNoiseThresholdTolerance;
+	u_int haltNoiseThresholdPasses;
 	u_int haltNoiseThresholdWarmUp, haltNoiseThresholdTestStep, haltNoiseThresholdImagePipelineIndex;
 	bool haltNoiseThresholdUseFilter, haltNoiseThresholdStopRendering;
 
@@ -615,7 +616,7 @@ template<> void Film::GetOutput<u_int>(const FilmOutputs::FilmOutputType type, u
 
 }
 
-BOOST_CLASS_VERSION(slg::Film, 27)
+BOOST_CLASS_VERSION(slg::Film, 28)
 BOOST_CLASS_VERSION(slg::FilmSamplesCounts, 1)
 
 BOOST_CLASS_EXPORT_KEY(slg::Film)

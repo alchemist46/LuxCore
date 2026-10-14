@@ -137,6 +137,13 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 	ar & haltNoiseThresholdTestStep;
 	ar & haltNoiseThresholdUseFilter;
 	ar & haltNoiseThresholdStopRendering;
+	if (version >= 28) {
+		ar & haltNoiseThresholdTolerance;
+		ar & haltNoiseThresholdPasses;
+	} else {
+		haltNoiseThresholdTolerance = 0.f;
+		haltNoiseThresholdPasses = 0;
+	}
 
 	ar & noiseEstimationWarmUp;
 	ar & noiseEstimationTestStep;
@@ -227,6 +234,8 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & haltNoiseThresholdTestStep;
 	ar & haltNoiseThresholdUseFilter;
 	ar & haltNoiseThresholdStopRendering;
+	ar & haltNoiseThresholdTolerance;
+	ar & haltNoiseThresholdPasses;
 
 	ar & noiseEstimationWarmUp;
 	ar & noiseEstimationTestStep;

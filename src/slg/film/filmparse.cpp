@@ -907,6 +907,17 @@ void Film::Parse(PropertiesRPtr props) {
 
 			haltNoiseThresholdImagePipelineIndex = props->Get(Property("batch.haltnoisethreshold.index")(0)).Get<u_int>();
 
+			// The fraction of the pixels allowed to stay above the threshold
+			haltNoiseThresholdTolerance = Clamp(props->Get(Property("batch.haltnoisethreshold.tolerance")(
+						props->Get(Property("batch.haltthreshold.tolerance")(0.0)).Get<double>()
+					)).Get<double>(), 0.0, 1.0);
+
+			// The consecutive tests a pixel has to pass to stay converged (0: all
+			// the pixels have to pass in the same test)
+			haltNoiseThresholdPasses = props->Get(Property("batch.haltnoisethreshold.passes")(
+						props->Get(Property("batch.haltthreshold.passes")(0u)).Get<u_int>()
+					)).Get<u_int>();
+
 			if (haltNoiseThresholdImagePipelineIndex >= GetImagePipelineCount()) {
 				SLG_LOG("WARNING: Halt thereshold image pipeline index not available. Reverting to first image pipeline");
 				haltNoiseThresholdImagePipelineIndex = 0;
@@ -915,7 +926,8 @@ void Film::Parse(PropertiesRPtr props) {
 			convTest = new FilmConvTest(
 				FilmPtr(this), haltNoiseThreshold, haltNoiseThresholdWarmUp,
 				haltNoiseThresholdTestStep, haltNoiseThresholdUseFilter,
-				haltNoiseThresholdImagePipelineIndex);
+				haltNoiseThresholdImagePipelineIndex, haltNoiseThresholdTolerance,
+				haltNoiseThresholdPasses);
 		}
 	}
 
