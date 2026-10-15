@@ -123,6 +123,24 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			RenderEngine::RenderEngineType2String(renderEngine->GetType()),
 			MachineEpsilon::GetMin(), MachineEpsilon::GetMax());
 
+	// On HIP, the material and texture evaluation stacks are private arrays
+	// when the scene fits in them (2-5% faster than the global memory stacks,
+	// whose size depends on the scene). The sizes are fixed, so there are only
+	// two kernel variants whatever the scene: a scene-sized array would be
+	// faster still, but would require a new kernel compilation for each size.
+	if (intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) {
+		const u_int privateMaterialEvalStackSize = 16;
+		const u_int privateTextureEvalStackSize = 32;
+
+		const CompiledScene *cscene = renderEngine->compiledScene;
+		if ((cscene->maxMaterialEvalStackSize <= privateMaterialEvalStackSize) &&
+				(cscene->maxTextureEvalStackSize <= privateTextureEvalStackSize)) {
+			kernelsParameters.push_back("-D PARAM_EVALSTACK_PRIVATE");
+			kernelsParameters.push_back("-D PARAM_MATERIAL_EVALSTACK_SIZE=" + ToString(privateMaterialEvalStackSize));
+			kernelsParameters.push_back("-D PARAM_TEXTURE_EVALSTACK_SIZE=" + ToString(privateTextureEvalStackSize));
+		}
+	}
+
 	const string kernelSource = GetKernelSources();
 	const string microKernelSource = slg::ocl::KernelSource_pathoclbase_kernels_micro;
 	// The full source (i.e. including micro-kernels) is used for the hash and

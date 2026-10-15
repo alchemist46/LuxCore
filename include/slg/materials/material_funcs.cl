@@ -36,8 +36,7 @@ OPENCL_HOT_FUNCTION float3 Material_Albedo(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalAlbedoOpStartIndex;
 	const uint evalOpLength = startMat->evalAlbedoOpLength;
@@ -86,8 +85,7 @@ OPENCL_HOT_FUNCTION float3 Material_Evaluate(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalEvaluateOpStartIndex;
 	const uint evalOpLength = startMat->evalEvaluateOpLength;
@@ -150,8 +148,7 @@ OPENCL_HOT_FUNCTION float3 Material_Sample(const uint matIndex, __global const H
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalSampleOpStartIndex;
 	const uint evalOpLength = startMat->evalSampleOpLength;
@@ -217,8 +214,7 @@ OPENCL_HOT_FUNCTION float3 Material_GetPassThroughTransparency(const uint matInd
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetPassThroughTransparencyOpStartIndex;
 	const uint evalOpLength = startMat->evalGetPassThroughTransparencyOpLength;
@@ -271,8 +267,7 @@ OPENCL_HOT_FUNCTION float3 Material_GetEmittedRadiance(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetEmittedRadianceOpStartIndex;
 	const uint evalOpLength = startMat->evalGetEmittedRadianceOpLength;
@@ -324,8 +319,7 @@ OPENCL_HOT_FUNCTION uint Material_GetInteriorVolume(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetInteriorVolumeOpStartIndex;
 	const uint evalOpLength = startMat->evalGetInteriorVolumeOpLength;
@@ -377,8 +371,7 @@ OPENCL_HOT_FUNCTION uint Material_GetExteriorVolume(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &matEvalStacks[gid * maxMaterialEvalStackSize];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetExteriorVolumeOpStartIndex;
 	const uint evalOpLength = startMat->evalGetExteriorVolumeOpLength;

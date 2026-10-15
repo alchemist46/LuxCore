@@ -20,6 +20,21 @@
 
 // Macros used mostly for Texture and Material evluations
 
+// The material and texture evaluation stacks are in global memory, a block of
+// maxMaterialEvalStackSize (or maxTextureEvalStackSize) floats per task, or,
+// on HIP when the scene needs small enough stacks, in private arrays of
+// PARAM_MATERIAL_EVALSTACK_SIZE (or PARAM_TEXTURE_EVALSTACK_SIZE) floats (see
+// PathOCLBaseOCLRenderThread::InitKernels()). The evaluation functions take
+// the stack as a __global pointer, which is the generic address space on HIP.
+#if defined(LUXRAYS_CUDA_DEVICE) && defined(PARAM_EVALSTACK_PRIVATE)
+#define EvalStack_Declare(stacks, stackSize, privateStackSize) \
+	float evalStackPrivate[privateStackSize]; \
+	__global float *evalStack = evalStackPrivate
+#else
+#define EvalStack_Declare(stacks, stackSize, privateStackSize) \
+	__global float *evalStack = &stacks[get_global_id(0) * stackSize]
+#endif
+
 #define EvalStack_PushInt(a) { ((__global int *)evalStack)[*evalStackOffset] = a; *evalStackOffset = *evalStackOffset + 1; }
 #define EvalStack_PopInt(a) { *evalStackOffset = *evalStackOffset - 1; a = ((__global int *)evalStack)[*evalStackOffset]; }
 

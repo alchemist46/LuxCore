@@ -32,8 +32,7 @@ OPENCL_HOT_FUNCTION float Texture_GetFloatValueSlowPath(const uint texIndex,
 #endif
 
 	__global const Texture* restrict startTex = &texs[texIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &texEvalStacks[gid * maxTextureEvalStackSize];
+	EvalStack_Declare(texEvalStacks, maxTextureEvalStackSize, PARAM_TEXTURE_EVALSTACK_SIZE);
 
 	const uint evalFloatOpStartIndex = startTex->evalFloatOpStartIndex;
 	const uint evalFloatOpLength = startTex->evalFloatOpLength;
@@ -103,8 +102,7 @@ OPENCL_HOT_FUNCTION float3 Texture_GetSpectrumValueSlowPath(const uint texIndex,
 #endif
 
 	__global const Texture* restrict startTex = &texs[texIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &texEvalStacks[gid * maxTextureEvalStackSize];
+	EvalStack_Declare(texEvalStacks, maxTextureEvalStackSize, PARAM_TEXTURE_EVALSTACK_SIZE);
 
 	const uint evalSpectrumOpStartIndex = startTex->evalSpectrumOpStartIndex;
 	const uint evalSpectrumOpLength = startTex->evalSpectrumOpLength;
@@ -176,8 +174,7 @@ OPENCL_HOT_FUNCTION float3 Texture_Bump(const uint texIndex,
 #endif
 
 	__global const Texture* restrict startTex = &texs[texIndex];
-	const size_t gid = get_global_id(0);
-	__global float *evalStack = &texEvalStacks[gid * maxTextureEvalStackSize];
+	EvalStack_Declare(texEvalStacks, maxTextureEvalStackSize, PARAM_TEXTURE_EVALSTACK_SIZE);
 
 	const uint evalBumpOpStartIndex = startTex->evalBumpOpStartIndex;
 	const uint evalBumpOpLength = startTex->evalBumpOpLength;
