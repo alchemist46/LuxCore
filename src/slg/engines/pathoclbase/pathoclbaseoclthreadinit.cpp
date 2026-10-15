@@ -372,6 +372,7 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	//--------------------------------------------------------------------------
 
 	intersectionDevice.AllocBufferRW(&tasksDirectLightBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTaskDirectLight) * taskCount, "GPUTaskDirectLight");
+	intersectionDevice.AllocBufferRW(&tasksDirectLightVertexBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTaskDirectLightVertex) * taskCount, "GPUTaskDirectLightVertex");
 
 	//--------------------------------------------------------------------------
 	// Allocate tasksStateBuff
@@ -673,8 +674,9 @@ void PathOCLBaseOCLRenderThread::InitRender() {
 	// Allocate Ray/RayHit buffers
 	//--------------------------------------------------------------------------
 
-	intersectionDevice.AllocBufferRW(&raysBuff, nullptr, sizeof(Ray) * taskCount, "Ray");
-	intersectionDevice.AllocBufferRW(&hitsBuff, nullptr, sizeof(RayHit) * taskCount, "RayHit");
+	// The vertex rays of the tasks, then their shadow rays
+	intersectionDevice.AllocBufferRW(&raysBuff, nullptr, sizeof(Ray) * 2 * taskCount, "Ray");
+	intersectionDevice.AllocBufferRW(&hitsBuff, nullptr, sizeof(RayHit) * 2 * taskCount, "RayHit");
 
 	//--------------------------------------------------------------------------
 	// Allocate GPU task buffers

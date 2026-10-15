@@ -40,11 +40,24 @@
 
 typedef enum {
 	// Micro-kernel states
+	//
+	// One kernel, AdvancePaths_MK_RT, runs all the steps: between two kernel
+	// runs, a task waits for the trace of its vertex ray and/or of its shadow
+	// ray (see AdvancePaths_MK_RT for their slots) in one of the MK_RT_* states
+	// (MK_GENERATE_CAMERA_RAY after Init() and MK_DONE are the exceptions).
+	// 3 and 4 were MK_DL_ILLUMINATE and MK_DL_SAMPLE_BSDF.
+
+	// The vertex ray
 	MK_RT_NEXT_VERTEX = 0,
-	// 1 to 4 were MK_HIT_NOTHING, MK_HIT_OBJECT, MK_DL_ILLUMINATE and
-	// MK_DL_SAMPLE_BSDF. One kernel, AdvancePaths_MK_RT, runs all the steps:
-	// a task is in MK_RT_NEXT_VERTEX or MK_RT_DL between two kernel runs
-	// (MK_GENERATE_CAMERA_RAY after Init() and MK_DONE are the exceptions)
+	// The vertex ray and the shadow ray of the previous vertex: the next
+	// vertex ray was sampled without waiting for the shadow ray (see
+	// AdvancePaths_MK_RT)
+	MK_RT_NEXT_VERTEX_DL = 1,
+	// The shadow ray of the last vertex of the path: the sample is splat
+	// after it
+	MK_RT_DL_SPLAT = 2,
+	// The shadow ray, then the next vertex ray is sampled (shadow catchers,
+	// and the scenes where the shadow rays can cross a surface)
 	MK_RT_DL = 5,
 	MK_GENERATE_NEXT_VERTEX_RAY = 6,
 	MK_SPLAT_SAMPLE = 7,
@@ -113,6 +126,16 @@ typedef struct {
 	// The shadow transparency flag used by Scene_Intersect()
 	int throughShadowTransparency;
 } GPUTaskDirectLight;
+
+// The path values at the vertex of a shadow ray traced with the next vertex
+// ray (MK_RT_NEXT_VERTEX_DL): the next vertex ray was sampled before the
+// shadow ray was traced, and it changed them. In their own buffer, so the
+// other paths don't load a larger GPUTaskDirectLight.
+typedef struct {
+	Spectrum throughput;
+	Spectrum irradiancePathThroughput;
+	int firstPathVertex;
+} GPUTaskDirectLightVertex;
 
 typedef struct {
 	// The task seed

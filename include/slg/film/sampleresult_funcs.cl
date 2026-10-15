@@ -94,10 +94,13 @@ OPENCL_FORCE_INLINE void SampleResult_AddEmission(__constant const Film* restric
 	}
 }
 
+// firstPathVertex and irradiancePathThroughput are the values of the vertex of
+// the shadow ray: the sample may already be at the next vertex
 OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* restrict film,
 		__global SampleResult *sampleResult, const uint lightID,
 		const BSDFEvent bsdfEvent, const float3 pathThroughput, const float3 incomingRadiance,
-		const float lightScale) {
+		const float lightScale, const bool firstPathVertex,
+		const float3 irradiancePathThroughput) {
 	const float3 radiance = pathThroughput * incomingRadiance;
 
 	// Avoid out of bound access if the light group doesn't exist. This can happen
@@ -105,7 +108,7 @@ OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* rest
 	const uint id = min(lightID, film->radianceGroupCount - 1u);
 	VADD3F(sampleResult->radiancePerPixelNormalized[id].c, radiance);
 
-	if (sampleResult->firstPathVertex) {
+	if (firstPathVertex) {
 		sampleResult->directShadowMask = fmax(0.f, sampleResult->directShadowMask - lightScale);
 
 		if ((bsdfEvent & (DIFFUSE | REFLECT)) == (DIFFUSE | REFLECT)) {
@@ -135,7 +138,7 @@ OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* rest
 			VADD3F(sampleResult->indirectSpecularTransmit.c, radiance);
 		}
 
-		VADD3F(sampleResult->irradiance.c, VLOAD3F(sampleResult->irradiancePathThroughput.c) * incomingRadiance);
+		VADD3F(sampleResult->irradiance.c, irradiancePathThroughput * incomingRadiance);
 	}
 }
 

@@ -457,6 +457,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global GPUTaskTmp *tasksTmp \
 		, __global HitPoint *tasksIntersectHitPoint \
 		, __global GPUTaskDirectLight *tasksDirectLight \
+		, __global GPUTaskDirectLightVertex *tasksDirectLightVertex \
 		, __global GPUTaskState *tasksState \
 		, __global PathState *pathStates \
 		, __global GPUTaskStats *taskStats \
@@ -575,6 +576,10 @@ __kernel void Init(
 	const size_t gid = get_global_id(0);
 
 	__global GPUTaskState *taskState = &tasksState[gid];
+
+	// No shadow ray to trace in the second half of the ray buffer (the shadow
+	// rays traced with a vertex ray, see AdvancePaths_MK_RT)
+	rays[get_global_size(0) + gid].flags = RAY_FLAGS_MASKED;
 
 #if defined(RENDER_ENGINE_TILEPATHOCL) || defined(RENDER_ENGINE_RTPATHOCL)
 	__global TilePathSamplerSharedData *samplerSharedData = (__global TilePathSamplerSharedData *)samplerSharedDataBuff;

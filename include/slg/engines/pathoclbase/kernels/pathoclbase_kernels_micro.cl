@@ -147,7 +147,9 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 
 // The trace result of the shadow ray: add the direct light if the light is
 // visible (the next state is MK_GENERATE_NEXT_VERTEX_RAY or MK_SPLAT_SAMPLE,
-// or MK_RT_DL to continue the trace)
+// or MK_RT_DL to continue the trace). The BSDF is still the one of the vertex
+// of the shadow ray, but with a taskDirectLightVertex the path has moved to
+// the next vertex: the path values of the vertex come from it.
 OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTaskTmp *taskTmp,
@@ -157,7 +159,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__global PathVolumeInfo *directLightVolInfo,
 		__global Ray *ray,
 		__global RayHit *rayHit,
-		__global SampleResult *sampleResult
+		__global SampleResult *sampleResult,
+		__global const GPUTaskDirectLightVertex *taskDirectLightVertex
 		MATERIALS_PARAM_DECL) {
 	// Count the shadow ray traced by the RT kernel
 	sampleResult->rayCount += 1;
@@ -199,20 +202,24 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			__global BSDF *bsdf = &taskState->bsdf;
 
 			if (!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)) {
+				const bool firstPathVertex = taskDirectLightVertex ?
+					taskDirectLightVertex->firstPathVertex : sampleResult->firstPathVertex;
+
 				const float3 lightRadiance = VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c);
 				SampleResult_AddDirectLight(&taskConfig->film,
 						sampleResult, taskDirectLight->illumInfo.lightID,
 						BSDF_GetEventTypes(bsdf
 							MATERIALS_PARAM),
-						VLOAD3F(taskState->throughput.c), lightRadiance,
-						1.f);
+						VLOAD3F(taskDirectLightVertex ? taskDirectLightVertex->throughput.c : taskState->throughput.c),
+						lightRadiance, 1.f, firstPathVertex,
+						VLOAD3F(taskDirectLightVertex ? taskDirectLightVertex->irradiancePathThroughput.c : sampleResult->irradiancePathThroughput.c));
 
 				// The first path vertex is not handled by AddDirectLight(). This is valid
 				// for irradiance AOV only if it is not a SPECULAR material.
 				//
 				// Note: irradiance samples the light sources only here (i.e. no
 				// direct hit, no MIS, it would be useless)
-				if ((sampleResult->firstPathVertex) && !(BSDF_GetEventTypes(bsdf
+				if (firstPathVertex && !(BSDF_GetEventTypes(bsdf
 							MATERIALS_PARAM) & SPECULAR)) {
 					const float3 irradiance = (M_1_PI_F * fabs(dot(
 								VLOAD3F(&bsdf->hitPoint.shadeN.x),
@@ -301,6 +308,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		__global PathVolumeInfo *directLightVolInfo,
 		__global Ray *ray,
 		__global const RayHit *rayHit,
+		__global Ray *shadowRay,
 		__global SampleResult *sampleResult,
 		__global void *samplerSharedDataBuff,
 		__global void *samplesBuff,
@@ -529,7 +537,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 			MATERIALS_PARAM) &&
 			DirectLight_Illuminate(
 				bsdf,
-				ray,
+				shadowRay,
 				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
 				&taskTmp->tmpHitPoint,
 				ray->time,
@@ -546,7 +554,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				pathInfo,
 				&taskTmp->tmpPathDepthInfo,
 				bsdf,
-				VLOAD3F(&ray->d.x)
+				VLOAD3F(&shadowRay->d.x)
 				LIGHTS_PARAM)) {
 		// Initialize the pass-through event for the shadow ray
 		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
@@ -564,7 +572,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		// The shadow ray was initialized by Light_Illuminate(): flag it for
 		// an any-hit trace if the scene allows it
 		if (taskConfig->scene.shadowRayAnyHit)
-			ray->flags |= RAY_FLAGS_SHADOW;
+			shadowRay->flags |= RAY_FLAGS_SHADOW;
 
 		// I have to trace the shadow ray
 		nextState = MK_RT_DL;
@@ -583,18 +591,25 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 //------------------------------------------------------------------------------
 // Evaluation of the Path finite state machine.
 //
-// From: MK_RT_NEXT_VERTEX or MK_RT_DL (the states waiting for a trace), or
-//       MK_GENERATE_CAMERA_RAY (a sample Init() could not start)
-// To: MK_RT_NEXT_VERTEX or MK_RT_DL (or MK_DONE with TILEPATHOCL/RTPATHOCL)
+// From: the MK_RT_* states (waiting for a trace), or MK_GENERATE_CAMERA_RAY (a
+//       sample Init() could not start)
+// To: the MK_RT_* states (or MK_DONE with TILEPATHOCL/RTPATHOCL)
 //
-// Everything a path does with the result of a trace until it needs the next
+// Everything a path does with the results of a trace until it needs the next
 // one, in one kernel so that the per-task state is loaded once:
-// - the next vertex ray: the hit (or the miss), the shading of the vertex, the
-//   direct light sampling and its shadow ray;
-// - the shadow ray: the direct light if the light is visible;
-// - then, for both, the next vertex ray when there is no shadow ray to trace;
+// - the shadow ray (rays[taskCount + gid] when it was traced with the vertex
+//   ray, else rays[gid]): the direct light if the light is visible;
+// - the vertex ray (rays[gid]): the hit (or the miss), the shading of the
+//   vertex, the direct light sampling and its shadow ray;
+// - then the next vertex ray;
 // - at the end of a path, the splat of the sample, the next sample and its
 //   camera ray.
+// The next vertex ray doesn't depend on the shadow ray, so both are traced
+// together and a path vertex takes one iteration, except where the result of
+// the shadow ray is needed first or the shadow ray may need more than one
+// trace (shadow catchers, shadow rays crossing transparent surfaces or
+// volumes): the next vertex ray is then sampled after the shadow ray (MK_RT_DL)
+// and a vertex takes two iterations.
 // It used to be ten kernels, one per state. The rays are traced before the
 // kernel and a task reads its state once, at the start, so it never consumes
 // a ray set up in the same iteration.
@@ -644,11 +659,42 @@ __kernel void AdvancePaths_MK_RT(
 	// End of variables setup
 	//--------------------------------------------------------------------------
 
-	if (pathState == MK_RT_DL) {
-		pathState = AdvancePaths_ShadowRayHit(taskConfig, taskTmp, intersectHitPoint, &tasksDirectLight[gid], taskState,
-				&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult
+	// A shadow ray traced with the vertex ray is in the second half of the ray
+	// buffer, a shadow ray traced alone uses the slot of the vertex ray (so the
+	// trace kernel doesn't run half empty waves)
+	const size_t secondRayIndex = get_global_size(0) + gid;
+
+	//--------------------------------------------------------------------------
+	// The shadow ray
+	//--------------------------------------------------------------------------
+
+	if ((pathState == MK_RT_DL) || (pathState == MK_RT_NEXT_VERTEX_DL) ||
+			(pathState == MK_RT_DL_SPLAT)) {
+		const size_t shadowRayIndex = (pathState == MK_RT_NEXT_VERTEX_DL) ? secondRayIndex : gid;
+		const PathState shadowRayState = AdvancePaths_ShadowRayHit(taskConfig, taskTmp, intersectHitPoint, &tasksDirectLight[gid], taskState,
+				&directLightVolInfos[gid], &rays[shadowRayIndex], &rayHits[shadowRayIndex], sampleResult,
+				(pathState == MK_RT_DL) ? NULL : &tasksDirectLightVertex[gid]
 				MATERIALS_PARAM);
-	} else {
+
+		// The second slot is free again (the merged flow is used only when the
+		// shadow ray is final after one trace)
+		if (pathState == MK_RT_NEXT_VERTEX_DL)
+			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+
+		if (pathState == MK_RT_DL)
+			pathState = shadowRayState;
+		else if (pathState == MK_RT_DL_SPLAT)
+			pathState = MK_SPLAT_SAMPLE;
+		else
+			pathState = MK_RT_NEXT_VERTEX;
+	}
+
+	//--------------------------------------------------------------------------
+	// The vertex ray
+	//--------------------------------------------------------------------------
+
+	bool shadowRayToTrace = false;
+	if (pathState == MK_RT_NEXT_VERTEX) {
 		// Count the ray traced by the RT kernel (the shadow rays are counted
 		// by AdvancePaths_ShadowRayHit())
 		sampleResult->rayCount += 1;
@@ -689,14 +735,37 @@ __kernel void AdvancePaths_MK_RT(
 				sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
 						&taskConfig->pathTracer.maxPathDepth, eventTypes);
 
+				// The next vertex ray can be sampled without waiting for the
+				// shadow ray if the shadow ray is final after one trace and
+				// the BSDF sampling doesn't depend on it (shadow catchers).
+				// The last vertex has no next vertex ray.
+				const bool sampleNextVertexRayNow = scene->shadowRayAnyHit &&
+						!sampleResult->lastPathVertex &&
+						!BSDF_IsShadowCatcher(&taskState->bsdf MATERIALS_PARAM);
+
 				pathState = AdvancePaths_HitObject(taskConfig,
 						task, taskTmp, &tasksDirectLight[gid], taskState, pathInfo,
-						&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult,
+						&directLightVolInfos[gid], &rays[gid], &rayHits[gid],
+						&rays[sampleNextVertexRayNow ? secondRayIndex : gid], sampleResult,
 						samplerSharedDataBuff, samplesBuff, samplesDataBuff, sampleResultsBuff,
 						worldCenterX, worldCenterY, worldCenterZ, worldRadius,
 						pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues,
 						pgicRadiancePhotonsBVHNodes, pgicCausticPhotons, pgicCausticPhotonsBVHNodes
 						LIGHTS_PARAM);
+
+				// Otherwise the shadow ray took the place of the vertex ray, and
+				// the next vertex ray is sampled after it (MK_RT_DL)
+				if ((pathState == MK_RT_DL) && sampleNextVertexRayNow) {
+					// Save the path values of this vertex for
+					// AdvancePaths_ShadowRayHit()
+					__global GPUTaskDirectLightVertex *taskDirectLightVertex = &tasksDirectLightVertex[gid];
+					taskDirectLightVertex->throughput = taskState->throughput;
+					taskDirectLightVertex->irradiancePathThroughput = sampleResult->irradiancePathThroughput;
+					taskDirectLightVertex->firstPathVertex = sampleResult->firstPathVertex;
+
+					shadowRayToTrace = true;
+					pathState = MK_GENERATE_NEXT_VERTEX_RAY;
+				}
 			}
 		}
 	}
@@ -714,6 +783,19 @@ __kernel void AdvancePaths_MK_RT(
 
 		// Save the seed
 		task->seed = seedValue;
+	}
+
+	if (shadowRayToTrace) {
+		if (pathState == MK_RT_NEXT_VERTEX)
+			pathState = MK_RT_NEXT_VERTEX_DL;
+		else {
+			// The path is over (MK_SPLAT_SAMPLE) but the direct light of its
+			// last vertex is still to add: the sample is splat after the
+			// shadow ray, which moves to the slot of the vertex ray
+			pathState = MK_RT_DL_SPLAT;
+			rays[gid] = rays[secondRayIndex];
+			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+		}
 	}
 
 	//--------------------------------------------------------------------------

@@ -196,6 +196,7 @@ protected:
 		const std::string &name
 	);
 
+	void EnqueueTraceRays();
 	void EnqueueAdvancePathsKernel();
 
 	static luxrays::oclKernelCache *AllocKernelCache(const std::string &type);
@@ -266,6 +267,7 @@ protected:
 	luxrays::HardwareDeviceBuffer *tasksTmpBuff;
 	luxrays::HardwareDeviceBuffer *tasksIntersectHitPointBuff;
 	luxrays::HardwareDeviceBuffer *tasksDirectLightBuff;
+	luxrays::HardwareDeviceBuffer *tasksDirectLightVertexBuff;
 	luxrays::HardwareDeviceBuffer *tasksStateBuff;
 	luxrays::HardwareDeviceBuffer *pathStatesBuff;
 	luxrays::HardwareDeviceBuffer *samplerSharedDataBuff;

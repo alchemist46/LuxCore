@@ -246,7 +246,7 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 		for (u_int i = 0; i < batchIterations; ++i) {
 			// Trace rays
-			intersectionDevice.EnqueueTraceRayBuffer(raysBuff, hitsBuff, taskCount);
+			EnqueueTraceRays();
 
 			// Advance to next path state
 			EnqueueAdvancePathsKernel();
