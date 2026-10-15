@@ -34,9 +34,9 @@ public:
 	virtual ~BlackBodyTexture() { }
 
 	virtual TextureType GetType() const { return BLACKBODY_TEX; }
-	virtual float GetFloatValue(const HitPoint &hitPoint) const { return rgb.Y(); }
+	virtual float GetFloatValue(const HitPoint &hitPoint) const { return Luminance(rgb); }
 	virtual luxrays::Spectrum GetSpectrumValue(const HitPoint &hitPoint) const { return rgb; }
-	virtual float Y() const { return rgb.Y(); }
+	virtual float Y() const { return Luminance(rgb); }
 	virtual float Filter() const { return rgb.Filter(); }
 
 	const luxrays::Spectrum &GetRGB() const { return rgb; }

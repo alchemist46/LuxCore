@@ -404,7 +404,7 @@ OPENCL_FORCE_NOT_INLINE float BlenderMagicTexture_ConstEvaluateFloat(__global co
 	float3 result = BlenderMagicTexture_Evaluate(TextureMapping3D_Map(mapping, hitPoint, NULL TEXTURES_PARAM), noisedepth, turbulence,
 			contrast, bright);
 
-	return (0.212671f * result.x + 0.715160f * result.y + 0.072169f * result.z);
+	return Spectrum_Y(result);
 }
 
 OPENCL_FORCE_NOT_INLINE float3 BlenderMagicTexture_ConstEvaluateSpectrum(__global const HitPoint *hitPoint,

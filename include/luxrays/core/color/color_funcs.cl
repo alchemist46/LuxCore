@@ -42,8 +42,14 @@ OPENCL_FORCE_INLINE float Spectrum_Filter(const float3 s)  {
 	return (s.x + s.y + s.z) * 0.33333333f;
 }
 
+// The luminance of a colour in the working colour space (see
+// WorkingColorSpace::Y())
 OPENCL_FORCE_INLINE float Spectrum_Y(const float3 s) {
+#if defined(PARAM_WCS_Y_R)
+	return PARAM_WCS_Y_R * s.x + PARAM_WCS_Y_G * s.y + PARAM_WCS_Y_B * s.z;
+#else
 	return 0.212671f * s.x + 0.715160f * s.y + 0.072169f * s.z;
+#endif
 }
 
 OPENCL_FORCE_INLINE float3 Spectrum_Clamp(const float3 s) {
@@ -71,6 +77,19 @@ OPENCL_FORCE_INLINE float3 WorkingColorSpace_FromRec709(const float3 c) {
 }
 #else
 #define WorkingColorSpace_FromRec709(c) (c)
+#endif
+
+// The working colour space to Linear Rec.709, for the formulas written for
+// Rec.709 colours
+#if defined(PARAM_WCS_TO_REC709_00)
+OPENCL_FORCE_INLINE float3 WorkingColorSpace_ToRec709(const float3 c) {
+	return MAKE_FLOAT3(
+		PARAM_WCS_TO_REC709_00 * c.x + PARAM_WCS_TO_REC709_01 * c.y + PARAM_WCS_TO_REC709_02 * c.z,
+		PARAM_WCS_TO_REC709_10 * c.x + PARAM_WCS_TO_REC709_11 * c.y + PARAM_WCS_TO_REC709_12 * c.z,
+		PARAM_WCS_TO_REC709_20 * c.x + PARAM_WCS_TO_REC709_21 * c.y + PARAM_WCS_TO_REC709_22 * c.z);
+}
+#else
+#define WorkingColorSpace_ToRec709(c) (c)
 #endif
 
 OPENCL_FORCE_INLINE float3 Spectrum_Sqrt(const float3 s) {

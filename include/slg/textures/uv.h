@@ -35,7 +35,7 @@ public:
 	virtual float GetFloatValue(const HitPoint &hitPoint) const;
 	virtual luxrays::Spectrum GetSpectrumValue(const HitPoint &hitPoint) const;
 	virtual float Y() const {
-		return luxrays::Spectrum(.5f, .5f, 0.f).Y();
+		return Luminance(luxrays::Spectrum(.5f, .5f, 0.f));
 	}
 	virtual float Filter() const {
 		return luxrays::Spectrum(.5f, .5f, 0.f).Filter();

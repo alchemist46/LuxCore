@@ -27,7 +27,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 float HitPointColorTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return hitPoint.GetColor(dataIndex).Y();
+	return Luminance(hitPoint.GetColor(dataIndex));
 }
 
 Spectrum HitPointColorTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -73,12 +73,12 @@ PropertiesUPtr HitPointAlphaTexture::ToProperties(const ImageMapCache &imgMapCac
 float HitPointGreyTexture::GetFloatValue(const HitPoint &hitPoint) const {
 	const Spectrum color = hitPoint.GetColor(dataIndex);
 
-	return (channel > 2) ? color.Y() : color.c[channel];
+	return (channel > 2) ? Luminance(color) : color.c[channel];
 }
 
 Spectrum HitPointGreyTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
 	const Spectrum color = hitPoint.GetColor(dataIndex);
-	const float v = (channel > 2) ? color.Y() : color.c[channel];
+	const float v = (channel > 2) ? Luminance(color) : color.c[channel];
 
 	return Spectrum(v);
 }

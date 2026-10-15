@@ -29,17 +29,17 @@ using namespace slg;
 float BandTexture::Y() const {
 	switch (interpType) {
 		case NONE: {
-			float ret = offsets[0] * values[0].Y();
+			float ret = offsets[0] * Luminance(values[0]);
 			for (u_int i = 0; i < GetOffsets().size() - 1; ++i)
-				ret += (offsets[i + 1] - offsets[i]) * values[i].Y();
+				ret += (offsets[i + 1] - offsets[i]) * Luminance(values[i]);
 			return ret;
 		}
 		case CUBIC: // Just an approximation
 		case LINEAR: {
-			float ret = offsets[0] * values[0].Y();
+			float ret = offsets[0] * Luminance(values[0]);
 			for (u_int i = 0; i < GetOffsets().size() - 1; ++i)
 				ret += .5f * (offsets[i + 1] - offsets[i]) *
-					(values[i + 1].Y() + values[i].Y());
+					(Luminance(values[i + 1]) + Luminance(values[i]));
 			return ret;
 		}
 		default:
@@ -60,7 +60,7 @@ float BandTexture::Filter() const {
 			float ret = offsets[0] * values[0].Filter();
 			for (u_int i = 0; i < GetOffsets().size() - 1; ++i)
 				ret += .5f * (offsets[i + 1] - offsets[i]) *
-					(values[i + 1].Y() + values[i].Filter());
+					(Luminance(values[i + 1]) + values[i].Filter());
 			return ret;
 		}
 		default:
@@ -69,7 +69,7 @@ float BandTexture::Filter() const {
 }
 
 float BandTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum BandTexture::GetSpectrumValue(const HitPoint &hitPoint) const {

@@ -66,12 +66,30 @@ public:
 		return IsRec709() ? c : Mul(GetToRec709Matrix(), c);
 	}
 
+	// The luminance of a working space colour: RGBColor::Y() in REC709 (the
+	// Rec.709 weights LuxCore has always used), the same weights applied to
+	// the colour converted to Rec.709 otherwise.
+	float Y(const luxrays::Spectrum &c) const {
+		if (IsRec709())
+			return c.Y();
+		const luxrays::Spectrum &w = GetLuminanceWeights();
+		return w.c[0] * c.c[0] + w.c[1] * c.c[1] + w.c[2] * c.c[2];
+	}
+	const luxrays::Spectrum &GetLuminanceWeights() const;
+
+	// Weights written for Rec.709 colours (a dot product with them), as
+	// weights of working space colours: ToRec709^T * w. It returns w
+	// unchanged in REC709.
+	luxrays::Spectrum ConvertRec709Weights(const luxrays::Spectrum &w) const;
+
 	// Row-major 3x3 matrices (see workingcolorspace_matrices.h)
 	const float (&GetFromRec709Matrix() const)[3][3];
 	const float (&GetToRec709Matrix() const)[3][3];
 	const float (&GetToXYZMatrix() const)[3][3];
 
-	// The kernel parameters of the working space (none in REC709)
+	// The kernel parameters of the working space (none in REC709): the
+	// Rec.709 to working and working to Rec.709 matrices and the luminance
+	// weights
 	void AddKernelParameters(std::vector<std::string> &params) const;
 
 	// The name of the working space in an OpenColorIO config, found by its

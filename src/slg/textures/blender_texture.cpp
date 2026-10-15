@@ -311,7 +311,7 @@ BlenderMagicTexture::BlenderMagicTexture(TextureMapping3DUPtr&& mp, const int no
 }
 
 float BlenderMagicTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum BlenderMagicTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -329,7 +329,7 @@ float BlenderMagicTexture::Y() const {
 #define NC  sizeof(c) / sizeof(c[0])
 	for (u_int i = 0; i < NC; ++i)
 		cs += luxrays::Spectrum(c[i]);
-	return cs.Y() / NC;
+	return Luminance(cs) / NC;
 #undef NC
 }
 

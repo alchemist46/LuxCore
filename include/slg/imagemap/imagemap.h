@@ -644,7 +644,9 @@ public:
 	ImageMapStorage(const u_int w, const u_int h, const WrapType wm, const FilterType ft);
 	virtual ~ImageMapStorage() { }
 
-	virtual ImageMapStorageUPtr SelectChannel(const ChannelSelectionType selectionType) const = 0;
+	// WEIGHTED_MEAN is the luminance in the given working colour space
+	virtual ImageMapStorageUPtr SelectChannel(const ChannelSelectionType selectionType,
+			const WorkingColorSpace &workingColorSpace) const = 0;
 
 	u_int GetIndex(u_int x, u_int y) const;
 
@@ -675,6 +677,9 @@ public:
 	// the other return the pixel value.
 
 	virtual float GetFloat(const luxrays::UV &uv) const = 0;
+	// The float value of a colour pixel is its luminance in the given working
+	// colour space
+	virtual float GetFloat(const luxrays::UV &uv, const WorkingColorSpace &workingColorSpace) const = 0;
 	virtual float GetFloat(const u_int index) const = 0;
 	float GetFloat(const u_int x, const u_int y) const {
 		return GetFloat(GetIndex(x, y));
@@ -693,6 +698,7 @@ public:
 	}
 
 	virtual luxrays::UV GetDuv(const luxrays::UV &uv) const = 0;
+	virtual luxrays::UV GetDuv(const luxrays::UV &uv, const WorkingColorSpace &workingColorSpace) const = 0;
 	virtual luxrays::UV GetDuv(const u_int index) const = 0;
 	luxrays::UV GetDuv(const u_int x, const u_int y) const {
 		return GetDuv(GetIndex(x, y));
@@ -761,7 +767,8 @@ public:
 
 	virtual ~ImageMapStorageImpl() {}
 
-	virtual ImageMapStorageUPtr SelectChannel(const ChannelSelectionType selectionType) const;
+	virtual ImageMapStorageUPtr SelectChannel(const ChannelSelectionType selectionType,
+			const WorkingColorSpace &workingColorSpace) const;
 
 	virtual StorageType GetStorageType() const;
 	constexpr virtual u_int GetChannelCount() const { return CHANNELS; }
@@ -778,12 +785,14 @@ public:
 	virtual void SetAlpha(const u_int index, const float v);
 
 	virtual float GetFloat(const luxrays::UV &uv) const;
+	virtual float GetFloat(const luxrays::UV &uv, const WorkingColorSpace &workingColorSpace) const;
 	virtual float GetFloat(const u_int index) const;
 	virtual luxrays::Spectrum GetSpectrum(const luxrays::UV &uv) const;
 	virtual luxrays::Spectrum GetSpectrum(const u_int index) const;
 	virtual float GetAlpha(const luxrays::UV &uv) const;
 	virtual float GetAlpha(const u_int index) const;
 	virtual luxrays::UV GetDuv(const luxrays::UV &uv) const;
+	virtual luxrays::UV GetDuv(const luxrays::UV &uv, const WorkingColorSpace &workingColorSpace) const;
 	virtual luxrays::UV GetDuv(const u_int index) const;
 
 	virtual void ReverseGammaCorrection(const float gamma);
@@ -798,6 +807,14 @@ public:
 private:
 	// Used by serialization
 	ImageMapStorageImpl() = default;
+
+	static float GetTexelFloat(const ImageMapPixel<T, CHANNELS> *pixel, const WorkingColorSpace &workingColorSpace) {
+		if constexpr (CHANNELS >= 3) {
+			if (!workingColorSpace.IsRec709())
+				return workingColorSpace.Y(pixel->GetSpectrum());
+		}
+		return pixel->GetFloat();
+	}
 
 	const ImageMapPixel<T, CHANNELS> *GetTexel(const int s, const int t) const;
 
@@ -1037,8 +1054,15 @@ public:
 	std::string GetFileExtension() const;
 	void WriteImage(const std::string &fileName) const;
 
+	// The pixels are already converted: this is the space of their luminance
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
+
 	float GetSpectrumMean() const { return imageMean; }
-	float GetSpectrumMeanY() const { return imageMeanY; }
+	// The mean luminance in the working colour space of the image map
+	float GetSpectrumMeanY() const {
+		return (workingColorSpace.IsRec709() || (GetChannelCount() < 3)) ?
+			imageMeanY : workingColorSpace.Y(imageMeanRGB);
+	}
 
 	ImageMapUPtr Copy() const;
 
@@ -1141,6 +1165,7 @@ protected:
 		const std::string &colorSpaceName);
 
 	float CalcSpectrumMean() const;
+	luxrays::Spectrum CalcSpectrumMeanRGB() const;
 	float CalcSpectrumMeanY() const;
 
 	template<class Archive> void serialize(Archive &ar, const u_int version);
@@ -1151,6 +1176,11 @@ protected:
 
 	// Cached image information
 	float imageMean, imageMeanY;
+	// Used by GetSpectrumMeanY() in a working space other than Rec.709 (not
+	// serialized: computed again when loaded)
+	luxrays::Spectrum imageMeanRGB;
+	// The working colour space of the pixels (see ImageMapConfig)
+	WorkingColorSpace workingColorSpace;
 
 	// Keep trace of ImageMapConfig provided to constructor
 	ImageMapConfig imageMapConfig;

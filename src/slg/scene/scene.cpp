@@ -516,6 +516,7 @@ void Scene::SetWorkingColorSpace(const WorkingColorSpace &wcs) {
 	SDL_LOG("Working color space: " << WorkingColorSpace::WorkingColorSpaceType2String(wcs.GetType()));
 
 	workingColorSpace = wcs;
+	texDefs.SetWorkingColorSpace(workingColorSpace);
 	imgMapCache.SetWorkingColorSpace(workingColorSpace);
 	colorSpaceConv.SetWorkingColorSpace(workingColorSpace);
 }

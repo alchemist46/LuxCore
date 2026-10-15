@@ -43,8 +43,18 @@ public:
 	void SetImageResizePolicy(ImageMapResizePolicy *policy);
 	const ImageMapResizePolicy *GetImageResizePolicy() const { return resizePolicy; }
 
-	// The image maps loaded by GetImageMap() are converted to this space
-	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
+	// The image maps loaded by GetImageMap() are converted to this space. The
+	// ones already in the cache (only when a scene is loaded, their pixels are
+	// already converted) get it as the space of their luminance.
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) {
+		workingColorSpace = wcs;
+		// Grey maps don't depend on it (and the random image map is shared
+		// by all the scenes)
+		for (auto &im : maps) {
+			if (im->GetChannelCount() >= 3)
+				im->SetWorkingColorSpace(wcs);
+		}
+	}
 
 	// Prefered insertion will require a unique_ptr owned object
 	// However, we also have to handle the case of ImageMapTexture::randomImageMap,

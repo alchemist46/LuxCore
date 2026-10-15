@@ -270,7 +270,7 @@ Spectrum DensityGridTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
 }
 
 float DensityGridTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 PropertiesUPtr DensityGridTexture::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

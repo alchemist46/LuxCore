@@ -199,7 +199,7 @@ void SkyLight2::Preprocess() {
 	radianceTerm = model[9];
 	
 	if (hasGroundAutoScale)
-		scaledGroundColor = temperatureScale * gain * ComputeSkyRadiance(Vector(0.f, 0.f, 1.f)).Y() * groundColor;
+		scaledGroundColor = temperatureScale * gain * workingColorSpace.Y(ComputeSkyRadiance(Vector(0.f, 0.f, 1.f))) * groundColor;
 	else
 		scaledGroundColor = groundColor;
 

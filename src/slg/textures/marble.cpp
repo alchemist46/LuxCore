@@ -69,7 +69,7 @@ float MarbleTexture::Y() const {
 #define NC  sizeof(c) / sizeof(c[0])
 	for (u_int i = 0; i < NC; ++i)
 		cs += Spectrum(c[i]);
-	return cs.Y() / NC;
+	return Luminance(cs) / NC;
 #undef NC
 }
 
@@ -86,7 +86,7 @@ float MarbleTexture::Filter() const {
 }
 
 float MarbleTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 PropertiesUPtr MarbleTexture::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

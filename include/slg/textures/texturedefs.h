@@ -44,6 +44,9 @@ public:
 
     std::tuple<TextureRef&, TextureUPtr> DefineTexture(TextureUPtr&& t);
 
+	// The working colour space given to the textures when they are defined
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
+
 	TextureConstRef GetTexture(const std::string &name) const {
 		return dynamic_cast<TextureConstRef>(texs.GetObj(name));
 	}
@@ -85,6 +88,7 @@ private:
 	) const;
 
 	luxrays::NamedObjectVector texs;
+	WorkingColorSpace workingColorSpace;
 };
 
 }

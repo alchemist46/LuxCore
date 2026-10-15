@@ -27,7 +27,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 float HsvTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum HsvTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
@@ -59,8 +59,8 @@ Spectrum HsvTexture::ApplyTransformation(const Spectrum &colorHitpoint,
 }
 
 float HsvTexture::Y() const {
-	return ApplyTransformation(Spectrum(GetTexture().Filter()),
-			GetHue().Filter(), GetSaturation().Filter(), GetValue().Filter()).Y();
+	return Luminance(ApplyTransformation(Spectrum(GetTexture().Filter()),
+			GetHue().Filter(), GetSaturation().Filter(), GetValue().Filter()));
 }
 
 float HsvTexture::Filter() const {

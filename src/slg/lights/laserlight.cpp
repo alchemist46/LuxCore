@@ -39,7 +39,7 @@ LaserLight::~LaserLight() {
 void LaserLight::Preprocess() {
 	NotIntersectableLightSource::Preprocess();
 
-	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(color.Y(), 0.f)) : 1.f;
+	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(workingColorSpace.Y(color), 0.f)) : 1.f;
 
 	emittedFactor = temperatureScale * gain * color * (power * efficiency * normalizeFactor / (M_PI * radius * radius));
 	if (emittedFactor.Black() || emittedFactor.IsInf() || emittedFactor.IsNaN())

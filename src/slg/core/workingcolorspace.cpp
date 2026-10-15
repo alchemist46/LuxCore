@@ -46,19 +46,64 @@ const float (&WorkingColorSpace::GetToXYZMatrix() const)[3][3] {
 	return workingcolorspace::ToXYZ[type];
 }
 
+// The Rec.709 luminance weights of RGBColor::Y() and Spectrum_Y()
+static const double rec709LuminanceWeights[3] = { 0.212671, 0.715160, 0.072169 };
+
+static Spectrum ConvertWeights(const float (&toRec709)[3][3], const double (&w)[3]) {
+	// (ToRec709^T * w)[x] = sum over y of ToRec709[y][x] * w[y]
+	double result[3];
+	for (u_int x = 0; x < 3; ++x)
+		result[x] = toRec709[0][x] * w[0] + toRec709[1][x] * w[1] + toRec709[2][x] * w[2];
+
+	return Spectrum((float)result[0], (float)result[1], (float)result[2]);
+}
+
+const Spectrum &WorkingColorSpace::GetLuminanceWeights() const {
+	static const Spectrum weights[3] = {
+		Spectrum(0.212671f, 0.715160f, 0.072169f),
+		ConvertWeights(workingcolorspace::ToRec709[REC2020], rec709LuminanceWeights),
+		ConvertWeights(workingcolorspace::ToRec709[ACESCG], rec709LuminanceWeights)
+	};
+
+	return weights[type];
+}
+
+Spectrum WorkingColorSpace::ConvertRec709Weights(const Spectrum &w) const {
+	if (IsRec709())
+		return w;
+
+	const double wd[3] = { w.c[0], w.c[1], w.c[2] };
+	return ConvertWeights(GetToRec709Matrix(), wd);
+}
+
+static void AddMatrixKernelParameters(vector<string> &params, const string &name, const float (&m)[3][3]) {
+	for (u_int y = 0; y < 3; ++y) {
+		for (u_int x = 0; x < 3; ++x) {
+			char buf[64];
+			snprintf(buf, sizeof(buf), "-D %s_%u%u=%.9gf", name.c_str(), y, x, m[y][x]);
+			params.push_back(buf);
+		}
+	}
+}
+
 void WorkingColorSpace::AddKernelParameters(vector<string> &params) const {
 	if (IsRec709())
 		return;
 
 	// PARAM_WCS_FROM_REC709_<row><column>: Rec.709 to the working space, for
 	// the colours the kernels compute in Rec.709 (dispersion, thin film, sky2)
-	const float (&m)[3][3] = GetFromRec709Matrix();
-	for (u_int y = 0; y < 3; ++y) {
-		for (u_int x = 0; x < 3; ++x) {
-			char buf[64];
-			snprintf(buf, sizeof(buf), "-D PARAM_WCS_FROM_REC709_%u%u=%.9gf", y, x, m[y][x]);
-			params.push_back(buf);
-		}
+	AddMatrixKernelParameters(params, "PARAM_WCS_FROM_REC709", GetFromRec709Matrix());
+	// PARAM_WCS_TO_REC709_<row><column>: the working space to Rec.709, for the
+	// formulas written for Rec.709 colours (the Disney tint)
+	AddMatrixKernelParameters(params, "PARAM_WCS_TO_REC709", GetToRec709Matrix());
+
+	// PARAM_WCS_Y_R/G/B: the luminance weights of Spectrum_Y()
+	const Spectrum &w = GetLuminanceWeights();
+	const char *names[3] = { "R", "G", "B" };
+	for (u_int i = 0; i < 3; ++i) {
+		char buf[64];
+		snprintf(buf, sizeof(buf), "-D PARAM_WCS_Y_%s=%.9gf", names[i], w.c[i]);
+		params.push_back(buf);
 	}
 }
 

@@ -92,7 +92,7 @@ void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
 
 	ConvertFromOpenColorIO(configFileName, inputColorSpace, c);
 
-	v = c.Y();
+	v = workingColorSpace.Y(c);
 }
 
 static string GetOCIOProcessorCacheKey(const string &configFileName,

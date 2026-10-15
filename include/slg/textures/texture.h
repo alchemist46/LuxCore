@@ -105,6 +105,16 @@ public:
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {}
 
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const = 0;
+
+	// The space of the colours of the texture, set when it is defined in a
+	// scene; the float value of a colour is its luminance in this space
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
+	const WorkingColorSpace &GetWorkingColorSpace() const { return workingColorSpace; }
+
+protected:
+	float Luminance(const luxrays::Spectrum &c) const { return workingColorSpace.Y(c); }
+
+	WorkingColorSpace workingColorSpace;
 };
 
 //------------------------------------------------------------------------------

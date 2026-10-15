@@ -39,8 +39,9 @@ TO_REC709 = {
 S = "resources/scenes/simple/"
 
 # Directly visible emitters only (kd = 0 everywhere), using every input that is
-# converted to the working space: the image is linear in them, so a render in
-# another space converted back to Rec.709 matches the Rec.709 render
+# converted to the working space and the luminance of a colour (a mix amount):
+# the image is linear in them, so a render in another space converted back to
+# Rec.709 matches the Rec.709 render
 EMITTERS_SCENE = """
 scene.camera.lookat.orig = 8.34339 -4.09766 5.74567
 scene.camera.lookat.target = -2.1735 1.36445 -0.197534
@@ -59,6 +60,10 @@ scene.textures.cgam.type = constfloat3
 scene.textures.cgam.value = 0.8 0.3 0.1
 scene.textures.cgam.colorspace = luxcore
 scene.textures.cgam.colorspace.gamma = 2.2
+scene.textures.lum.type = mix
+scene.textures.lum.amount = irr
+scene.textures.lum.texture1 = 0 0 0
+scene.textures.lum.texture2 = 1 1 1
 scene.materials.room.type = matte
 scene.materials.room.kd = 0 0 0
 scene.materials.room.emission = grid
@@ -76,7 +81,7 @@ scene.materials.cube2.emission.temperature = 4000
 scene.materials.cube2.emission.temperature.normalize = 1
 scene.materials.back2.type = matte
 scene.materials.back2.kd = 0 0 0
-scene.materials.back2.emission = irr
+scene.materials.back2.emission = lum
 scene.objects.room.ply = {S}room-nowall.ply
 scene.objects.room.material = room
 scene.objects.cube1.ply = {S}simple-mat-cube1.ply
@@ -93,6 +98,35 @@ scene.lights.sky.turbidity = 2.2
 scene.lights.sky.gain = .00002 .00002 .00002
 """.replace("{S}", S)
 
+# A Disney sphere with its specular and sheen tints, lit directly by white
+# light: linear in the base colour if the tint follows the working space
+DISNEY_SCENE = """
+scene.camera.lookat.orig = 8.34339 -4.09766 5.74567
+scene.camera.lookat.target = -2.1735 1.36445 -0.197534
+scene.textures.base.type = constfloat3
+scene.textures.base.value = 0.8 0.3 0.1
+scene.textures.base.colorspace = luxcore
+scene.textures.base.colorspace.gamma = 2.2
+scene.materials.grey.type = matte
+scene.materials.grey.kd = 0.5 0.5 0.5
+scene.materials.disney.type = disney
+scene.materials.disney.basecolor = base
+scene.materials.disney.roughness = 0.4
+scene.materials.disney.specular = 1
+scene.materials.disney.speculartint = 1
+scene.materials.disney.sheen = 1
+scene.materials.disney.sheentint = 1
+scene.materials.light.type = matte
+scene.materials.light.kd = 0 0 0
+scene.materials.light.emission = 20 20 20
+scene.objects.room.ply = {S}room-nowall.ply
+scene.objects.room.material = grey
+scene.objects.lights.ply = {S}simple-lights.ply
+scene.objects.lights.material = light
+scene.objects.sphere.ply = {S}simple-mat-sphere1.ply
+scene.objects.sphere.material = disney
+""".replace("{S}", S)
+
 def ParseScene(text):
 	props = pyluxcore.Properties()
 	props.SetFromString(text)
@@ -101,8 +135,8 @@ def ParseScene(text):
 
 	return scene
 
-def RenderRGB(space):
-	scene = ParseScene("scene.colorspace.working = " + space + "\n" + EMITTERS_SCENE)
+def RenderRGB(space, sceneText=EMITTERS_SCENE, directOnly=False):
+	scene = ParseScene("scene.colorspace.working = " + space + "\n" + sceneText)
 
 	# TILEPATHCPU with 1 thread is deterministic
 	width, height = 64, 48
@@ -119,6 +153,9 @@ def RenderRGB(space):
 		film.outputs.0.type = RGB
 		film.outputs.0.filename = rgb.exr
 		""".format(width, height))
+	if directOnly:
+		cfgProps.Set(pyluxcore.Property("path.pathdepth.total", 1))
+		cfgProps.Set(pyluxcore.Property("path.pathdepth.diffuse", 1))
 	config = pyluxcore.RenderConfig(cfgProps, scene)
 	session = pyluxcore.RenderSession(config)
 	session.Start()
@@ -159,13 +196,13 @@ class TestWorkingColorSpace(unittest.TestCase):
 		with self.assertRaises(RuntimeError):
 			scene.Parse(props)
 
-	def test_WorkingColorSpace_LinearInputs(self):
-		ref = RenderRGB("rec709")
+	def CheckLinear(self, sceneText, directOnly):
+		ref = RenderRGB("rec709", sceneText, directOnly)
 		scale = max(abs(v) for v in ref)
 		self.assertGreater(scale, 0.0)
 
 		for space, m in TO_REC709.items():
-			img = RenderRGB(space)
+			img = RenderRGB(space, sceneText, directOnly)
 
 			maxConverted = 0.0
 			maxRaw = 0.0
@@ -179,3 +216,9 @@ class TestWorkingColorSpace(unittest.TestCase):
 			self.assertLess(maxConverted, 1e-4, space)
 			# ...but not the same pixel values
 			self.assertGreater(maxRaw, 1e-2, space)
+
+	def test_WorkingColorSpace_LinearInputs(self):
+		self.CheckLinear(EMITTERS_SCENE, False)
+
+	def test_WorkingColorSpace_DisneyTint(self):
+		self.CheckLinear(DISNEY_SCENE, True)

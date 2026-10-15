@@ -44,7 +44,7 @@ Spectrum DistortTexture::GetSpectrumValue(const HitPoint &hitPoint) const {
 }
 
 float DistortTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 PropertiesUPtr DistortTexture::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

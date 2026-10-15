@@ -27,7 +27,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 float MakeFloat3Texture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum MakeFloat3Texture::GetSpectrumValue(const HitPoint &hitPoint) const {

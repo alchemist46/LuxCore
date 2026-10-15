@@ -48,7 +48,7 @@ PropertiesUPtr ObjectIDTexture::ToProperties(const ImageMapCache &imgMapCache, c
 //------------------------------------------------------------------------------
 
 float ObjectIDColorTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum ObjectIDColorTexture::GetSpectrumValue(const HitPoint &hitPoint) const {

@@ -392,6 +392,11 @@ void ImageMapStorageImpl<T, CHANNELS>::SetAlpha(const u_int index, const float v
 
 template <class T, u_int CHANNELS>
 float ImageMapStorageImpl<T, CHANNELS>::GetFloat(const UV &uv) const {
+	return GetFloat(uv, WorkingColorSpace());
+}
+
+template <class T, u_int CHANNELS>
+float ImageMapStorageImpl<T, CHANNELS>::GetFloat(const UV &uv, const WorkingColorSpace &workingColorSpace) const {
 	switch (filterType) {
 		case NEAREST: {
 			const float s = uv.u * width;
@@ -400,7 +405,7 @@ float ImageMapStorageImpl<T, CHANNELS>::GetFloat(const UV &uv) const {
 			const int s0 = Floor2Int(s);
 			const int t0 = Floor2Int(t);
 
-			return GetTexel(s0, t0)->GetFloat();
+			return GetTexelFloat(GetTexel(s0, t0), workingColorSpace);
 		}
 		case LINEAR: {
 			const float s = uv.u * width - .5f;
@@ -415,10 +420,10 @@ float ImageMapStorageImpl<T, CHANNELS>::GetFloat(const UV &uv) const {
 			const float ids = 1.f - ds;
 			const float idt = 1.f - dt;
 
-			return ids * idt * GetTexel(s0, t0)->GetFloat() +
-					ids * dt * GetTexel(s0, t0 + 1)->GetFloat() +
-					ds * idt * GetTexel(s0 + 1, t0)->GetFloat() +
-					ds * dt * GetTexel(s0 + 1, t0 + 1)->GetFloat();
+			return ids * idt * GetTexelFloat(GetTexel(s0, t0), workingColorSpace) +
+					ids * dt * GetTexelFloat(GetTexel(s0, t0 + 1), workingColorSpace) +
+					ds * idt * GetTexelFloat(GetTexel(s0 + 1, t0), workingColorSpace) +
+					ds * dt * GetTexelFloat(GetTexel(s0 + 1, t0 + 1), workingColorSpace);
 		}
 		default:
 			throw runtime_error("Unknown filter mode in ImageMapStorageImpl<T, CHANNELS>::GetFloat(): " + ToString(filterType));
@@ -506,6 +511,11 @@ float ImageMapStorageImpl<T, CHANNELS>::GetAlpha(const u_int index) const {
 
 template <class T, u_int CHANNELS>
 UV ImageMapStorageImpl<T, CHANNELS>::GetDuv(const UV &uv) const {
+	return GetDuv(uv, WorkingColorSpace());
+}
+
+template <class T, u_int CHANNELS>
+UV ImageMapStorageImpl<T, CHANNELS>::GetDuv(const UV &uv, const WorkingColorSpace &workingColorSpace) const {
 	const float s = uv.u * width;
 	const float t = uv.v * height;
 
@@ -533,11 +543,11 @@ UV ImageMapStorageImpl<T, CHANNELS>::GetDuv(const UV &uv) const {
 	}
 
 	UV duv;
-	duv.u = Lerp(at, GetTexel(s1, it)->GetFloat() - GetTexel(s0, it)->GetFloat(),
-		GetTexel(s1, it + 1)->GetFloat() - GetTexel(s0, it + 1)->GetFloat()) *
+	duv.u = Lerp(at, GetTexelFloat(GetTexel(s1, it), workingColorSpace) - GetTexelFloat(GetTexel(s0, it), workingColorSpace),
+		GetTexelFloat(GetTexel(s1, it + 1), workingColorSpace) - GetTexelFloat(GetTexel(s0, it + 1), workingColorSpace)) *
 		width;
-	duv.v = Lerp(as, GetTexel(is, t1)->GetFloat() - GetTexel(is, t0)->GetFloat(),
-		GetTexel(is + 1, t1)->GetFloat() - GetTexel(is + 1, t0)->GetFloat()) *
+	duv.v = Lerp(as, GetTexelFloat(GetTexel(is, t1), workingColorSpace) - GetTexelFloat(GetTexel(is, t0), workingColorSpace),
+		GetTexelFloat(GetTexel(is + 1, t1), workingColorSpace) - GetTexelFloat(GetTexel(is + 1, t0), workingColorSpace)) *
 		height;
 	return duv;
 }
@@ -633,7 +643,8 @@ ImageMapStorageUPtr ImageMapStorageImpl<T, CHANNELS>::Copy() const {
 
 template <class T, u_int CHANNELS>
 ImageMapStorageUPtr ImageMapStorageImpl<T, CHANNELS>::SelectChannel(
-	const ChannelSelectionType selectionType
+	const ChannelSelectionType selectionType,
+	const WorkingColorSpace &workingColorSpace
 ) const {
 
 	const u_int pixelCount = width * height;
@@ -698,7 +709,7 @@ ImageMapStorageUPtr ImageMapStorageImpl<T, CHANNELS>::SelectChannel(
 			} else {
 				for (auto& p: pixels) {
 					auto& newPix = newPixels.emplace_back();
-					newPix.SetFloat(p.GetSpectrum().Y());
+					newPix.SetFloat(workingColorSpace.Y(p.GetSpectrum()));
 				}
 			}
 
@@ -843,6 +854,7 @@ ImageMap::ImageMap(
 	pixelStorage(std::move(pixels)),
 	imageMean(im),
 	imageMeanY(imy),
+	workingColorSpace(cfg.workingColorSpace),
 	imageMapConfig(cfg),
 	instrumentationInfo(
 		std::make_unique<InstrumentationInfo>(
@@ -1040,7 +1052,7 @@ float ImageMap::GetFloat(const UV &uv) const {
 	if (instrumentationInfo && instrumentationInfo->enabled)
 		instrumentationInfo->ThreadAddSample(uv);
 
-	return pixelStorage->GetFloat(uv);
+	return pixelStorage->GetFloat(uv, workingColorSpace);
 }
 
 Spectrum ImageMap::GetSpectrum(const UV &uv) const {
@@ -1061,7 +1073,7 @@ UV ImageMap::GetDuv(const UV &uv) const {
 	if (instrumentationInfo && instrumentationInfo->enabled)
 		instrumentationInfo->ThreadAddSample(uv);
 
-	return pixelStorage->GetDuv(uv);
+	return pixelStorage->GetDuv(uv, workingColorSpace);
 }
 
 ImageMapUPtr ImageMap::AllocImageMap(
@@ -1169,6 +1181,27 @@ float ImageMap::CalcSpectrumMean() const {
 	return result;
 }
 
+Spectrum ImageMap::CalcSpectrumMeanRGB() const {
+	const u_int pixelCount = pixelStorage->GetWidth() * pixelStorage->GetHeight();
+
+	double r = 0.0, g = 0.0, b = 0.0;
+	#pragma omp parallel for reduction(+:r,g,b)
+	for (
+			// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+			unsigned
+#endif
+			int i = 0; i < pixelCount; ++i) {
+		const Spectrum c = pixelStorage->GetSpectrum(i);
+
+		r += c.c[0];
+		g += c.c[1];
+		b += c.c[2];
+	}
+
+	return Spectrum((float)(r / pixelCount), (float)(g / pixelCount), (float)(b / pixelCount));
+}
+
 float ImageMap::CalcSpectrumMeanY() const {
 	const u_int pixelCount = pixelStorage->GetWidth() * pixelStorage->GetHeight();
 
@@ -1195,10 +1228,11 @@ float ImageMap::CalcSpectrumMeanY() const {
 void ImageMap::Preprocess() {
 	imageMean = CalcSpectrumMean();
 	imageMeanY = CalcSpectrumMeanY();
+	imageMeanRGB = CalcSpectrumMeanRGB();
 }
 
 void ImageMap::SelectChannel(const ImageMapStorage::ChannelSelectionType selectionType) {
-	ImageMapStorageUPtr newPixelStorage = pixelStorage->SelectChannel(selectionType);
+	ImageMapStorageUPtr newPixelStorage = pixelStorage->SelectChannel(selectionType, workingColorSpace);
 
 	// Replace the old image map storage if required
 	if (newPixelStorage) {
@@ -1316,6 +1350,7 @@ void ImageMap::ConvertColorSpace(const string &configFileName,
 
 void ImageMap::ConvertToWorkingColorSpace(const ImageMapConfig &cfg) {
 	const WorkingColorSpace &wcs = cfg.workingColorSpace;
+	workingColorSpace = wcs;
 	// A grey image stays grey: the rows of the matrices sum to 1
 	const bool isColor = (pixelStorage->GetChannelCount() >= 3);
 

@@ -41,7 +41,7 @@ PointLight::~PointLight() {
 void PointLight::Preprocess() {
 	NotIntersectableLightSource::Preprocess();
 
-	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(color.Y(), 0.f)) : 1.f;
+	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(workingColorSpace.Y(color), 0.f)) : 1.f;
 
 	emittedFactor = temperatureScale * gain * color * (power * efficiency * normalizeFactor);
 

@@ -76,6 +76,9 @@ template<class Archive> void ImageMap::serialize(Archive &ar, const u_int versio
 	ar & imageMeanY;
 	
 	ar & instrumentationInfo;
+
+	if constexpr (Archive::is_loading::value)
+		imageMeanRGB = CalcSpectrumMeanRGB();
 }
 
 namespace slg {

@@ -62,7 +62,9 @@ OPENCL_FORCE_INLINE void DisneyMaterial_GetEmittedRadiance(__global const Materi
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float3 DisneyMaterial_CalculateTint(const float3 color) {
-	float luminance = color.x * 0.3f + color.y * 0.6f + color.z * 1.0f;
+	// The weights are for Rec.709 colours
+	const float3 color709 = WorkingColorSpace_ToRec709(color);
+	float luminance = color709.x * 0.3f + color709.y * 0.6f + color709.z * 1.0f;
 	return (luminance > 0.0f) ? color * (1.0f / luminance) : WHITE;
 }
 

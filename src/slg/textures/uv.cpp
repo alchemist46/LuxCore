@@ -27,7 +27,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 float UVTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum UVTexture::GetSpectrumValue(const HitPoint &hitPoint) const {

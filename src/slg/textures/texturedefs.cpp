@@ -30,6 +30,7 @@ using namespace slg;
 
 std::tuple<Texture&, TextureUPtr>
 TextureDefinitions::DefineTexture(TextureUPtr&& tex) {
+	tex->SetWorkingColorSpace(workingColorSpace);
 
 	auto [newTexRef, oldTexPtr] = texs.DefineObj<Texture>(std::move(tex));
 

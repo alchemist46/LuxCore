@@ -40,7 +40,7 @@ float BombingTexture::Filter() const {
 }
 
 float BombingTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 Spectrum BombingTexture::GetSpectrumValue(const HitPoint &hitPoint) const {

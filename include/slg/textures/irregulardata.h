@@ -34,9 +34,9 @@ public:
 	virtual ~IrregularDataTexture() { }
 
 	virtual TextureType GetType() const { return IRREGULARDATA_TEX; }
-	virtual float GetFloatValue(const HitPoint &hitPoint) const { return rgb.Y(); }
+	virtual float GetFloatValue(const HitPoint &hitPoint) const { return Luminance(rgb); }
 	virtual luxrays::Spectrum GetSpectrumValue(const HitPoint &hitPoint) const { return rgb; }
-	virtual float Y() const { return rgb.Y(); }
+	virtual float Y() const { return Luminance(rgb); }
 	virtual float Filter() const { return rgb.Filter(); }
 
 	const std::vector<float> &GetWaveLengths() const { return waveLengths; }

@@ -66,7 +66,7 @@ BrickTexture::BrickTexture(TextureMapping3DUPtr&& mp, TextureConstRef t1,
 }
 
 float BrickTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	return GetSpectrumValue(hitPoint).Y();
+	return Luminance(GetSpectrumValue(hitPoint));
 }
 
 bool BrickTexture::RunningAlternate(const Point &p, Point &i, Point &b,

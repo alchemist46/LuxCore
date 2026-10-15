@@ -481,7 +481,9 @@ void DisneyMaterial::ClearcoatPdf(const bool fromLight, const float clearcoatGlo
 }
 
 Spectrum DisneyMaterial::CalculateTint(const Spectrum &color) const {
-	const float luminance = color.c[0] * 0.3f + color.c[1] * 0.6f + color.c[2] * 1.0f;
+	// The weights are for Rec.709 colours
+	const Spectrum color709 = workingColorSpace.ToRec709(color);
+	const float luminance = color709.c[0] * 0.3f + color709.c[1] * 0.6f + color709.c[2] * 1.0f;
 
 	return (luminance > 0.0f) ? color * (1.0f / luminance) : Spectrum(1.0f);
 }

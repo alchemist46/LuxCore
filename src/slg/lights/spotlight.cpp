@@ -42,7 +42,7 @@ void SpotLight::Preprocess() {
 	cosTotalWidth = cosf(Radians(coneAngle));
 	cosFalloffStart = cosf(Radians(coneAngle - coneDeltaAngle));
 
-	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(color.Y(), 0.f)) : 1.f;
+	const float normalizeFactor = emittedPowerNormalize ? (1.f / Max(workingColorSpace.Y(color), 0.f)) : 1.f;
 
 	emittedFactor = temperatureScale * gain * color * (power * efficiency * normalizeFactor /
 			(2.f * M_PI * (1.f - .5f * (cosFalloffStart + cosTotalWidth))));

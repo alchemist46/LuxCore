@@ -369,7 +369,7 @@ void ImageMapTexture::AddReferencedImageMaps(std::unordered_set<const ImageMap *
 float ImageMapTexture::GetFloatValue(const HitPoint &hitPoint) const {
 	const UV pos = mapping->Map(hitPoint);
 
-	const float value = randomizedTiling ? RandomizedTilingGetSpectrumValue(pos).Y() : GetImageMap().GetFloat(pos);
+	const float value = randomizedTiling ? Luminance(RandomizedTilingGetSpectrumValue(pos)) : GetImageMap().GetFloat(pos);
 
 	return gain * value;
 }

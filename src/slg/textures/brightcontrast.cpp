@@ -27,7 +27,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 float BrightContrastTexture::GetFloatValue(const HitPoint &hitPoint) const {
-	const float value = GetTex().GetSpectrumValue(hitPoint).Y();
+	const float value = Luminance(GetTex().GetSpectrumValue(hitPoint));
 	const float contrast = GetContrastTex().GetFloatValue(hitPoint);
 	const float brightness = GetBrightnessTex().GetFloatValue(hitPoint);
 
