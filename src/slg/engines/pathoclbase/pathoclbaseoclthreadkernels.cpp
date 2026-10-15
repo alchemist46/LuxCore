@@ -233,11 +233,7 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	// AdvancePaths kernel (Micro-Kernels)
 	std::tuple<HardwareDeviceKernelUPtr&, const char *>
 	microKernels[] = {
-		{advancePathsKernel_MK_RT_NEXT_VERTEX, "AdvancePaths_MK_RT_NEXT_VERTEX"},
-		{advancePathsKernel_MK_HIT_NOTHING, "AdvancePaths_MK_HIT_NOTHING"},
-		{advancePathsKernel_MK_HIT_OBJECT, "AdvancePaths_MK_HIT_OBJECT"},
-		{advancePathsKernel_MK_RT_DL, "AdvancePaths_MK_RT_DL"},
-		{advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY, "AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY"},
+		{advancePathsKernel_MK_RT, "AdvancePaths_MK_RT"},
 		{advancePathsKernel_MK_SPLAT_SAMPLE, "AdvancePaths_MK_SPLAT_SAMPLE"},
 		{advancePathsKernel_MK_NEXT_SAMPLE, "AdvancePaths_MK_NEXT_SAMPLE"},
 		{advancePathsKernel_MK_GENERATE_CAMERA_RAY, "AdvancePaths_MK_GENERATE_CAMERA_RAY"},
@@ -392,16 +388,8 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 }
 
 void PathOCLBaseOCLRenderThread::SetAllAdvancePathsKernelArgs(const u_int filmIndex) {
-	if (advancePathsKernel_MK_RT_NEXT_VERTEX)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_RT_NEXT_VERTEX, filmIndex);
-	if (advancePathsKernel_MK_HIT_NOTHING)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_HIT_NOTHING, filmIndex);
-	if (advancePathsKernel_MK_HIT_OBJECT)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_HIT_OBJECT, filmIndex);
-	if (advancePathsKernel_MK_RT_DL)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_RT_DL, filmIndex);
-	if (advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY, filmIndex);
+	if (advancePathsKernel_MK_RT)
+		SetAdvancePathsKernelArgs(advancePathsKernel_MK_RT, filmIndex);
 	if (advancePathsKernel_MK_SPLAT_SAMPLE)
 		SetAdvancePathsKernelArgs(advancePathsKernel_MK_SPLAT_SAMPLE, filmIndex);
 	if (advancePathsKernel_MK_NEXT_SAMPLE)
@@ -436,18 +424,10 @@ void PathOCLBaseOCLRenderThread::EnqueueAdvancePathsKernel() {
 
 	// Micro kernels version
 	//
-	// The rays are traced before this sequence, so a kernel that consumes a
-	// trace result (MK_RT_NEXT_VERTEX, MK_RT_DL) must run before any kernel
-	// that sets up a new ray to trace (MK_HIT_OBJECT sets up the shadow ray).
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT_NEXT_VERTEX,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_HIT_NOTHING,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT_DL,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_HIT_OBJECT,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY,
+	// The rays are traced before this sequence: MK_RT consumes the trace
+	// results, and the following kernels finish the paths that are done and
+	// start their next sample.
+	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_SPLAT_SAMPLE,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));

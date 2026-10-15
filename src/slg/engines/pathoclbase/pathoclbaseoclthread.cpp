@@ -119,11 +119,7 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	// OpenCL kernels
 	initSeedKernel = nullptr;
 	initKernel = nullptr;
-	advancePathsKernel_MK_RT_NEXT_VERTEX = nullptr;
-	advancePathsKernel_MK_HIT_NOTHING = nullptr;
-	advancePathsKernel_MK_HIT_OBJECT = nullptr;
-	advancePathsKernel_MK_RT_DL = nullptr;
-	advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY = nullptr;
+	advancePathsKernel_MK_RT = nullptr;
 	advancePathsKernel_MK_SPLAT_SAMPLE = nullptr;
 	advancePathsKernel_MK_NEXT_SAMPLE = nullptr;
 	advancePathsKernel_MK_GENERATE_CAMERA_RAY = nullptr;

@@ -41,10 +41,10 @@
 typedef enum {
 	// Micro-kernel states
 	MK_RT_NEXT_VERTEX = 0,
-	MK_HIT_NOTHING = 1,
-	MK_HIT_OBJECT = 2,
-	// 3 and 4 were MK_DL_ILLUMINATE and MK_DL_SAMPLE_BSDF, now part of
-	// MK_HIT_OBJECT
+	// 1 to 4 were MK_HIT_NOTHING, MK_HIT_OBJECT, MK_DL_ILLUMINATE and
+	// MK_DL_SAMPLE_BSDF: the AdvancePaths_MK_RT kernel does all the steps
+	// from a trace result to the next ray to trace (MK_RT_NEXT_VERTEX,
+	// MK_RT_DL, MK_GENERATE_NEXT_VERTEX_RAY)
 	MK_RT_DL = 5,
 	MK_GENERATE_NEXT_VERTEX_RAY = 6,
 	MK_SPLAT_SAMPLE = 7,

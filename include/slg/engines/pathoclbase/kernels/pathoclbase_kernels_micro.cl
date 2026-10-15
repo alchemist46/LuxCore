@@ -25,665 +25,22 @@
 //#define DEBUG_PRINTF_KERNEL_NAME 1
 
 //------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_RT_NEXT_VERTEX
-// To: MK_HIT_NOTHING or MK_HIT_OBJECT or MK_RT_NEXT_VERTEX
+// The steps of a path vertex, called by AdvancePaths_MK_RT
 //------------------------------------------------------------------------------
 
-__kernel void AdvancePaths_MK_RT_NEXT_VERTEX(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_RT_NEXT_VERTEX(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_RT_NEXT_VERTEX)
-		return;
-
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-
-	// Count the ray traced by the RT kernel (MK_RT_DL counts the shadow rays)
-	sampleResult->rayCount += 1;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-	
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	float3 connectionThroughput;
-
-	Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
-	const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-	taskState->seedPassThroughEvent = seedPassThroughEvent;
-
-	int throughShadowTransparency = taskState->throughShadowTransparency;
-	const bool continueToTrace = Scene_Intersect(taskConfig,
-			EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
-			&throughShadowTransparency,
-			&pathInfo->volume,
-			&tasks[gid].tmpHitPoint,
-			passThroughEvent,
-			&rays[gid], &rayHits[gid], &taskState->bsdf,
-			&connectionThroughput, VLOAD3F(taskState->throughput.c),
-			sampleResult,
-			false
-			MATERIALS_PARAM
-			);
-	taskState->throughShadowTransparency = throughShadowTransparency;
-	VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
-
-	// If continueToTrace, there is nothing to do, just keep the same state
-	if (!continueToTrace) {
-		if (rayHits[gid].meshIndex == NULL_INDEX)
-			pathStates[gid] = MK_HIT_NOTHING;
-		else {
-			const BSDFEvent eventTypes = BSDF_GetEventTypes(&taskState->bsdf
-					MATERIALS_PARAM);
-
-			sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth, 
-					&taskConfig->pathTracer.maxPathDepth, eventTypes);
-
-			pathStates[gid] = MK_HIT_OBJECT;
-		}
-	}
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_HIT_NOTHING
-// To: MK_SPLAT_SAMPLE
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_HIT_NOTHING(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_HIT_NOTHING(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_HIT_NOTHING)
-		return;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	// Nothing was hit, add environmental lights radiance
-
-	bool checkDirectLightHit = true;
-	
-	checkDirectLightHit = checkDirectLightHit &&
-			(!(taskConfig->pathTracer.forceBlackBackground && pathInfo->isPassThroughPath) || !pathInfo->isPassThroughPath);
-
-	checkDirectLightHit = checkDirectLightHit &&
-			// Avoid to render caustic path if hybridBackForwardEnable
-			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo));
-
-	checkDirectLightHit = checkDirectLightHit &&
-			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
-			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
-
-	if (checkDirectLightHit) {
-		DirectHitInfiniteLight(
-				&taskConfig->film,
-				pathInfo,
-				&taskState->throughput,
-				&rays[gid],
-				sampleResult->firstPathVertex ? NULL : &taskState->bsdf,
-				sampleResult
-				LIGHTS_PARAM);
-	}
-
-	if (pathInfo->depth.depth == 0) {
-		sampleResult->alpha = 0.f;
-		sampleResult->depth = INFINITY;
-		sampleResult->position.x = INFINITY;
-		sampleResult->position.y = INFINITY;
-		sampleResult->position.z = INFINITY;
-		sampleResult->geometryNormal.x = 0.f;
-		sampleResult->geometryNormal.y = 0.f;
-		sampleResult->geometryNormal.z = 0.f;
-		sampleResult->shadingNormal.x = 0.f;
-		sampleResult->shadingNormal.y = 0.f;
-		sampleResult->shadingNormal.z = 0.f;
-		sampleResult->materialID = 0;
-		sampleResult->objectID = 0;
-		sampleResult->uv.u = INFINITY;
-		sampleResult->uv.v = INFINITY;
-		sampleResult->isHoldout = false;
-	} else if (!sampleResult->isHoldout && pathInfo->isTransmittedPath) {
-		// I set to 0.0 also the alpha all purely transmitted paths hitting nothing
-		sampleResult->alpha = 0.f;
-	}
-
-	pathStates[gid] = MK_SPLAT_SAMPLE;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_HIT_OBJECT
-// To: MK_RT_DL or MK_GENERATE_NEXT_VERTEX_RAY or MK_SPLAT_SAMPLE
-//
-// The shading of a hit and the direct light sampling of the vertex, which run
-// back to back with no trace between them: one kernel, so that the per-task
-// state is loaded once (it used to be three kernels: MK_HIT_OBJECT,
-// MK_DL_ILLUMINATE and MK_DL_SAMPLE_BSDF).
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_HIT_OBJECT(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_HIT_OBJECT(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_HIT_OBJECT)
-		return;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
+// The next vertex ray: sample the BSDF, Russian roulette (the next state is
+// MK_RT_NEXT_VERTEX or MK_SPLAT_SAMPLE)
+OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskState *taskState,
+		__global EyePathInfo *pathInfo,
+		__global Ray *ray,
+		__global SampleResult *sampleResult,
+		const DirectLightResult directLightResult
+		SAMPLER_PARAM_DECL
+		MATERIALS_PARAM_DECL) {
 	__global BSDF *bsdf = &taskState->bsdf;
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-	
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	// Something was hit
-
-	if (taskState->albedoToDo && BSDF_IsAlbedoEndPoint(bsdf, taskConfig->pathTracer.albedo.specularSetting,
-			taskConfig->pathTracer.albedo.specularGlossinessThreshold MATERIALS_PARAM)) {
-		const float3 albedo = VLOAD3F(taskState->throughput.c) * BSDF_Albedo(bsdf
-				MATERIALS_PARAM);
-		VSTORE3F(albedo, sampleResult->albedo.c);
-		sampleResult->shadingNormal = bsdf->hitPoint.shadeN;
-
-		taskState->albedoToDo = false;
-	}
-
-	if (pathInfo->depth.depth == 0) {
-		const bool isHoldout = BSDF_IsHoldout(bsdf
-				MATERIALS_PARAM);
-		sampleResult->alpha = isHoldout ? 0.f : 1.f;
-		sampleResult->depth = rayHits[gid].t;
-		sampleResult->position = bsdf->hitPoint.p;
-		sampleResult->geometryNormal = bsdf->hitPoint.geometryN;
-		sampleResult->materialID = BSDF_GetMaterialID(bsdf
-				MATERIALS_PARAM);
-		sampleResult->objectID = BSDF_GetObjectID(bsdf, sceneObjs);
-		sampleResult->uv = bsdf->hitPoint.defaultUV;
-		sampleResult->isHoldout = isHoldout;
-	}
-
-	//----------------------------------------------------------------------
-	// Check if it is a baked material
-	//----------------------------------------------------------------------
-
-	if (BSDF_HasBakeMap(bsdf, COMBINED MATERIALS_PARAM)) {
-		const float3 radiance = VLOAD3F(&taskState->throughput.c[0]) * BSDF_GetBakeMapValue(bsdf MATERIALS_PARAM);
-		VADD3F(sampleResult->radiancePerPixelNormalized[0].c, radiance);
-
-		pathStates[gid] = MK_SPLAT_SAMPLE;
-		return;
-	} else if (BSDF_HasBakeMap(bsdf, LIGHTMAP MATERIALS_PARAM)) {
-		const float3 radiance = VLOAD3F(&taskState->throughput.c[0]) *
-				BSDF_Albedo(bsdf MATERIALS_PARAM) *
-				BSDF_GetBakeMapValue(bsdf MATERIALS_PARAM);
-		VADD3F(sampleResult->radiancePerPixelNormalized[0].c, radiance);
-
-		pathStates[gid] = MK_SPLAT_SAMPLE;
-		return;
-	}
-
-	//--------------------------------------------------------------------------
-	// Check if it is a light source and I have to add light emission
-	//--------------------------------------------------------------------------
-
-	bool checkDirectLightHit = true;
-
-	checkDirectLightHit = checkDirectLightHit &&
-			// Avoid to render caustic path if hybridBackForwardEnable
-			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo));
-
-	checkDirectLightHit = checkDirectLightHit &&
-			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
-			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
-
-	// Check if it is a light source (note: I can hit only triangle area light sources)
-	if (BSDF_IsLightSource(bsdf) && checkDirectLightHit) {
-		DirectHitFiniteLight(
-				&taskConfig->film,
-				pathInfo,
-				&taskState->throughput,
-				&rays[gid],
-				rayHits[gid].t,
-				bsdf,
-				sampleResult
-				LIGHTS_PARAM);
-	}
-
-	//----------------------------------------------------------------------
-	// Check if I can use the photon cache
-	//----------------------------------------------------------------------
-
-	if (taskConfig->pathTracer.pgic.indirectEnabled || taskConfig->pathTracer.pgic.causticEnabled) {
-		const bool isPhotonGIEnabled = PhotonGICache_IsPhotonGIEnabled(bsdf,
-				taskConfig->pathTracer.pgic.glossinessUsageThreshold
-				MATERIALS_PARAM);
-
-		switch (taskConfig->pathTracer.pgic.debugType) {
-			case PGIC_DEBUG_SHOWINDIRECT: {
-				if (isPhotonGIEnabled) {
-					__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
-							pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
-							taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
-							taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
-					if (radiance) {
-						for (uint i = 0; i < pgicLightGroupCounts; ++i)
-							VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(radiance[i].c));
-					}
-				}
-				pathStates[gid] = MK_SPLAT_SAMPLE;
-				return;
-			}
-			case PGIC_DEBUG_SHOWCAUSTIC: {
-				if (isPhotonGIEnabled) {
-					PhotonGICache_ConnectWithCausticPaths(bsdf,
-							pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
-							taskConfig->pathTracer.pgic.causticPhotonTracedCount,
-							taskConfig->pathTracer.pgic.causticLookUpRadius,
-							taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
-							WHITE,
-							&sampleResult->radiancePerPixelNormalized[0]
-							MATERIALS_PARAM);
-				}
-				pathStates[gid] = MK_SPLAT_SAMPLE;
-				return;
-			}
-			case PGIC_DEBUG_SHOWINDIRECTPATHMIX: {
-				if (isPhotonGIEnabled) {
-					Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
-					const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-
-					if (taskState->photonGICacheEnabledOnLastHit &&
-							(rayHits[gid].t > PhotonGICache_GetIndirectUsageThreshold(
-								pathInfo->lastBSDFEvent,
-								pathInfo->lastGlossiness,
-								// I hope to not introduce strange sample correlations
-								// by using passThrough here
-								passThroughEvent,
-								taskConfig->pathTracer.pgic.glossinessUsageThreshold,
-								taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
-								taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
-						VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 1.f), sampleResult->radiancePerPixelNormalized[0].c);
-						taskState->photonGIShowIndirectPathMixUsed = true;
-
-						pathStates[gid] = MK_SPLAT_SAMPLE;
-						return;
-					}
-
-					taskState->photonGICacheEnabledOnLastHit = true;
-				} else
-					taskState->photonGICacheEnabledOnLastHit = false;
-
-				break;
-			}
-			case PGIC_DEBUG_NONE:
-			default: {
-				if (isPhotonGIEnabled) {
-					if (taskConfig->pathTracer.pgic.causticEnabled &&
-							(!taskConfig->pathTracer.hybridBackForward.enabled || (pathInfo->depth.depth != 0))) {
-						const bool isEmpty = PhotonGICache_ConnectWithCausticPaths(bsdf,
-								pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
-								taskConfig->pathTracer.pgic.causticPhotonTracedCount,
-								taskConfig->pathTracer.pgic.causticLookUpRadius,
-								taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
-								VLOAD3F(taskState->throughput.c),
-								&sampleResult->radiancePerPixelNormalized[0]
-								MATERIALS_PARAM);
-
-						if (!isEmpty)
-							taskState->photonGICausticCacheUsed = true;
-					}
-
-					if (taskConfig->pathTracer.pgic.indirectEnabled) {
-						Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
-						const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-
-						if (taskState->photonGICacheEnabledOnLastHit &&
-								(rayHits[gid].t > PhotonGICache_GetIndirectUsageThreshold(
-									pathInfo->lastBSDFEvent,
-									pathInfo->lastGlossiness,
-									// I hope to not introduce strange sample correlations
-									// by using passThrough here
-									passThroughEvent,
-									taskConfig->pathTracer.pgic.glossinessUsageThreshold,
-									taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
-									taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
-							__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
-								pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
-								taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
-								taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
-
-							if (radiance) {
-								for (uint i = 0; i < pgicLightGroupCounts; ++i)
-									VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(taskState->throughput.c) * VLOAD3F(radiance[i].c));
-							}
-
-							// I can terminate the path, all done
-							pathStates[gid] = MK_SPLAT_SAMPLE;
-							return;
-						}
-					}
-
-					taskState->photonGICacheEnabledOnLastHit = true;
-				} else
-					taskState->photonGICacheEnabledOnLastHit = false;
-
-				break;
-			}
-		}
-	}
-
-	//----------------------------------------------------------------------
-	// Check if this is the last path vertex (but not also the first)
-	//
-	// I handle as a special case when the path vertex is both the first
-	// and the last: I do direct light sampling without MIS.
-	if (sampleResult->lastPathVertex && !sampleResult->firstPathVertex) {
-		pathStates[gid] = MK_SPLAT_SAMPLE;
-		return;
-	}
-
-	//--------------------------------------------------------------------------
-	// Direct light sampling: pick a light source and a point on it, then
-	// evaluate the BSDF in the direction of the light
-	//--------------------------------------------------------------------------
-
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
 	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	// It will set eventually to true if the light is visible
-	taskDirectLight->directLightResult = NOT_VISIBLE;
-
-	if (!BSDF_IsDelta(bsdf
-			MATERIALS_PARAM) &&
-			DirectLight_Illuminate(
-				bsdf,
-				&rays[gid],
-				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
-				&task->tmpHitPoint,
-				rays[gid].time,
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Z SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_W SAMPLER_PARAM),
-				&taskDirectLight->illumInfo
-				LIGHTS_PARAM) &&
-			DirectLight_BSDFSampling(
-				taskConfig,
-				&taskDirectLight->illumInfo,
-				rays[gid].time, sampleResult->lastPathVertex,
-				pathInfo,
-				&task->tmpPathDepthInfo,
-				bsdf,
-				VLOAD3F(&rays[gid].d.x)
-				LIGHTS_PARAM)) {
-		// Initialize the pass-through event for the shadow ray
-		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
-		Seed seedPassThroughEvent;
-		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
-		taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
-
-		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
-		taskDirectLight->throughShadowTransparency = false;
-
-		// Make a copy of current PathVolumeInfo for tracing the
-		// shadow ray
-		directLightVolInfos[gid] = pathInfo->volume;
-
-		// The shadow ray was initialized by Light_Illuminate(): flag it for
-		// an any-hit trace if the scene allows it
-		if (taskConfig->scene.shadowRayAnyHit)
-			rays[gid].flags |= RAY_FLAGS_SHADOW;
-
-		// I have to trace the shadow ray
-		pathStates[gid] = MK_RT_DL;
-	} else {
-		// No shadow ray to trace, move to the next vertex ray
-		// however, I have to check if this is the last path vertex
-		pathStates[gid] = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
-	}
-
-	// Save the seed
-	task->seed = seedValue;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_RT_DL
-// To: MK_SPLAT_SAMPLE or MK_GENERATE_NEXT_VERTEX_RAY
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_RT_DL(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_RT_DL(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_RT_DL)
-		return;
-
- 	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-
-	// Count the shadow ray traced by the RT kernel
-	sampleResult->rayCount += 1;
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-	
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	float3 connectionThroughput = WHITE;
-
-	Seed seedPassThroughEvent = taskDirectLight->seedPassThroughEvent;
-	const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-	taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
-
-	int throughShadowTransparency = taskDirectLight->throughShadowTransparency;
-	// With the any-hit shadow rays (nothing in the scene can let a shadow ray
-	// through: no transparency, no volume) the trace result is final and the
-	// BSDF of the blocker is not needed
-	const bool continueToTrace = scene->shadowRayAnyHit ? false :
-		Scene_Intersect(taskConfig,
-			EYE_RAY | SHADOW_RAY,
-			&throughShadowTransparency,
-			&directLightVolInfos[gid],
-			&task->tmpHitPoint,
-			passThroughEvent,
-			&rays[gid], &rayHits[gid], &task->tmpBsdf,
-			&connectionThroughput, WHITE,
-			NULL,
-			true
-			MATERIALS_PARAM
-			);
-	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
-	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c), taskDirectLight->illumInfo.lightRadiance.c);
-	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightIrradiance.c), taskDirectLight->illumInfo.lightIrradiance.c);
-
-	const bool rayMiss = (rayHits[gid].meshIndex == NULL_INDEX);
-
-	// If continueToTrace, there is nothing to do, just keep the same state
-	if (!continueToTrace) {
-		if (rayMiss) {
-			// Nothing was hit, the light source is visible
-
-			__global BSDF *bsdf = &taskState->bsdf;
-
-			if (!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)) {
-				const float3 lightRadiance = VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c);
-				SampleResult_AddDirectLight(&taskConfig->film,
-						sampleResult, taskDirectLight->illumInfo.lightID,
-						BSDF_GetEventTypes(bsdf
-							MATERIALS_PARAM),
-						VLOAD3F(taskState->throughput.c), lightRadiance,
-						1.f);
-
-				// The first path vertex is not handled by AddDirectLight(). This is valid
-				// for irradiance AOV only if it is not a SPECULAR material.
-				//
-				// Note: irradiance samples the light sources only here (i.e. no
-				// direct hit, no MIS, it would be useless)
-				if ((sampleResult->firstPathVertex) && !(BSDF_GetEventTypes(bsdf
-							MATERIALS_PARAM) & SPECULAR)) {
-					const float3 irradiance = (M_1_PI_F * fabs(dot(
-								VLOAD3F(&bsdf->hitPoint.shadeN.x),
-								VLOAD3F(&rays[gid].d.x)))) *
-							VLOAD3F(taskDirectLight->illumInfo.lightIrradiance.c);
-					VSTORE3F(irradiance, sampleResult->irradiance.c);
-				}
-			}
-
-			taskDirectLight->directLightResult = ILLUMINATED;
-		} else
-			taskDirectLight->directLightResult = SHADOWED;
-
-		// Check if this is the last path vertex
-		if (sampleResult->lastPathVertex)
-			pathState = MK_SPLAT_SAMPLE;
-		else
-			pathState = MK_GENERATE_NEXT_VERTEX_RAY;
-
-		// Save the state
-		pathStates[gid] = pathState;
-	}
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_GENERATE_NEXT_VERTEX_RAY
-// To: MK_SPLAT_SAMPLE or MK_RT_NEXT_VERTEX
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_GENERATE_NEXT_VERTEX_RAY)
-		return;
-
- 	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	__global BSDF *bsdf = &taskState->bsdf;
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-
-	__global Ray *ray = &rays[gid];
-	
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
 
 	// Sample the BSDF
 	float3 sampledDir;
@@ -692,7 +49,7 @@ __kernel void AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY(
 	float bsdfPdfW;
 	BSDFEvent bsdfEvent;
 
-	if (BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM) && (tasksDirectLight[gid].directLightResult != SHADOWED)) {
+	if (BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM) && (directLightResult != SHADOWED)) {
 		bsdfSample = BSDF_ShadowCatcherSample(bsdf,
 				&sampledDir, &bsdfPdfW, &cosSampledDir, &bsdfEvent
 				MATERIALS_PARAM);
@@ -783,18 +140,570 @@ __kernel void AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY(
 		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 		taskState->throughShadowTransparency = false;
 
-
-		pathState = MK_RT_NEXT_VERTEX;
+		return MK_RT_NEXT_VERTEX;
 	} else
-		pathState = MK_SPLAT_SAMPLE;
+		return MK_SPLAT_SAMPLE;
+}
 
-	// Save the state
-	pathStates[gid] = pathState;
+// The trace result of the shadow ray: add the direct light if the light is
+// visible (the next state is MK_GENERATE_NEXT_VERTEX_RAY or MK_SPLAT_SAMPLE,
+// or MK_RT_DL to continue the trace)
+OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTask *task,
+		__global GPUTaskDirectLight *taskDirectLight,
+		__global GPUTaskState *taskState,
+		__global PathVolumeInfo *directLightVolInfo,
+		__global Ray *ray,
+		__global RayHit *rayHit,
+		__global SampleResult *sampleResult
+		MATERIALS_PARAM_DECL) {
+	// Count the shadow ray traced by the RT kernel
+	sampleResult->rayCount += 1;
+
+	float3 connectionThroughput = WHITE;
+
+	Seed seedPassThroughEvent = taskDirectLight->seedPassThroughEvent;
+	const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
+	taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
+
+	int throughShadowTransparency = taskDirectLight->throughShadowTransparency;
+	// With the any-hit shadow rays (nothing in the scene can let a shadow ray
+	// through: no transparency, no volume) the trace result is final and the
+	// BSDF of the blocker is not needed
+	const bool continueToTrace = scene->shadowRayAnyHit ? false :
+		Scene_Intersect(taskConfig,
+			EYE_RAY | SHADOW_RAY,
+			&throughShadowTransparency,
+			directLightVolInfo,
+			&task->tmpHitPoint,
+			passThroughEvent,
+			ray, rayHit, &task->tmpBsdf,
+			&connectionThroughput, WHITE,
+			NULL,
+			true
+			MATERIALS_PARAM
+			);
+	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
+	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c), taskDirectLight->illumInfo.lightRadiance.c);
+	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightIrradiance.c), taskDirectLight->illumInfo.lightIrradiance.c);
+
+	const bool rayMiss = (rayHit->meshIndex == NULL_INDEX);
+
+	// If continueToTrace, there is nothing to do, just keep the same state
+	if (!continueToTrace) {
+		if (rayMiss) {
+			// Nothing was hit, the light source is visible
+
+			__global BSDF *bsdf = &taskState->bsdf;
+
+			if (!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)) {
+				const float3 lightRadiance = VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c);
+				SampleResult_AddDirectLight(&taskConfig->film,
+						sampleResult, taskDirectLight->illumInfo.lightID,
+						BSDF_GetEventTypes(bsdf
+							MATERIALS_PARAM),
+						VLOAD3F(taskState->throughput.c), lightRadiance,
+						1.f);
+
+				// The first path vertex is not handled by AddDirectLight(). This is valid
+				// for irradiance AOV only if it is not a SPECULAR material.
+				//
+				// Note: irradiance samples the light sources only here (i.e. no
+				// direct hit, no MIS, it would be useless)
+				if ((sampleResult->firstPathVertex) && !(BSDF_GetEventTypes(bsdf
+							MATERIALS_PARAM) & SPECULAR)) {
+					const float3 irradiance = (M_1_PI_F * fabs(dot(
+								VLOAD3F(&bsdf->hitPoint.shadeN.x),
+								VLOAD3F(&ray->d.x)))) *
+							VLOAD3F(taskDirectLight->illumInfo.lightIrradiance.c);
+					VSTORE3F(irradiance, sampleResult->irradiance.c);
+				}
+			}
+
+			taskDirectLight->directLightResult = ILLUMINATED;
+		} else
+			taskDirectLight->directLightResult = SHADOWED;
+
+		// Check if this is the last path vertex
+		return (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
+	}
+
+	return MK_RT_DL;
+}
+
+// Nothing was hit (the next state is MK_SPLAT_SAMPLE)
+OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskState *taskState,
+		__global EyePathInfo *pathInfo,
+		__global const Ray *ray,
+		__global SampleResult *sampleResult
+		LIGHTS_PARAM_DECL) {
+	bool checkDirectLightHit = true;
+	
+	checkDirectLightHit = checkDirectLightHit &&
+			(!(taskConfig->pathTracer.forceBlackBackground && pathInfo->isPassThroughPath) || !pathInfo->isPassThroughPath);
+
+	checkDirectLightHit = checkDirectLightHit &&
+			// Avoid to render caustic path if hybridBackForwardEnable
+			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo));
+
+	checkDirectLightHit = checkDirectLightHit &&
+			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
+			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
+
+	if (checkDirectLightHit) {
+		DirectHitInfiniteLight(
+				&taskConfig->film,
+				pathInfo,
+				&taskState->throughput,
+				ray,
+				sampleResult->firstPathVertex ? NULL : &taskState->bsdf,
+				sampleResult
+				LIGHTS_PARAM);
+	}
+
+	if (pathInfo->depth.depth == 0) {
+		sampleResult->alpha = 0.f;
+		sampleResult->depth = INFINITY;
+		sampleResult->position.x = INFINITY;
+		sampleResult->position.y = INFINITY;
+		sampleResult->position.z = INFINITY;
+		sampleResult->geometryNormal.x = 0.f;
+		sampleResult->geometryNormal.y = 0.f;
+		sampleResult->geometryNormal.z = 0.f;
+		sampleResult->shadingNormal.x = 0.f;
+		sampleResult->shadingNormal.y = 0.f;
+		sampleResult->shadingNormal.z = 0.f;
+		sampleResult->materialID = 0;
+		sampleResult->objectID = 0;
+		sampleResult->uv.u = INFINITY;
+		sampleResult->uv.v = INFINITY;
+		sampleResult->isHoldout = false;
+	} else if (!sampleResult->isHoldout && pathInfo->isTransmittedPath) {
+		// I set to 0.0 also the alpha all purely transmitted paths hitting nothing
+		sampleResult->alpha = 0.f;
+	}
+}
+
+// Something was hit: the shading of the hit and the direct light sampling of
+// the vertex (the next state is MK_RT_DL, MK_GENERATE_NEXT_VERTEX_RAY or
+// MK_SPLAT_SAMPLE)
+OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTask *task,
+		__global GPUTaskDirectLight *taskDirectLight,
+		__global GPUTaskState *taskState,
+		__global EyePathInfo *pathInfo,
+		__global PathVolumeInfo *directLightVolInfo,
+		__global Ray *ray,
+		__global const RayHit *rayHit,
+		__global SampleResult *sampleResult,
+		__global void *samplerSharedDataBuff,
+		__global void *samplesBuff,
+		__global float *samplesDataBuff,
+		__global SampleResult *sampleResultsBuff
+		KERNEL_ARGS_INFINITELIGHTS
+		KERNEL_ARGS_PHOTONGI
+		LIGHTS_PARAM_DECL) {
+	__global BSDF *bsdf = &taskState->bsdf;
+
+	if (taskState->albedoToDo && BSDF_IsAlbedoEndPoint(bsdf, taskConfig->pathTracer.albedo.specularSetting,
+			taskConfig->pathTracer.albedo.specularGlossinessThreshold MATERIALS_PARAM)) {
+		const float3 albedo = VLOAD3F(taskState->throughput.c) * BSDF_Albedo(bsdf
+				MATERIALS_PARAM);
+		VSTORE3F(albedo, sampleResult->albedo.c);
+		sampleResult->shadingNormal = bsdf->hitPoint.shadeN;
+
+		taskState->albedoToDo = false;
+	}
+
+	if (pathInfo->depth.depth == 0) {
+		const bool isHoldout = BSDF_IsHoldout(bsdf
+				MATERIALS_PARAM);
+		sampleResult->alpha = isHoldout ? 0.f : 1.f;
+		sampleResult->depth = rayHit->t;
+		sampleResult->position = bsdf->hitPoint.p;
+		sampleResult->geometryNormal = bsdf->hitPoint.geometryN;
+		sampleResult->materialID = BSDF_GetMaterialID(bsdf
+				MATERIALS_PARAM);
+		sampleResult->objectID = BSDF_GetObjectID(bsdf, sceneObjs);
+		sampleResult->uv = bsdf->hitPoint.defaultUV;
+		sampleResult->isHoldout = isHoldout;
+	}
+
+	//----------------------------------------------------------------------
+	// Check if it is a baked material
+	//----------------------------------------------------------------------
+
+	if (BSDF_HasBakeMap(bsdf, COMBINED MATERIALS_PARAM)) {
+		const float3 radiance = VLOAD3F(&taskState->throughput.c[0]) * BSDF_GetBakeMapValue(bsdf MATERIALS_PARAM);
+		VADD3F(sampleResult->radiancePerPixelNormalized[0].c, radiance);
+
+		return MK_SPLAT_SAMPLE;
+	} else if (BSDF_HasBakeMap(bsdf, LIGHTMAP MATERIALS_PARAM)) {
+		const float3 radiance = VLOAD3F(&taskState->throughput.c[0]) *
+				BSDF_Albedo(bsdf MATERIALS_PARAM) *
+				BSDF_GetBakeMapValue(bsdf MATERIALS_PARAM);
+		VADD3F(sampleResult->radiancePerPixelNormalized[0].c, radiance);
+
+		return MK_SPLAT_SAMPLE;
+	}
 
 	//--------------------------------------------------------------------------
+	// Check if it is a light source and I have to add light emission
+	//--------------------------------------------------------------------------
+
+	bool checkDirectLightHit = true;
+
+	checkDirectLightHit = checkDirectLightHit &&
+			// Avoid to render caustic path if hybridBackForwardEnable
+			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo));
+
+	checkDirectLightHit = checkDirectLightHit &&
+			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
+			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
+
+	// Check if it is a light source (note: I can hit only triangle area light sources)
+	if (BSDF_IsLightSource(bsdf) && checkDirectLightHit) {
+		DirectHitFiniteLight(
+				&taskConfig->film,
+				pathInfo,
+				&taskState->throughput,
+				ray,
+				rayHit->t,
+				bsdf,
+				sampleResult
+				LIGHTS_PARAM);
+	}
+
+	//----------------------------------------------------------------------
+	// Check if I can use the photon cache
+	//----------------------------------------------------------------------
+
+	if (taskConfig->pathTracer.pgic.indirectEnabled || taskConfig->pathTracer.pgic.causticEnabled) {
+		const bool isPhotonGIEnabled = PhotonGICache_IsPhotonGIEnabled(bsdf,
+				taskConfig->pathTracer.pgic.glossinessUsageThreshold
+				MATERIALS_PARAM);
+
+		switch (taskConfig->pathTracer.pgic.debugType) {
+			case PGIC_DEBUG_SHOWINDIRECT: {
+				if (isPhotonGIEnabled) {
+					__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
+							pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
+							taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
+							taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
+					if (radiance) {
+						for (uint i = 0; i < pgicLightGroupCounts; ++i)
+							VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(radiance[i].c));
+					}
+				}
+				return MK_SPLAT_SAMPLE;
+			}
+			case PGIC_DEBUG_SHOWCAUSTIC: {
+				if (isPhotonGIEnabled) {
+					PhotonGICache_ConnectWithCausticPaths(bsdf,
+							pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
+							taskConfig->pathTracer.pgic.causticPhotonTracedCount,
+							taskConfig->pathTracer.pgic.causticLookUpRadius,
+							taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
+							WHITE,
+							&sampleResult->radiancePerPixelNormalized[0]
+							MATERIALS_PARAM);
+				}
+				return MK_SPLAT_SAMPLE;
+			}
+			case PGIC_DEBUG_SHOWINDIRECTPATHMIX: {
+				if (isPhotonGIEnabled) {
+					Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
+					const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
+
+					if (taskState->photonGICacheEnabledOnLastHit &&
+							(rayHit->t > PhotonGICache_GetIndirectUsageThreshold(
+								pathInfo->lastBSDFEvent,
+								pathInfo->lastGlossiness,
+								// I hope to not introduce strange sample correlations
+								// by using passThrough here
+								passThroughEvent,
+								taskConfig->pathTracer.pgic.glossinessUsageThreshold,
+								taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
+								taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
+						VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 1.f), sampleResult->radiancePerPixelNormalized[0].c);
+						taskState->photonGIShowIndirectPathMixUsed = true;
+
+						return MK_SPLAT_SAMPLE;
+					}
+
+					taskState->photonGICacheEnabledOnLastHit = true;
+				} else
+					taskState->photonGICacheEnabledOnLastHit = false;
+
+				break;
+			}
+			case PGIC_DEBUG_NONE:
+			default: {
+				if (isPhotonGIEnabled) {
+					if (taskConfig->pathTracer.pgic.causticEnabled &&
+							(!taskConfig->pathTracer.hybridBackForward.enabled || (pathInfo->depth.depth != 0))) {
+						const bool isEmpty = PhotonGICache_ConnectWithCausticPaths(bsdf,
+								pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
+								taskConfig->pathTracer.pgic.causticPhotonTracedCount,
+								taskConfig->pathTracer.pgic.causticLookUpRadius,
+								taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
+								VLOAD3F(taskState->throughput.c),
+								&sampleResult->radiancePerPixelNormalized[0]
+								MATERIALS_PARAM);
+
+						if (!isEmpty)
+							taskState->photonGICausticCacheUsed = true;
+					}
+
+					if (taskConfig->pathTracer.pgic.indirectEnabled) {
+						Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
+						const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
+
+						if (taskState->photonGICacheEnabledOnLastHit &&
+								(rayHit->t > PhotonGICache_GetIndirectUsageThreshold(
+									pathInfo->lastBSDFEvent,
+									pathInfo->lastGlossiness,
+									// I hope to not introduce strange sample correlations
+									// by using passThrough here
+									passThroughEvent,
+									taskConfig->pathTracer.pgic.glossinessUsageThreshold,
+									taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
+									taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
+							__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
+								pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
+								taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
+								taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
+
+							if (radiance) {
+								for (uint i = 0; i < pgicLightGroupCounts; ++i)
+									VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(taskState->throughput.c) * VLOAD3F(radiance[i].c));
+							}
+
+							// I can terminate the path, all done
+							return MK_SPLAT_SAMPLE;
+						}
+					}
+
+					taskState->photonGICacheEnabledOnLastHit = true;
+				} else
+					taskState->photonGICacheEnabledOnLastHit = false;
+
+				break;
+			}
+		}
+	}
+
+	//----------------------------------------------------------------------
+	// Check if this is the last path vertex (but not also the first)
+	//
+	// I handle as a special case when the path vertex is both the first
+	// and the last: I do direct light sampling without MIS.
+	if (sampleResult->lastPathVertex && !sampleResult->firstPathVertex) {
+		return MK_SPLAT_SAMPLE;
+	}
+
+	//--------------------------------------------------------------------------
+	// Direct light sampling: pick a light source and a point on it, then
+	// evaluate the BSDF in the direction of the light
+	//--------------------------------------------------------------------------
+
+	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
+
+	// Read the seed
+	Seed seedValue = task->seed;
+	// This trick is required by SAMPLER_PARAM macro
+	Seed *seed = &seedValue;
+
+	PathState nextState;
+
+	// It will set eventually to true if the light is visible
+	taskDirectLight->directLightResult = NOT_VISIBLE;
+
+	if (!BSDF_IsDelta(bsdf
+			MATERIALS_PARAM) &&
+			DirectLight_Illuminate(
+				bsdf,
+				ray,
+				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
+				&task->tmpHitPoint,
+				ray->time,
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Z SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_W SAMPLER_PARAM),
+				&taskDirectLight->illumInfo
+				LIGHTS_PARAM) &&
+			DirectLight_BSDFSampling(
+				taskConfig,
+				&taskDirectLight->illumInfo,
+				ray->time, sampleResult->lastPathVertex,
+				pathInfo,
+				&task->tmpPathDepthInfo,
+				bsdf,
+				VLOAD3F(&ray->d.x)
+				LIGHTS_PARAM)) {
+		// Initialize the pass-through event for the shadow ray
+		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
+		Seed seedPassThroughEvent;
+		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
+		taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
+
+		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
+		taskDirectLight->throughShadowTransparency = false;
+
+		// Make a copy of current PathVolumeInfo for tracing the
+		// shadow ray
+		*directLightVolInfo = pathInfo->volume;
+
+		// The shadow ray was initialized by Light_Illuminate(): flag it for
+		// an any-hit trace if the scene allows it
+		if (taskConfig->scene.shadowRayAnyHit)
+			ray->flags |= RAY_FLAGS_SHADOW;
+
+		// I have to trace the shadow ray
+		nextState = MK_RT_DL;
+	} else {
+		// No shadow ray to trace, move to the next vertex ray
+		// however, I have to check if this is the last path vertex
+		nextState = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
+	}
 
 	// Save the seed
 	task->seed = seedValue;
+
+	return nextState;
+}
+
+//------------------------------------------------------------------------------
+// Evaluation of the Path finite state machine.
+//
+// From: MK_RT_NEXT_VERTEX or MK_RT_DL (the states waiting for a trace)
+// To: MK_RT_NEXT_VERTEX or MK_RT_DL or MK_SPLAT_SAMPLE
+//
+// Everything a path does with the result of a trace until it needs the next
+// one, in one kernel so that the per-task state is loaded once:
+// - the next vertex ray: the hit (or the miss), the shading of the vertex, the
+//   direct light sampling and its shadow ray;
+// - the shadow ray: the direct light if the light is visible;
+// - then, for both, the next vertex ray when there is no shadow ray to trace.
+// It used to be seven kernels (MK_RT_NEXT_VERTEX, MK_HIT_NOTHING,
+// MK_HIT_OBJECT, MK_DL_ILLUMINATE, MK_DL_SAMPLE_BSDF, MK_RT_DL and
+// MK_GENERATE_NEXT_VERTEX_RAY). The rays are traced before the kernel sequence
+// and a task reads its state once, at the start, so it never consumes a ray
+// set up in the same iteration.
+//------------------------------------------------------------------------------
+
+__kernel void AdvancePaths_MK_RT(
+		KERNEL_ARGS
+		) {
+	const size_t gid = get_global_id(0);
+
+	// Read the path state
+	__global GPUTaskState *taskState = &tasksState[gid];
+	PathState pathState = pathStates[gid];
+#if defined(DEBUG_PRINTF_KERNEL_NAME)
+	if (gid == 0)
+		printf("Kernel: AdvancePaths_MK_RT(state = %d)\n", pathState);
+	else
+		return;
+#endif
+	if ((pathState != MK_RT_NEXT_VERTEX) && (pathState != MK_RT_DL))
+		return;
+
+	//--------------------------------------------------------------------------
+	// Start of variables setup
+	//--------------------------------------------------------------------------
+
+	__global GPUTask *task = &tasks[gid];
+	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
+	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
+	__constant const Scene* restrict scene = &taskConfig->scene;
+
+	// Initialize image maps page pointer table
+	INIT_IMAGEMAPS_PAGES
+
+	//--------------------------------------------------------------------------
+	// End of variables setup
+	//--------------------------------------------------------------------------
+
+	if (pathState == MK_RT_DL) {
+		pathState = AdvancePaths_ShadowRayHit(taskConfig, task, &tasksDirectLight[gid], taskState,
+				&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult
+				MATERIALS_PARAM);
+	} else {
+		// Count the ray traced by the RT kernel (the shadow rays are counted
+		// by AdvancePaths_ShadowRayHit())
+		sampleResult->rayCount += 1;
+
+		float3 connectionThroughput;
+
+		Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
+		const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
+		taskState->seedPassThroughEvent = seedPassThroughEvent;
+
+		int throughShadowTransparency = taskState->throughShadowTransparency;
+		const bool continueToTrace = Scene_Intersect(taskConfig,
+				EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
+				&throughShadowTransparency,
+				&pathInfo->volume,
+				&task->tmpHitPoint,
+				passThroughEvent,
+				&rays[gid], &rayHits[gid], &taskState->bsdf,
+				&connectionThroughput, VLOAD3F(taskState->throughput.c),
+				sampleResult,
+				false
+				MATERIALS_PARAM
+				);
+		taskState->throughShadowTransparency = throughShadowTransparency;
+		VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+
+		// If continueToTrace, there is nothing to do, just keep the same state
+		if (!continueToTrace) {
+			if (rayHits[gid].meshIndex == NULL_INDEX) {
+				AdvancePaths_HitNothing(taskConfig, taskState, pathInfo, &rays[gid], sampleResult
+						LIGHTS_PARAM);
+
+				pathState = MK_SPLAT_SAMPLE;
+			} else {
+				const BSDFEvent eventTypes = BSDF_GetEventTypes(&taskState->bsdf
+						MATERIALS_PARAM);
+
+				sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
+						&taskConfig->pathTracer.maxPathDepth, eventTypes);
+
+				pathState = AdvancePaths_HitObject(taskConfig,
+						task, &tasksDirectLight[gid], taskState, pathInfo,
+						&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult,
+						samplerSharedDataBuff, samplesBuff, samplesDataBuff, sampleResultsBuff,
+						worldCenterX, worldCenterY, worldCenterZ, worldRadius,
+						pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues,
+						pgicRadiancePhotonsBVHNodes, pgicCausticPhotons, pgicCausticPhotonsBVHNodes
+						LIGHTS_PARAM);
+			}
+		}
+	}
+
+	if (pathState == MK_GENERATE_NEXT_VERTEX_RAY) {
+		// Read the seed
+		Seed seedValue = task->seed;
+		// This trick is required by SAMPLER_PARAM macro
+		Seed *seed = &seedValue;
+
+		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, pathInfo,
+				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult
+				SAMPLER_PARAM
+				MATERIALS_PARAM);
+
+		// Save the seed
+		task->seed = seedValue;
+	}
+
+	// Save the state
+	pathStates[gid] = pathState;
 }
 
 //------------------------------------------------------------------------------
