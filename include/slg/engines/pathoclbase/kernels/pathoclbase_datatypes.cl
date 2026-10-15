@@ -42,9 +42,9 @@ typedef enum {
 	// Micro-kernel states
 	MK_RT_NEXT_VERTEX = 0,
 	// 1 to 4 were MK_HIT_NOTHING, MK_HIT_OBJECT, MK_DL_ILLUMINATE and
-	// MK_DL_SAMPLE_BSDF: the AdvancePaths_MK_RT kernel does all the steps
-	// from a trace result to the next ray to trace (MK_RT_NEXT_VERTEX,
-	// MK_RT_DL, MK_GENERATE_NEXT_VERTEX_RAY)
+	// MK_DL_SAMPLE_BSDF. One kernel, AdvancePaths_MK_RT, runs all the steps:
+	// a task is in MK_RT_NEXT_VERTEX or MK_RT_DL between two kernel runs
+	// (MK_GENERATE_CAMERA_RAY after Init() and MK_DONE are the exceptions)
 	MK_RT_DL = 5,
 	MK_GENERATE_NEXT_VERTEX_RAY = 6,
 	MK_SPLAT_SAMPLE = 7,

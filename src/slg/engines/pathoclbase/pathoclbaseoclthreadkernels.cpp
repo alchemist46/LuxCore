@@ -234,9 +234,6 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	std::tuple<HardwareDeviceKernelUPtr&, const char *>
 	microKernels[] = {
 		{advancePathsKernel_MK_RT, "AdvancePaths_MK_RT"},
-		{advancePathsKernel_MK_SPLAT_SAMPLE, "AdvancePaths_MK_SPLAT_SAMPLE"},
-		{advancePathsKernel_MK_NEXT_SAMPLE, "AdvancePaths_MK_NEXT_SAMPLE"},
-		{advancePathsKernel_MK_GENERATE_CAMERA_RAY, "AdvancePaths_MK_GENERATE_CAMERA_RAY"},
 	};
 
 	advancePathsWorkGroupSize = std::numeric_limits<size_t>::max();
@@ -390,12 +387,6 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 void PathOCLBaseOCLRenderThread::SetAllAdvancePathsKernelArgs(const u_int filmIndex) {
 	if (advancePathsKernel_MK_RT)
 		SetAdvancePathsKernelArgs(advancePathsKernel_MK_RT, filmIndex);
-	if (advancePathsKernel_MK_SPLAT_SAMPLE)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_SPLAT_SAMPLE, filmIndex);
-	if (advancePathsKernel_MK_NEXT_SAMPLE)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_NEXT_SAMPLE, filmIndex);
-	if (advancePathsKernel_MK_GENERATE_CAMERA_RAY)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_GENERATE_CAMERA_RAY, filmIndex);
 }
 
 void PathOCLBaseOCLRenderThread::SetKernelArgs() {
@@ -422,18 +413,10 @@ void PathOCLBaseOCLRenderThread::SetKernelArgs() {
 void PathOCLBaseOCLRenderThread::EnqueueAdvancePathsKernel() {
 	const u_int taskCount = renderEngine->taskCount;
 
-	// Micro kernels version
-	//
-	// The rays are traced before this sequence: MK_RT consumes the trace
-	// results, and the following kernels finish the paths that are done and
-	// start their next sample.
+	// One kernel takes each path from the trace result (the rays are traced
+	// before it) to the next ray to trace, through the end of the path and the
+	// start of its next sample
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_SPLAT_SAMPLE,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_NEXT_SAMPLE,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_GENERATE_CAMERA_RAY,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
 }
 

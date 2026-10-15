@@ -581,20 +581,21 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 //------------------------------------------------------------------------------
 // Evaluation of the Path finite state machine.
 //
-// From: MK_RT_NEXT_VERTEX or MK_RT_DL (the states waiting for a trace)
-// To: MK_RT_NEXT_VERTEX or MK_RT_DL or MK_SPLAT_SAMPLE
+// From: MK_RT_NEXT_VERTEX or MK_RT_DL (the states waiting for a trace), or
+//       MK_GENERATE_CAMERA_RAY (a sample Init() could not start)
+// To: MK_RT_NEXT_VERTEX or MK_RT_DL (or MK_DONE with TILEPATHOCL/RTPATHOCL)
 //
 // Everything a path does with the result of a trace until it needs the next
 // one, in one kernel so that the per-task state is loaded once:
 // - the next vertex ray: the hit (or the miss), the shading of the vertex, the
 //   direct light sampling and its shadow ray;
 // - the shadow ray: the direct light if the light is visible;
-// - then, for both, the next vertex ray when there is no shadow ray to trace.
-// It used to be seven kernels (MK_RT_NEXT_VERTEX, MK_HIT_NOTHING,
-// MK_HIT_OBJECT, MK_DL_ILLUMINATE, MK_DL_SAMPLE_BSDF, MK_RT_DL and
-// MK_GENERATE_NEXT_VERTEX_RAY). The rays are traced before the kernel sequence
-// and a task reads its state once, at the start, so it never consumes a ray
-// set up in the same iteration.
+// - then, for both, the next vertex ray when there is no shadow ray to trace;
+// - at the end of a path, the splat of the sample, the next sample and its
+//   camera ray.
+// It used to be ten kernels, one per state. The rays are traced before the
+// kernel and a task reads its state once, at the start, so it never consumes
+// a ray set up in the same iteration.
 //------------------------------------------------------------------------------
 
 __kernel void AdvancePaths_MK_RT(
@@ -611,7 +612,7 @@ __kernel void AdvancePaths_MK_RT(
 	else
 		return;
 #endif
-	if ((pathState != MK_RT_NEXT_VERTEX) && (pathState != MK_RT_DL))
+	if (pathState == MK_DONE)
 		return;
 
 	//--------------------------------------------------------------------------
@@ -702,239 +703,120 @@ __kernel void AdvancePaths_MK_RT(
 		task->seed = seedValue;
 	}
 
+	//--------------------------------------------------------------------------
+	// The end of a path: splat the sample, then start the next one
+	//--------------------------------------------------------------------------
+
+	if ((pathState == MK_SPLAT_SAMPLE) || (pathState == MK_NEXT_SAMPLE) ||
+			(pathState == MK_GENERATE_CAMERA_RAY)) {
+		// Read the seed
+		Seed seedValue = task->seed;
+		// This trick is required by SAMPLER_PARAM macro
+		Seed *seed = &seedValue;
+
+		if (pathState == MK_SPLAT_SAMPLE) {
+			__constant const Film* restrict film = &taskConfig->film;
+
+			// Initialize Film radiance group pointer table
+			__global float *filmRadianceGroup[FILM_MAX_RADIANCE_GROUP_COUNT];
+			filmRadianceGroup[0] = filmRadianceGroup0;
+			filmRadianceGroup[1] = filmRadianceGroup1;
+			filmRadianceGroup[2] = filmRadianceGroup2;
+			filmRadianceGroup[3] = filmRadianceGroup3;
+			filmRadianceGroup[4] = filmRadianceGroup4;
+			filmRadianceGroup[5] = filmRadianceGroup5;
+			filmRadianceGroup[6] = filmRadianceGroup6;
+			filmRadianceGroup[7] = filmRadianceGroup7;
+
+			// Initialize Film radiance group scale table
+			float3 filmRadianceGroupScale[FILM_MAX_RADIANCE_GROUP_COUNT];
+			filmRadianceGroupScale[0] = MAKE_FLOAT3(filmRadianceGroupScale0_R, filmRadianceGroupScale0_G, filmRadianceGroupScale0_B);
+			filmRadianceGroupScale[1] = MAKE_FLOAT3(filmRadianceGroupScale1_R, filmRadianceGroupScale1_G, filmRadianceGroupScale1_B);
+			filmRadianceGroupScale[2] = MAKE_FLOAT3(filmRadianceGroupScale2_R, filmRadianceGroupScale2_G, filmRadianceGroupScale2_B);
+			filmRadianceGroupScale[3] = MAKE_FLOAT3(filmRadianceGroupScale3_R, filmRadianceGroupScale3_G, filmRadianceGroupScale3_B);
+			filmRadianceGroupScale[4] = MAKE_FLOAT3(filmRadianceGroupScale4_R, filmRadianceGroupScale4_G, filmRadianceGroupScale4_B);
+			filmRadianceGroupScale[5] = MAKE_FLOAT3(filmRadianceGroupScale5_R, filmRadianceGroupScale5_G, filmRadianceGroupScale5_B);
+			filmRadianceGroupScale[6] = MAKE_FLOAT3(filmRadianceGroupScale6_R, filmRadianceGroupScale6_G, filmRadianceGroupScale6_B);
+			filmRadianceGroupScale[7] = MAKE_FLOAT3(filmRadianceGroupScale7_R, filmRadianceGroupScale7_G, filmRadianceGroupScale7_B);
+
+			if (sampleResult->isHoldout) {
+				SampleResult_ClearRadiance(sampleResult);
+				VSTORE3F(BLACK, sampleResult->albedo.c);
+			}
+
+			if (taskConfig->pathTracer.pgic.indirectEnabled &&
+					(taskConfig->pathTracer.pgic.debugType == PGIC_DEBUG_SHOWINDIRECTPATHMIX) &&
+					!taskState->photonGIShowIndirectPathMixUsed)
+				VSTORE3F(MAKE_FLOAT3(1.f, 0.f, 0.f), sampleResult->radiancePerPixelNormalized[0].c);
+
+			//--------------------------------------------------------------------------
+			// Variance clamping
+			//--------------------------------------------------------------------------
+
+			const float sqrtVarianceClampMaxValue = taskConfig->pathTracer.sqrtVarianceClampMaxValue;
+			if (sqrtVarianceClampMaxValue > 0.f) {
+				// Radiance clamping
+				VarianceClamping_Clamp(sampleResult, sqrtVarianceClampMaxValue
+						FILM_PARAM);
+			}
+
+			//--------------------------------------------------------------------------
+			// Sampler splat sample
+			//--------------------------------------------------------------------------
+
+			Sampler_SplatSample(taskConfig
+					SAMPLER_PARAM
+					FILM_PARAM);
+			taskStats[gid].sampleCount += 1;
+
+			pathState = MK_NEXT_SAMPLE;
+		}
+
+		if (pathState == MK_NEXT_SAMPLE) {
+			Sampler_NextSample(taskConfig,
+					filmNoise,
+					filmUserImportance,
+					filmWidth, filmHeight,
+					filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3
+					SAMPLER_PARAM);
+
+			// Generate a new path and camera ray only it is not TILEPATHOCL
+#if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
+			pathState = MK_GENERATE_CAMERA_RAY;
+#else
+			pathState = MK_DONE;
+			// Mark the ray like like one to NOT trace
+			rays[gid].flags = RAY_FLAGS_MASKED;
+#endif
+		}
+
+		// Generate a new path and camera ray only it is not TILEPATHOCL: path
+		// regeneration is not used in this case
+#if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
+		if (pathState == MK_GENERATE_CAMERA_RAY) {
+			// Re-initialize the volume information
+			PathVolumeInfo_Init(&pathInfo->volume);
+
+			GenerateEyePath(taskConfig,
+					&tasksDirectLight[gid], taskState,
+					camera,
+					cameraBokehDistribution,
+					filmWidth, filmHeight,
+					filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3,
+					pixelFilterDistribution,
+					&rays[gid],
+					pathInfo
+					SAMPLER_PARAM);
+			pathState = MK_RT_NEXT_VERTEX;
+		}
+#endif
+
+		// Save the seed
+		task->seed = seedValue;
+	}
+
 	// Save the state
 	pathStates[gid] = pathState;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_SPLAT_SAMPLE
-// To: MK_NEXT_SAMPLE
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_SPLAT_SAMPLE(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_SPLAT_SAMPLE(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_SPLAT_SAMPLE)
-		return;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	__constant const Film* restrict film = &taskConfig->film;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	// Initialize Film radiance group pointer table
-	__global float *filmRadianceGroup[FILM_MAX_RADIANCE_GROUP_COUNT];
-	filmRadianceGroup[0] = filmRadianceGroup0;
-	filmRadianceGroup[1] = filmRadianceGroup1;
-	filmRadianceGroup[2] = filmRadianceGroup2;
-	filmRadianceGroup[3] = filmRadianceGroup3;
-	filmRadianceGroup[4] = filmRadianceGroup4;
-	filmRadianceGroup[5] = filmRadianceGroup5;
-	filmRadianceGroup[6] = filmRadianceGroup6;
-	filmRadianceGroup[7] = filmRadianceGroup7;
-
-	// Initialize Film radiance group scale table
-	float3 filmRadianceGroupScale[FILM_MAX_RADIANCE_GROUP_COUNT];
-	filmRadianceGroupScale[0] = MAKE_FLOAT3(filmRadianceGroupScale0_R, filmRadianceGroupScale0_G, filmRadianceGroupScale0_B);
-	filmRadianceGroupScale[1] = MAKE_FLOAT3(filmRadianceGroupScale1_R, filmRadianceGroupScale1_G, filmRadianceGroupScale1_B);
-	filmRadianceGroupScale[2] = MAKE_FLOAT3(filmRadianceGroupScale2_R, filmRadianceGroupScale2_G, filmRadianceGroupScale2_B);
-	filmRadianceGroupScale[3] = MAKE_FLOAT3(filmRadianceGroupScale3_R, filmRadianceGroupScale3_G, filmRadianceGroupScale3_B);
-	filmRadianceGroupScale[4] = MAKE_FLOAT3(filmRadianceGroupScale4_R, filmRadianceGroupScale4_G, filmRadianceGroupScale4_B);
-	filmRadianceGroupScale[5] = MAKE_FLOAT3(filmRadianceGroupScale5_R, filmRadianceGroupScale5_G, filmRadianceGroupScale5_B);
-	filmRadianceGroupScale[6] = MAKE_FLOAT3(filmRadianceGroupScale6_R, filmRadianceGroupScale6_G, filmRadianceGroupScale6_B);
-	filmRadianceGroupScale[7] = MAKE_FLOAT3(filmRadianceGroupScale7_R, filmRadianceGroupScale7_G, filmRadianceGroupScale7_B);
-
-	if (sampleResult->isHoldout) {
-		SampleResult_ClearRadiance(sampleResult);
-		VSTORE3F(BLACK, sampleResult->albedo.c);
-	}
-
-	if (taskConfig->pathTracer.pgic.indirectEnabled &&
-			(taskConfig->pathTracer.pgic.debugType == PGIC_DEBUG_SHOWINDIRECTPATHMIX) &&
-			!taskState->photonGIShowIndirectPathMixUsed)
-		VSTORE3F(MAKE_FLOAT3(1.f, 0.f, 0.f), sampleResult->radiancePerPixelNormalized[0].c);
-
-	//--------------------------------------------------------------------------
-	// Variance clamping
-	//--------------------------------------------------------------------------
-
-	const float sqrtVarianceClampMaxValue = taskConfig->pathTracer.sqrtVarianceClampMaxValue;
-	if (sqrtVarianceClampMaxValue > 0.f) {
-		// Radiance clamping
-		VarianceClamping_Clamp(sampleResult, sqrtVarianceClampMaxValue
-				FILM_PARAM);
-	}
-
-	//--------------------------------------------------------------------------
-	// Sampler splat sample
-	//--------------------------------------------------------------------------
-
-	Sampler_SplatSample(taskConfig
-			SAMPLER_PARAM
-			FILM_PARAM);
-	taskStats[gid].sampleCount += 1;
-
-	// Save the state
-	pathStates[gid] = MK_NEXT_SAMPLE;
-
-	//--------------------------------------------------------------------------
-
-	// Save the seed
-	task->seed = seedValue;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_NEXT_SAMPLE
-// To: MK_GENERATE_CAMERA_RAY
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_NEXT_SAMPLE(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_NEXT_SAMPLE(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_NEXT_SAMPLE)
-		return;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	Sampler_NextSample(taskConfig,
-			filmNoise,
-			filmUserImportance,
-			filmWidth, filmHeight,
-			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3
-			SAMPLER_PARAM);
-
-	// Save the state
-
-	// Generate a new path and camera ray only it is not TILEPATHOCL
-#if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
-	pathStates[gid] = MK_GENERATE_CAMERA_RAY;
-#else
-	pathStates[gid] = MK_DONE;
-	// Mark the ray like like one to NOT trace
-	rays[gid].flags = RAY_FLAGS_MASKED;
-#endif
-
-	//--------------------------------------------------------------------------
-
-	// Save the seed
-	task->seed = seedValue;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_GENERATE_CAMERA_RAY
-// To: MK_RT_NEXT_VERTEX
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_GENERATE_CAMERA_RAY(
-		KERNEL_ARGS
-		) {
-	// Generate a new path and camera ray only it is not TILEPATHOCL: path regeneration
-	// is not used in this case
-#if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_GENERATE_CAMERA_RAY(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_GENERATE_CAMERA_RAY)
-		return;
-
-	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	__global Ray *ray = &rays[gid];
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	// Re-initialize the volume information
-	PathVolumeInfo_Init(&pathInfo->volume);
-
-	GenerateEyePath(taskConfig,
-			&tasksDirectLight[gid], taskState,
-			camera,
-			cameraBokehDistribution,
-			filmWidth, filmHeight,
-			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3,
-			pixelFilterDistribution,
-			ray,
-			pathInfo
-			SAMPLER_PARAM);
-	pathStates[gid] = MK_RT_NEXT_VERTEX;
-
-	//--------------------------------------------------------------------------
-
-	// Save the seed
-	task->seed = seedValue;
-
-#endif
 }
 
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

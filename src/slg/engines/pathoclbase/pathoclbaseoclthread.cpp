@@ -120,9 +120,6 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	initSeedKernel = nullptr;
 	initKernel = nullptr;
 	advancePathsKernel_MK_RT = nullptr;
-	advancePathsKernel_MK_SPLAT_SAMPLE = nullptr;
-	advancePathsKernel_MK_NEXT_SAMPLE = nullptr;
-	advancePathsKernel_MK_GENERATE_CAMERA_RAY = nullptr;
 
 	initKernelArgsCount  = 0;
 
