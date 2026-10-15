@@ -150,7 +150,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 // or MK_RT_DL to continue the trace)
 OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
-		__global GPUTask *task,
+		__global GPUTaskTmp *taskTmp,
+		__global HitPoint *intersectHitPoint,
 		__global GPUTaskDirectLight *taskDirectLight,
 		__global GPUTaskState *taskState,
 		__global PathVolumeInfo *directLightVolInfo,
@@ -176,9 +177,9 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			EYE_RAY | SHADOW_RAY,
 			&throughShadowTransparency,
 			directLightVolInfo,
-			&task->tmpHitPoint,
+			intersectHitPoint,
 			passThroughEvent,
-			ray, rayHit, &task->tmpBsdf,
+			ray, rayHit, &taskTmp->tmpBsdf,
 			&connectionThroughput, WHITE,
 			NULL,
 			true
@@ -293,6 +294,7 @@ OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTask *task,
+		__global GPUTaskTmp *taskTmp,
 		__global GPUTaskDirectLight *taskDirectLight,
 		__global GPUTaskState *taskState,
 		__global EyePathInfo *pathInfo,
@@ -529,7 +531,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				bsdf,
 				ray,
 				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
-				&task->tmpHitPoint,
+				&taskTmp->tmpHitPoint,
 				ray->time,
 				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
 				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
@@ -542,7 +544,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				&taskDirectLight->illumInfo,
 				ray->time, sampleResult->lastPathVertex,
 				pathInfo,
-				&task->tmpPathDepthInfo,
+				&taskTmp->tmpPathDepthInfo,
 				bsdf,
 				VLOAD3F(&ray->d.x)
 				LIGHTS_PARAM)) {
@@ -620,6 +622,17 @@ __kernel void AdvancePaths_MK_RT(
 	//--------------------------------------------------------------------------
 
 	__global GPUTask *task = &tasks[gid];
+#if defined(LUXRAYS_CUDA_DEVICE)
+	GPUTaskTmp taskTmpValue;
+	GPUTaskTmp *taskTmp = &taskTmpValue;
+	// The HitPoint used by Scene_Intersect() for the volumes stays in global
+	// memory: a private one makes the ray marching of heterogeneous volumes
+	// 7% slower (luxball-hdr-vol)
+	__global HitPoint *intersectHitPoint = &tasksIntersectHitPoint[gid];
+#else
+	__global GPUTaskTmp *taskTmp = &tasksTmp[gid];
+	__global HitPoint *intersectHitPoint = &taskTmp->tmpHitPoint;
+#endif
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
 	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
 	__constant const Scene* restrict scene = &taskConfig->scene;
@@ -632,7 +645,7 @@ __kernel void AdvancePaths_MK_RT(
 	//--------------------------------------------------------------------------
 
 	if (pathState == MK_RT_DL) {
-		pathState = AdvancePaths_ShadowRayHit(taskConfig, task, &tasksDirectLight[gid], taskState,
+		pathState = AdvancePaths_ShadowRayHit(taskConfig, taskTmp, intersectHitPoint, &tasksDirectLight[gid], taskState,
 				&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult
 				MATERIALS_PARAM);
 	} else {
@@ -651,7 +664,7 @@ __kernel void AdvancePaths_MK_RT(
 				EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
 				&throughShadowTransparency,
 				&pathInfo->volume,
-				&task->tmpHitPoint,
+				intersectHitPoint,
 				passThroughEvent,
 				&rays[gid], &rayHits[gid], &taskState->bsdf,
 				&connectionThroughput, VLOAD3F(taskState->throughput.c),
@@ -677,7 +690,7 @@ __kernel void AdvancePaths_MK_RT(
 						&taskConfig->pathTracer.maxPathDepth, eventTypes);
 
 				pathState = AdvancePaths_HitObject(taskConfig,
-						task, &tasksDirectLight[gid], taskState, pathInfo,
+						task, taskTmp, &tasksDirectLight[gid], taskState, pathInfo,
 						&directLightVolInfos[gid], &rays[gid], &rayHits[gid], sampleResult,
 						samplerSharedDataBuff, samplesBuff, samplesDataBuff, sampleResultsBuff,
 						worldCenterX, worldCenterY, worldCenterZ, worldRadius,

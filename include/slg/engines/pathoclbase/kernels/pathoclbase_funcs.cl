@@ -454,6 +454,8 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 #define KERNEL_ARGS \
 		__constant const GPUTaskConfiguration* restrict taskConfig \
 		, __global GPUTask *tasks \
+		, __global GPUTaskTmp *tasksTmp \
+		, __global HitPoint *tasksIntersectHitPoint \
 		, __global GPUTaskDirectLight *tasksDirectLight \
 		, __global GPUTaskState *tasksState \
 		, __global PathState *pathStates \

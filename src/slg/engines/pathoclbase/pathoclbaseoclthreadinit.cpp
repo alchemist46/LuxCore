@@ -357,6 +357,17 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	intersectionDevice.AllocBufferRW(&tasksBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTask) * taskCount, "GPUTask");
 
 	//--------------------------------------------------------------------------
+	// Allocate tasksTmpBuff and tasksIntersectHitPointBuff: the temporary
+	// storage of AdvancePaths_MK_RT is a private variable of the kernel on CUDA
+	// and HIP, but for the HitPoint of Scene_Intersect(). The unused buffer
+	// has one element (only to keep the same kernel arguments).
+	//--------------------------------------------------------------------------
+
+	const bool privateTaskTmp = intersectionDevice.GetDeviceDesc().GetType() & (DEVICE_TYPE_CUDA_ALL | DEVICE_TYPE_HIP_ALL);
+	intersectionDevice.AllocBufferRW(&tasksTmpBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTaskTmp) * (privateTaskTmp ? 1 : taskCount), "GPUTaskTmp");
+	intersectionDevice.AllocBufferRW(&tasksIntersectHitPointBuff, nullptr, sizeof(slg::ocl::HitPoint) * (privateTaskTmp ? taskCount : 1), "GPUTask intersection HitPoint");
+
+	//--------------------------------------------------------------------------
 	// Allocate tasksDirectLightBuff
 	//--------------------------------------------------------------------------
 

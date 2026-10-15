@@ -117,18 +117,25 @@ typedef struct {
 typedef struct {
 	// The task seed
 	Seed seed;
+} GPUTask;
 
-	// Space for temporary storage
+// Space for temporary storage, used only within one run of AdvancePaths_MK_RT.
+// On CUDA and HIP it is a private variable of the kernel (scratch memory, laid
+// out lane by lane, so a wave's accesses to a member are coalesced), except
+// for the HitPoint of Scene_Intersect(), which has its own global buffer (see
+// AdvancePaths_MK_RT). The OpenCL device can't pass private pointers where the
+// functions expect __global ones, so it keeps a global buffer of them.
+typedef struct {
 	BSDF tmpBsdf; // Variable size structure
 
 	// This is used by TriangleLight_Illuminate() to temporary store the
 	// point on the light sources.
 	// Also used by Scene_Intersect() for evaluating volume textures.
 	HitPoint tmpHitPoint;
-	
+
 	// This is used by DirectLight_BSDFSampling()
 	PathDepthInfo tmpPathDepthInfo;
-} GPUTask;
+} GPUTaskTmp;
 
 typedef struct {
 	unsigned int sampleCount;

@@ -263,6 +263,8 @@ protected:
 	luxrays::HardwareDeviceBuffer *hitsBuff;
 	luxrays::HardwareDeviceBuffer *taskConfigBuff;
 	luxrays::HardwareDeviceBuffer *tasksBuff;
+	luxrays::HardwareDeviceBuffer *tasksTmpBuff;
+	luxrays::HardwareDeviceBuffer *tasksIntersectHitPointBuff;
 	luxrays::HardwareDeviceBuffer *tasksDirectLightBuff;
 	luxrays::HardwareDeviceBuffer *tasksStateBuff;
 	luxrays::HardwareDeviceBuffer *pathStatesBuff;
