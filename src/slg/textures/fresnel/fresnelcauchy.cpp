@@ -30,7 +30,8 @@ using namespace slg;
 // Fresnel cauchy texture
 //------------------------------------------------------------------------------
 
-static std::unique_ptr<FresnelTexture> MakeCauchy(float a, float b)
+static std::unique_ptr<FresnelTexture> MakeCauchy(float a, float b,
+		const WorkingColorSpace &workingColorSpace)
 {
 	vector<float> wl;
 	vector<float> n;
@@ -46,10 +47,11 @@ static std::unique_ptr<FresnelTexture> MakeCauchy(float a, float b)
 		1.f / 3.f, 1.f / 3.f, 1.f);
 	const RGBColor Nrgb = colorSpace.ToRGBConstrained(N.ToNormalizedXYZ());
 
-	return std::make_unique<FresnelConstTexture>(Nrgb, Spectrum(0.f));
+	return std::make_unique<FresnelConstTexture>(workingColorSpace.FromRec709(Nrgb), Spectrum(0.f));
 }
 
-FresnelTextureUPtr slg::AllocFresnelCauchyTex(const luxrays::Properties &props, const std::string &propName)
+FresnelTextureUPtr slg::AllocFresnelCauchyTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace)
 {
 	const float b = props.Get(Property(propName + ".b")(0.f)).Get<double>();
 	const float index = props.Get(Property(propName + ".index")(-1.f)).Get<double>();
@@ -59,10 +61,11 @@ FresnelTextureUPtr slg::AllocFresnelCauchyTex(const luxrays::Properties &props, 
 	else
 		a = props.Get(Property(propName + ".a")(1.5f)).Get<double>();
 
-	return MakeCauchy(a, b);
+	return MakeCauchy(a, b, workingColorSpace);
 }
 
-std::unique_ptr<FresnelTexture> slg::AllocFresnelAbbeTex(const luxrays::Properties &props, const std::string &propName)
+std::unique_ptr<FresnelTexture> slg::AllocFresnelAbbeTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace)
 {
 	const string mode(props.Get(Property(propName + ".mode")("d")).Get<string>());
 
@@ -97,6 +100,6 @@ std::unique_ptr<FresnelTexture> slg::AllocFresnelAbbeTex(const luxrays::Properti
 	const float b = (n - 1.f) * (c * f) / (v * (c - f));
 	const float a = n - b / d;
 
-	return MakeCauchy(a, b);
+	return MakeCauchy(a, b, workingColorSpace);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

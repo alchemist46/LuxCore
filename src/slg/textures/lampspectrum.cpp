@@ -31,7 +31,8 @@ using namespace slg;
 
 namespace slg {
 
-TextureUPtr AllocLampSpectrumTex(const Properties &props, const string &propName) {
+TextureUPtr AllocLampSpectrumTex(const Properties &props, const string &propName,
+		const WorkingColorSpace &workingColorSpace) {
 	const string name = props.Get(Property(propName + ".name")("Incandescent2")).Get<string>();
 	const int wlCount = 250;
 
@@ -63,7 +64,7 @@ TextureUPtr AllocLampSpectrumTex(const Properties &props, const string &propName
 		//wl = lampspectrum_Candle_WL;
 		//data = lampspectrum_Candle_AP;
 		// Override with blackbody for incandescent sources due to poor calibration
-		return std::make_unique<BlackBodyTexture>(1020.f);
+		return std::make_unique<BlackBodyTexture>(1020.f, false, workingColorSpace);
 	} else if (name == "CarbonArc") {
 		wl = lampspectrum_CarbonArc_WL;
 		data = lampspectrum_CarbonArc_AP;
@@ -158,7 +159,7 @@ TextureUPtr AllocLampSpectrumTex(const Properties &props, const string &propName
 		//wl = lampspectrum_Incandescent1_WL;
 		//data = lampspectrum_Incandescent1_AP;
 		// Override with blackbody for incandescent sources due to poor calibration
-		return std::make_unique<BlackBodyTexture>(2750.f);
+		return std::make_unique<BlackBodyTexture>(2750.f, false, workingColorSpace);
 	} else if (name == "LCDS") {
 		wl = lampspectrum_LCDS_WL;
 		data = lampspectrum_LCDS_AP;
@@ -246,10 +247,10 @@ TextureUPtr AllocLampSpectrumTex(const Properties &props, const string &propName
 		//wl = lampspectrum_Incandescent2_WL;
 		//data = lampspectrum_Incandescent2_AP;
 		// Override with blackbody for incandescent sources due to poor calibration
-		return std::make_unique<BlackBodyTexture>(2900.f);
+		return std::make_unique<BlackBodyTexture>(2900.f, false, workingColorSpace);
 	}
 
-	return std::make_unique<IrregularDataTexture>(wlCount, wl, data, .1f, true);
+	return std::make_unique<IrregularDataTexture>(wlCount, wl, data, .1f, true, workingColorSpace);
 }
 
 }  // namespace slg

@@ -83,8 +83,11 @@ string ImageMapCache::GetCacheKey(const string &fileName) const {
 }
 
 ImageMapRef ImageMapCache::GetImageMap(
-	const string &fileName, const ImageMapConfig &imgCfg, const bool applyResizePolicy
+	const string &fileName, const ImageMapConfig &cfg, const bool applyResizePolicy
 ) {
+	ImageMapConfig imgCfg = cfg;
+	imgCfg.workingColorSpace = workingColorSpace;
+
 	// Compose the cache key
 	string key = GetCacheKey(fileName);
 

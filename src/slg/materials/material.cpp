@@ -175,7 +175,9 @@ Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {
 }
 
 void Material::UpdateEmittedFactor() {
-	const Spectrum emittedTemperatureScale = (emittedTemperature >= 0.f) ? TemperatureToWhitePoint(emittedTemperature, emittedNormalizeTemperature) : Spectrum(1.f);
+	const Spectrum emittedTemperatureScale = (emittedTemperature >= 0.f) ?
+		workingColorSpace.FromRec709(TemperatureToWhitePoint(emittedTemperature, emittedNormalizeTemperature)) :
+		Spectrum(1.f);
 
 	if (emittedTex) {
 		const float normalizePowerFactor = emittedPowerNormalize ? (1.f / Max(emittedTex->Y(), 0.f)) : 1.f;

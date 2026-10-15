@@ -161,7 +161,7 @@ Spectrum DisneyMaterial::DisneyEvaluate(
 										   NdotL, NdotV, NdotH, LdotH, VdotH, wi, wo, H);
 	
 	if (localFilmThickness > 0.f) {
-		const Spectrum metallicWithFilmColor = metallicEval * CalcFilmColor(wo, localFilmThickness, localFilmIor);
+		const Spectrum metallicWithFilmColor = metallicEval * CalcFilmColor(wo, localFilmThickness, localFilmIor, workingColorSpace);
 		metallicEval = Lerp(localFilmAmount, metallicEval, metallicWithFilmColor);
 	}
 	

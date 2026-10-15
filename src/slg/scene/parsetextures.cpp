@@ -476,7 +476,7 @@ TextureUPtr Scene::CreateTexture(const string &texName, const Properties &props)
 	} else if (texType == "blackbody") {
 		const float temperature = Max(props.Get(Property(propName + ".temperature")(6500.0)).Get<double>(), 0.0);
 		const bool normalize = props.Get(Property(propName + ".normalize")(false)).Get<bool>();
-		tex = std::make_unique<BlackBodyTexture>(temperature, normalize);
+		tex = std::make_unique<BlackBodyTexture>(temperature, normalize, workingColorSpace);
 	} else if (texType == "irregulardata") {
 		if (!props.IsDefined(propName + ".wavelengths"))
 			throw runtime_error("Missing wavelengths property in irregulardata texture: " + propName);
@@ -498,13 +498,14 @@ TextureUPtr Scene::CreateTexture(const string &texName, const Properties &props)
 
 		const float resolution = props.Get(Property(propName + ".resolution")(5.0)).Get<double>();
 		const bool emission = props.Get(Property(propName + ".emission")(true)).Get<bool>();
-		tex = std::make_unique<IrregularDataTexture>(waveLengths.size(), &waveLengths[0], &data[0], resolution, emission);
+		tex = std::make_unique<IrregularDataTexture>(waveLengths.size(), &waveLengths[0], &data[0], resolution, emission,
+				workingColorSpace);
 	} else if (texType == "lampspectrum") {
-		tex = AllocLampSpectrumTex(props, propName);
+		tex = AllocLampSpectrumTex(props, propName, workingColorSpace);
 	} else if (texType == "fresnelabbe") {
-		tex = AllocFresnelAbbeTex(props, propName);
+		tex = AllocFresnelAbbeTex(props, propName, workingColorSpace);
 	} else if (texType == "fresnelcauchy") {
-		tex = AllocFresnelCauchyTex(props, propName);
+		tex = AllocFresnelCauchyTex(props, propName, workingColorSpace);
 	} else if (texType == "fresnelcolor") {
 		auto& col = GetTexture(props.Get(Property(propName + ".kr")(.5f)));
 
@@ -515,11 +516,11 @@ TextureUPtr Scene::CreateTexture(const string &texName, const Properties &props)
 
 		tex = std::make_unique<FresnelConstTexture>(n, k);
 	} else if (texType == "fresnelluxpop") {
-		tex = AllocFresnelLuxPopTex(props, propName);
+		tex = AllocFresnelLuxPopTex(props, propName, workingColorSpace);
 	} else if (texType == "fresnelpreset") {
-		tex = AllocFresnelPresetTex(props, propName);
+		tex = AllocFresnelPresetTex(props, propName, workingColorSpace);
 	} else if (texType == "fresnelsopra") {
-		tex = AllocFresnelSopraTex(props, propName);
+		tex = AllocFresnelSopraTex(props, propName, workingColorSpace);
 	} else if (texType == "abs") {
 		auto& tex1 = GetTexture(props.Get(Property(propName + ".texture")(1.f)));
 

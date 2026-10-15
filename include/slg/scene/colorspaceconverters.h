@@ -27,6 +27,7 @@ namespace OCIO = OCIO_NAMESPACE;
 #include "luxrays/core/color/color.h"
 #include "slg/slg.h"
 #include "slg/core/colorspace.h"
+#include "slg/core/workingcolorspace.h"
 
 namespace slg {
 
@@ -38,6 +39,10 @@ class ColorSpaceConverters {
 public:
 	ColorSpaceConverters();
 	virtual ~ColorSpaceConverters();
+
+	// The colours are converted to this space (the gamma encoded ones are
+	// Rec.709, the not encoded ones are already in the working space)
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
 
 	void ConvertFrom(const ColorSpaceConfig &cfg, float &v);
 	void ConvertFrom(const ColorSpaceConfig &cfg, luxrays::Spectrum &c);
@@ -51,6 +56,7 @@ private:
 	void ConvertFromOpenColorIO(const std::string &configFileName,
 		const std::string &inputColorSpace, luxrays::Spectrum &c);
 
+	WorkingColorSpace workingColorSpace;
 	std::unordered_map<std::string, OCIO::ConstCPUProcessorRcPtr> ocioProcessorCache;
 };
 

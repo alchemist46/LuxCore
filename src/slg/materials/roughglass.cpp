@@ -147,7 +147,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 		if (localFilmThickness > 0.f) {
 			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
-			return result * CalcFilmColor(localEyeDir, localFilmThickness, localFilmIor);
+			return result * CalcFilmColor(localEyeDir, localFilmThickness, localFilmIor, workingColorSpace);
 		}
 		return result;
 	}
@@ -257,7 +257,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 		if (localFilmThickness > 0.f) {
 			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
-			result *= CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+			result *= CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
 		}
 
 		*pdfW *= (1.f - threshold);

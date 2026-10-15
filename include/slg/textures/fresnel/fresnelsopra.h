@@ -29,7 +29,8 @@ namespace slg {
 // Fresnel Sopra texture
 //------------------------------------------------------------------------------
 
-extern std::unique_ptr<FresnelTexture> AllocFresnelSopraTex(const luxrays::Properties &props, const std::string &propName);
+extern std::unique_ptr<FresnelTexture> AllocFresnelSopraTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace);
 
 }
 

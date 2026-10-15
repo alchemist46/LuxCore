@@ -1020,22 +1020,8 @@ void ImageMap::Init(
 	}
 	in->close();
 
-	switch (cfg.colorSpaceCfg.colorSpaceType) {
-		case ColorSpaceConfig::NOP_COLORSPACE:
-			// Nothing to do
-			break;
-		case ColorSpaceConfig::LUXCORE_COLORSPACE:
-			pixelStorage->ReverseGammaCorrection(cfg.colorSpaceCfg.luxcore.gamma);
-			break;
-		case ColorSpaceConfig::OPENCOLORIO_COLORSPACE:
-			ConvertColorSpace(cfg.colorSpaceCfg.ocio.configName,
-					cfg.colorSpaceCfg.ocio.colorSpaceName,
-					OCIO::ROLE_SCENE_LINEAR);
-			break;
-		default:
-			throw runtime_error("Unknown color space in ImageMap::ImageMap(" +
-					fileName + "): " + ToString(cfg.colorSpaceCfg.colorSpaceType));
-	}
+	ConvertToWorkingColorSpace(cfg);
+
 	auto span = pixelStorage->ToSpan();
 	SDL_LOG("Image dimensions: "
 		<< span.width() << "x" << span.height()
@@ -1152,22 +1138,7 @@ ImageMapUPtr ImageMap::AllocImageMap(
 
 	memcpy(imageMap->GetStorage().GetPixelsData(), pixels, imageMap->GetStorage().GetMemorySize());
 
-	switch (cfg.colorSpaceCfg.colorSpaceType) {
-		case ColorSpaceConfig::NOP_COLORSPACE:
-			// Nothing to do
-			break;
-		case ColorSpaceConfig::LUXCORE_COLORSPACE:
-			imageMap->pixelStorage->ReverseGammaCorrection(cfg.colorSpaceCfg.luxcore.gamma);
-			break;
-		case ColorSpaceConfig::OPENCOLORIO_COLORSPACE:
-			imageMap->ConvertColorSpace(cfg.colorSpaceCfg.ocio.configName,
-					cfg.colorSpaceCfg.ocio.colorSpaceName,
-					OCIO::ROLE_SCENE_LINEAR);
-			break;
-		default:
-			throw runtime_error("Unknown color space in ImageMap::AllocImageMap(): " +
-					ToString(cfg.colorSpaceCfg.colorSpaceType));
-	}
+	imageMap->ConvertToWorkingColorSpace(cfg);
 
 	imageMap->SelectChannel(cfg.GetSelectionType());
 	imageMap->Preprocess();
@@ -1341,6 +1312,91 @@ void ImageMap::ConvertColorSpace(const string &configFileName,
 
 	// Convert back the image to the original storage type and channel count
 	ConvertStorage(storageType, channelCount);
+}
+
+void ImageMap::ConvertToWorkingColorSpace(const ImageMapConfig &cfg) {
+	const WorkingColorSpace &wcs = cfg.workingColorSpace;
+	// A grey image stays grey: the rows of the matrices sum to 1
+	const bool isColor = (pixelStorage->GetChannelCount() >= 3);
+
+	switch (cfg.colorSpaceCfg.colorSpaceType) {
+		case ColorSpaceConfig::NOP_COLORSPACE:
+			// The pixels are already in the working space
+			break;
+		case ColorSpaceConfig::LUXCORE_COLORSPACE: {
+			// The gamma encoded pixels are Rec.709
+			const float gamma = cfg.colorSpaceCfg.luxcore.gamma;
+			if (wcs.IsRec709() || !isColor)
+				pixelStorage->ReverseGammaCorrection(gamma);
+			else {
+				// Decode and convert in float, so a byte image is quantized once
+				const u_int pixelCount = pixelStorage->GetWidth() * pixelStorage->GetHeight();
+				#pragma omp parallel for
+				for (
+						// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+						unsigned
+#endif
+						int i = 0; i < pixelCount; ++i) {
+					Spectrum c = pixelStorage->GetSpectrum(i);
+					if (gamma != 1.f) {
+						c.c[0] = powf(c.c[0], gamma);
+						c.c[1] = powf(c.c[1], gamma);
+						c.c[2] = powf(c.c[2], gamma);
+					}
+					pixelStorage->SetSpectrum(i, wcs.FromRec709(c));
+				}
+			}
+			break;
+		}
+		case ColorSpaceConfig::OPENCOLORIO_COLORSPACE: {
+			const string &configName = cfg.colorSpaceCfg.ocio.configName;
+			const string &colorSpaceName = cfg.colorSpaceCfg.ocio.colorSpaceName;
+
+			if (wcs.IsRec709()) {
+				ConvertColorSpace(configName, colorSpaceName, OCIO::ROLE_SCENE_LINEAR);
+				break;
+			}
+
+			const string workingColorSpaceName = wcs.FindOpenColorIOColorSpace(configName);
+			if (workingColorSpaceName != "") {
+				ConvertColorSpace(configName, colorSpaceName, workingColorSpaceName);
+				break;
+			}
+
+			// The config has no such colour space: take its scene linear role
+			// as Rec.709, as LuxCore did before the working spaces
+			SDL_LOG("WARNING: the OpenColorIO config \"" << configName << "\" has no " <<
+					WorkingColorSpace::WorkingColorSpaceType2String(wcs.GetType()) <<
+					" color space, the scene_linear role is taken as Linear Rec.709: " << GetName());
+			ConvertColorSpace(configName, colorSpaceName, OCIO::ROLE_SCENE_LINEAR);
+
+			if (isColor && !IsOpenColorIODataColorSpace(configName, colorSpaceName)) {
+				const u_int pixelCount = pixelStorage->GetWidth() * pixelStorage->GetHeight();
+				for (u_int i = 0; i < pixelCount; ++i)
+					pixelStorage->SetSpectrum(i, wcs.FromRec709(pixelStorage->GetSpectrum(i)));
+			}
+			break;
+		}
+		default:
+			throw runtime_error("Unknown color space in ImageMap::ConvertToWorkingColorSpace(" +
+					GetName() + "): " + ToString(cfg.colorSpaceCfg.colorSpaceType));
+	}
+}
+
+bool ImageMap::IsOpenColorIODataColorSpace(const string &configFileName,
+		const string &colorSpaceName) {
+	try {
+		OCIO::ConstConfigRcPtr config = (configFileName == "") ?
+			OCIO::GetCurrentConfig() :
+			OCIO::Config::CreateFromFile(SLG_FileNameResolver.ResolveFile(configFileName).c_str());
+
+		OCIO::ConstColorSpaceRcPtr cs = config->getColorSpace(colorSpaceName.c_str());
+
+		return cs && cs->isData();
+	} catch (OCIO::Exception &exception) {
+		throw runtime_error("OpenColorIO Error in ImageMap::IsOpenColorIODataColorSpace(): " + string(exception.what()));
+	}
 }
 
 void ImageMap::Resize(const u_int newWidth, const u_int newHeight) {

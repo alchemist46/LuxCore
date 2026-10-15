@@ -37,6 +37,7 @@
 #include "luxrays/core/color/color.h"
 #include "luxrays/core/namedobject.h"
 #include "slg/imagemap/imagemap.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/imagemap/imagemapcache.h"
 #include "slg/textures/mapping/mapping.h"
 #include "slg/bsdf/hitpoint.h"

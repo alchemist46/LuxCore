@@ -26,9 +26,10 @@ using namespace slg;
 // Black body texture
 //------------------------------------------------------------------------------
 
-BlackBodyTexture::BlackBodyTexture(const float temp, const bool norm) :
+BlackBodyTexture::BlackBodyTexture(const float temp, const bool norm,
+		const WorkingColorSpace &workingColorSpace) :
 		temperature(temp), normalize(norm) {
-	rgb = TemperatureToWhitePoint(temperature, norm);
+	rgb = workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, norm));
 }
 
 PropertiesUPtr BlackBodyTexture::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

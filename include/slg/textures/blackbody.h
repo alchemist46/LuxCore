@@ -29,7 +29,8 @@ namespace slg {
 
 class BlackBodyTexture : public Texture {
 public:
-	BlackBodyTexture(const float temp, const bool normalize = false);
+	BlackBodyTexture(const float temp, const bool normalize,
+			const WorkingColorSpace &workingColorSpace);
 	virtual ~BlackBodyTexture() { }
 
 	virtual TextureType GetType() const { return BLACKBODY_TEX; }

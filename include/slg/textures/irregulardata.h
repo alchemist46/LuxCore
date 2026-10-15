@@ -30,7 +30,7 @@ namespace slg {
 class IrregularDataTexture : public Texture {
 public:
 	IrregularDataTexture(const u_int n, const float *waveLengths, const float *data,
-		const float resolution, bool emission);
+		const float resolution, bool emission, const WorkingColorSpace &workingColorSpace);
 	virtual ~IrregularDataTexture() { }
 
 	virtual TextureType GetType() const { return IRREGULARDATA_TEX; }

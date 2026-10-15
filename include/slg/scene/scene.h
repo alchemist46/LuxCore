@@ -37,6 +37,7 @@
 #include "slg/materials/materialdefs.h"
 #include "slg/scene/sceneobjectdefs.h"
 #include "slg/scene/colorspaceconverters.h"
+#include "slg/core/workingcolorspace.h"
 
 namespace luxrays {
 	class cyHairFile;
@@ -258,6 +259,8 @@ public:
 	auto& GetImageMaps() { return imgMapCache; }
 	const auto& GetImageMaps() const { return imgMapCache; }
 
+	const WorkingColorSpace &GetWorkingColorSpace() const { return workingColorSpace; }
+
 	auto& GetExtMeshes() { return extMeshCache; }
 	const auto& GetExtMeshes() const { return extMeshCache; }
 
@@ -328,9 +331,14 @@ private:
 						//
 	ColorSpaceConverters colorSpaceConv;
 
+	// The working colour space (scene.colorspace.working)
+	WorkingColorSpace workingColorSpace;
+
 	void Init(luxrays::PropertiesRPtr resizePolicyProps);
 	void UpdateShadowBlockers();
 
+	void ParseColorSpace(const luxrays::Properties &props);
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs);
 	void ParseCamera(const luxrays::Properties &props);
 	void ParseTextures(const luxrays::Properties &props);
 	void ParseVolumes(const luxrays::Properties &props);

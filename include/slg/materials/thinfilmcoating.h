@@ -21,10 +21,12 @@
 
 #include "luxrays/core/geometry/vector.h"
 #include "luxrays/core/color/color.h"
+#include "slg/core/workingcolorspace.h"
 
 namespace slg {
 
-extern luxrays::Spectrum CalcFilmColor(const luxrays::Vector &localFixedDir, const float filmThickness, const float filmIOR);
+extern luxrays::Spectrum CalcFilmColor(const luxrays::Vector &localFixedDir, const float filmThickness, const float filmIOR,
+		const WorkingColorSpace &workingColorSpace);
 
 }
 

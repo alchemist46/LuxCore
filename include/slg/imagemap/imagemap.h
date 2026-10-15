@@ -42,6 +42,7 @@
 #include "luxrays/utils/serializationutils.h"
 #include "luxrays/utils/ocl.h"
 #include "slg/core/colorspace.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/utils/halfserialization.h"
 
 namespace slg {
@@ -962,8 +963,10 @@ public:
 	static void FromProperties(const luxrays::Properties &props, const std::string &prefix, ImageMapConfig &imgCfg);
 
 	ColorSpaceConfig colorSpaceCfg;
+	// The space the image is converted to (set by the image map cache of the
+	// scene; the default is the identity, for the image maps used as data)
+	WorkingColorSpace workingColorSpace;
 
-	
 	ImageMapStorage::StorageType GetStorageType() const { return storageType; }
 	ImageMapStorage::WrapType GetWrapType() const { return wrapType; }
 	ImageMapStorage::FilterType GetFilterType() const {return filterType; }
@@ -1131,6 +1134,11 @@ protected:
 
 	void Init(const std::string &fileName, const ImageMapConfig &cfg,
 		const u_int widthHint = 0, const u_int heightHint = 0);
+	// Decodes the pixels (gamma or OpenColorIO) and converts them to the
+	// working colour space of the config
+	void ConvertToWorkingColorSpace(const ImageMapConfig &cfg);
+	static bool IsOpenColorIODataColorSpace(const std::string &configFileName,
+		const std::string &colorSpaceName);
 
 	float CalcSpectrumMean() const;
 	float CalcSpectrumMeanY() const;

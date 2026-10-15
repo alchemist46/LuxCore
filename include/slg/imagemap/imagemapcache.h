@@ -43,6 +43,9 @@ public:
 	void SetImageResizePolicy(ImageMapResizePolicy *policy);
 	const ImageMapResizePolicy *GetImageResizePolicy() const { return resizePolicy; }
 
+	// The image maps loaded by GetImageMap() are converted to this space
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; }
+
 	// Prefered insertion will require a unique_ptr owned object
 	// However, we also have to handle the case of ImageMapTexture::randomImageMap,
 	// which is shared between ImageMapTexture and ImageMapCache
@@ -121,6 +124,7 @@ private:
 	std::vector<std::string> mapNames;
 
 	ImageMapResizePolicy *resizePolicy;
+	WorkingColorSpace workingColorSpace;
 	std::vector<bool> resizePolicyToApply;
 };
 

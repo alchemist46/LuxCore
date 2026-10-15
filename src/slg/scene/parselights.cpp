@@ -468,6 +468,7 @@ LightSourceUPtr Scene::CreateLightSource(const string &name, const luxrays::Prop
 	if (!lightSource->IsIntersectable()) {
 		auto& nils = static_cast<NotIntersectableLightSource&>(*lightSource);
 
+		nils.workingColorSpace = workingColorSpace;
 		nils.temperature = props.Get(Property(propName + ".temperature")(-1.0)).Get<double>();
 		nils.normalizeTemperature = props.Get(Property(propName + ".temperature.normalize")(false)).Get<bool>();
 	}

@@ -72,7 +72,9 @@ string LightSource::LightSourceType2String(const LightSourceType type) {
 //------------------------------------------------------------------------------
 
 void NotIntersectableLightSource::Preprocess() {
-	temperatureScale = (temperature >= 0.f) ? TemperatureToWhitePoint(temperature, normalizeTemperature) : Spectrum(1.f);
+	temperatureScale = (temperature >= 0.f) ?
+		workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, normalizeTemperature)) :
+		Spectrum(1.f);
 }
 
 PropertiesUPtr NotIntersectableLightSource::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

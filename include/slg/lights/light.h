@@ -30,6 +30,7 @@
 #include "luxrays/core/namedobject.h"
 #include "luxrays/utils/mcdistribution.h"
 #include "slg/usings.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/textures/texture.h"
 #include "slg/textures/mapping/mapping.h"
 #include "slg/materials/material.h"
@@ -180,6 +181,9 @@ public:
 
 	float temperature;
 	bool normalizeTemperature;
+
+	// The space of the colours computed by the light (temperature, sun, sky)
+	WorkingColorSpace workingColorSpace;
 
 protected:
 	u_int id;

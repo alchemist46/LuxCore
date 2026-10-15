@@ -120,7 +120,10 @@ static bool nearlyEqual(const float a, const float b, const float epsilon) {
   return fabs(a - b) < epsilon;
 }
 
-static Spectrum getColorFromImage(const vector<float> &imageData, const float gamma,
+// The image colours are Rec.709 (gamma encoded), converted to the working
+// colour space of the scene
+static Spectrum getColorFromImage(const slg::WorkingColorSpace &workingColorSpace,
+               const vector<float> &imageData, const float gamma,
                const size_t width, const size_t height, const size_t channelCount,
                const float u, const float v) {
   assert (width > 0);
@@ -140,9 +143,9 @@ static Spectrum getColorFromImage(const vector<float> &imageData, const float ga
     return Spectrum(powf(imageData[index], gamma));
   } else {
     // In case of channelCount == 4, we just ignore the alpha channel
-    return Spectrum(powf(imageData[index], gamma),
+    return workingColorSpace.FromRec709(Spectrum(powf(imageData[index], gamma),
             powf(imageData[index + 1], gamma),
-            powf(imageData[index + 2], gamma));
+            powf(imageData[index + 2], gamma)));
   }
 }
 
@@ -438,7 +441,7 @@ bool Scene_DefineBlenderStrands(
         Spectrum colPoint(1.f);
 
         if (colorsFromImage) {
-          colPoint = getColorFromImage(imageData, imageGamma,
+          colPoint = getColorFromImage(scene->GetSlgScene().GetWorkingColorSpace(), imageData, imageGamma,
             width, height,
             channelCount, u, v);
         }
@@ -488,7 +491,7 @@ bool Scene_DefineBlenderStrands(
       Spectrum colPoint(1.f);
 
       if (colorsFromImage) {
-        colPoint = getColorFromImage(imageData, imageGamma,
+        colPoint = getColorFromImage(scene->GetSlgScene().GetWorkingColorSpace(), imageData, imageGamma,
           width, height,
           channelCount, u, v);
       }
@@ -893,7 +896,7 @@ bool Scene_DefineBlenderCurveStrands(luxcore::detail::SceneImpl* scene,
         Spectrum colPoint(1.f);
 
         if (colorsFromImage) {
-          colPoint = getColorFromImage(imageData, imageGamma,
+          colPoint = getColorFromImage(scene->GetSlgScene().GetWorkingColorSpace(), imageData, imageGamma,
             width, height,
             channelCount, u, v);
         }
@@ -945,7 +948,7 @@ bool Scene_DefineBlenderCurveStrands(luxcore::detail::SceneImpl* scene,
       Spectrum colPoint(1.f);
 
       if (colorsFromImage) {
-        colPoint = getColorFromImage(imageData, imageGamma,
+        colPoint = getColorFromImage(scene->GetSlgScene().GetWorkingColorSpace(), imageData, imageGamma,
           width, height,
           channelCount, u, v);
       }

@@ -425,7 +425,7 @@ MaterialUPtr Scene::CreateMaterial(
 
 		TextureConstPtr n, k;
 		if (isDefined("preset") || isDefined("name")) {
-			FresnelTextureUPtr presetTex = AllocFresnelPresetTex(props, propName);
+			FresnelTextureUPtr presetTex = AllocFresnelPresetTex(props, propName, workingColorSpace);
 			const auto texname = NamedObject::GetUniqueName(matName + "-Implicit-FresnelPreset");
 			presetTex->SetName(texname);
 			auto [newTexRef, oldTexPtr] = texDefs.DefineTexture(std::move(presetTex));
@@ -714,6 +714,7 @@ MaterialUPtr Scene::CreateMaterial(
 		throw runtime_error("Unknown material type: " + matType);
 
 	mat->SetName(matName);
+	mat->SetWorkingColorSpace(workingColorSpace);
 
 	mat->SetID(props.Get(Property(propName + ".id")(defaultMatID)).Get<u_int>());
 	mat->SetBumpSampleDistance(bumpSampleDistance);

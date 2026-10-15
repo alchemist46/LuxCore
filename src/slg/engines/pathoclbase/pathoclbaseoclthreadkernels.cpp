@@ -141,6 +141,9 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		}
 	}
 
+	// The working colour space matrix (no parameter in Rec.709)
+	renderEngine->renderConfig.GetScene().GetWorkingColorSpace().AddKernelParameters(kernelsParameters);
+
 	const string kernelSource = GetKernelSources();
 	const string microKernelSource = slg::ocl::KernelSource_pathoclbase_kernels_micro;
 	// The full source (i.e. including micro-kernels) is used for the hash and

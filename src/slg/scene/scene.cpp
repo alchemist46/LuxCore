@@ -102,6 +102,12 @@ Scene::~Scene() {
 PropertiesUPtr Scene::ToProperties(const bool useRealFileName) const {
 	auto props = std::make_unique<Properties>();
 
+	// Write the working colour space (only when it is not the default, so the
+	// scene files of a Rec.709 scene don't change)
+	if (!workingColorSpace.IsRec709())
+		props->Set(Property("scene.colorspace.working")(
+				WorkingColorSpace::WorkingColorSpaceType2String(workingColorSpace.GetType())));
+
 	// Write the camera information
 	if (camera)
 		props->Set(camera->ToProperties(imgMapCache, useRealFileName));
@@ -186,7 +192,10 @@ ImageMapRef Scene::DefineImageMap(ImageMapUPtr&& im) {
 ImageMapRef Scene::DefineImageMap(const string &name, void *pixels,
 		const u_int channels, const u_int width, const u_int height,
 		const ImageMapConfig &cfg) {
-	auto imgMap = ImageMap::AllocImageMap(pixels, channels, width, height, cfg);
+	ImageMapConfig wcsCfg = cfg;
+	wcsCfg.workingColorSpace = workingColorSpace;
+
+	auto imgMap = ImageMap::AllocImageMap(pixels, channels, width, height, wcsCfg);
 	imgMap->SetName(name);
 
 	ImageMapRef ref = DefineImageMap(std::move(imgMap));
@@ -423,6 +432,12 @@ void Scene::Parse(PropertiesRPtr props) {
 	}
 
 	//--------------------------------------------------------------------------
+	// Read the working colour space, before anything that depends on it
+	//--------------------------------------------------------------------------
+
+	ParseColorSpace(*props);
+
+	//--------------------------------------------------------------------------
 	// Read all textures
 	//--------------------------------------------------------------------------
 
@@ -474,6 +489,36 @@ void Scene::Parse(PropertiesRPtr props) {
 	ParseLights(*props);
 }
 
+
+void Scene::ParseColorSpace(const Properties &props) {
+	if (!props.IsDefined("scene.colorspace.working"))
+		return;
+
+	const WorkingColorSpace wcs(WorkingColorSpace::String2WorkingColorSpaceType(
+			props.Get("scene.colorspace.working").Get<string>()));
+	if (wcs == workingColorSpace)
+		return;
+
+	// The image maps, the textures, the materials and the lights are converted
+	// to the working space when they are defined, so it can't change afterwards
+	// (the random image map is always defined)
+	if ((imgMapCache.GetSize() > 1) || (texDefs.GetSize() > 0) ||
+			(matDefs.GetSize() > 0) || (lightDefs.GetSize() > 0) ||
+			(objDefs.GetSize() > 0))
+		throw runtime_error("The working color space can be set only before defining any image map, "
+				"texture, material, light or object: scene.colorspace.working = " +
+				WorkingColorSpace::WorkingColorSpaceType2String(wcs.GetType()));
+
+	SetWorkingColorSpace(wcs);
+}
+
+void Scene::SetWorkingColorSpace(const WorkingColorSpace &wcs) {
+	SDL_LOG("Working color space: " << WorkingColorSpace::WorkingColorSpaceType2String(wcs.GetType()));
+
+	workingColorSpace = wcs;
+	imgMapCache.SetWorkingColorSpace(workingColorSpace);
+	colorSpaceConv.SetWorkingColorSpace(workingColorSpace);
+}
 
 void Scene::moveToTrash(NamedObjectUPtr&& oldObj) {
 	if (!oldObj) return;

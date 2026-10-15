@@ -28,6 +28,7 @@
 #include "luxrays/utils/mc.h"
 #include "luxrays/utils/properties.h"
 #include "slg/usings.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/bsdf/bsdfevents.h"
 #include "slg/bsdf/hitpoint.h"
 #include "slg/textures/texture.h"
@@ -99,6 +100,11 @@ public:
 	void SetEmittedTheta(const float theta);
 	float GetEmittedTheta() const { return emittedTheta; }
 	float GetEmittedCosThetaMax() const { return emittedCosThetaMax; }
+	// The space of the colours computed by the material (emission temperature,
+	// dispersion, thin film)
+	void SetWorkingColorSpace(const WorkingColorSpace &wcs) { workingColorSpace = wcs; UpdateEmittedFactor(); }
+	const WorkingColorSpace &GetWorkingColorSpace() const { return workingColorSpace; }
+
 	void SetEmittedTemperature(const float v) { emittedTemperature = v; UpdateEmittedFactor(); }
 	void SetEmittedTemperatureNormalize(const bool v) { emittedNormalizeTemperature = v; UpdateEmittedFactor(); }
 	bool IsUsingPrimitiveArea() const { return usePrimitiveArea; }
@@ -310,6 +316,8 @@ protected:
 
 	MicrofacetDistributionType microfacetDistribution;
 	bool multiscattering;
+
+	WorkingColorSpace workingColorSpace;
 };
 
 //------------------------------------------------------------------------------

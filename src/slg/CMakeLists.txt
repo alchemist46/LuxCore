@@ -126,6 +126,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/projective.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/stereo.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/core/colorspace.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/core/workingcolorspace.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/core/indexbvh.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/core/indexkdtree.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/core/indexoctree.cpp

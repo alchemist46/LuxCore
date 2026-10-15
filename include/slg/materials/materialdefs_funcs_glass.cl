@@ -161,7 +161,7 @@ OPENCL_FORCE_INLINE float3 GlassMaterial_EvalSpecularTransmission(__global const
 
 		lnt = GlassMaterial_WaveLength2IOR(waveLength, nt, cauchyB);
 
-		lkt = kt * GlassMaterial_WaveLength2RGB(waveLength);
+		lkt = kt * WorkingColorSpace_FromRec709(GlassMaterial_WaveLength2RGB(waveLength));
 	} else {
 		lnt = nt;
 		lkt = kt;

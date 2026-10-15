@@ -79,7 +79,8 @@ public:
 			const luxrays::Vector &localFixedDir,
 			const luxrays::Spectrum &kr, const float nc, const float nt,
 			luxrays::Vector *localSampledDir,
-			const float localFilmThickness, const float localFilmIor);
+			const float localFilmThickness, const float localFilmIor,
+			const WorkingColorSpace &workingColorSpace);
 	static luxrays::Spectrum EvalSpecularTransmission(const HitPoint &hitPoint,
 			const luxrays::Vector &localFixedDir, const luxrays::Spectrum &kt,
 			 const float nc, const float nt, luxrays::Vector *localSampledDir);

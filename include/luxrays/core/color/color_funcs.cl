@@ -58,6 +58,21 @@ OPENCL_FORCE_INLINE float3 Spectrum_Pow(const float3 s, const float e) {
 	return MAKE_FLOAT3(pow(s.x, e), pow(s.y, e), pow(s.z, e));
 }
 
+// Linear Rec.709 to the working colour space, for the colours the kernels
+// compute in Rec.709 (dispersion, thin film, sky2). The matrix is set by the
+// host (WorkingColorSpace::AddKernelParameters()), only when the working space
+// is not Rec.709.
+#if defined(PARAM_WCS_FROM_REC709_00)
+OPENCL_FORCE_INLINE float3 WorkingColorSpace_FromRec709(const float3 c) {
+	return MAKE_FLOAT3(
+		PARAM_WCS_FROM_REC709_00 * c.x + PARAM_WCS_FROM_REC709_01 * c.y + PARAM_WCS_FROM_REC709_02 * c.z,
+		PARAM_WCS_FROM_REC709_10 * c.x + PARAM_WCS_FROM_REC709_11 * c.y + PARAM_WCS_FROM_REC709_12 * c.z,
+		PARAM_WCS_FROM_REC709_20 * c.x + PARAM_WCS_FROM_REC709_21 * c.y + PARAM_WCS_FROM_REC709_22 * c.z);
+}
+#else
+#define WorkingColorSpace_FromRec709(c) (c)
+#endif
+
 OPENCL_FORCE_INLINE float3 Spectrum_Sqrt(const float3 s) {
 	return MAKE_FLOAT3(sqrt(s.x), sqrt(s.y), sqrt(s.z));
 }

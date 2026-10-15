@@ -59,7 +59,8 @@ Spectrum ArchGlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 		const Vector &localFixedDir, const Spectrum &kr,
 		const float nc, const float nt,
 		Vector *localSampledDir,
-		const float localFilmThickness, const float localFilmIor) {
+		const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace) {
 	if (kr.Black())
 		return Spectrum();
 
@@ -73,7 +74,7 @@ Spectrum ArchGlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 	const Spectrum result = kr * FresnelTexture::CauchyEvaluate(ntc, costheta);
 	
 	if (localFilmThickness > 0.f) {
-		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
 		return result * filmColor;
 	}
 	return result;
@@ -128,7 +129,7 @@ Spectrum ArchGlassMaterial::Sample(const HitPoint &hitPoint,
 	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 	Vector reflLocalSampledDir;
 	const Spectrum refl = EvalSpecularReflection(hitPoint, localFixedDir,
-			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
+			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor, workingColorSpace);
 
 	// Decide to transmit or reflect
 	float threshold;
@@ -190,7 +191,7 @@ Spectrum ArchGlassMaterial::GetPassThroughTransparency(const HitPoint &hitPoint,
 	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 	Vector reflLocalSampledDir;
 	const Spectrum refl = EvalSpecularReflection(hitPoint, localFixedDir,
-			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
+			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor, workingColorSpace);
 
 	// Decide to transmit or reflect
 	if (!refl.Black()) {

@@ -100,7 +100,7 @@ void SunLight::Preprocess() {
 
 	RegularSPD LSPD(Ldata, 350, 800, 91);
 	color = ((temperatureScale * gain) / (relSize * relSize)) *
-			ColorSystem::DefaultColorSystem.ToRGBConstrained(LSPD.ToXYZ()).Clamp();
+			workingColorSpace.FromRec709(ColorSystem::DefaultColorSystem.ToRGBConstrained(LSPD.ToXYZ()).Clamp());
 }
 
 void SunLight::GetPreprocessedData(float *absoluteSunDirData,

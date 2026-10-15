@@ -29,8 +29,10 @@ namespace slg {
 // Fresnel cauchy and abbe texture
 //------------------------------------------------------------------------------
 
-extern std::unique_ptr<FresnelTexture> AllocFresnelCauchyTex(const luxrays::Properties &props, const std::string &propName);
-extern std::unique_ptr<FresnelTexture> AllocFresnelAbbeTex(const luxrays::Properties &props, const std::string &propName);
+extern std::unique_ptr<FresnelTexture> AllocFresnelCauchyTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace);
+extern std::unique_ptr<FresnelTexture> AllocFresnelAbbeTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace);
 
 }
 

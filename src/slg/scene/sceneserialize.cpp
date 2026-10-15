@@ -77,6 +77,13 @@ template<class Archive> void Scene::load(Archive &ar, const u_int version) {
 	// Load flags
 	ar & enableParsePrint;
 
+	// The image maps have been saved already converted to the working colour
+	// space, so it is set before the parsing (which refuses to change it once
+	// there are image maps)
+	if (sceneProps->IsDefined("scene.colorspace.working"))
+		SetWorkingColorSpace(WorkingColorSpace(WorkingColorSpace::String2WorkingColorSpaceType(
+				sceneProps->Get("scene.colorspace.working").Get<string>())));
+
 	// Parse all the scene properties
 	Parse(sceneProps);
 }

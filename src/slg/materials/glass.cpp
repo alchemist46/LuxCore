@@ -124,7 +124,8 @@ Spectrum GlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 		const Vector &localFixedDir, const Spectrum &kr,
 		const float nc, const float nt,
 		Vector *localSampledDir, 
-		const float localFilmThickness, const float localFilmIor) {
+		const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace) {
 	if (kr.Black())
 		return Spectrum();
 
@@ -135,7 +136,7 @@ Spectrum GlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 	const Spectrum result = kr * FresnelTexture::CauchyEvaluate(ntc, cosTheta);
 
 	if (localFilmThickness > 0.f) {
-		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
 		return result * filmColor;
 	}
 	return result;
@@ -144,7 +145,7 @@ Spectrum GlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 		const Vector &localFixedDir, const float u0,
 		const Spectrum &kt, const float nc, const float nt, const float cauchyB,
-		Vector *localSampledDir) {
+		Vector *localSampledDir, const WorkingColorSpace &workingColorSpace) {
 	if (kt.Black())
 		return Spectrum();
 
@@ -157,7 +158,7 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 
 		lnt = WaveLength2IOR(waveLength, nt, cauchyB);
 
-		lkt = kt * WaveLength2RGB(waveLength);
+		lkt = kt * workingColorSpace.FromRec709(WaveLength2RGB(waveLength));
 	} else {
 		lnt = nt;
 		lkt = kt;
@@ -203,13 +204,13 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 
 	Vector transLocalSampledDir; 
 	const Spectrum trans = EvalSpecularTransmission(hitPoint, localFixedDir, u0,
-			kt, nc, nt, cauchyBValue, &transLocalSampledDir);
+			kt, nc, nt, cauchyBValue, &transLocalSampledDir, workingColorSpace);
 	
 	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 	Vector reflLocalSampledDir;
 	const Spectrum refl = EvalSpecularReflection(hitPoint, localFixedDir,
-			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
+			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor, workingColorSpace);
 
 	// Decide to transmit or reflect
 	float threshold;

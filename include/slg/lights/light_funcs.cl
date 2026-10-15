@@ -265,9 +265,10 @@ OPENCL_FORCE_INLINE float3 Sky2Light_ComputeSkyRadiance(__global const LightSour
 		Spectrum_Pow(1.f + iTerm * (iTerm - (2.f * cosG)), 1.5f);
 	const float3 zenithTerm = hTerm * sqrt(cosT);
 
-	// 683 is a scaling factor to convert W to lm
-	return 683.f * (1.f + aTerm * Spectrum_Exp(bTerm / (cosT + .01f))) *
-		(cTerm + expTerm + rayleighTerm + mieTerm + zenithTerm) * radianceTerm;
+	// 683 is a scaling factor to convert W to lm. The Hosek-Wilkie RGB
+	// datasets are Rec.709.
+	return WorkingColorSpace_FromRec709(683.f * (1.f + aTerm * Spectrum_Exp(bTerm / (cosT + .01f))) *
+		(cTerm + expTerm + rayleighTerm + mieTerm + zenithTerm) * radianceTerm);
 }
 
 OPENCL_FORCE_INLINE float3 Sky2Light_ComputeRadiance(__global const LightSource *sky2Light, const float3 w) {

@@ -29,7 +29,8 @@ namespace slg {
 // Fresnel preset texture
 //------------------------------------------------------------------------------
 
-extern FresnelTextureUPtr AllocFresnelPresetTex(const luxrays::Properties &props, const std::string &propName);
+extern FresnelTextureUPtr AllocFresnelPresetTex(const luxrays::Properties &props, const std::string &propName,
+		const WorkingColorSpace &workingColorSpace);
 
 }
 

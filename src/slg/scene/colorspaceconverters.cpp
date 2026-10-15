@@ -78,6 +78,8 @@ void ColorSpaceConverters::ConvertFromLuxCore(const float gamma, Spectrum &c) {
 	c.c[0] = powf(c.c[0], gamma);
 	c.c[1] = powf(c.c[1], gamma);
 	c.c[2] = powf(c.c[2], gamma);
+
+	c = workingColorSpace.FromRec709(c);
 }
 
 //------------------------------------------------------------------------------
@@ -94,8 +96,9 @@ void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
 }
 
 static string GetOCIOProcessorCacheKey(const string &configFileName,
-		const string &inputColorSpace) {
-	return configFileName + "_#_" + inputColorSpace;
+		const string &inputColorSpace, const WorkingColorSpace &wcs) {
+	return configFileName + "_#_" + inputColorSpace + "_#_" +
+			WorkingColorSpace::WorkingColorSpaceType2String(wcs.GetType());
 }
 
 void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
@@ -104,7 +107,7 @@ void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
 		OCIO::ConstCPUProcessorRcPtr cpu;
 
 		// Look for the processor inside the cache
-		const string key = GetOCIOProcessorCacheKey(configFileName, inputColorSpace);
+		const string key = GetOCIOProcessorCacheKey(configFileName, inputColorSpace, workingColorSpace);
 		auto it = ocioProcessorCache.find(key);
 		if (it == ocioProcessorCache.end()) {
 			// Not found, insert a new one into the cache
@@ -112,7 +115,42 @@ void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
 				OCIO::GetCurrentConfig() :
 				OCIO::Config::CreateFromFile(SLG_FileNameResolver.ResolveFile(configFileName).c_str());
 
-			OCIO::ConstProcessorRcPtr processor = config->getProcessor(inputColorSpace.c_str(), OCIO::ROLE_SCENE_LINEAR);
+			// The target is the working space, or the scene linear role taken
+			// as Rec.709 when the config has no such colour space
+			string outputColorSpace = OCIO::ROLE_SCENE_LINEAR;
+			OCIO::ConstProcessorRcPtr processor;
+			if (!workingColorSpace.IsRec709()) {
+				const string workingColorSpaceName = workingColorSpace.FindOpenColorIOColorSpace(configFileName);
+				if (workingColorSpaceName != "")
+					outputColorSpace = workingColorSpaceName;
+				else {
+					OCIO::ConstColorSpaceRcPtr cs = config->getColorSpace(inputColorSpace.c_str());
+					if (!(cs && cs->isData())) {
+						// Append Rec.709 to the working space to the transform
+						const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
+						const double m44[16] = {
+							m[0][0], m[0][1], m[0][2], 0.0,
+							m[1][0], m[1][1], m[1][2], 0.0,
+							m[2][0], m[2][1], m[2][2], 0.0,
+							0.0, 0.0, 0.0, 1.0
+						};
+						OCIO::MatrixTransformRcPtr matrix = OCIO::MatrixTransform::Create();
+						matrix->setMatrix(m44);
+
+						OCIO::GroupTransformRcPtr group = OCIO::GroupTransform::Create();
+						OCIO::ColorSpaceTransformRcPtr toSceneLinear = OCIO::ColorSpaceTransform::Create();
+						toSceneLinear->setSrc(inputColorSpace.c_str());
+						toSceneLinear->setDst(OCIO::ROLE_SCENE_LINEAR);
+						group->appendTransform(toSceneLinear);
+						group->appendTransform(matrix);
+
+						processor = config->getProcessor(group);
+					}
+				}
+			}
+
+			if (!processor)
+				processor = config->getProcessor(inputColorSpace.c_str(), outputColorSpace.c_str());
 
 			cpu = processor->getDefaultCPUProcessor();
 

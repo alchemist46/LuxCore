@@ -30,7 +30,7 @@ using namespace slg;
 
 IrregularDataTexture::IrregularDataTexture(const u_int n,
 		const float *wl, const float *dt,
-		const float res, bool em) :
+		const float res, bool em, const WorkingColorSpace &workingColorSpace) :
 	waveLengths(n), data(n), resolution(res), emission(em)
 {
 	copy(wl, wl + n, waveLengths.begin());
@@ -46,6 +46,8 @@ IrregularDataTexture::IrregularDataTexture(const u_int n,
 			1.f / 3.f, 1.f / 3.f, 1.f);
 		rgb = colorSpace.ToRGBConstrained(spd.ToNormalizedXYZ()).Clamp(0.f);
 	}
+
+	rgb = workingColorSpace.FromRec709(rgb);
 }
 
 PropertiesUPtr IrregularDataTexture::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

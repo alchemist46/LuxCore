@@ -165,9 +165,10 @@ Spectrum SkyLight2::ComputeSkyRadiance(const Vector &w) const {
 		Pow(Spectrum(1.f) + iTerm * (iTerm - Spectrum(2.f * cosG)), 1.5f));
 	const Spectrum zenithTerm(hTerm * sqrtf(cosT));
 
-	// 683 is a scaling factor to convert W to lm
-	return 683.f * (Spectrum(1.f) + aTerm * Exp(bTerm / (cosT + .01f))) *
-		(cTerm + expTerm + rayleighTerm + mieTerm + zenithTerm) * radianceTerm;
+	// 683 is a scaling factor to convert W to lm. The Hosek-Wilkie RGB
+	// datasets are Rec.709.
+	return workingColorSpace.FromRec709(683.f * (Spectrum(1.f) + aTerm * Exp(bTerm / (cosT + .01f))) *
+		(cTerm + expTerm + rayleighTerm + mieTerm + zenithTerm) * radianceTerm);
 }
 
 Spectrum SkyLight2::ComputeRadiance(const Vector &w) const {
