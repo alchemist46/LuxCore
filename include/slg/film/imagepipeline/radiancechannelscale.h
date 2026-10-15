@@ -21,6 +21,7 @@
 
 #include "luxrays/luxrays.h"
 #include "luxrays/core/color/color.h"
+#include "slg/core/workingcolorspace.h"
 #include "luxrays/utils/serializationutils.h"
 
 namespace slg {
@@ -51,6 +52,8 @@ public:
 	float globalScale, temperature;
 	luxrays::Spectrum rgbScale;
 	bool reverse, normalize, enabled;
+	// The space of the image: the temperature white point is converted to it
+	WorkingColorSpace workingColorSpace;
 
 	friend class boost::serialization::access;
 
@@ -64,7 +67,7 @@ private:
 
 }
 
-BOOST_CLASS_VERSION(slg::RadianceChannelScale, 2)
+BOOST_CLASS_VERSION(slg::RadianceChannelScale, 3)
 		
 BOOST_CLASS_EXPORT_KEY(slg::RadianceChannelScale)
 

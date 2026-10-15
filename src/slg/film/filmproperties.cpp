@@ -19,6 +19,7 @@
 #include "slg/film/film.h"
 #include "slg/film/imagepipeline/plugins/tonemaps/autolinear.h"
 #include "slg/film/imagepipeline/plugins/gammacorrection.h"
+#include "slg/film/imagepipeline/plugins/workingtorec709.h"
 
 using namespace std;
 using namespace luxrays;
@@ -45,6 +46,9 @@ PropertiesUPtr Film::ToProperties(const Properties &cfg) {
 			cfg.Get(Property("batch.halttime")(0.0)) <<
 			cfg.Get(Property("batch.haltspp")(0u)) <<
 			FilmOutputs::ToProperties(cfg);
+
+	if (cfg.IsDefined("film.colorspace.working"))
+		*props << cfg.Get("film.colorspace.working");
 
 	// Add also all image pipeline definitions
 	*props << *cfg.GetAllProperties("film.imagepipeline.");
@@ -105,7 +109,7 @@ bool Film::GetFilmSize(const Properties &cfg,
 	return subRegionUsed;
 }
 
-FilmUPtr Film::FromProperties(PropertiesRPtr cfg) {
+FilmUPtr Film::FromProperties(PropertiesRPtr cfg, const WorkingColorSpace &defaultWorkingColorSpace) {
 	//--------------------------------------------------------------------------
 	// Create the Film
 	//--------------------------------------------------------------------------
@@ -119,6 +123,13 @@ FilmUPtr Film::FromProperties(PropertiesRPtr cfg) {
 
 	FilmUPtr film = Film::Create(filmFullWidth, filmFullHeight,
 			filmSubRegionUsed ? filmSubRegion : nullptr);
+
+	// The working colour space (film.colorspace.working, parsed by Parse(),
+	// can override it)
+	film->workingColorSpace = defaultWorkingColorSpace;
+	if (cfg->IsDefined("film.colorspace.working"))
+		film->workingColorSpace = WorkingColorSpace(WorkingColorSpace::String2WorkingColorSpaceType(
+				cfg->Get("film.colorspace.working").Get<string>()));
 
 	// For compatibility with the past
 	if (cfg->IsDefined("film.alphachannel.enable")) {
@@ -144,6 +155,8 @@ FilmUPtr Film::FromProperties(PropertiesRPtr cfg) {
 
 	auto imagePipeline = std::make_unique<ImagePipeline>();
 	imagePipeline->AddPlugin(new AutoLinearToneMap());
+	if (!film->workingColorSpace.IsRec709())
+		imagePipeline->AddPlugin(new WorkingToRec709Plugin(film->workingColorSpace));
 	imagePipeline->AddPlugin(new GammaCorrectionPlugin(2.2f));
 
 	film->SetImagePipelines(imagePipeline.release());

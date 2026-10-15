@@ -653,6 +653,7 @@ set(SLG_FILM_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/outputswitcher.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/vignetting.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/premultiplyalpha.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/workingtorec709.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/autolinear.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/linear.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/luxlinear.cpp

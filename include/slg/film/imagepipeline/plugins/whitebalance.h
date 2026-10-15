@@ -24,6 +24,7 @@
 #include "luxrays/core/color/color.h"
 #include "luxrays/core/hardwaredevice.h"
 #include "slg/film/film.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/film/imagepipeline/imagepipeline.h"
 
 //------------------------------------------------------------------------------
@@ -34,7 +35,8 @@ namespace slg {
 
 class WhiteBalance : public ImagePipelinePlugin {
 public:
-	WhiteBalance(const float temperature, const bool reverse, const bool normalize);
+	WhiteBalance(const float temperature, const bool reverse, const bool normalize,
+			const WorkingColorSpace &workingColorSpace);
 	~WhiteBalance();
 
 	virtual ImagePipelinePlugin *Copy() const;

@@ -161,6 +161,13 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 
 	ar & initialized;
 
+	if (version >= 30) {
+		int workingColorSpaceType;
+		ar & workingColorSpaceType;
+		workingColorSpace = WorkingColorSpace((WorkingColorSpace::WorkingColorSpaceType)workingColorSpaceType);
+	} else
+		workingColorSpace = WorkingColorSpace();
+
 	SetUpHW();
 }
 
@@ -255,6 +262,9 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & filmOutputs;
 
 	ar & initialized;
+
+	const int workingColorSpaceType = workingColorSpace.GetType();
+	ar & workingColorSpaceType;
 }
 
 namespace slg {

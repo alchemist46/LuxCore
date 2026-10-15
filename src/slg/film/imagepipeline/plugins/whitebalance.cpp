@@ -31,8 +31,10 @@ using namespace slg;
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::WhiteBalance)
 
-WhiteBalance::WhiteBalance(const float temperature, const bool reverse, const bool normalize) {
-	scale = TemperatureToWhitePoint(temperature, normalize);
+WhiteBalance::WhiteBalance(const float temperature, const bool reverse, const bool normalize,
+		const WorkingColorSpace &workingColorSpace) {
+	// The white point in the space of the image
+	scale = workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, normalize));
 	if (reverse)
 		scale = Spectrum(1.f) / scale;
 			

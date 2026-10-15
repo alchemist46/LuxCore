@@ -76,6 +76,19 @@ Spectrum WorkingColorSpace::ConvertRec709Weights(const Spectrum &w) const {
 	return ConvertWeights(GetToRec709Matrix(), wd);
 }
 
+const float *WorkingColorSpace::GetChromaticities() const {
+	static const float chromaticities[3][8] = {
+		// Rec.709 / sRGB, D65
+		{ .64f, .33f, .30f, .60f, .15f, .06f, .3127f, .3290f },
+		// Rec.2020, D65
+		{ .708f, .292f, .170f, .797f, .131f, .046f, .3127f, .3290f },
+		// ACES AP1, ACES white
+		{ .713f, .293f, .165f, .830f, .128f, .044f, .32168f, .33767f }
+	};
+
+	return chromaticities[type];
+}
+
 static void AddMatrixKernelParameters(vector<string> &params, const string &name, const float (&m)[3][3]) {
 	for (u_int y = 0; y < 3; ++y) {
 		for (u_int x = 0; x < 3; ++x) {

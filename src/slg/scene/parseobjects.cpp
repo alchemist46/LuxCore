@@ -186,7 +186,7 @@ SceneObjectUPtr Scene::CreateObject(const u_int defaultObjID, const string &objN
 	scnObj->SetName(objName);
 
 	if (props.IsDefined(propName + ".bake.combined.file")) {
-		ImageMapUPtr imgMap = ImageMap::FromProperties(props, propName + ".bake.combined");
+		ImageMapUPtr imgMap = ImageMap::FromProperties(props, propName + ".bake.combined", workingColorSpace);
 
 		// Add the image map to the cache
 		const string name ="LUXCORE_BAKEMAP_COMBINED_" + propName;
@@ -197,7 +197,7 @@ SceneObjectUPtr Scene::CreateObject(const u_int defaultObjID, const string &objN
 
 		scnObj->SetBakeMap(*imgMap, COMBINED, uvIndex);
 	} else if (props.IsDefined(propName + ".bake.lightmap.file")) {
-		auto imgMap = ImageMap::FromProperties(props, propName + ".bake.lightmap");
+		auto imgMap = ImageMap::FromProperties(props, propName + ".bake.lightmap", workingColorSpace);
 
 		// Add the image map to the cache
 		const string name ="LUXCORE_BAKEMAP_LIGHTMAP_" + propName;

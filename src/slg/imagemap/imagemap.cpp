@@ -1726,13 +1726,16 @@ void ImageMap::MakeTx(const std::string &srcFileName, const std::string &dstFile
 		throw runtime_error("ImageMap::MakeTx error: " + s.str());
 }
 
-ImageMapUPtr ImageMap::FromProperties(const Properties &props, const string &prefix) {
+ImageMapUPtr ImageMap::FromProperties(const Properties &props, const string &prefix,
+		const WorkingColorSpace &workingColorSpace) {
 	ImageMapUPtr im;
 	if (props.IsDefined(prefix + ".file")) {
 		// Read the image map from a file
 		const string fileName = props.Get(Property(prefix + ".file")("image.png")).Get<string>();
 
-		im = std::make_unique<ImageMap>(fileName, ImageMapConfig(props, prefix));
+		ImageMapConfig imageMapConfig(props, prefix);
+		imageMapConfig.workingColorSpace = workingColorSpace;
+		im = std::make_unique<ImageMap>(fileName, imageMapConfig);
 	} else if (props.IsDefined(prefix + ".blob")) {
 		// Read the image map from embedded data
 		const u_int width = props.Get(Property(prefix + ".blob.width")(512)).Get<u_int>();
@@ -1767,8 +1770,10 @@ ImageMapUPtr ImageMap::FromProperties(const Properties &props, const string &pre
 		const Blob &blob = props.Get(Property(prefix + ".blob")).Get<const Blob &>();
 		copy(blob.GetData(), blob.GetData() + blob.GetSize(), (char *)pixelStorage->GetPixelsData());
 
+		// The blobs are written already converted (nop), see ToProperties()
 		ImageMapConfig imageMapConfig;
 		ImageMapConfig::FromProperties(props, prefix, imageMapConfig);
+		imageMapConfig.workingColorSpace = workingColorSpace;
 
 		im = std::make_unique<ImageMap>(
 			std::move(pixelStorage), 0.f, 0.f, imageMapConfig

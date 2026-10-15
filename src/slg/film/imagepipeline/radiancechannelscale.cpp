@@ -37,7 +37,7 @@ void RadianceChannelScale::Init() {
 		scale = 0.f;
 	else {
 		if (temperature > 0.f) {
-			scale = TemperatureToWhitePoint(temperature, normalize);
+			scale = workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, normalize));
 			if (reverse)
 				scale = Spectrum(1.f) / scale;
 		} else

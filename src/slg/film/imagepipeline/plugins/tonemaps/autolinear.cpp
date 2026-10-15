@@ -72,7 +72,7 @@ void AutoLinearToneMap::Apply(Film &film, const u_int index) {
 	float Y = 0.f;
 	for (u_int i = 0; i < pixelCount; ++i) {
 		if (film.HasSamples(hasPN, hasSN, i)) {
-			const float y = pixels[i].Y();
+			const float y = film.GetWorkingColorSpace().Y(pixels[i]);
 			if ((y <= 0.f) || isinf(y))
 				continue;
 
@@ -127,6 +127,8 @@ void AutoLinearToneMap::ApplyHW(Film &film, const u_int index) {
 		vector<string> opts;
 		opts.push_back("-D LUXRAYS_OPENCL_KERNEL");
 		opts.push_back("-D SLG_OPENCL_KERNEL");
+		// The luminance weights of the working colour space
+		film.GetWorkingColorSpace().AddKernelParameters(opts);
 
 		auto program = hardwareDevice->CompileProgram(
 				opts,

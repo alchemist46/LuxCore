@@ -33,7 +33,11 @@ __kernel void AutoLinearToneMap_Apply(
 
 	// Check if the pixel has received any sample
 	if (!isinf(channel_IMAGEPIPELINE[gid * 3])) {
+#if defined(PARAM_WCS_Y_R)
+		const float totalLuminance = PARAM_WCS_Y_R * totalRGB[0] + PARAM_WCS_Y_G * totalRGB[1] + PARAM_WCS_Y_B * totalRGB[2];
+#else
 		const float totalLuminance = .212671f * totalRGB[0] + .715160f * totalRGB[1] + .072169f * totalRGB[2];
+#endif
 		const float avgLuminance = totalLuminance / pixelCount;
 		const float scale = (avgLuminance > 0.f) ? (1.25f / avgLuminance * native_powr(118.f / 255.f, gamma)) : 1.f;
 		

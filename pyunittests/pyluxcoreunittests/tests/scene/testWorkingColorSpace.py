@@ -127,6 +127,20 @@ scene.objects.sphere.ply = {S}simple-mat-sphere1.ply
 scene.objects.sphere.material = disney
 """.replace("{S}", S)
 
+# A 4000 K blackbody emitter on black
+BLACKBODY_SCENE = """
+scene.camera.lookat.orig = 8.34339 -4.09766 5.74567
+scene.camera.lookat.target = -2.1735 1.36445 -0.197534
+scene.textures.bb.type = blackbody
+scene.textures.bb.temperature = 4000
+scene.textures.bb.normalize = 1
+scene.materials.bb.type = matte
+scene.materials.bb.kd = 0 0 0
+scene.materials.bb.emission = bb
+scene.objects.sphere.ply = {S}simple-mat-sphere1.ply
+scene.objects.sphere.material = bb
+""".replace("{S}", S)
+
 def ParseScene(text):
 	props = pyluxcore.Properties()
 	props.SetFromString(text)
@@ -135,7 +149,7 @@ def ParseScene(text):
 
 	return scene
 
-def RenderRGB(space, sceneText=EMITTERS_SCENE, directOnly=False):
+def RenderRGB(space, sceneText=EMITTERS_SCENE, directOnly=False, imagePipeline=None):
 	scene = ParseScene("scene.colorspace.working = " + space + "\n" + sceneText)
 
 	# TILEPATHCPU with 1 thread is deterministic
@@ -156,6 +170,8 @@ def RenderRGB(space, sceneText=EMITTERS_SCENE, directOnly=False):
 	if directOnly:
 		cfgProps.Set(pyluxcore.Property("path.pathdepth.total", 1))
 		cfgProps.Set(pyluxcore.Property("path.pathdepth.diffuse", 1))
+	if imagePipeline:
+		cfgProps.SetFromString(imagePipeline)
 	config = pyluxcore.RenderConfig(cfgProps, scene)
 	session = pyluxcore.RenderSession(config)
 	session.Start()
@@ -165,7 +181,7 @@ def RenderRGB(space, sceneText=EMITTERS_SCENE, directOnly=False):
 	session.Stop()
 
 	buf = pyarray.array("f", [0.0] * (width * height * 3))
-	session.GetFilm().GetOutputFloat(pyluxcore.FilmOutputType.RGB, buf)
+	session.GetFilm().GetOutputFloat(pyluxcore.FilmOutputType.RGB_IMAGEPIPELINE if imagePipeline else pyluxcore.FilmOutputType.RGB, buf)
 
 	return buf
 
@@ -222,3 +238,48 @@ class TestWorkingColorSpace(unittest.TestCase):
 
 	def test_WorkingColorSpace_DisneyTint(self):
 		self.CheckLinear(DISNEY_SCENE, True)
+
+	def CheckImagePipeline(self, imagePipeline):
+		# The image pipeline converts to Rec.709 before the gamma, so its output
+		# doesn't depend on the working space when the image is linear in the
+		# inputs. (The 4096 entries of the gamma table round the result.)
+		ref = RenderRGB("rec709", imagePipeline=imagePipeline)
+		self.assertGreater(max(ref), 0.0)
+
+		for space in TO_REC709:
+			img = RenderRGB(space, imagePipeline=imagePipeline)
+			maxDiff = max(abs(a - b) for a, b in zip(img, ref))
+			self.assertLess(maxDiff, 2e-3, space)
+
+	def test_WorkingColorSpace_GammaPipeline(self):
+		self.CheckImagePipeline("""
+			film.imagepipelines.0.0.type = TONEMAP_LINEAR
+			film.imagepipelines.0.0.scale = 1.0
+			film.imagepipelines.0.1.type = GAMMA_CORRECTION
+			film.imagepipelines.0.1.value = 2.2
+			""")
+
+	def test_WorkingColorSpace_AutoLinear(self):
+		self.CheckImagePipeline("""
+			film.imagepipelines.0.0.type = TONEMAP_AUTOLINEAR
+			film.imagepipelines.0.1.type = GAMMA_CORRECTION
+			film.imagepipelines.0.1.value = 2.2
+			""")
+
+	def test_WorkingColorSpace_WhiteBalance(self):
+		# A white balance at a temperature makes a blackbody emitter at that
+		# temperature neutral, in every working space (it is a per channel
+		# scale, so the other colours depend on the space)
+		pipeline = """
+			film.imagepipelines.0.0.type = TONEMAP_LINEAR
+			film.imagepipelines.0.0.scale = 1.0
+			film.imagepipelines.0.1.type = WHITE_BALANCE
+			film.imagepipelines.0.1.temperature = 4000
+			film.imagepipelines.0.1.normalize = 1
+			"""
+		for space in ["rec709"] + list(TO_REC709):
+			img = RenderRGB(space, BLACKBODY_SCENE, imagePipeline=pipeline)
+			maxValue = max(img)
+			self.assertGreater(maxValue, 0.0, space)
+			maxDiff = max(max(abs(img[i] - img[i + 1]), abs(img[i + 1] - img[i + 2])) for i in range(0, len(img), 3))
+			self.assertLess(maxDiff / maxValue, 1e-4, space)

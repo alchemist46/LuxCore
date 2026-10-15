@@ -50,7 +50,7 @@ float ContourLinesPlugin::GetLuminance(const Film &film,
 	Spectrum v;
 	film.channel_IRRADIANCE->GetWeightedPixel(x, y, v.c);
 
-	return scale * v.Y();
+	return scale * film.GetWorkingColorSpace().Y(v);
 }
 
 int ContourLinesPlugin::GetStep(const Film &film,

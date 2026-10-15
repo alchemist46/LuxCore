@@ -87,6 +87,11 @@ public:
 	const float (&GetToRec709Matrix() const)[3][3];
 	const float (&GetToXYZMatrix() const)[3][3];
 
+	// The primaries and white point (CIE xy: red, green, blue, white), as the
+	// OpenEXR chromaticities attribute: Rec.709 and Rec.2020 with D65, ACES
+	// AP1 with the ACES white point
+	const float *GetChromaticities() const;
+
 	// The kernel parameters of the working space (none in REC709): the
 	// Rec.709 to working and working to Rec.709 matrices and the luminance
 	// weights

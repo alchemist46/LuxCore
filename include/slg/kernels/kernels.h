@@ -148,6 +148,7 @@ extern std::string KernelSource_plugin_gaussianblur3x3_funcs;
 extern std::string KernelSource_plugin_objectidmask_funcs;
 extern std::string KernelSource_plugin_optixdenoiser_funcs;
 extern std::string KernelSource_plugin_premultiplyalpha_funcs;
+extern std::string KernelSource_plugin_workingtorec709_funcs;
 extern std::string KernelSource_plugin_vignetting_funcs;
 extern std::string KernelSource_plugin_whitebalance_funcs;
 extern std::string KernelSource_tonemap_reduce_funcs;

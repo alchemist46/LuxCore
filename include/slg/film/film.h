@@ -39,6 +39,7 @@
 #include "luxrays/utils/properties.h"
 #include "luxrays/utils/serializationutils.h"
 #include "slg/slg.h"
+#include "slg/core/workingcolorspace.h"
 #include "slg/film/framebuffer.h"
 #include "slg/film/filmoutputs.h"
 #include "slg/film/convtest/filmconvtest.h"
@@ -223,6 +224,10 @@ public:
 	void SetImagePipelines(ImagePipeline *newImagePiepeline);
 	void SetImagePipelines(std::vector<ImagePipeline *> &newImagePiepelines);
 	const u_int GetImagePipelineCount() const { return imagePipelines.size(); }
+
+	// The space of the rendered colours (film.colorspace.working, the scene's
+	// one when the film is created by a RenderConfig)
+	const WorkingColorSpace &GetWorkingColorSpace() const { return workingColorSpace; }
 	const ImagePipeline *GetImagePipeline(const u_int index) const { return imagePipelines[index]; }
 
 	void CopyDynamicSettings(const Film &film);
@@ -293,6 +298,9 @@ public:
 
 	bool HasOutput(const FilmOutputs::FilmOutputType type) const;
 	u_int GetOutputCount(const FilmOutputs::FilmOutputType type) const;
+	// The colours of the output are in the working colour space (not converted
+	// to Rec.709 by the image pipeline)
+	bool IsWorkingColorSpaceOutput(const FilmOutputs::FilmOutputType type, const u_int imagePipelineIndex) const;
 	size_t GetOutputSize(const FilmOutputs::FilmOutputType type) const;
 
 	void Output();
@@ -542,7 +550,8 @@ public:
 		u_int *filmSubRegion);
 
 	static luxrays::PropertiesUPtr ToProperties(const luxrays::Properties &cfg);
-	static FilmUPtr FromProperties(luxrays::PropertiesRPtr cfg);
+	static FilmUPtr FromProperties(luxrays::PropertiesRPtr cfg,
+			const WorkingColorSpace &defaultWorkingColorSpace = WorkingColorSpace());
 
 	static FilmChannelType String2FilmChannelType(const std::string &type);
 	static const std::string FilmChannelType2String(const FilmChannelType type);
@@ -616,6 +625,8 @@ private:
 	// The per-pixel error estimate from the *_HALF channels (see FilmConvTest)
 	bool haltNoiseThresholdHalfBuffer;
 
+	WorkingColorSpace workingColorSpace;
+
 	// Adaptive sampling
 	FilmNoiseEstimation *noiseEstimation;
 
@@ -637,7 +648,7 @@ template<> void Film::GetOutput<u_int>(const FilmOutputs::FilmOutputType type, u
 
 }
 
-BOOST_CLASS_VERSION(slg::Film, 29)
+BOOST_CLASS_VERSION(slg::Film, 30)
 BOOST_CLASS_VERSION(slg::FilmSamplesCounts, 1)
 
 BOOST_CLASS_EXPORT_KEY(slg::Film)

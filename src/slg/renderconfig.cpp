@@ -342,7 +342,8 @@ FilterUPtr RenderConfig::AllocPixelFilter() const {
 }
 
 FilmUPtr RenderConfig::AllocFilm() const {
-	auto film = Film::FromProperties(cfg);
+	// The film renders in the working colour space of the scene
+	auto film = Film::FromProperties(cfg, GetScene().GetWorkingColorSpace());
 
 	// Add the channels required by the Sampler
 	Film::FilmChannels channels;

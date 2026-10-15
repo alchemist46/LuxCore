@@ -1074,7 +1074,9 @@ public:
 		const u_int width, const u_int height);
 	static ImageMapUPtr Resample(ImageMapConstRef map, const u_int channels,
 		const u_int width, const u_int height);
-	static ImageMapUPtr FromProperties(const luxrays::Properties &props, const std::string &prefix);
+	// The image is converted to the given working colour space (see ImageMapConfig)
+	static ImageMapUPtr FromProperties(const luxrays::Properties &props, const std::string &prefix,
+			const WorkingColorSpace &workingColorSpace = WorkingColorSpace());
 
 	static ImageMapUPtr AllocImageMap(
 		const u_int channels,

@@ -34,6 +34,7 @@
 #include "slg/film/film.h"
 #include "slg/film/imagepipeline/imagepipeline.h"
 #include "slg/film/imagepipeline/radiancechannelscale.h"
+#include "slg/film/imagepipeline/plugins/workingtorec709.h"
 #include "slg/film/sampleresult.h"
 
 using namespace std;
@@ -840,6 +841,11 @@ void Film::Output(
 		}
 	}
 
+	// The colour outputs of an EXR are in the working colour space: say so
+	// when it is not Rec.709 (the EXR default)
+	if ((fileExtension == ".exr") && !workingColorSpace.IsRec709() && IsWorkingColorSpaceOutput(type, imagePipelineIndex))
+		buffer.specmod().attribute("chromaticities", TypeDesc(TypeDesc::FLOAT, 8), workingColorSpace.GetChromaticities());
+
 	if (filmOutputs.UseSafeSave()) {
 		SafeSave safeSave(fileName);
 
@@ -852,6 +858,43 @@ void Film::Output(
 		if (!buffer.write(fileName))
 			throw runtime_error("Error while writing an output type in Film::Output(): " +
 					fileName + " (error = " + buffer.geterror() + ")");
+	}
+}
+
+bool Film::IsWorkingColorSpaceOutput(const FilmOutputs::FilmOutputType type, const u_int imagePipelineIndex) const {
+	switch (type) {
+		case FilmOutputs::RGB:
+		case FilmOutputs::RGBA:
+		case FilmOutputs::DIRECT_DIFFUSE:
+		case FilmOutputs::DIRECT_DIFFUSE_REFLECT:
+		case FilmOutputs::DIRECT_DIFFUSE_TRANSMIT:
+		case FilmOutputs::DIRECT_GLOSSY:
+		case FilmOutputs::DIRECT_GLOSSY_REFLECT:
+		case FilmOutputs::DIRECT_GLOSSY_TRANSMIT:
+		case FilmOutputs::EMISSION:
+		case FilmOutputs::INDIRECT_DIFFUSE:
+		case FilmOutputs::INDIRECT_DIFFUSE_REFLECT:
+		case FilmOutputs::INDIRECT_DIFFUSE_TRANSMIT:
+		case FilmOutputs::INDIRECT_GLOSSY:
+		case FilmOutputs::INDIRECT_GLOSSY_REFLECT:
+		case FilmOutputs::INDIRECT_GLOSSY_TRANSMIT:
+		case FilmOutputs::INDIRECT_SPECULAR:
+		case FilmOutputs::INDIRECT_SPECULAR_REFLECT:
+		case FilmOutputs::INDIRECT_SPECULAR_TRANSMIT:
+		case FilmOutputs::RADIANCE_GROUP:
+		case FilmOutputs::BY_MATERIAL_ID:
+		case FilmOutputs::BY_OBJECT_ID:
+		case FilmOutputs::IRRADIANCE:
+		case FilmOutputs::ALBEDO:
+		case FilmOutputs::CAUSTIC:
+			return true;
+		case FilmOutputs::RGB_IMAGEPIPELINE:
+		case FilmOutputs::RGBA_IMAGEPIPELINE:
+			// Unless the image pipeline converted it to Rec.709 for a display
+			// curve
+			return !imagePipelines[imagePipelineIndex]->GetPlugin(typeid(WorkingToRec709Plugin));
+		default:
+			return false;
 	}
 }
 

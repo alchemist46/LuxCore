@@ -77,6 +77,7 @@ set(SLG_KERNELS
     include/slg/film/imagepipeline/plugins/plugin_objectidmask_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_optixdenoiser_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_premultiplyalpha_funcs.cl
+    include/slg/film/imagepipeline/plugins/plugin_workingtorec709_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_vignetting_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_whitebalance_funcs.cl
     include/slg/film/imagepipeline/plugins/tonemaps/tonemap_reduce_funcs.cl

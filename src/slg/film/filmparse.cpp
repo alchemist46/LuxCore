@@ -49,6 +49,7 @@ namespace OCIO = OCIO_NAMESPACE;
 #include "slg/film/imagepipeline/plugins/vignetting.h"
 #include "slg/film/imagepipeline/plugins/coloraberration.h"
 #include "slg/film/imagepipeline/plugins/premultiplyalpha.h"
+#include "slg/film/imagepipeline/plugins/workingtorec709.h"
 #include "slg/film/imagepipeline/plugins/mist.h"
 #include "slg/film/imagepipeline/plugins/intel_oidn.h"
 #include "slg/film/imagepipeline/plugins/whitebalance.h"
@@ -541,6 +542,7 @@ void Film::ParseRadianceGroupsScale(const Properties &props, const u_int imagePi
 		const string prefix = radianceGroupsScalePrefix + "." + indexStr;
 
 		RadianceChannelScale radianceChannelScale;
+		radianceChannelScale.workingColorSpace = workingColorSpace;
 		radianceChannelScale.globalScale = props.Get(Property(prefix + ".globalscale")(1.0)).Get<double>();
 		radianceChannelScale.temperature = props.Get(Property(prefix + ".temperature")(0.0)).Get<double>();
 		radianceChannelScale.rgbScale = props.Get(Property(prefix + ".rgbscale")(1.f, 1.f, 1.f)).Get<Spectrum>();
@@ -591,6 +593,16 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 	const u_int keyFieldCount = Property::CountFields(imagePipelinePrefix);
 	unique_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
 
+	// The display curves (gamma, camera response) are for Rec.709 primaries:
+	// in another working space the image is converted in front of the first one
+	bool isRec709 = workingColorSpace.IsRec709();
+	auto ConvertToRec709 = [&]() {
+		if (!isRec709) {
+			imagePipeline->AddPlugin(new WorkingToRec709Plugin(workingColorSpace));
+			isRec709 = true;
+		}
+	};
+
 	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames(imagePipelinePrefix, true);
 	if (imagePipelineKeys.size() > 0) {
 		SDL_LOG("Image pipeline: " << imagePipelinePrefix);
@@ -629,6 +641,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "NOP") {
 				imagePipeline->AddPlugin(new NopPlugin());
 			} else if (type == "GAMMA_CORRECTION") {
+				ConvertToRec709();
 				imagePipeline->AddPlugin(new GammaCorrectionPlugin(
 					props.Get(Property(prefix + ".value")(2.2)).Get<double>(),
 					// 4096 => 12bit resolution
@@ -648,6 +661,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 				imagePipeline->AddPlugin(new GaussianBlur3x3FilterPlugin(weight));
 			} else if (type == "CAMERA_RESPONSE_FUNC") {
+				ConvertToRec709();
 				imagePipeline->AddPlugin(new CameraResponsePlugin(
 					props.Get(Property(prefix + ".name")("Advantix_100CD")).Get<string>()));
 			} else if (type == "CONTOUR_LINES") {
@@ -658,7 +672,8 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 				imagePipeline->AddPlugin(new ContourLinesPlugin(scale, range, steps, zeroGridSize));
 			} else if (type == "BACKGROUND_IMG") {
-				auto im = ImageMap::FromProperties(props, prefix);
+				// Composited with the rendered image: in its working colour space
+				auto im = ImageMap::FromProperties(props, prefix, workingColorSpace);
 
 				imagePipeline->AddPlugin(new BackgroundImgPlugin(std::move(im)));
 			} else if (type == "BLOOM") {
@@ -749,7 +764,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const bool reverse = props.Get(Property(prefix + ".reverse")(true)).Get<bool>();
 				const bool normalize = props.Get(Property(prefix + ".normalize")(false)).Get<bool>();
 
-				imagePipeline->AddPlugin(new WhiteBalance(temperature, reverse, normalize));
+				imagePipeline->AddPlugin(new WhiteBalance(temperature, reverse, normalize, workingColorSpace));
 			} else if (type == "BAKEMAP_MARGIN") {
 				const u_int marginPixels = Max(props.Get(Property(prefix + ".margin")(2)).Get<u_int>(), 1u);
 				const float samplesThreshold = Max(props.Get(Property(prefix + ".samplesthreshold")(0.0)).Get<double>(), 0.0);
@@ -767,10 +782,20 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "TONEMAP_OPENCOLORIO") {
 				const string mode = props.Get(Property(prefix + ".mode")("COLORSPACE_CONVERSION")).Get<string>();
 
+				// The default source is the working space (the rendering role
+				// in Rec.709, or if the config has no such colour space)
+				auto ocioSource = [&](const string &prefix) -> string {
+					if (workingColorSpace.IsRec709())
+						return OCIO::ROLE_RENDERING;
+					const string name = workingColorSpace.FindOpenColorIOColorSpace(
+							props.Get(Property(prefix + ".config")("")).Get<string>());
+					return (name == "") ? string(OCIO::ROLE_RENDERING) : name;
+				};
+
 				if (mode == "COLORSPACE_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateColorSpaceConversion(
 						props.Get(Property(prefix + ".config")("")).Get<string>(),
-						props.Get(Property(prefix + ".src")(OCIO::ROLE_RENDERING)).Get<string>(),
+						props.Get(Property(prefix + ".src")(ocioSource(prefix))).Get<string>(),
 						props.Get(Property(prefix + ".dst")(OCIO::ROLE_INTERCHANGE_DISPLAY)).Get<string>()));
 				} else if (mode == "LUT_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateLUTConversion(
@@ -778,14 +803,14 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				} else if (mode == "DISPLAY_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateDisplayConversion(
 						props.Get(Property(prefix + ".config")("")).Get<string>(),
-						props.Get(Property(prefix + ".src")(OCIO::ROLE_RENDERING)).Get<string>(),
+						props.Get(Property(prefix + ".src")(ocioSource(prefix))).Get<string>(),
 						props.Get(Property(prefix + ".display")(OCIO::ROLE_INTERCHANGE_DISPLAY)).Get<string>(),
 						props.Get(Property(prefix + ".view")(OCIO::OCIO_VIEW_USE_DISPLAY_NAME)).Get<string>(),
 						props.Get(Property(prefix + ".look")("")).Get<string>()));
 				} else if (mode == "LOOK_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateLookConversion(
 						props.Get(Property(prefix + ".config")("")).Get<string>(),
-						props.Get(Property(prefix + ".src")(OCIO::ROLE_RENDERING)).Get<string>(),
+						props.Get(Property(prefix + ".src")(ocioSource(prefix))).Get<string>(),
 						props.Get(Property(prefix + ".look")("look")).Get<string>()));
 				} else
 					throw runtime_error("Unknown mode for TONEMAP_OPENCOLORIO: " + mode);
@@ -795,6 +820,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 	} else {
 		// The definition of image pipeline is missing, use the default
 		imagePipeline->AddPlugin(new AutoLinearToneMap());
+		ConvertToRec709();
 		imagePipeline->AddPlugin(new GammaCorrectionPlugin(2.2f));
 	}
 
@@ -852,6 +878,15 @@ void Film::ParseImagePipelines(const Properties &props) {
 //------------------------------------------------------------------------------
 
 void Film::Parse(PropertiesRPtr props) {
+	//--------------------------------------------------------------------------
+	// Check if there is a new working colour space, before the image pipelines
+	// that depend on it
+	//--------------------------------------------------------------------------
+
+	if (props->IsDefined("film.colorspace.working"))
+		workingColorSpace = WorkingColorSpace(WorkingColorSpace::String2WorkingColorSpaceType(
+				props->Get("film.colorspace.working").Get<string>()));
+
 	//--------------------------------------------------------------------------
 	// Check if there is a new image pipeline definition
 	//--------------------------------------------------------------------------

@@ -35,6 +35,8 @@ template<class Archive> void RadianceChannelScale::save(Archive &ar, const u_int
 	ar & reverse;
 	ar & normalize;
 	ar & enabled;
+	const int workingColorSpaceType = workingColorSpace.GetType();
+	ar & workingColorSpaceType;
 }
 
 template<class Archive> void RadianceChannelScale::load(Archive &ar, const u_int version) {
@@ -44,6 +46,11 @@ template<class Archive> void RadianceChannelScale::load(Archive &ar, const u_int
 	ar & reverse;
 	ar & normalize;
 	ar & enabled;
+	if (version >= 3) {
+		int workingColorSpaceType;
+		ar & workingColorSpaceType;
+		workingColorSpace = WorkingColorSpace((WorkingColorSpace::WorkingColorSpaceType)workingColorSpaceType);
+	}
 
 	Init();
 }

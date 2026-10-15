@@ -244,6 +244,7 @@ void Film::CopyDynamicSettings(const Film &film) {
 	maskObjectIDs = film.maskObjectIDs;
 	byObjectIDs = film.byObjectIDs;
 	radianceGroupCount = film.radianceGroupCount;
+	workingColorSpace = film.workingColorSpace;
 
 	// Copy the image pipeline
 	imagePipelines.resize(0);

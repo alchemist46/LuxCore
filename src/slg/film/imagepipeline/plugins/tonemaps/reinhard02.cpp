@@ -82,7 +82,7 @@ void Reinhard02ToneMap::Apply(Film &film, const u_int index) {
 	float Ywa = 0.f;
 	for (u_int i = 0; i < pixelCount; ++i) {
 		if (film.HasSamples(hasPN, hasSN, i) && !rgbPixels[i].IsInf())
-			Ywa += logf(Max(rgbPixels[i].Y(), 1e-6f));
+			Ywa += logf(Max(film.GetWorkingColorSpace().Y(rgbPixels[i]), 1e-6f));
 	}
 
 	if (pixelCount > 0)
@@ -105,7 +105,7 @@ void Reinhard02ToneMap::Apply(Film &film, const u_int index) {
 #endif
 			int i = 0; i < pixelCount; ++i) {
 		if (film.HasSamples(hasPN, hasSN, i)) {
-			const float ys = rgbPixels[i].Y() * preS;
+			const float ys = film.GetWorkingColorSpace().Y(rgbPixels[i]) * preS;
 			// Note: I don't need to convert to XYZ and back because I'm only
 			// scaling the value.
 			rgbPixels[i] *= postS * (1.f + ys * invB2) / (1.f + ys);
@@ -139,6 +139,8 @@ void Reinhard02ToneMap::ApplyHW(Film &film, const u_int index) {
 		vector<string> opts;
 		opts.push_back("-D LUXRAYS_OPENCL_KERNEL");
 		opts.push_back("-D SLG_OPENCL_KERNEL");
+		// The luminance weights of the working colour space (Spectrum_Y())
+		film.GetWorkingColorSpace().AddKernelParameters(opts);
 
 		auto program = hardwareDevice->CompileProgram(
 				opts,
