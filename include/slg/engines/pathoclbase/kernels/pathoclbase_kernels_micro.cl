@@ -199,7 +199,12 @@ __kernel void AdvancePaths_MK_HIT_NOTHING(
 // Evaluation of the Path finite state machine.
 //
 // From: MK_HIT_OBJECT
-// To: MK_DL_ILLUMINATE or MK_SPLAT_SAMPLE
+// To: MK_RT_DL or MK_GENERATE_NEXT_VERTEX_RAY or MK_SPLAT_SAMPLE
+//
+// The shading of a hit and the direct light sampling of the vertex, which run
+// back to back with no trace between them: one kernel, so that the per-task
+// state is loaded once (it used to be three kernels: MK_HIT_OBJECT,
+// MK_DL_ILLUMINATE and MK_DL_SAMPLE_BSDF).
 //------------------------------------------------------------------------------
 
 __kernel void AdvancePaths_MK_HIT_OBJECT(
@@ -437,8 +442,79 @@ __kernel void AdvancePaths_MK_HIT_OBJECT(
 	//
 	// I handle as a special case when the path vertex is both the first
 	// and the last: I do direct light sampling without MIS.
-	pathStates[gid] = (sampleResult->lastPathVertex && !sampleResult->firstPathVertex) ?
-		MK_SPLAT_SAMPLE : MK_DL_ILLUMINATE;
+	if (sampleResult->lastPathVertex && !sampleResult->firstPathVertex) {
+		pathStates[gid] = MK_SPLAT_SAMPLE;
+		return;
+	}
+
+	//--------------------------------------------------------------------------
+	// Direct light sampling: pick a light source and a point on it, then
+	// evaluate the BSDF in the direction of the light
+	//--------------------------------------------------------------------------
+
+	__global GPUTask *task = &tasks[gid];
+	__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
+	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
+
+	// Read the seed
+	Seed seedValue = task->seed;
+	// This trick is required by SAMPLER_PARAM macro
+	Seed *seed = &seedValue;
+
+	// It will set eventually to true if the light is visible
+	taskDirectLight->directLightResult = NOT_VISIBLE;
+
+	if (!BSDF_IsDelta(bsdf
+			MATERIALS_PARAM) &&
+			DirectLight_Illuminate(
+				bsdf,
+				&rays[gid],
+				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
+				&task->tmpHitPoint,
+				rays[gid].time,
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Z SAMPLER_PARAM),
+				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_W SAMPLER_PARAM),
+				&taskDirectLight->illumInfo
+				LIGHTS_PARAM) &&
+			DirectLight_BSDFSampling(
+				taskConfig,
+				&taskDirectLight->illumInfo,
+				rays[gid].time, sampleResult->lastPathVertex,
+				pathInfo,
+				&task->tmpPathDepthInfo,
+				bsdf,
+				VLOAD3F(&rays[gid].d.x)
+				LIGHTS_PARAM)) {
+		// Initialize the pass-through event for the shadow ray
+		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
+		Seed seedPassThroughEvent;
+		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
+		taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
+
+		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
+		taskDirectLight->throughShadowTransparency = false;
+
+		// Make a copy of current PathVolumeInfo for tracing the
+		// shadow ray
+		directLightVolInfos[gid] = pathInfo->volume;
+
+		// The shadow ray was initialized by Light_Illuminate(): flag it for
+		// an any-hit trace if the scene allows it
+		if (taskConfig->scene.shadowRayAnyHit)
+			rays[gid].flags |= RAY_FLAGS_SHADOW;
+
+		// I have to trace the shadow ray
+		pathStates[gid] = MK_RT_DL;
+	} else {
+		// No shadow ray to trace, move to the next vertex ray
+		// however, I have to check if this is the last path vertex
+		pathStates[gid] = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
+	}
+
+	// Save the seed
+	task->seed = seedValue;
 }
 
 //------------------------------------------------------------------------------
@@ -556,172 +632,6 @@ __kernel void AdvancePaths_MK_RT_DL(
 
 		// Save the state
 		pathStates[gid] = pathState;
-	}
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_DL_ILLUMINATE
-// To: MK_DL_SAMPLE_BSDF or MK_GENERATE_NEXT_VERTEX_RAY
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_DL_ILLUMINATE(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTask *task = &tasks[gid];
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_DL_ILLUMINATE(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_DL_ILLUMINATE)
-		return;
-
- 	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-
-	__global BSDF *bsdf = &taskState->bsdf;
-
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
-	__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-	
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	// It will set eventually to true if the light is visible
-	taskDirectLight->directLightResult = NOT_VISIBLE;
-
-	if (!BSDF_IsDelta(bsdf
-			MATERIALS_PARAM) &&
-			DirectLight_Illuminate(
-				bsdf,
-				&rays[gid],
-				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
-				&task->tmpHitPoint,
-				rays[gid].time,
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Z SAMPLER_PARAM),
-				Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_W SAMPLER_PARAM),
-				&taskDirectLight->illumInfo
-				LIGHTS_PARAM)) {
-		// I have now to evaluate the BSDF
-		pathStates[gid] = MK_DL_SAMPLE_BSDF;
-	} else {
-		// No shadow ray to trace, move to the next vertex ray
-		// however, I have to Check if this is the last path vertex
-		pathStates[gid] = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
-	}
-
-	//--------------------------------------------------------------------------
-
-	// Save the seed
-	task->seed = seedValue;
-}
-
-//------------------------------------------------------------------------------
-// Evaluation of the Path finite state machine.
-//
-// From: MK_DL_SAMPLE_BSDF
-// To: MK_GENERATE_NEXT_VERTEX_RAY or MK_RT_DL or MK_SPLAT_SAMPLE
-//------------------------------------------------------------------------------
-
-__kernel void AdvancePaths_MK_DL_SAMPLE_BSDF(
-		KERNEL_ARGS
-		) {
-	const size_t gid = get_global_id(0);
-
-	// Read the path state
-	__global GPUTaskState *taskState = &tasksState[gid];
-	PathState pathState = pathStates[gid];
-#if defined(DEBUG_PRINTF_KERNEL_NAME)
-	if (gid == 0)
-		printf("Kernel: AdvancePaths_MK_DL_SAMPLE_BSDF(state = %d)\n", pathState);
-	else
-		return;
-#endif
-	if (pathState != MK_DL_SAMPLE_BSDF)
-		return;
-
- 	//--------------------------------------------------------------------------
-	// Start of variables setup
-	//--------------------------------------------------------------------------
-
-	__global GPUTask *task = &tasks[gid];
-	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
-	__constant const Scene* restrict scene = &taskConfig->scene;
-	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
-	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
-
-	// Initialize image maps page pointer table
-	INIT_IMAGEMAPS_PAGES
-	
-	//--------------------------------------------------------------------------
-	// End of variables setup
-	//--------------------------------------------------------------------------
-
-	if (DirectLight_BSDFSampling(
-			taskConfig,
-			&tasksDirectLight[gid].illumInfo,
-			rays[gid].time, sampleResult->lastPathVertex,
-			pathInfo,
-			&task->tmpPathDepthInfo,
-			&taskState->bsdf,
-			VLOAD3F(&rays[gid].d.x)
-			LIGHTS_PARAM)) {
-		__global GPUTask *task = &tasks[gid];
-		Seed seedValue = task->seed;
-		// This trick is required by SAMPLER_PARAM macro
-		Seed *seed = &seedValue;
-
-		// Initialize the pass-through event for the shadow ray
-		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
-		Seed seedPassThroughEvent;
-		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
-		tasksDirectLight[gid].seedPassThroughEvent = seedPassThroughEvent;
-
-		// Save the seed
-		task->seed = seedValue;
-
-		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
-		tasksDirectLight[gid].throughShadowTransparency = false;
-
-		// Make a copy of current PathVolumeInfo for tracing the
-		// shadow ray
-		directLightVolInfos[gid] = pathInfo->volume;
-
-		// The shadow ray was initialized by Light_Illuminate(): flag it for
-		// an any-hit trace if the scene allows it
-		if (taskConfig->scene.shadowRayAnyHit)
-			rays[gid].flags |= RAY_FLAGS_SHADOW;
-
-		// I have to trace the shadow ray
-		pathStates[gid] = MK_RT_DL;
-	} else {
-		// No shadow ray to trace, move to the next vertex ray
-		// however, I have to check if this is the last path vertex
-		pathStates[gid] = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
 	}
 }
 

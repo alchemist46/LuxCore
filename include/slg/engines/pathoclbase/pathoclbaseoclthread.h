@@ -292,8 +292,6 @@ protected:
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_HIT_NOTHING;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_HIT_OBJECT;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_RT_DL;
-	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_DL_ILLUMINATE;
-	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_DL_SAMPLE_BSDF;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_SPLAT_SAMPLE;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_NEXT_SAMPLE;

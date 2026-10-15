@@ -123,8 +123,6 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	advancePathsKernel_MK_HIT_NOTHING = nullptr;
 	advancePathsKernel_MK_HIT_OBJECT = nullptr;
 	advancePathsKernel_MK_RT_DL = nullptr;
-	advancePathsKernel_MK_DL_ILLUMINATE = nullptr;
-	advancePathsKernel_MK_DL_SAMPLE_BSDF = nullptr;
 	advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY = nullptr;
 	advancePathsKernel_MK_SPLAT_SAMPLE = nullptr;
 	advancePathsKernel_MK_NEXT_SAMPLE = nullptr;

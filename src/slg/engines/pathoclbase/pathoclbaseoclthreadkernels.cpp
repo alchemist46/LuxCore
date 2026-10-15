@@ -237,8 +237,6 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		{advancePathsKernel_MK_HIT_NOTHING, "AdvancePaths_MK_HIT_NOTHING"},
 		{advancePathsKernel_MK_HIT_OBJECT, "AdvancePaths_MK_HIT_OBJECT"},
 		{advancePathsKernel_MK_RT_DL, "AdvancePaths_MK_RT_DL"},
-		{advancePathsKernel_MK_DL_ILLUMINATE, "AdvancePaths_MK_DL_ILLUMINATE"},
-		{advancePathsKernel_MK_DL_SAMPLE_BSDF, "AdvancePaths_MK_DL_SAMPLE_BSDF"},
 		{advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY, "AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY"},
 		{advancePathsKernel_MK_SPLAT_SAMPLE, "AdvancePaths_MK_SPLAT_SAMPLE"},
 		{advancePathsKernel_MK_NEXT_SAMPLE, "AdvancePaths_MK_NEXT_SAMPLE"},
@@ -402,10 +400,6 @@ void PathOCLBaseOCLRenderThread::SetAllAdvancePathsKernelArgs(const u_int filmIn
 		SetAdvancePathsKernelArgs(advancePathsKernel_MK_HIT_OBJECT, filmIndex);
 	if (advancePathsKernel_MK_RT_DL)
 		SetAdvancePathsKernelArgs(advancePathsKernel_MK_RT_DL, filmIndex);
-	if (advancePathsKernel_MK_DL_ILLUMINATE)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_DL_ILLUMINATE, filmIndex);
-	if (advancePathsKernel_MK_DL_SAMPLE_BSDF)
-		SetAdvancePathsKernelArgs(advancePathsKernel_MK_DL_SAMPLE_BSDF, filmIndex);
 	if (advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY)
 		SetAdvancePathsKernelArgs(advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY, filmIndex);
 	if (advancePathsKernel_MK_SPLAT_SAMPLE)
@@ -441,17 +435,17 @@ void PathOCLBaseOCLRenderThread::EnqueueAdvancePathsKernel() {
 	const u_int taskCount = renderEngine->taskCount;
 
 	// Micro kernels version
+	//
+	// The rays are traced before this sequence, so a kernel that consumes a
+	// trace result (MK_RT_NEXT_VERTEX, MK_RT_DL) must run before any kernel
+	// that sets up a new ray to trace (MK_HIT_OBJECT sets up the shadow ray).
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT_NEXT_VERTEX,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_HIT_NOTHING,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_HIT_OBJECT,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_RT_DL,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_DL_ILLUMINATE,
-			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
-	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_DL_SAMPLE_BSDF,
+	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_HIT_OBJECT,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
 	intersectionDevice.EnqueueKernel(advancePathsKernel_MK_GENERATE_NEXT_VERTEX_RAY,
 			HardwareDeviceRange(taskCount), HardwareDeviceRange(advancePathsWorkGroupSize));
