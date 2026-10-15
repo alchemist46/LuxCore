@@ -214,9 +214,13 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							const float directLightSamplingPdfW = directPdfW * lightPickPdf;
 							const float factor = 1.f / directLightSamplingPdfW;
 
-							if (directLightDepthInfo.GetRRDepth() >= rrDepth) {
-								// Russian Roulette
-								bsdfPdfW *= RenderEngine::RussianRouletteProb(bsdfEval, rrImportanceCap);
+							if ((directLightDepthInfo.GetRRDepth() >= rrDepth) && (bsdfPdfW > 0.f)) {
+								// Russian Roulette: the BSDF technique continues the path
+								// with the probability RenderEyePath() computes from the
+								// sample weight of the direction, f cos / pdf (the MIS
+								// weight of a BSDF hit on the light uses the same product,
+								// see EyePathInfo::lastBSDFPdfW)
+								bsdfPdfW *= RenderEngine::RussianRouletteProb(bsdfEval / bsdfPdfW, rrImportanceCap);
 							}
 
 							// Account for material transparency
@@ -305,8 +309,11 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 					(lightStrategy.GetType() == TYPE_DLS_CACHE))
 				return;
 
-			const float directPdfW = PdfAtoW(directPdfA, distance,
-					AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
+			// The pdf of the light sampling from the origin of the ray: the
+			// last scattering vertex (Scene::Intersect() moves mint, not the
+			// origin, past the pass-through surfaces)
+			const float directPdfW = bsdf.GetTriangleLightSource()->GetDirectPdfW(bsdf.hitPoint,
+					ray.o, distance, AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
 
 			// MIS between BSDF sampling and direct light sampling
 			weight = PowerHeuristic(pathInfo.lastBSDFPdfW * lightSource->GetAvgPassThroughTransparency(), directPdfW * lightPickProb);
@@ -640,6 +647,10 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 			// Increase path contribution
 			bsdfSample /= rrProb;
+
+			// The pdf of the BSDF technique, for the MIS weight of a hit on
+			// a light, includes the Russian Roulette
+			pathInfo.lastBSDFPdfW *= rrProb;
 		}
 
 		pathThroughput *= bsdfSample;

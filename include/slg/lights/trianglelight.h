@@ -30,6 +30,16 @@ namespace slg {
 // TriangleLight implementation
 //------------------------------------------------------------------------------
 
+// The solid angle sampling of a triangle seen from a point (the code shared
+// with the GPU, sphericaltriangle_funcs.cl). SphericalTriangle_Sample() takes
+// one sample, split in two coordinates.
+float SphericalTriangle_SolidAngle(const luxrays::Point &v0, const luxrays::Point &v1,
+		const luxrays::Point &v2, const luxrays::Point &p);
+bool SphericalTriangle_UseSolidAngle(const float solidAngle);
+bool SphericalTriangle_Sample(const luxrays::Point &v0, const luxrays::Point &v1,
+		const luxrays::Point &v2, const luxrays::Point &p, const float u,
+		float *b0, float *b1, float *b2, float *pdfW);
+
 class TriangleLight : public IntersectableLightSource {
 public:
 	TriangleLight();
@@ -65,10 +75,20 @@ public:
 			float *directPdfA = NULL,
 			float *emissionPdfW = NULL) const;
 
+	// The solid angle pdf of Illuminate() for a direct hit on the light from
+	// refPoint (the MIS weight of the BSDF sampling)
+	float GetDirectPdfW(const HitPoint &hitPoint, const luxrays::Point &refPoint,
+			const float distance, const float cosAtLight) const;
+
+	bool UsesSolidAngleSampling() const;
+
 	SceneObjectConstPtr sceneObject;
 	// Note: meshIndex is initialized in LightSourceDefinitions::Preprocess()
 	u_int meshIndex, triangleIndex;
-	
+	// Solid angle sampling of the direct light, set by
+	// LightSourceDefinitions::Preprocess() (lightstrategy.trianglelight.solidangle)
+	bool solidAngleSampling;
+
 private:
 	float triangleArea, invTriangleArea;
 	float meshArea, invMeshArea;

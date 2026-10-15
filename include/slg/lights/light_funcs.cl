@@ -461,6 +461,25 @@ OPENCL_FORCE_INLINE float3 TriangleLight_GetRadiance(__global const LightSource 
 			MATERIALS_PARAM) * emissionColor;
 }
 
+// The solid angle pdf of TriangleLight_Illuminate() for a direct hit on the
+// light from refPoint (the MIS weight of the BSDF sampling)
+OPENCL_FORCE_INLINE float TriangleLight_GetDirectPdfW(__global const LightSource *triLight,
+		__global const HitPoint *hitPoint, const float3 refPoint,
+		const float distance, const float cosAtLight
+		MATERIALS_PARAM_DECL) {
+	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
+		float3 p0, p1, p2;
+		ExtMesh_GetTriangleVertices(&hitPoint->localToWorld,
+				triLight->triangle.meshIndex, triLight->triangle.triangleIndex,
+				&p0, &p1, &p2 EXTMESH_PARAM);
+		const float solidAngle = SphericalTriangle_SolidAngle(p0, p1, p2, refPoint);
+		if (SphericalTriangle_UseSolidAngle(solidAngle))
+			return 1.f / solidAngle;
+	}
+
+	return PdfAtoW(triLight->triangle.invTriangleArea, distance, cosAtLight);
+}
+
 OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *triLight,
 		__global HitPoint *tmpHitPoint, __global const BSDF *bsdf,
 		const float time, const float u0, const float u1,
@@ -482,15 +501,33 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	// Initialized local to world object space transformation
 	ExtMesh_GetLocal2World(time, meshIndex, triangleIndex, &tmpHitPoint->localToWorld EXTMESH_PARAM);
 
+	const float3 hitPointP = VLOAD3F(&bsdf->hitPoint.p.x);
 	float b0, b1, b2;
 	float3 samplePoint;
-	ExtMesh_Sample(&tmpHitPoint->localToWorld,
-			meshIndex, triangleIndex,
-			u0, u1,
-			&samplePoint, &b0, &b1, &b2
-			EXTMESH_PARAM);
+	// Solid angle sampling (not for the lights with an emission map: their
+	// pdf has no cosine)
+	float solidAnglePdfW = 0.f;
+	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
+		float3 p0, p1, p2;
+		ExtMesh_GetTriangleVertices(&tmpHitPoint->localToWorld, meshIndex, triangleIndex,
+				&p0, &p1, &p2 EXTMESH_PARAM);
+		if (SphericalTriangle_UseSolidAngle(SphericalTriangle_SolidAngle(p0, p1, p2, hitPointP))) {
+			float s, t;
+			SphericalTriangle_SplitSample(u0, &s, &t);
+			if (SphericalTriangle_Sample(p0, p1, p2, hitPointP, s, t, &b0, &b1, &b2, &solidAnglePdfW))
+				samplePoint = b0 * p0 + b1 * p1 + b2 * p2;
+			else
+				return BLACK;
+		}
+	}
+	if (solidAnglePdfW == 0.f)
+		ExtMesh_Sample(&tmpHitPoint->localToWorld,
+				meshIndex, triangleIndex,
+				u0, u1,
+				&samplePoint, &b0, &b1, &b2
+				EXTMESH_PARAM);
 
-	float3 sampleDir = samplePoint - VLOAD3F(&bsdf->hitPoint.p.x);
+	float3 sampleDir = samplePoint - hitPointP;
 	const float distanceSquared = dot(sampleDir, sampleDir);
 	const float distance = sqrt(distanceSquared);
 	sampleDir /= distance;
@@ -549,7 +586,9 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 				IMAGEMAPS_PARAM) / triLight->triangle.average;
 
 		*directPdfW = triLight->triangle.invTriangleArea * shadowRayDistanceSquared ;
-	} else
+	} else if (solidAnglePdfW > 0.f)
+		*directPdfW = solidAnglePdfW;
+	else
 		*directPdfW = triLight->triangle.invTriangleArea * shadowRayDistanceSquared / fabs(cosAtLight);
 
 	// Setup the shadow ray

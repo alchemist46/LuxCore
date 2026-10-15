@@ -831,6 +831,10 @@ __kernel void AdvancePaths_MK_GENERATE_NEXT_VERTEX_RAY(
 
 	const bool continuePath = !Spectrum_IsBlack(bsdfSample) && rrContinuePath && !maxPathDepth;
 	if (continuePath) {
+		// The pdf of the BSDF technique, for the MIS weight of a hit on a
+		// light, includes the Russian Roulette
+		pathInfo->lastBSDFPdfW *= rrProb;
+
 		float3 throughputFactor = WHITE;
 
 		// RR increases path contribution

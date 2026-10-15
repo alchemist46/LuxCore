@@ -252,8 +252,10 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 				return;
 #endif
 			
-			const float directPdfW = PdfAtoW(directPdfA, distance,
-					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x))));
+			const float directPdfW = TriangleLight_GetDirectPdfW(light, &bsdf->hitPoint,
+					VLOAD3F(&ray->o.x), distance,
+					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x)))
+					MATERIALS_PARAM);
 
 			// MIS between BSDF sampling and direct light sampling
 			//
@@ -361,9 +363,12 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 	const float directLightSamplingPdfW = info->directPdfW * info->pickPdf;
 	const float factor = 1.f / directLightSamplingPdfW;
 
-	// Russian Roulette
-	bsdfPdfW *= (PathDepthInfo_GetRRDepth(tmpDepthInfo) >= taskConfig->pathTracer.rrDepth) ?
-		RussianRouletteProb(taskConfig->pathTracer.rrImportanceCap, bsdfEval) :
+	// Russian Roulette: the BSDF technique continues the path with the
+	// probability computed from the sample weight of the direction, f cos / pdf
+	// (the MIS weight of a BSDF hit on the light uses the same product, see
+	// pathInfo->lastBSDFPdfW)
+	bsdfPdfW *= ((PathDepthInfo_GetRRDepth(tmpDepthInfo) >= taskConfig->pathTracer.rrDepth) && (bsdfPdfW > 0.f)) ?
+		RussianRouletteProb(taskConfig->pathTracer.rrImportanceCap, bsdfEval / bsdfPdfW) :
 		1.f;
 
 	// Account for material transparency

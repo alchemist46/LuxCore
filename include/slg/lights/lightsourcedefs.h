@@ -157,6 +157,8 @@ private:
 	// The light strategies
 	LightStrategyUPtr
 		emitLightStrategy, illuminateLightStrategy, infiniteLightStrategy;
+	// Solid angle sampling of the triangle lights (lightstrategy.trianglelight.solidangle)
+	bool triangleLightSolidAngle;
 };
 
 }

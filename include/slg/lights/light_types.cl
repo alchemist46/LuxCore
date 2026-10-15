@@ -145,6 +145,9 @@ typedef struct {
 	// Used for image map and/or IES map
 	float average;
 	unsigned int imageMapIndex;
+
+	// Solid angle sampling of the direct light (see sphericaltriangle_funcs.cl)
+	unsigned int solidAngleSampling;
 } TriangleLightParam;
 
 typedef struct {

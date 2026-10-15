@@ -40,6 +40,7 @@ LightSourceDefinitions::LightSourceDefinitions() :
 	emitLightStrategy = std::make_unique<LightStrategyLogPower>();
 	illuminateLightStrategy = std::make_unique<LightStrategyLogPower>();
 	infiniteLightStrategy = std::make_unique<LightStrategyLogPower>();
+	triangleLightSolidAngle = false;
 	lightGroupCount = 1;
 }
 
@@ -205,6 +206,13 @@ void LightSourceDefinitions::SetLightStrategy(const luxrays::Properties &props) 
 	if (LightStrategy::GetType(props) != infiniteLightStrategy->GetType()) {
 		infiniteLightStrategy = LightStrategy::FromProperties(props);
 	}
+
+	// The solid angle sampling of the triangle lights. Not for the BiDir
+	// engines: their MIS stores the area pdf of the light sampling on the
+	// light vertex, before the eye vertex it connects to is known.
+	const std::string engineType = props.Get(Property("renderengine.type")("PATHOCL")).Get<std::string>();
+	triangleLightSolidAngle = props.Get(Property("lightstrategy.trianglelight.solidangle")(false)).Get<bool>() &&
+			(engineType != "BIDIRCPU") && (engineType != "BIDIRVMCPU");
 }
 
 void LightSourceDefinitions::UpdateVolumeReferences(
@@ -262,6 +270,7 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 			auto& tl = dynamic_cast<TriangleLightRef>(l);
 			intersectableLightSources.push_back(tl);
 			tl.meshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+			tl.solidAngleSampling = triangleLightSolidAngle;
 		} catch (std::bad_cast&) {}
 
 		++i;
@@ -275,6 +284,7 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 			auto& tl = dynamic_cast<TriangleLightRef>(lights[i].get());
 			intersectableLightSources.push_back(tl);
 			tl.meshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+			tl.solidAngleSampling = triangleLightSolidAngle;
 		} catch(std::bad_cast&) {}
 	}
 

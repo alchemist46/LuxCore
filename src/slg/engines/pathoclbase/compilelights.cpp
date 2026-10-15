@@ -343,6 +343,7 @@ void CompiledScene::CompileLights() {
 				oclLight->triangle.invMeshArea = (meshArea == 0.f) ? 0.f : (1.f / meshArea);
 				oclLight->triangle.meshIndex = tl.meshIndex;
 				oclLight->triangle.triangleIndex = tl.triangleIndex;
+				oclLight->triangle.solidAngleSampling = tl.UsesSolidAngleSampling();
 
 				auto& emissionFunc = tl.lightMaterial->GetEmissionFunc();
 				if (emissionFunc) {

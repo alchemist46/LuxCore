@@ -222,6 +222,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/lights/spherelight.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/spotlight.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/sunlight.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/lights/sphericaltriangle.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/trianglelight.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscache.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscacheimpl/dlscacheimpl.cpp

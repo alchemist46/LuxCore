@@ -323,6 +323,28 @@ OPENCL_FORCE_INLINE void ExtMesh_Sample(
 	}
 }
 
+// The vertices of a triangle in world coordinates
+OPENCL_FORCE_INLINE void ExtMesh_GetTriangleVertices(
+		__global const Transform* restrict localToWorld,
+		const uint meshIndex, const uint triangleIndex,
+		float3 *p0, float3 *p1, float3 *p2
+		EXTMESH_PARAM_DECL) {
+	__global const ExtMesh* restrict meshDesc = &meshDescs[meshIndex];
+	__global const Point* restrict triVerts = &vertices[meshDesc->vertsOffset];
+	__global const Triangle* restrict tri = &triangles[meshDesc->trisOffset + triangleIndex];
+
+	*p0 = VLOAD3F(&triVerts[tri->v[0]].x);
+	*p1 = VLOAD3F(&triVerts[tri->v[1]].x);
+	*p2 = VLOAD3F(&triVerts[tri->v[2]].x);
+
+	// The vertices are already in world coordinates for TYPE_EXT_TRIANGLE
+	if (meshDesc->type != TYPE_EXT_TRIANGLE) {
+		*p0 = Transform_ApplyPoint(localToWorld, *p0);
+		*p1 = Transform_ApplyPoint(localToWorld, *p1);
+		*p2 = Transform_ApplyPoint(localToWorld, *p2);
+	}
+}
+
 OPENCL_FORCE_INLINE void ExtMesh_GetLocal2World(const float time,
 		const uint meshIndex, const uint triangleIndex,
 		__global Transform *local2World

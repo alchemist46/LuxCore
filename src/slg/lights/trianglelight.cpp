@@ -31,11 +31,17 @@ using namespace slg;
 
 TriangleLight::TriangleLight() : sceneObject(nullptr), 
 		meshIndex(NULL_INDEX), triangleIndex(NULL_INDEX),
+		solidAngleSampling(false),
 		triangleArea(0.f), invTriangleArea(0.f),
 		meshArea(0.f), invMeshArea(0.f) {
 }
 
 TriangleLight::~TriangleLight() {
+}
+
+bool TriangleLight::UsesSolidAngleSampling() const {
+	// Not for the lights with an emission function: their pdf has no cosine
+	return solidAngleSampling && !lightMaterial->GetEmissionFunc();
 }
 
 bool TriangleLight::IsDirectLightSamplingEnabled() const {
@@ -173,7 +179,21 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 
 	Point samplePoint;
 	float b0, b1, b2;
-	mesh.Sample(tmpHitPoint.localToWorld, triangleIndex, u0, u1, &samplePoint, &b0, &b1, &b2);
+	float solidAnglePdfW = 0.f;
+	if (UsesSolidAngleSampling()) {
+		const Triangle &tri = mesh.GetTriangles()[triangleIndex];
+		const Point p0 = mesh.GetVertex(tmpHitPoint.localToWorld, tri.v[0]);
+		const Point p1 = mesh.GetVertex(tmpHitPoint.localToWorld, tri.v[1]);
+		const Point p2 = mesh.GetVertex(tmpHitPoint.localToWorld, tri.v[2]);
+
+		if (SphericalTriangle_UseSolidAngle(SphericalTriangle_SolidAngle(p0, p1, p2, bsdf.hitPoint.p))) {
+			if (!SphericalTriangle_Sample(p0, p1, p2, bsdf.hitPoint.p, u0, &b0, &b1, &b2, &solidAnglePdfW))
+				return Spectrum();
+			samplePoint = b0 * p0 + b1 * p1 + b2 * p2;
+		}
+	}
+	if (solidAnglePdfW == 0.f)
+		mesh.Sample(tmpHitPoint.localToWorld, triangleIndex, u0, u1, &samplePoint, &b0, &b1, &b2);
 
 	Vector sampleDir = samplePoint - bsdf.hitPoint.p;
 	const float distanceSquared = sampleDir.LengthSquared();
@@ -244,7 +264,7 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 				*emissionPdfW = invTriangleArea * fabsf(cosAtLight) * INV_PI;
 		}
 
-		directPdfW = invTriangleArea * distanceSquared / fabsf(cosAtLight);
+		directPdfW = (solidAnglePdfW > 0.f) ? solidAnglePdfW : (invTriangleArea * distanceSquared / fabsf(cosAtLight));
 	}
 
 	assert (!isnan(directPdfW) && !isinf(directPdfW));
@@ -322,5 +342,22 @@ Spectrum TriangleLight::GetRadiance(const HitPoint &hitPoint,
 	}
 
 	return lightMaterial->GetEmittedRadiance(hitPoint, invMeshArea) * emissionColor;
+}
+float TriangleLight::GetDirectPdfW(const HitPoint &hitPoint, const Point &refPoint,
+		const float distance, const float cosAtLight) const {
+	if (UsesSolidAngleSampling()) {
+		auto& mesh = sceneObject->GetExtMesh();
+		const Triangle &tri = mesh.GetTriangles()[triangleIndex];
+		const float solidAngle = SphericalTriangle_SolidAngle(
+				mesh.GetVertex(hitPoint.localToWorld, tri.v[0]),
+				mesh.GetVertex(hitPoint.localToWorld, tri.v[1]),
+				mesh.GetVertex(hitPoint.localToWorld, tri.v[2]),
+				refPoint);
+
+		if (SphericalTriangle_UseSolidAngle(solidAngle))
+			return 1.f / solidAngle;
+	}
+
+	return PdfAtoW(invTriangleArea, distance, cosAtLight);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

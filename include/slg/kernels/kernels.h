@@ -120,6 +120,7 @@ extern std::string KernelSource_varianceclamping_funcs;
 extern std::string KernelSource_volume_types;
 extern std::string KernelSource_volume_funcs;
 extern std::string KernelSource_light_types;
+extern std::string KernelSource_sphericaltriangle_funcs;
 extern std::string KernelSource_light_funcs;
 extern std::string KernelSource_lightstrategy_funcs;
 extern std::string KernelSource_dlsc_types;

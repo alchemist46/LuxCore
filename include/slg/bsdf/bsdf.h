@@ -162,6 +162,7 @@ public:
 	luxrays::Spectrum GetEmittedRadiance(float *directPdfA = NULL, float *emissionPdfW = NULL) const ;
 
 	LightSourceConstPtr GetLightSource() const { return triangleLightSource; }
+	TriangleLightConstPtr GetTriangleLightSource() const { return triangleLightSource; }
 
 	luxrays::Point GetRayOrigin(const luxrays::Vector &sampleDir) const {
 		if (IsVolume())
