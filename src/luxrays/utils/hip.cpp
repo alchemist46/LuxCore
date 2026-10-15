@@ -21,6 +21,7 @@
 
 #include <fstream>
 #include <mutex>
+#include <sstream>
 #include <vector>
 #include <oneapi/tbb.h>
 
@@ -50,7 +51,7 @@ std::filesystem::path hipKernelPersistentCache::GetCacheDir(const std::string &a
 }
 
 std::vector<std::string> hipKernelPersistentCache::GetCompilerOptions(const std::string &gpuArch) {
-	return {
+	std::vector<std::string> opts = {
 		// Compile for the architecture of the device the program will run on
 		"--offload-arch=" + gpuArch,
 		"-O3",
@@ -64,6 +65,17 @@ std::vector<std::string> hipKernelPersistentCache::GetCompilerOptions(const std:
 		// speed of the AMD OpenCL compiler) and spills less to the stack.
 		"--gpu-max-threads-per-block=" + std::to_string(MaxWorkGroupSize)
 	};
+
+	// For experiments (e.g. "-mllvm -amdgpu-num-vgpr=192"): extra options,
+	// separated by spaces. They are part of the cache key.
+	if (const char *extra = getenv("LUXRAYS_HIP_COMPILER_OPTIONS")) {
+		std::istringstream ss(extra);
+		std::string opt;
+		while (ss >> opt)
+			opts.push_back(opt);
+	}
+
+	return opts;
 }
 
 bool hipKernelPersistentCache::ForcedCompileCodeObject(

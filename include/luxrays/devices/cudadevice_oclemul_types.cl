@@ -18,7 +18,13 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#if defined(LUXRAYS_HIP_DEVICE) && defined(LUXRAYS_HIP_WAVES_PER_EU)
+// For experiments (LUXRAYS_HIP_COMPILER_OPTIONS="-DLUXRAYS_HIP_WAVES_PER_EU=N"):
+// asks the compiler for at least N waves per SIMD, i.e. a register budget
+#define __kernel extern "C" __global__ __attribute__((amdgpu_waves_per_eu(LUXRAYS_HIP_WAVES_PER_EU)))
+#else
 #define __kernel extern "C" __global__
+#endif
 #define __global
 #define __local __shared__
 #define __constant
