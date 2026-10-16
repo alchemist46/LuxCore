@@ -87,7 +87,7 @@ Spectrum Metal2Material::EvaluateFresnel(const HitPoint &hitPoint, const float c
 // quadrature on [0, 1]
 Spectrum Metal2Material::MSScale(const HitPoint &hitPoint, const float u, const float v,
 		const Vector &localEyeDir) const {
-	if (!IsMultiscattering() || (GetMicrofacetDistribution() != GGX_DISTRIBUTION))
+	if (!IsMultiscattering())
 		return Spectrum(1.f);
 
 	static const float nodes[4] = { .069431844f, .330009478f, .669990522f, .930568156f };
@@ -119,7 +119,6 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	float *directPdfW, float *reversePdfW) const {
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const Vector wh(Normalize(localLightDir + localEyeDir));
 	const float cosWH = Dot(localLightDir, wh);
@@ -127,10 +126,10 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 	if (directPdfW)
-		*directPdfW = Microfacet_PdfReflect(dist, u, v, localFixedDir, localSampledDir);
+		*directPdfW = Microfacet_PdfReflect(u, v, localFixedDir, localSampledDir);
 
 	if (reversePdfW)
-		*reversePdfW = Microfacet_PdfReflect(dist, u, v, localSampledDir, localFixedDir);
+		*reversePdfW = Microfacet_PdfReflect(u, v, localSampledDir, localFixedDir);
 
 	Spectrum F;
 	if (fresnelTex)
@@ -143,10 +142,10 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	}
 	F.Clamp(0.f, 1.f);
 
-	const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
+	const float G = Microfacet_G(u, v, localLightDir, localEyeDir);
 
 	*event = GLOSSY | REFLECT;
-	return (Microfacet_D(dist, u, v, wh) * G / (4.f * fabsf(localEyeDir.z))) * F *
+	return (Microfacet_D(u, v, wh) * G / (4.f * fabsf(localEyeDir.z))) * F *
 			MSScale(hitPoint, u, v, localEyeDir);
 }
 
@@ -159,9 +158,8 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
-	*pdfW = Microfacet_SampleReflect(dist, u, v, localFixedDir, u0, u1, localSampledDir);
+	*pdfW = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
 
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir->z);
@@ -174,8 +172,8 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 	const Vector wh(Normalize(localFixedDir + *localSampledDir));
 	const float cosWH = AbsDot(localFixedDir, wh);
 
-	const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
-	const float d = Microfacet_D(dist, u, v, wh);
+	const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
+	const float d = Microfacet_D(u, v, wh);
 
 	Spectrum F;
 	if (fresnelTex)
@@ -205,16 +203,15 @@ void Metal2Material::Pdf(const HitPoint &hitPoint,
 		float *directPdfW, float *reversePdfW) const {
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 
 	if (directPdfW)
-		*directPdfW = Microfacet_PdfReflect(dist, u, v, localFixedDir, localSampledDir);
+		*directPdfW = Microfacet_PdfReflect(u, v, localFixedDir, localSampledDir);
 
 	if (reversePdfW)
-		*reversePdfW = Microfacet_PdfReflect(dist, u, v, localSampledDir, localFixedDir);
+		*reversePdfW = Microfacet_PdfReflect(u, v, localSampledDir, localFixedDir);
 }
 
 void Metal2Material::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {
@@ -267,7 +264,6 @@ PropertiesUPtr Metal2Material::ToProperties(const ImageMapCache &imgMapCache, co
 		props->Set(Property("scene.materials." + name + ".k")(k->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 

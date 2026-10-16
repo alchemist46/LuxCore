@@ -22,8 +22,6 @@ scene.materials.mat_sphere.ioroutside = 1.0
 scene.materials.mat_sphere.iorinside = 1.7
 scene.materials.mat_sphere.uroughness = 0.15
 scene.materials.mat_sphere.vroughness = 0.15
-scene.materials.mat_cube.distribution = ggx
-scene.materials.mat_sphere.distribution = ggx
 ################################################################################
 scene.objects.lightplanes.ply = resources/scenes/simple/simple-lights.ply
 scene.objects.lightplanes.material = whitelight

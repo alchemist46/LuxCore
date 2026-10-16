@@ -47,7 +47,7 @@ Material::Material(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 		glossiness(0.f),
 		isVisibleIndirectDiffuse(true), isVisibleIndirectGlossy(true), isVisibleIndirectSpecular(true),
 		isShadowCatcher(false), isShadowCatcherOnlyInfiniteLights(false), isPhotonGIEnabled(true),
-		isHoldout(false), microfacetDistribution(SCHLICK_DISTRIBUTION), multiscattering(false) {
+		isHoldout(false), multiscattering(false) {
 	SetEmittedTheta(90.f);
 	UpdateEmittedFactor();
 	UpdateAvgPassThroughTransparency();
@@ -404,111 +404,6 @@ Spectrum slg::CoatingAbsorption(const float cosi, const float coso,
 }
 
 //------------------------------------------------------------------------------
-// SchlickDistribution
-//------------------------------------------------------------------------------
-
-float slg::SchlickDistribution_SchlickZ(const float roughness, const float cosNH) {
-	if (roughness > 0.f) {
-		const float cosNH2 = cosNH * cosNH;
-		// expanded for increased numerical stability
-		const float d = cosNH2 * roughness + (1.f - cosNH2);
-		// use double division to avoid overflow in d*d product
-		return (roughness / d) / d;
-	}
-	return 0.f;
-}
-
-float slg::SchlickDistribution_SchlickA(const Vector &H, const float anisotropy) {
-	const float h = sqrtf(H.x * H.x + H.y * H.y);
-	if (h > 0.f) {
-		const float w = (anisotropy > 0.f ? H.x : H.y) / h;
-		const float p = 1.f - fabsf(anisotropy);
-		return sqrtf(p / (p * p + w * w * (1.f - p * p)));
-	}
-
-	return 1.f;
-}
-
-float slg::SchlickDistribution_D(const float roughness, const Vector &wh,
-		const float anisotropy) {
-	const float cosTheta = fabsf(wh.z);
-	return SchlickDistribution_SchlickZ(roughness, cosTheta) * SchlickDistribution_SchlickA(wh, anisotropy) * INV_PI;
-}
-
-float slg::SchlickDistribution_SchlickG(const float roughness,
-		const float costheta) {
-	return costheta / (costheta * (1.f - roughness) + roughness);
-}
-
-float slg::SchlickDistribution_G(const float roughness, const Vector &localFixedDir,
-	const Vector &localSampledDir) {
-	return SchlickDistribution_SchlickG(roughness, fabsf(localFixedDir.z)) *
-			SchlickDistribution_SchlickG(roughness, fabsf(localSampledDir.z));
-}
-
-static float GetPhi(const float a, const float b) {
-	return M_PI * .5f * sqrtf(a * b / (1.f - a * (1.f - b)));
-}
-
-void slg::SchlickDistribution_SampleH(const float roughness, const float anisotropy,
-		const float u0, const float u1, Vector *wh, float *d, float *pdf) {
-	float u1x4 = u1 * 4.f;
-	const float cos2Theta = u0 / (roughness * (1 - u0) + u0);
-	const float cosTheta = sqrtf(cos2Theta);
-	const float sinTheta = sqrtf(1.f - cos2Theta);
-	const float p = 1.f - fabsf(anisotropy);
-	float phi;
-	if (u1x4 < 1.f) {
-		phi = GetPhi(u1x4 * u1x4, p * p);
-	} else if (u1x4 < 2.f) {
-		u1x4 = 2.f - u1x4;
-		phi = M_PI - GetPhi(u1x4 * u1x4, p * p);
-	} else if (u1x4 < 3.f) {
-		u1x4 -= 2.f;
-		phi = M_PI + GetPhi(u1x4 * u1x4, p * p);
-	} else {
-		u1x4 = 4.f - u1x4;
-		phi = M_PI * 2.f - GetPhi(u1x4 * u1x4, p * p);
-	}
-
-	if (anisotropy > 0.f)
-		phi += M_PI * .5f;
-
-	*wh = Vector(sinTheta * cosf(phi), sinTheta * sinf(phi), cosTheta);
-	*d = SchlickDistribution_SchlickZ(roughness, cosTheta) * SchlickDistribution_SchlickA(*wh, anisotropy) * INV_PI;
-	*pdf = *d;
-}
-
-float slg::SchlickDistribution_Pdf(const float roughness, const Vector &wh,
-		const float anisotropy) {
-	return SchlickDistribution_D(roughness, wh, anisotropy);
-}
-
-//------------------------------------------------------------------------------
-// Microfacet distribution type
-//------------------------------------------------------------------------------
-
-MicrofacetDistributionType slg::String2MicrofacetDistributionType(const string &type) {
-	if (type == "schlick")
-		return SCHLICK_DISTRIBUTION;
-	else if (type == "ggx")
-		return GGX_DISTRIBUTION;
-	else
-		throw runtime_error("Unknown microfacet distribution type: " + type);
-}
-
-string slg::MicrofacetDistributionType2String(const MicrofacetDistributionType type) {
-	switch (type) {
-		case SCHLICK_DISTRIBUTION:
-			return "schlick";
-		case GGX_DISTRIBUTION:
-			return "ggx";
-		default:
-			throw runtime_error("Unknown microfacet distribution type in MicrofacetDistributionType2String(): " + ToString(type));
-	}
-}
-
-//------------------------------------------------------------------------------
 // GGX distribution with the Smith masking (alpha = (u, v))
 //------------------------------------------------------------------------------
 
@@ -610,95 +505,45 @@ float slg::GGXDistribution_PdfBoundedReflect(const float alphaU, const float alp
 // Microfacet lobe
 //------------------------------------------------------------------------------
 
-static inline void SchlickDistribution_Params(const float u, const float v,
-		float *roughness, float *anisotropy) {
-	const float u2 = u * u;
-	const float v2 = v * v;
-	*anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	*roughness = u * v;
-}
-
-float slg::Microfacet_D(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::Microfacet_D(const float u, const float v,
 		const Vector &wh) {
-	if (dist == GGX_DISTRIBUTION)
-		return GGXDistribution_D(u, v, wh);
-	else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_D(roughness, wh, anisotropy);
-	}
+	return GGXDistribution_D(u, v, wh);
 }
 
-float slg::Microfacet_G(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::Microfacet_G(const float u, const float v,
 		const Vector &wo, const Vector &wi) {
-	if (dist == GGX_DISTRIBUTION)
-		return GGXDistribution_G(u, v, wo, wi);
-	else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_G(roughness, wo, wi);
-	}
+	return GGXDistribution_G(u, v, wo, wi);
 }
 
-void slg::Microfacet_SampleH(const MicrofacetDistributionType dist, const float u, const float v,
+void slg::Microfacet_SampleH(const float u, const float v,
 		const Vector &wo, const float u0, const float u1,
 		Vector *wh, float *d, float *pdfH) {
-	if (dist == GGX_DISTRIBUTION) {
-		const Vector woUp = (wo.z < 0.f) ? -wo : wo;
-		GGXDistribution_SampleVisibleH(u, v, woUp, u0, u1, wh);
-		*d = GGXDistribution_D(u, v, *wh);
-		*pdfH = GGXDistribution_PdfVisibleH(u, v, woUp, *wh);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, wh, d, pdfH);
-	}
+	const Vector woUp = (wo.z < 0.f) ? -wo : wo;
+	GGXDistribution_SampleVisibleH(u, v, woUp, u0, u1, wh);
+	*d = GGXDistribution_D(u, v, *wh);
+	*pdfH = GGXDistribution_PdfVisibleH(u, v, woUp, *wh);
 }
 
-float slg::Microfacet_PdfH(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::Microfacet_PdfH(const float u, const float v,
 		const Vector &wo, const Vector &wh) {
-	if (dist == GGX_DISTRIBUTION) {
-		const Vector woUp = (wo.z < 0.f) ? -wo : wo;
-		return GGXDistribution_PdfVisibleH(u, v, woUp, wh);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_Pdf(roughness, wh, anisotropy);
-	}
+	const Vector woUp = (wo.z < 0.f) ? -wo : wo;
+	return GGXDistribution_PdfVisibleH(u, v, woUp, wh);
 }
 
-float slg::Microfacet_SampleReflect(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::Microfacet_SampleReflect(const float u, const float v,
 		const Vector &wo, const float u0, const float u1, Vector *wi) {
-	if (dist == GGX_DISTRIBUTION) {
-		const bool flip = (wo.z < 0.f);
-		const Vector woUp = flip ? -wo : wo;
-		Vector wiUp;
-		GGXDistribution_SampleBoundedReflect(u, v, woUp, u0, u1, &wiUp);
-		*wi = flip ? -wiUp : wiUp;
-		return GGXDistribution_PdfBoundedReflect(u, v, woUp, wiUp);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		Vector wh;
-		float d, pdfH;
-		SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &pdfH);
-		const float cosWH = Dot(wo, wh);
-		*wi = 2.f * cosWH * wh - wo;
-		return pdfH / (4.f * fabsf(cosWH));
-	}
+	const bool flip = (wo.z < 0.f);
+	const Vector woUp = flip ? -wo : wo;
+	Vector wiUp;
+	GGXDistribution_SampleBoundedReflect(u, v, woUp, u0, u1, &wiUp);
+	*wi = flip ? -wiUp : wiUp;
+	return GGXDistribution_PdfBoundedReflect(u, v, woUp, wiUp);
 }
 
-float slg::Microfacet_PdfReflect(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::Microfacet_PdfReflect(const float u, const float v,
 		const Vector &wo, const Vector &wi) {
-	if (dist == GGX_DISTRIBUTION) {
-		const bool flip = (wo.z < 0.f);
-		return GGXDistribution_PdfBoundedReflect(u, v, flip ? -wo : wo, flip ? -wi : wi);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		const Vector wh(Normalize(wo + wi));
-		return SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * AbsDot(wo, wh));
-	}
+	const bool flip = (wo.z < 0.f);
+	return GGXDistribution_PdfBoundedReflect(u, v, flip ? -wo : wo, flip ? -wi : wi);
 }
 
 //------------------------------------------------------------------------------
@@ -715,7 +560,7 @@ float slg::SchlickBSDF_CoatingWeight(const Spectrum &ks, const Vector &localFixe
 }
 
 Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
-		const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
+		const float u, const float v, const bool mbounce,
 		const bool multiscattering,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
 	const float coso = fabsf(localFixedDir.z);
@@ -726,10 +571,10 @@ Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
 	const Spectrum S = FresnelTexture::SchlickEvaluate(ks, cosi_Schlick);
 	assert (S.IsValid());
 
-	const float G = Microfacet_G(dist, u, v, localFixedDir, localSampledDir);
+	const float G = Microfacet_G(u, v, localFixedDir, localSampledDir);
 
 	// Multibounce - alternative with interreflection in the coating creases
-	float factor = Microfacet_D(dist, u, v, wh) * G;
+	float factor = Microfacet_D(u, v, wh) * G;
 	if (!fromLight)
 		factor = factor / (4.f * coso) +
 				(mbounce ? cosi * Clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) : 0.f);
@@ -740,17 +585,17 @@ Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? localSampledDir : localFixedDir;
-	const Spectrum msScale = Microfacet_MSScale(dist, multiscattering, u, v, fabsf(localEyeDir.z),
+	const Spectrum msScale = Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return factor * S * msScale;
 }
 
 Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks,
-		const MicrofacetDistributionType dist, const float u, const float v, const bool mbounce,
+		const float u, const float v, const bool mbounce,
 		const bool multiscattering,
 		const Vector &localFixedDir, Vector *localSampledDir, float u0, float u1, float *pdf) {
-	*pdf = Microfacet_SampleReflect(dist, u, v, localFixedDir, u0, u1, localSampledDir);
+	*pdf = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
 
 	if ((fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 		return Spectrum();
@@ -766,8 +611,8 @@ Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks
 
 	Spectrum S = FresnelTexture::SchlickEvaluate(ks, cosWH);
 
-	const float d = Microfacet_D(dist, u, v, wh);
-	const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
+	const float d = Microfacet_D(u, v, wh);
+	const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
 	if (!fromLight)
 		//CoatingF(sw, *wi, wo, f_);
 		S *= (d / *pdf) * G / (4.f * coso) + 
@@ -779,14 +624,14 @@ Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? *localSampledDir : localFixedDir;
-	S *= Microfacet_MSScale(dist, multiscattering, u, v, fabsf(localEyeDir.z),
+	S *= Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return S;
 }
 
-float slg::SchlickBSDF_CoatingPdf(const MicrofacetDistributionType dist, const float u, const float v,
+float slg::SchlickBSDF_CoatingPdf(const float u, const float v,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
-	return Microfacet_PdfReflect(dist, u, v, localFixedDir, localSampledDir);
+	return Microfacet_PdfReflect(u, v, localFixedDir, localSampledDir);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

@@ -192,13 +192,12 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
 		const float u = clamp(nuVal, 1e-9f, 1.f);
 		const float v = clamp(nvVal, 1e-9f, 1.f);
-		const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
 		const float wBase = 1.f - wCoating;
 
 		directPdfW = wBase * directPdfW +
-				wCoating * SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
+				wCoating * SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 
 		// Absorption
 		const float cosi = fabs(sampledDir.z);
@@ -212,7 +211,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 H = normalize(fixedDir + sampledDir);
 		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v,
 				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
 
 		// Blend in base layer Schlick style
@@ -318,7 +317,6 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 	const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Save u and v
 	EvalStack_PushFloat(u);
@@ -371,7 +369,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 		// Sample coating BSDF (Schlick BSDF)
 		float3 sampledDir;
 		float coatingPdf;
-		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v,
+		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, u, v,
 				material->glossycoating.multibounce, material->multiscattering, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 
 		// Save coatingF, coatingPdf and sampledDir
@@ -504,7 +502,6 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	float u, v;
 	EvalStack_PopFloat(v);
 	EvalStack_PopFloat(u);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Pop ks
 	float3 ks;
@@ -534,9 +531,9 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	float3 coatingF;
 	float coatingPdf;
 	if (!(event & SPECULAR)) {
-		coatingF = SchlickBSDF_CoatingF(ks, dist, u, v,
+		coatingF = SchlickBSDF_CoatingF(ks, u, v,
 				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
-		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
+		coatingPdf = SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 	} else {
 		coatingF = BLACK;
 		coatingPdf = 0.f;
@@ -593,7 +590,6 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 	float u, v;
 	EvalStack_PopFloat(v);
 	EvalStack_PopFloat(u);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Pop ks
 	float3 ks;

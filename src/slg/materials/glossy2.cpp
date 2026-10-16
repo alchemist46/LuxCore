@@ -76,7 +76,6 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	if (directPdfW) {
 		if ((!doublesided) && (localFixedDir.z < 0.f)) {
@@ -88,7 +87,7 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = wBase * fabsf (localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf (dist, u, v, localFixedDir, localSampledDir);
+				wCoating * SchlickBSDF_CoatingPdf (u, v, localFixedDir, localSampledDir);
 
 		}
 	}
@@ -103,7 +102,7 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = wBaseR * fabsf (localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf (dist, u, v, localSampledDir, localFixedDir);
+				wCoatingR * SchlickBSDF_CoatingPdf (u, v, localSampledDir, localFixedDir);
 		}
 	}
 	if ((!doublesided) && (localFixedDir.z < 0.f)) {
@@ -123,7 +122,7 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector H(Normalize(localFixedDir + localSampledDir));
 	const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localSampledDir, H));
 
-	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(), localFixedDir, localSampledDir);
+	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(), localFixedDir, localSampledDir);
 
 	// Blend in base layer Schlick style
 	// assumes coating bxdf takes fresnel factor S into account
@@ -162,7 +161,6 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	// Coating is used only on the front face
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
@@ -182,11 +180,11 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 		baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
 
 		// Evaluate coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(), localFixedDir, *localSampledDir);
-		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, *localSampledDir);
+		coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(), localFixedDir, *localSampledDir);
+		coatingPdf = SchlickBSDF_CoatingPdf(u, v, localFixedDir, *localSampledDir);
 	} else {
 		// Sample coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
 				localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		if (coatingF.Black())
 			return Spectrum();
@@ -239,7 +237,6 @@ void Glossy2Material::Pdf(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	if (directPdfW) {
 		if ((!doublesided) && (localFixedDir.z < 0.f)) {
@@ -251,7 +248,7 @@ void Glossy2Material::Pdf(const HitPoint &hitPoint,
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = wBase * fabsf (localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf (dist, u, v, localFixedDir, localSampledDir);
+				wCoating * SchlickBSDF_CoatingPdf (u, v, localFixedDir, localSampledDir);
 		}
 	}
 
@@ -266,7 +263,7 @@ void Glossy2Material::Pdf(const HitPoint &hitPoint,
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = wBaseR * fabsf (localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf (dist, u, v, localSampledDir, localFixedDir);
+				wCoatingR * SchlickBSDF_CoatingPdf (u, v, localSampledDir, localFixedDir);
 		}
 	}
 }
@@ -319,7 +316,6 @@ PropertiesUPtr Glossy2Material::ToProperties(const ImageMapCache &imgMapCache, c
 	props->Set(Property("scene.materials." + name + ".ks")(Ks->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));

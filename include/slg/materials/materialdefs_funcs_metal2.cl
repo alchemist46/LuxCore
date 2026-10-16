@@ -54,7 +54,7 @@ __constant float Metal2Material_GLWeights[4] = { .173927423f, .326072577f, .3260
 OPENCL_FORCE_INLINE float3 Metal2Material_MSScale(__global const Material* restrict material, __global const HitPoint *hitPoint,
 		const float u, const float v, const float cosEye
 		MATERIALS_PARAM_DECL) {
-	if (!material->multiscattering || (material->microfacetDistribution != GGX_DISTRIBUTION))
+	if (!material->multiscattering)
 		return WHITE;
 
 	float3 n, k;
@@ -125,12 +125,11 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 
 	const float u = clamp(uVal, 1e-9f, 1.f);
 	const float v = clamp(vVal, 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	const float3 wh = normalize(lightDir + eyeDir);
 	const float cosWH = dot(lightDir, wh);
 
-	const float directPdfW = Microfacet_PdfReflect(dist, u, v, eyeDir, lightDir);
+	const float directPdfW = Microfacet_PdfReflect(u, v, eyeDir, lightDir);
 
 	float3 nVal, kVal;
 	Metal2Material_GetNK(material, hitPoint,
@@ -140,10 +139,10 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 	const float3 F = FresnelGeneral_Evaluate(nVal, kVal, cosWH);
 	Spectrum_Clamp(F);
 
-	const float G = Microfacet_G(dist, u, v, lightDir, eyeDir);
+	const float G = Microfacet_G(u, v, lightDir, eyeDir);
 
 	const BSDFEvent event = GLOSSY | REFLECT;
-	const float3 result = (Microfacet_D(dist, u, v, wh) * G / (4.f * fabs(eyeDir.z))) * F *
+	const float3 result = (Microfacet_D(u, v, wh) * G / (4.f * fabs(eyeDir.z))) * F *
 			Metal2Material_MSScale(material, hitPoint, u, v, fabs(eyeDir.z) MATERIALS_PARAM);
 	
 	EvalStack_PushFloat3(result);
@@ -171,10 +170,9 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 
 	const float u = clamp(uVal, 1e-9f, 1.f);
 	const float v = clamp(vVal, 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	float3 sampledDir;
-	const float pdfW = Microfacet_SampleReflect(dist, u, v, fixedDir, u0, u1, &sampledDir);
+	const float pdfW = Microfacet_SampleReflect(u, v, fixedDir, u0, u1, &sampledDir);
 
 	const float coso = fabs(fixedDir.z);
 	const float cosi = fabs(sampledDir.z);
@@ -189,8 +187,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 	const float3 wh = normalize(fixedDir + sampledDir);
 	const float cosWH = fabs(dot(fixedDir, wh));
 
-	const float G = Microfacet_G(dist, u, v, fixedDir, sampledDir);
-	const float d = Microfacet_D(dist, u, v, wh);
+	const float G = Microfacet_G(u, v, fixedDir, sampledDir);
+	const float d = Microfacet_D(u, v, wh);
 
 	float3 nVal, kVal;
 	Metal2Material_GetNK(material, hitPoint,

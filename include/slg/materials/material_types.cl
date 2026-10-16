@@ -65,12 +65,6 @@ typedef struct {
 // Materials
 //------------------------------------------------------------------------------
 
-// The microfacet distribution of the Metal2, RoughGlass, CarPaint, Glossy2,
-// GlossyCoating and GlossyTranslucent materials
-typedef enum {
-	SCHLICK_DISTRIBUTION, GGX_DISTRIBUTION
-} MicrofacetDistributionType;
-
 typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
@@ -363,9 +357,7 @@ typedef struct {
 	// The result of calling Material::IsDelta()
 	int isDelta; 
 
-	MicrofacetDistributionType microfacetDistribution;
-	// Multiple-scattering energy compensation (GGX_DISTRIBUTION only; EON for
-	// RoughMatte)
+	// Multiple-scattering energy compensation (EON for RoughMatte)
 	int multiscattering;
 
 	// Material eval. ops start index and length 

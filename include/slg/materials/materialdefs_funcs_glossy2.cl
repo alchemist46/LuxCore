@@ -109,13 +109,12 @@ OPENCL_FORCE_INLINE void Glossy2Material_Evaluate(__global const Material* restr
 
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Direct pdf
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
 	const float wBase = 1.f - wCoating;
 	const float directPdfW = wBase * fabs(sampledDir.z * M_1_PI_F) +
-		wCoating * SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
+		wCoating * SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 
 	// Absorption
 	const float cosi = fabs(sampledDir.z);
@@ -130,7 +129,7 @@ OPENCL_FORCE_INLINE void Glossy2Material_Evaluate(__global const Material* restr
 	const float3 H = normalize(fixedDir + sampledDir);
 	const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
 
-	const float3 coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, material->glossy2.multibounce, material->multiscattering,
+	const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, material->glossy2.multibounce, material->multiscattering,
 			fixedDir, sampledDir);
 
 	// Blend in base layer Schlick style
@@ -214,7 +213,6 @@ OPENCL_FORCE_INLINE void Glossy2Material_Sample(__global const Material* restric
 
 	const float u = clamp(nuVal, 1e-9f, 1.f);
 	const float v = clamp(nvVal, 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Coating is used only on the front face
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
@@ -238,12 +236,12 @@ OPENCL_FORCE_INLINE void Glossy2Material_Sample(__global const Material* restric
 		baseF *= basePdf;
 
 		// Evaluate coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingF(ks, dist, u, v, material->glossy2.multibounce, material->multiscattering,
+		coatingF = SchlickBSDF_CoatingF(ks, u, v, material->glossy2.multibounce, material->multiscattering,
 				fixedDir, sampledDir);
-		coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, fixedDir, sampledDir);
+		coatingPdf = SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 	} else {
 		// Sample coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingSampleF(ks, dist, u, v,
+		coatingF = SchlickBSDF_CoatingSampleF(ks, u, v,
 				material->glossy2.multibounce, material->multiscattering, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 		if (Spectrum_IsBlack(coatingF)) {
 			MATERIAL_SAMPLE_RETURN_BLACK;

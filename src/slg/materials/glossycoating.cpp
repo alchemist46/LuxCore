@@ -131,14 +131,13 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 
 		const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 		const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-		const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 		if (directPdfW) {
 			const float wCoating = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localLightDir : localEyeDir);
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = wBase * *directPdfW +
-				wCoating * SchlickBSDF_CoatingPdf(dist, u, v, localLightDir, localEyeDir);
+				wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
 		}
 
 		if (reversePdfW) {
@@ -146,7 +145,7 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = wBaseR * *reversePdfW +
-				wCoatingR * SchlickBSDF_CoatingPdf(dist, u, v, localEyeDir, localLightDir);
+				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
 		}
 
 		// Absorption
@@ -158,7 +157,7 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const Vector H(Normalize(localLightDir + localEyeDir));
 		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localEyeDir, H));
 
-		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, dist, u, v, multibounce, IsMultiscattering(),
+		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v, multibounce, IsMultiscattering(),
 			localLightDir, localEyeDir);
 
 		// Blend in base layer Schlick style
@@ -250,7 +249,6 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	float basePdf, coatingPdf;
 	Spectrum baseF, coatingF;
@@ -274,17 +272,17 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 		// Don't add the coating scattering if the base sampled
 		// component is specular	
 		if (!(*event & SPECULAR)) {
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
+			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
 				localFixedDir, *localSampledDir);
 			assert (coatingF.IsValid());
 
-			coatingPdf = SchlickBSDF_CoatingPdf(dist, u, v, localFixedDir, *localSampledDir);
+			coatingPdf = SchlickBSDF_CoatingPdf(u, v, localFixedDir, *localSampledDir);
 			assert (IsValid(coatingPdf));
 		} else
 			coatingPdf = 0.f;
 	} else {
 		// Sample coating BxDF
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, dist, u, v, multibounce, IsMultiscattering(),
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
 			localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		assert (coatingF.IsValid());
 
@@ -398,14 +396,13 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	if (directPdfW) {
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 		const float wBase = 1.f - wCoating;
 
 		*directPdfW = wBase * *directPdfW +
-			wCoating * SchlickBSDF_CoatingPdf(dist, u, v, localLightDir, localEyeDir);
+			wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
 	}
 
 	if (reversePdfW) {
@@ -413,7 +410,7 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 		const float wBaseR = 1.f - wCoatingR;
 
 		*reversePdfW = wBaseR * *reversePdfW +
-			wCoatingR * SchlickBSDF_CoatingPdf(dist, u, v, localEyeDir, localLightDir);
+			wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
 	}
 }
 
@@ -485,7 +482,6 @@ PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCa
 	props->Set(Property("scene.materials." + name + ".ks")(Ks->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));

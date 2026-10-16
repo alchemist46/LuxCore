@@ -78,7 +78,6 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 
 	float pdf = 0.f;
 	int n = 1; // already counts the diffuse layer
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 
 	// Absorption
 	const float cosi = fabs(lightDir.z);
@@ -99,9 +98,9 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	if (Spectrum_Filter(ks1) > 0.f && m1 > 0.f)
 	{
 		const float r1 = Texture_GetFloatValue(material->carpaint.R1TexIndex, hitPoint TEXTURES_PARAM);
-		result += (Microfacet_D(dist, m1, m1, H) * Microfacet_G(dist, m1, m1, lightDir, eyeDir) / (4.f * coso)) * (ks1 * FresnelSchlick_Evaluate(TO_FLOAT3(r1), dot(eyeDir, H))) *
-				Microfacet_MSScale(dist, material->multiscattering, m1, m1, coso, SchlickFresnel_Average(TO_FLOAT3(r1)));
-		pdf += Microfacet_PdfReflect(dist, m1, m1, eyeDir, lightDir);
+		result += (Microfacet_D(m1, m1, H) * Microfacet_G(m1, m1, lightDir, eyeDir) / (4.f * coso)) * (ks1 * FresnelSchlick_Evaluate(TO_FLOAT3(r1), dot(eyeDir, H))) *
+				Microfacet_MSScale(material->multiscattering, m1, m1, coso, SchlickFresnel_Average(TO_FLOAT3(r1)));
+		pdf += Microfacet_PdfReflect(m1, m1, eyeDir, lightDir);
 		++n;
 	}
 	const float3 ks2Val = Texture_GetSpectrumValue(material->carpaint.Ks2TexIndex, hitPoint TEXTURES_PARAM);
@@ -110,9 +109,9 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	if (Spectrum_Filter(ks2) > 0.f && m2 > 0.f)
 	{
 		const float r2 = Texture_GetFloatValue(material->carpaint.R2TexIndex, hitPoint TEXTURES_PARAM);
-		result += (Microfacet_D(dist, m2, m2, H) * Microfacet_G(dist, m2, m2, lightDir, eyeDir) / (4.f * coso)) * (ks2 * FresnelSchlick_Evaluate(TO_FLOAT3(r2), dot(eyeDir, H))) *
-				Microfacet_MSScale(dist, material->multiscattering, m2, m2, coso, SchlickFresnel_Average(TO_FLOAT3(r2)));
-		pdf += Microfacet_PdfReflect(dist, m2, m2, eyeDir, lightDir);
+		result += (Microfacet_D(m2, m2, H) * Microfacet_G(m2, m2, lightDir, eyeDir) / (4.f * coso)) * (ks2 * FresnelSchlick_Evaluate(TO_FLOAT3(r2), dot(eyeDir, H))) *
+				Microfacet_MSScale(material->multiscattering, m2, m2, coso, SchlickFresnel_Average(TO_FLOAT3(r2)));
+		pdf += Microfacet_PdfReflect(m2, m2, eyeDir, lightDir);
 		++n;
 	}
 	const float3 ks3Val = Texture_GetSpectrumValue(material->carpaint.Ks3TexIndex, hitPoint TEXTURES_PARAM);
@@ -121,9 +120,9 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	if (Spectrum_Filter(ks3) > 0.f && m3 > 0.f)
 	{
 		const float r3 = Texture_GetFloatValue(material->carpaint.R3TexIndex, hitPoint TEXTURES_PARAM);
-		result += (Microfacet_D(dist, m3, m3, H) * Microfacet_G(dist, m3, m3, lightDir, eyeDir) / (4.f * coso)) * (ks3 * FresnelSchlick_Evaluate(TO_FLOAT3(r3), dot(eyeDir, H))) *
-				Microfacet_MSScale(dist, material->multiscattering, m3, m3, coso, SchlickFresnel_Average(TO_FLOAT3(r3)));
-		pdf += Microfacet_PdfReflect(dist, m3, m3, eyeDir, lightDir);
+		result += (Microfacet_D(m3, m3, H) * Microfacet_G(m3, m3, lightDir, eyeDir) / (4.f * coso)) * (ks3 * FresnelSchlick_Evaluate(TO_FLOAT3(r3), dot(eyeDir, H))) *
+				Microfacet_MSScale(material->multiscattering, m3, m3, coso, SchlickFresnel_Average(TO_FLOAT3(r3)));
+		pdf += Microfacet_PdfReflect(m3, m3, eyeDir, lightDir);
 		++n;
 	}
 
@@ -196,7 +195,6 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 		++n;
 	}
 
-	const MicrofacetDistributionType dist = material->microfacetDistribution;
 	float3 sampledDir, wh;
 	float cosWH;
 	if (passThroughEvent < 1.f / n) {
@@ -223,7 +221,7 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 	} else if (passThroughEvent < 2.f / n && l1) {
 		// Sample 1st glossy layer
 		sampled = 1;
-		pdf = Microfacet_SampleReflect(dist, m1, m1, fixedDir, u0, u1, &sampledDir);
+		pdf = Microfacet_SampleReflect(m1, m1, fixedDir, u0, u1, &sampledDir);
 
 		if ((sampledDir.z < DEFAULT_COS_EPSILON_STATIC) ||
 			(fixedDir.z * sampledDir.z < 0.f)) {
@@ -240,16 +238,16 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 		cosWH = fabs(dot(fixedDir, wh));
 
 		result = ks1 * FresnelSchlick_Evaluate(TO_FLOAT3(r1), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m1, m1, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r1)));
+				Microfacet_MSScale(material->multiscattering, m1, m1, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r1)));
 
-		const float d = Microfacet_D(dist, m1, m1, wh);
-		const float G = Microfacet_G(dist, m1, m1, fixedDir, sampledDir);
+		const float d = Microfacet_D(m1, m1, wh);
+		const float G = Microfacet_G(m1, m1, fixedDir, sampledDir);
 		result *= d * G / (4.f * fabs(fixedDir.z));
 	} else if ((passThroughEvent < 2.f / n  ||
 		(!l1 && passThroughEvent < 3.f / n)) && l2) {
 		// Sample 2nd glossy layer
 		sampled = 2;
-		pdf = Microfacet_SampleReflect(dist, m2, m2, fixedDir, u0, u1, &sampledDir);
+		pdf = Microfacet_SampleReflect(m2, m2, fixedDir, u0, u1, &sampledDir);
 
 		if ((sampledDir.z < DEFAULT_COS_EPSILON_STATIC) ||
 			(fixedDir.z * sampledDir.z < 0.f)) {
@@ -266,15 +264,15 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 		cosWH = fabs(dot(fixedDir, wh));
 
 		result = ks2 * FresnelSchlick_Evaluate(TO_FLOAT3(r2), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m2, m2, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r2)));
+				Microfacet_MSScale(material->multiscattering, m2, m2, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r2)));
 
-		const float d = Microfacet_D(dist, m2, m2, wh);
-		const float G = Microfacet_G(dist, m2, m2, fixedDir, sampledDir);
+		const float d = Microfacet_D(m2, m2, wh);
+		const float G = Microfacet_G(m2, m2, fixedDir, sampledDir);
 		result *= d * G / (4.f * fabs(fixedDir.z));
 	} else if (l3) {
 		// Sample 3rd glossy layer
 		sampled = 3;
-		pdf = Microfacet_SampleReflect(dist, m3, m3, fixedDir, u0, u1, &sampledDir);
+		pdf = Microfacet_SampleReflect(m3, m3, fixedDir, u0, u1, &sampledDir);
 
 		if ((sampledDir.z < DEFAULT_COS_EPSILON_STATIC) ||
 			(fixedDir.z * sampledDir.z < 0.f)) {
@@ -291,10 +289,10 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 		cosWH = fabs(dot(fixedDir, wh));
 
 		result = ks3 * FresnelSchlick_Evaluate(TO_FLOAT3(r3), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m3, m3, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r3)));
+				Microfacet_MSScale(material->multiscattering, m3, m3, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r3)));
 
-		const float d = Microfacet_D(dist, m3, m3, wh);
-		const float G = Microfacet_G(dist, m3, m3, fixedDir, sampledDir);
+		const float d = Microfacet_D(m3, m3, wh);
+		const float G = Microfacet_G(m3, m3, fixedDir, sampledDir);
 		result *= d * G / (4.f * fabs(fixedDir.z));
 	} else {
 		// Sampling issue
@@ -318,40 +316,40 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 	}
 	// 1st glossy
 	if (l1 && sampled != 1) {
-		const float d1 = Microfacet_D(dist, m1, m1, wh);
-		const float pdf1 = Microfacet_PdfReflect(dist, m1, m1, fixedDir, sampledDir);
+		const float d1 = Microfacet_D(m1, m1, wh);
+		const float pdf1 = Microfacet_PdfReflect(m1, m1, fixedDir, sampledDir);
 		if (pdf1 > 0.f) {
 			result += ks1 * (d1 *
-				Microfacet_G(dist, m1, m1, fixedDir, sampledDir) /
+				Microfacet_G(m1, m1, fixedDir, sampledDir) /
 				(4.f * fabs(fixedDir.z))) *
 				FresnelSchlick_Evaluate(TO_FLOAT3(r1), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m1, m1, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r1)));
+				Microfacet_MSScale(material->multiscattering, m1, m1, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r1)));
 			pdf += pdf1;
 		}
 	}
 	// 2nd glossy
 	if (l2 && sampled != 2) {
-		const float d2 = Microfacet_D(dist, m2, m2, wh);
-		const float pdf2 = Microfacet_PdfReflect(dist, m2, m2, fixedDir, sampledDir);
+		const float d2 = Microfacet_D(m2, m2, wh);
+		const float pdf2 = Microfacet_PdfReflect(m2, m2, fixedDir, sampledDir);
 		if (pdf2 > 0.f) {
 			result += ks2 * (d2 *
-				Microfacet_G(dist, m2, m2, fixedDir, sampledDir) /
+				Microfacet_G(m2, m2, fixedDir, sampledDir) /
 				(4.f * fabs(fixedDir.z))) *
 				FresnelSchlick_Evaluate(TO_FLOAT3(r2), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m2, m2, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r2)));
+				Microfacet_MSScale(material->multiscattering, m2, m2, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r2)));
 			pdf += pdf2;
 		}
 	}
 	// 3rd glossy
 	if (l3 && sampled != 3) {
-		const float d3 = Microfacet_D(dist, m3, m3, wh);
-		const float pdf3 = Microfacet_PdfReflect(dist, m3, m3, fixedDir, sampledDir);
+		const float d3 = Microfacet_D(m3, m3, wh);
+		const float pdf3 = Microfacet_PdfReflect(m3, m3, fixedDir, sampledDir);
 		if (pdf3 > 0.f) {
 			result += ks3 * (d3 *
-				Microfacet_G(dist, m3, m3, fixedDir, sampledDir) /
+				Microfacet_G(m3, m3, fixedDir, sampledDir) /
 				(4.f * fabs(fixedDir.z))) *
 				FresnelSchlick_Evaluate(TO_FLOAT3(r3), cosWH) *
-				Microfacet_MSScale(dist, material->multiscattering, m3, m3, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r3)));
+				Microfacet_MSScale(material->multiscattering, m3, m3, fabs(fixedDir.z), SchlickFresnel_Average(TO_FLOAT3(r3)));
 			pdf += pdf3;
 		}
 	}

@@ -66,9 +66,9 @@ luxrays::Spectrum slg::SchlickFresnel_Average(const luxrays::Spectrum &F0) {
 	return F0 + (luxrays::Spectrum(1.f) - F0) * (1.f / 21.f);
 }
 
-luxrays::Spectrum slg::Microfacet_MSScale(const MicrofacetDistributionType dist, const bool multiscattering,
+luxrays::Spectrum slg::Microfacet_MSScale(const bool multiscattering,
 		const float u, const float v, const float mu, const luxrays::Spectrum &Fss) {
-	if (multiscattering && (dist == GGX_DISTRIBUTION))
+	if (multiscattering)
 		return GGXEnergy_ReflectScale(u, v, mu, Fss, false);
 	else
 		return luxrays::Spectrum(1.f);

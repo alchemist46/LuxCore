@@ -50,18 +50,6 @@ class CarPaintMaterial(ImageTest):
 CarPaintMaterial = AddTests(CarPaintMaterial, TestCarPaintMaterial, GetTestCases())
 
 ################################################################################
-# CarPaintGGX material test
-################################################################################
-
-def TestCarPaintGGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-carpaint-ggx-area.cfg", "CarPaintGGXMaterial")
-
-class CarPaintGGXMaterial(ImageTest):
-    pass
-
-CarPaintGGXMaterial = AddTests(CarPaintGGXMaterial, TestCarPaintGGXMaterial, GetTestCases())
-
-################################################################################
 # Cloth material test
 ################################################################################
 
@@ -122,18 +110,6 @@ class Glossy2Material(ImageTest):
 Glossy2Material = AddTests(Glossy2Material, TestGlossy2Material, GetTestCases())
 
 ################################################################################
-# Glossy2GGX material test
-################################################################################
-
-def TestGlossy2GGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-glossy2-ggx-area.cfg", "Glossy2GGXMaterial")
-
-class Glossy2GGXMaterial(ImageTest):
-    pass
-
-Glossy2GGXMaterial = AddTests(Glossy2GGXMaterial, TestGlossy2GGXMaterial, GetTestCases())
-
-################################################################################
 # GlossyCoating material test
 ################################################################################
 
@@ -146,18 +122,6 @@ class GlossyCoatingMaterial(ImageTest):
 GlossyCoatingMaterial = AddTests(GlossyCoatingMaterial, TestGlossyCoatingMaterial, GetTestCases())
 
 ################################################################################
-# GlossyCoatingGGX material test
-################################################################################
-
-def TestGlossyCoatingGGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-glossycoating-ggx-area.cfg", "GlossyCoatingGGXMaterial")
-
-class GlossyCoatingGGXMaterial(ImageTest):
-    pass
-
-GlossyCoatingGGXMaterial = AddTests(GlossyCoatingGGXMaterial, TestGlossyCoatingGGXMaterial, GetTestCases())
-
-################################################################################
 # GlossyTranslucent material test
 ################################################################################
 
@@ -168,18 +132,6 @@ class GlossyTranslucentMaterial(ImageTest):
     pass
 
 GlossyTranslucentMaterial = AddTests(GlossyTranslucentMaterial, TestGlossyTranslucentMaterial, GetTestCases())
-
-################################################################################
-# GlossyTranslucentGGX material test
-################################################################################
-
-def TestGlossyTranslucentGGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-glossytranslucent-ggx-area.cfg", "GlossyTranslucentGGXMaterial")
-
-class GlossyTranslucentGGXMaterial(ImageTest):
-    pass
-
-GlossyTranslucentGGXMaterial = AddTests(GlossyTranslucentGGXMaterial, TestGlossyTranslucentGGXMaterial, GetTestCases())
 
 ################################################################################
 # Matte material test
@@ -206,18 +158,6 @@ class Metal2Material(ImageTest):
 Metal2Material = AddTests(Metal2Material, TestMetal2Material, GetTestCases())
 
 ################################################################################
-# Metal2GGX material test
-################################################################################
-
-def TestMetal2GGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-metal2-ggx-area.cfg", "Metal2GGXMaterial")
-
-class Metal2GGXMaterial(ImageTest):
-    pass
-
-Metal2GGXMaterial = AddTests(Metal2GGXMaterial, TestMetal2GGXMaterial, GetTestCases())
-
-################################################################################
 # RoughGlass material test
 ################################################################################
 
@@ -228,18 +168,6 @@ class RoughGlassMaterial(ImageTest):
     pass
 
 RoughGlassMaterial = AddTests(RoughGlassMaterial, TestRoughGlassMaterial, GetTestCases())
-
-################################################################################
-# RoughGlassGGX material test
-################################################################################
-
-def TestRoughGlassGGXMaterial(cls, params):
-	StandardSceneTest(cls, params, "simple/mat-roughglass-ggx-area.cfg", "RoughGlassGGXMaterial")
-
-class RoughGlassGGXMaterial(ImageTest):
-    pass
-
-RoughGlassGGXMaterial = AddTests(RoughGlassGGXMaterial, TestRoughGlassGGXMaterial, GetTestCases())
 
 ################################################################################
 # Metal2MS material test

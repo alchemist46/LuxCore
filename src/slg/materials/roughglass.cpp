@@ -46,9 +46,9 @@ RoughGlassMaterial::RoughGlassMaterial(TextureConstPtr frontTransp, TextureConst
 // The multiple-scattering scale of the whole interface seen from localEyeDir:
 // 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
 // other side over the eye side as relative IOR), as in Cycles
-static float RoughGlass_MSScale(const MicrofacetDistributionType dist, const bool multiscattering,
+static float RoughGlass_MSScale(const bool multiscattering,
 		const float u, const float v, const Vector &localEyeDir, const float ntc) {
-	if (!multiscattering || (dist != GGX_DISTRIBUTION))
+	if (!multiscattering)
 		return 1.f;
 
 	const float eta = (localEyeDir.z > 0.f) ? ntc : 1.f / ntc;
@@ -73,10 +73,9 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
-	const float msScale = RoughGlass_MSScale(dist, IsMultiscattering(), u, v, localEyeDir, ntc);
+	const float msScale = RoughGlass_MSScale(IsMultiscattering(), u, v, localEyeDir, ntc);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
 		// Transmit
 
@@ -95,17 +94,17 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 		const float cosThetaIH = AbsDot(localEyeDir, wh);
 		const float cosThetaOH = Dot(localLightDir, wh);
 
-		const float D = Microfacet_D(dist, u, v, wh);
-		const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
+		const float D = Microfacet_D(u, v, wh);
+		const float G = Microfacet_G(u, v, localLightDir, localEyeDir);
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
 
 		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 		if (directPdfW)
-			*directPdfW = threshold * Microfacet_PdfH(dist, u, v, localFixedDir, wh) * (hitPoint.fromLight ? fabsf(cosThetaIH) : (fabsf(cosThetaOH) * eta * eta)) / lengthSquared;
+			*directPdfW = threshold * Microfacet_PdfH(u, v, localFixedDir, wh) * (hitPoint.fromLight ? fabsf(cosThetaIH) : (fabsf(cosThetaOH) * eta * eta)) / lengthSquared;
 
 		if (reversePdfW)
-			*reversePdfW = threshold * Microfacet_PdfH(dist, u, v, localSampledDir, wh) * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
+			*reversePdfW = threshold * Microfacet_PdfH(u, v, localSampledDir, wh) * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
 
 		const Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
@@ -128,17 +127,17 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 			wh = -wh;
 
 		float cosThetaH = Dot(localEyeDir, wh);
-		const float D = Microfacet_D(dist, u, v, wh);
-		const float G = Microfacet_G(dist, u, v, localLightDir, localEyeDir);
+		const float D = Microfacet_D(u, v, wh);
+		const float G = Microfacet_G(u, v, localLightDir, localEyeDir);
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaH);
 
 		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 		if (directPdfW)
-			*directPdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localFixedDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*directPdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localFixedDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		if (reversePdfW)
-			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localSampledDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localSampledDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		const Spectrum result = (D * G / (4.f * cosThetaI)) * kr * F * msScale;
 
@@ -170,11 +169,10 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	Vector wh;
 	float d, specPdf;
-	Microfacet_SampleH(dist, u, v, localFixedDir, u0, u1, &wh, &d, &specPdf);
+	Microfacet_SampleH(u, v, localFixedDir, u0, u1, &wh, &d, &specPdf);
 	if (wh.z < 0.f)
 		wh = -wh;
 	const float cosThetaOH = Dot(localFixedDir, wh);
@@ -222,7 +220,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 
 		const float cosi = fabsf(localSampledDir->z);
 
-		const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
+		const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / threshold;
 
 		if (!hitPoint.fromLight) {
@@ -247,7 +245,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 			return Spectrum();
 
-		const float G = Microfacet_G(dist, u, v, localFixedDir, *localSampledDir);
+		const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / (1.f - threshold);
 
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
@@ -264,7 +262,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		*event = GLOSSY | REFLECT;
 	}
 
-	return result * RoughGlass_MSScale(dist, IsMultiscattering(), u, v,
+	return result * RoughGlass_MSScale(IsMultiscattering(), u, v,
 			hitPoint.fromLight ? *localSampledDir : localFixedDir, ntc);
 }
 
@@ -290,7 +288,6 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 
 	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
 	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const MicrofacetDistributionType dist = GetMicrofacetDistribution();
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
@@ -312,10 +309,10 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 		const float cosThetaOH = AbsDot(localLightDir, wh);
 
 		if (directPdfW)
-			*directPdfW = threshold * Microfacet_PdfH(dist, u, v, localLightDir, wh) * cosThetaIH / lengthSquared;
+			*directPdfW = threshold * Microfacet_PdfH(u, v, localLightDir, wh) * cosThetaIH / lengthSquared;
 
 		if (reversePdfW)
-			*reversePdfW = threshold * Microfacet_PdfH(dist, u, v, localEyeDir, wh) * cosThetaOH * eta * eta / lengthSquared;
+			*reversePdfW = threshold * Microfacet_PdfH(u, v, localEyeDir, wh) * cosThetaOH * eta * eta / lengthSquared;
 	} else {
 		// Reflect
 		const float cosThetaO = fabsf(CosTheta(localLightDir));
@@ -331,10 +328,10 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 			wh = -wh;
 
 		if (directPdfW)
-			*directPdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localLightDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*directPdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localLightDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		if (reversePdfW)
-			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(dist, u, v, localEyeDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localEyeDir, wh) / (4.f * AbsDot(localLightDir, wh));
 	}
 }
 
@@ -397,7 +394,6 @@ PropertiesUPtr RoughGlassMaterial::ToProperties(const ImageMapCache &imgMapCache
 		props->Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".distribution")(MicrofacetDistributionType2String(GetMicrofacetDistribution())));
 	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	if (filmThickness)
 		props->Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));

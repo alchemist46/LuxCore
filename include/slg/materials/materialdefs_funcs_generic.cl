@@ -123,80 +123,6 @@ OPENCL_FORCE_INLINE float Material_IsHoldout(const uint matIndex
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE float SchlickDistribution_SchlickZ(const float roughness, float cosNH) {
-	if (roughness > 0.f) {
-		const float cosNH2 = cosNH * cosNH;
-		// expanded for increased numerical stability
-		const float d = cosNH2 * roughness + (1.f - cosNH2);
-		// use double division to avoid overflow in d*d product
-		return (roughness / d) / d;
-	}
-	return 0.f;
-}
-
-OPENCL_FORCE_INLINE float SchlickDistribution_SchlickA(const float3 H, const float anisotropy) {
-	const float h = sqrt(H.x * H.x + H.y * H.y);
-	if (h > 0.f) {
-		const float w = (anisotropy > 0.f ? H.x : H.y) / h;
-		const float p = 1.f - fabs(anisotropy);
-		return sqrt(p / (p * p + w * w * (1.f - p * p)));
-	}
-
-	return 1.f;
-}
-
-OPENCL_FORCE_INLINE float SchlickDistribution_D(const float roughness, const float3 wh, const float anisotropy) {
-	const float cosTheta = fabs(wh.z);
-	return SchlickDistribution_SchlickZ(roughness, cosTheta) * SchlickDistribution_SchlickA(wh, anisotropy) * M_1_PI_F;
-}
-
-OPENCL_FORCE_INLINE float SchlickDistribution_SchlickG(const float roughness, const float costheta) {
-	return costheta / (costheta * (1.f - roughness) + roughness);
-}
-
-OPENCL_FORCE_INLINE float SchlickDistribution_G(const float roughness, const float3 fixedDir, const float3 sampledDir) {
-	return SchlickDistribution_SchlickG(roughness, fabs(fixedDir.z)) *
-			SchlickDistribution_SchlickG(roughness, fabs(sampledDir.z));
-}
-
-OPENCL_FORCE_INLINE float GetPhi(const float a, const float b) {
-	return M_PI_F * .5f * sqrt(a * b / (1.f - a * (1.f - b)));
-}
-
-OPENCL_FORCE_INLINE void SchlickDistribution_SampleH(const float roughness, const float anisotropy,
-		const float u0, const float u1, float3 *wh, float *d, float *pdf) {
-	float u1x4 = u1 * 4.f;
-	const float cos2Theta = u0 / (roughness * (1.f - u0) + u0);
-	const float cosTheta = sqrt(cos2Theta);
-	const float sinTheta = sqrt(1.f - cos2Theta);
-	const float p = 1.f - fabs(anisotropy);
-	float phi;
-	if (u1x4 < 1.f) {
-		phi = GetPhi(u1x4 * u1x4, p * p);
-	} else if (u1x4 < 2.f) {
-		u1x4 = 2.f - u1x4;
-		phi = M_PI_F - GetPhi(u1x4 * u1x4, p * p);
-	} else if (u1x4 < 3.f) {
-		u1x4 -= 2.f;
-		phi = M_PI_F + GetPhi(u1x4 * u1x4, p * p);
-	} else {
-		u1x4 = 4.f - u1x4;
-		phi = M_PI_F * 2.f - GetPhi(u1x4 * u1x4, p * p);
-	}
-
-	if (anisotropy > 0.f)
-		phi += M_PI_F * .5f;
-
-	*wh = MAKE_FLOAT3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
-	*d = SchlickDistribution_SchlickZ(roughness, cosTheta) * SchlickDistribution_SchlickA(*wh, anisotropy) * M_1_PI_F;
-	*pdf = *d;
-}
-
-OPENCL_FORCE_INLINE float SchlickDistribution_Pdf(const float roughness, const float3 wh,
-		const float anisotropy) {
-	return SchlickDistribution_D(roughness, wh, anisotropy);
-}
-
 OPENCL_FORCE_INLINE float3 FresnelSchlick_Evaluate(const float3 normalIncidence, const float cosi) {
 	return normalIncidence + (WHITE - normalIncidence) *
 		pow(1.f - cosi, 5.f);
@@ -312,107 +238,56 @@ OPENCL_FORCE_INLINE float GGXDistribution_PdfBoundedReflect(const float alphaU, 
 
 //------------------------------------------------------------------------------
 // Microfacet lobe shared by Metal2, RoughGlass, CarPaint and the coating of
-// Glossy2, GlossyCoating and GlossyTranslucent (see material.h for the
-// description of the two distributions)
+// Glossy2, GlossyCoating and GlossyTranslucent (GGX, see material.h)
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE void SchlickDistribution_Params(const float u, const float v,
-		float *roughness, float *anisotropy) {
-	const float u2 = u * u;
-	const float v2 = v * v;
-	*anisotropy = (u2 < v2) ? (1.f - u2 / v2) : u2 > 0.f ? (v2 / u2 - 1.f) : 0.f;
-	*roughness = u * v;
-}
-
-OPENCL_FORCE_INLINE float Microfacet_D(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float Microfacet_D(const float u, const float v,
 		const float3 wh) {
-	if (dist == GGX_DISTRIBUTION)
-		return GGXDistribution_D(u, v, wh);
-	else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_D(roughness, wh, anisotropy);
-	}
+	return GGXDistribution_D(u, v, wh);
 }
 
-OPENCL_FORCE_INLINE float Microfacet_G(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float Microfacet_G(const float u, const float v,
 		const float3 wo, const float3 wi) {
-	if (dist == GGX_DISTRIBUTION)
-		return GGXDistribution_G(u, v, wo, wi);
-	else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_G(roughness, wo, wi);
-	}
+	return GGXDistribution_G(u, v, wo, wi);
 }
 
 // Samples a half vector in the upper hemisphere (wo can be on either side).
 // d is D(wh) and pdfH the pdf of wh over the solid angle.
-OPENCL_FORCE_INLINE void Microfacet_SampleH(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE void Microfacet_SampleH(const float u, const float v,
 		const float3 wo, const float u0, const float u1,
 		float3 *wh, float *d, float *pdfH) {
-	if (dist == GGX_DISTRIBUTION) {
-		const float3 woUp = (wo.z < 0.f) ? -wo : wo;
-		*wh = GGXDistribution_SampleVisibleH(u, v, woUp, u0, u1);
-		*d = GGXDistribution_D(u, v, *wh);
-		*pdfH = GGXDistribution_PdfVisibleH(u, v, woUp, *wh);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, wh, d, pdfH);
-	}
+	const float3 woUp = (wo.z < 0.f) ? -wo : wo;
+	*wh = GGXDistribution_SampleVisibleH(u, v, woUp, u0, u1);
+	*d = GGXDistribution_D(u, v, *wh);
+	*pdfH = GGXDistribution_PdfVisibleH(u, v, woUp, *wh);
 }
 
-OPENCL_FORCE_INLINE float Microfacet_PdfH(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float Microfacet_PdfH(const float u, const float v,
 		const float3 wo, const float3 wh) {
-	if (dist == GGX_DISTRIBUTION) {
-		const float3 woUp = (wo.z < 0.f) ? -wo : wo;
-		return GGXDistribution_PdfVisibleH(u, v, woUp, wh);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		return SchlickDistribution_Pdf(roughness, wh, anisotropy);
-	}
+	const float3 woUp = (wo.z < 0.f) ? -wo : wo;
+	return GGXDistribution_PdfVisibleH(u, v, woUp, wh);
 }
 
 // Reflection lobe: samples wi on the same side as wo and returns its pdf over
 // the solid angle (0 when the sample is not usable)
-OPENCL_FORCE_INLINE float Microfacet_SampleReflect(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float Microfacet_SampleReflect(const float u, const float v,
 		const float3 wo, const float u0, const float u1, float3 *wi) {
-	if (dist == GGX_DISTRIBUTION) {
-		const bool flip = (wo.z < 0.f);
-		const float3 woUp = flip ? -wo : wo;
-		const float3 wiUp = GGXDistribution_SampleBoundedReflect(u, v, woUp, u0, u1);
-		*wi = flip ? -wiUp : wiUp;
-		return GGXDistribution_PdfBoundedReflect(u, v, woUp, wiUp);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		float3 wh;
-		float d, pdfH;
-		SchlickDistribution_SampleH(roughness, anisotropy, u0, u1, &wh, &d, &pdfH);
-		const float cosWH = dot(wo, wh);
-		*wi = 2.f * cosWH * wh - wo;
-		return pdfH / (4.f * fabs(cosWH));
-	}
+	const bool flip = (wo.z < 0.f);
+	const float3 woUp = flip ? -wo : wo;
+	const float3 wiUp = GGXDistribution_SampleBoundedReflect(u, v, woUp, u0, u1);
+	*wi = flip ? -wiUp : wiUp;
+	return GGXDistribution_PdfBoundedReflect(u, v, woUp, wiUp);
 }
 
-OPENCL_FORCE_INLINE float Microfacet_PdfReflect(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float Microfacet_PdfReflect(const float u, const float v,
 		const float3 wo, const float3 wi) {
-	if (dist == GGX_DISTRIBUTION) {
-		const bool flip = (wo.z < 0.f);
-		return GGXDistribution_PdfBoundedReflect(u, v, flip ? -wo : wo, flip ? -wi : wi);
-	} else {
-		float roughness, anisotropy;
-		SchlickDistribution_Params(u, v, &roughness, &anisotropy);
-		const float3 wh = normalize(wo + wi);
-		return SchlickDistribution_Pdf(roughness, wh, anisotropy) / (4.f * fabs(dot(wo, wh)));
-	}
+	const bool flip = (wo.z < 0.f);
+	return GGXDistribution_PdfBoundedReflect(u, v, flip ? -wo : wo, flip ? -wi : wi);
 }
 
 //------------------------------------------------------------------------------
 // Multiple-scattering energy compensation of the GGX lobes (property
-// "multiscattering", GGX_DISTRIBUTION only), see microfacet_energy_tables.cl
+// "multiscattering"), see microfacet_energy_tables.cl
 //------------------------------------------------------------------------------
 
 // The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
@@ -431,10 +306,10 @@ OPENCL_FORCE_INLINE float3 GGXEnergy_ReflectScale3(const float u, const float v,
 }
 
 // The scale of a Microfacet_* reflection lobe seen with the cosine mu: 1 unless
-// multiscattering is enabled and the distribution is GGX
-OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const MicrofacetDistributionType dist, const int multiscattering,
+// multiscattering is enabled
+OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const int multiscattering,
 		const float u, const float v, const float mu, const float3 Fss) {
-	if (multiscattering && (dist == GGX_DISTRIBUTION))
+	if (multiscattering)
 		return GGXEnergy_ReflectScale3(u, v, mu, Fss, false);
 	else
 		return WHITE;
@@ -454,7 +329,7 @@ OPENCL_FORCE_INLINE float SchlickBSDF_CoatingWeight(const float3 ks, const float
 }
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
-		const MicrofacetDistributionType dist, const float u, const float v,
+		const float u, const float v,
 		const int multibounce, const int multiscattering, const float3 fixedDir,
 		const float3 sampledDir) {
 	const float coso = fabs(fixedDir.z);
@@ -464,10 +339,10 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
 	const float cosi_Schlick = clamp(fabs(dot(sampledDir, wh)), 0.f, 1.f);
 	const float3 S = FresnelSchlick_Evaluate(ks, cosi_Schlick);
 
-	const float G = Microfacet_G(dist, u, v, fixedDir, sampledDir);
+	const float G = Microfacet_G(u, v, fixedDir, sampledDir);
 
 	// Multibounce - alternative with interreflection in the coating creases
-	float factor = Microfacet_D(dist, u, v, wh) * G;
+	float factor = Microfacet_D(u, v, wh) * G;
 	//if (!fromLight)
 		factor = factor / (4.f * coso) +
 				(multibounce ? cosi * clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) : 0.f);
@@ -476,14 +351,14 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
 	//			(multibounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) : 0.f);
 
 	// Multiple-scattering energy compensation (fixedDir is the eye direction)
-	return factor * S * Microfacet_MSScale(dist, multiscattering, u, v, coso, SchlickFresnel_Average(ks));
+	return factor * S * Microfacet_MSScale(multiscattering, u, v, coso, SchlickFresnel_Average(ks));
 }
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
-		const MicrofacetDistributionType dist, const float u, const float v,
+		const float u, const float v,
 		const int multibounce, const int multiscattering, const float3 fixedDir, float3 *sampledDir,
 		float u0, float u1, float *pdf) {
-	*pdf = Microfacet_SampleReflect(dist, u, v, fixedDir, u0, u1, sampledDir);
+	*pdf = Microfacet_SampleReflect(u, v, fixedDir, u0, u1, sampledDir);
 
 	if ((fabs((*sampledDir).z) < DEFAULT_COS_EPSILON_STATIC) || (fixedDir.z * (*sampledDir).z < 0.f))
 		return BLACK;
@@ -499,20 +374,20 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 
 	float3 S = FresnelSchlick_Evaluate(ks, cosWH);
 
-	const float d = Microfacet_D(dist, u, v, wh);
-	const float G = Microfacet_G(dist, u, v, fixedDir, *sampledDir);
+	const float d = Microfacet_D(u, v, wh);
+	const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
 
 	//CoatingF(sw, *wi, wo, f_);
 	S *= (d / *pdf) * G / (4.f * coso) + 
 			(multibounce ? cosi * clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) / *pdf : 0.f);
 
 	// Multiple-scattering energy compensation (fixedDir is the eye direction)
-	return S * Microfacet_MSScale(dist, multiscattering, u, v, coso, SchlickFresnel_Average(ks));
+	return S * Microfacet_MSScale(multiscattering, u, v, coso, SchlickFresnel_Average(ks));
 }
 
-OPENCL_FORCE_INLINE float SchlickBSDF_CoatingPdf(const MicrofacetDistributionType dist, const float u, const float v,
+OPENCL_FORCE_INLINE float SchlickBSDF_CoatingPdf(const float u, const float v,
 		const float3 fixedDir, const float3 sampledDir) {
-	return Microfacet_PdfReflect(dist, u, v, fixedDir, sampledDir);
+	return Microfacet_PdfReflect(u, v, fixedDir, sampledDir);
 }
 
 OPENCL_FORCE_INLINE float FrDiel2(const float cosi, const float cost, const float eta) {
