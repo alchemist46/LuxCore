@@ -29,6 +29,7 @@
 #include "slg/scene/scene.h"
 #include "slg/scene/sceneobject.h"
 #include "slg/lights/strategies/dlscache.h"
+#include "slg/lights/strategies/lighttree.h"
 #include "slg/lights/visibility/envlightvisibilitycache.h"
 #include "slg/engines/pathtracer.h"
 #include "slg/cameras/camera.h"
@@ -97,6 +98,11 @@ public:
 	std::vector<float> dlscDistributions; 
 	std::vector<luxrays::ocl::IndexBVHArrayNode> dlscBVHArrayNode;
 	float dlscRadius2, dlscNormalCosAngle;
+	// Light tree related data (see lighttree_funcs.cl); lightTreeLightIndex
+	// is empty when the direct light sampling doesn't use the tree
+	std::vector<slg::ocl::LightTreeNode> lightTreeNodes;
+	std::vector<slg::ocl::LightTreeDistantLight> lightTreeDistantLights;
+	std::vector<u_int> lightTreeLightIndex;
 	// EnvLightVisibilityCache related data
 	std::vector<slg::ocl::ELVCacheEntry> elvcAllEntries;
 	std::vector<float> elvcDistributions;

@@ -73,6 +73,9 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	dlscAllEntriesBuff = nullptr;
 	dlscDistributionsBuff = nullptr;
 	dlscBVHNodesBuff = nullptr;
+	lightTreeNodesBuff = nullptr;
+	lightTreeDistantLightsBuff = nullptr;
+	lightTreeLightIndexBuff = nullptr;
 	elvcAllEntriesBuff = nullptr;
 	elvcDistributionsBuff = nullptr;
 	elvcTileDistributionOffsetsBuff = nullptr;
@@ -191,6 +194,9 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	intersectionDevice.FreeBuffer(&dlscAllEntriesBuff);
 	intersectionDevice.FreeBuffer(&dlscDistributionsBuff);
 	intersectionDevice.FreeBuffer(&dlscBVHNodesBuff);
+	intersectionDevice.FreeBuffer(&lightTreeNodesBuff);
+	intersectionDevice.FreeBuffer(&lightTreeDistantLightsBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLightIndexBuff);
 	intersectionDevice.FreeBuffer(&elvcAllEntriesBuff);
 	intersectionDevice.FreeBuffer(&elvcDistributionsBuff);
 	intersectionDevice.FreeBuffer(&elvcTileDistributionOffsetsBuff);

@@ -251,7 +251,26 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 		intersectionDevice.FreeBuffer(&dlscDistributionsBuff);
 		intersectionDevice.FreeBuffer(&dlscBVHNodesBuff);
 	}
-	
+
+	if (cscene->lightTreeLightIndex.size() > 0) {
+		if (cscene->lightTreeNodes.size() > 0) {
+			intersectionDevice.AllocBufferRO(&lightTreeNodesBuff, &cscene->lightTreeNodes[0],
+				cscene->lightTreeNodes.size() * sizeof(slg::ocl::LightTreeNode), "Light tree nodes");
+		} else
+			intersectionDevice.FreeBuffer(&lightTreeNodesBuff);
+		if (cscene->lightTreeDistantLights.size() > 0) {
+			intersectionDevice.AllocBufferRO(&lightTreeDistantLightsBuff, &cscene->lightTreeDistantLights[0],
+				cscene->lightTreeDistantLights.size() * sizeof(slg::ocl::LightTreeDistantLight), "Light tree distant lights");
+		} else
+			intersectionDevice.FreeBuffer(&lightTreeDistantLightsBuff);
+		intersectionDevice.AllocBufferRO(&lightTreeLightIndexBuff, &cscene->lightTreeLightIndex[0],
+			cscene->lightTreeLightIndex.size() * sizeof(u_int), "Light tree light index");
+	} else {
+		intersectionDevice.FreeBuffer(&lightTreeNodesBuff);
+		intersectionDevice.FreeBuffer(&lightTreeDistantLightsBuff);
+		intersectionDevice.FreeBuffer(&lightTreeLightIndexBuff);
+	}
+
 	if (cscene->elvcAllEntries.size() > 0) {
 		intersectionDevice.AllocBufferRO(&elvcAllEntriesBuff, &cscene->elvcAllEntries[0],
 			cscene->elvcAllEntries.size() * sizeof(slg::ocl::ELVCacheEntry), "ELVC all entries");

@@ -205,6 +205,8 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 						dlscAllEntries,
 						dlscDistributions, dlscBVHNodes,
 						dlscRadius2, dlscNormalCosAngle,
+						lightTreeNodes, lightTreeDistantLights,
+						lightTreeDistantLightCount, lightTreeLightIndex,
 						VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
 						pathInfo->lastFromVolume,
 						light->lightSceneIndex);
@@ -246,6 +248,8 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 					dlscAllEntries,
 					dlscDistributions, dlscBVHNodes,
 					dlscRadius2, dlscNormalCosAngle,
+					lightTreeNodes, lightTreeDistantLights,
+					lightTreeDistantLightCount, lightTreeLightIndex,
 					VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
 					pathInfo->lastFromVolume,
 					light->lightSceneIndex);
@@ -288,17 +292,22 @@ OPENCL_FORCE_INLINE bool DirectLight_Illuminate(
 		const float lightPassThroughEvent,
 		__global DirectLightIlluminateInfo *info
 		LIGHTS_PARAM_DECL) {
-	// Select the light strategy to use
-	__global const float* restrict lightDist = BSDF_IsShadowCatcherOnlyInfiniteLights(bsdf MATERIALS_PARAM) ?
+	// Select the light strategy to use: the shadow catchers that only see
+	// the infinite lights use their log power distribution, not the tree
+	const bool onlyInfiniteLights = BSDF_IsShadowCatcherOnlyInfiniteLights(bsdf MATERIALS_PARAM);
+	__global const float* restrict lightDist = onlyInfiniteLights ?
 		infiniteLightSourcesDistribution : lightsDistribution;
 
-	// Pick a light source to sample
+	// Pick a light source to sample (with the landing shading normal, as the
+	// CPU and the pdf of a BSDF hit on a light do)
 	float lightPickPdf;
 	const uint lightIndex = LightStrategy_SampleLights(lightDist,
 			dlscAllEntries,
 			dlscDistributions, dlscBVHNodes,
 			dlscRadius2, dlscNormalCosAngle,
-			VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingGeometryN(bsdf), 
+			lightTreeNodes, lightTreeDistantLights,
+			lightTreeDistantLightCount, onlyInfiniteLights ? NULL : lightTreeLightIndex,
+			VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf),
 			bsdf->isVolume,
 			u0, &lightPickPdf);
 	if ((lightIndex == NULL_INDEX) || (lightPickPdf <= 0.f))
@@ -514,6 +523,10 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global const IndexBVHArrayNode* restrict dlscBVHNodes \
 		, const float dlscRadius2 \
 		, const float dlscNormalCosAngle \
+		, __global const LightTreeNode* restrict lightTreeNodes \
+		, __global const LightTreeDistantLight* restrict lightTreeDistantLights \
+		, const uint lightTreeDistantLightCount \
+		, __global const uint* restrict lightTreeLightIndex \
 		, __global const ELVCacheEntry* restrict elvcAllEntries \
 		, __global const float* restrict elvcDistributions \
 		, __global const uint* restrict elvcTileDistributionOffsets \

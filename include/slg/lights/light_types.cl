@@ -181,6 +181,10 @@ typedef struct {
 	__global const float* restrict dlscDistributions, \
 	__global const IndexBVHArrayNode* restrict dlscBVHNodes, \
 	const float dlscRadius2, const float dlscNormalCosAngle, \
+	__global const LightTreeNode* restrict lightTreeNodes, \
+	__global const LightTreeDistantLight* restrict lightTreeDistantLights, \
+	const uint lightTreeDistantLightCount, \
+	__global const uint* restrict lightTreeLightIndex, \
 	__global const ELVCacheEntry* restrict elvcAllEntries, \
 	__global const float* restrict elvcDistributions, \
 	__global const uint* restrict elvcTileDistributionOffsets, \
@@ -199,6 +203,10 @@ typedef struct {
 	dlscBVHNodes, \
 	dlscRadius2, \
 	dlscNormalCosAngle, \
+	lightTreeNodes, \
+	lightTreeDistantLights, \
+	lightTreeDistantLightCount, \
+	lightTreeLightIndex, \
 	elvcAllEntries, \
 	elvcDistributions, \
 	elvcTileDistributionOffsets, \

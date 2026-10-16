@@ -88,6 +88,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_camera_types <<
 			slg::ocl::KernelSource_light_types <<
 			slg::ocl::KernelSource_dlsc_types <<
+			slg::ocl::KernelSource_lighttree_types <<
 			slg::ocl::KernelSource_elvc_types <<
 			slg::ocl::KernelSource_pgic_types <<
 			// OpenCL SLG Funcs
@@ -168,8 +169,9 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_camera_funcs <<
 			slg::ocl::KernelSource_dlsc_funcs <<
 			slg::ocl::KernelSource_elvc_funcs <<
+			slg::ocl::KernelSource_sphericaltriangle_funcs << // Required by lighttree_funcs
+			slg::ocl::KernelSource_lighttree_funcs <<
 			slg::ocl::KernelSource_lightstrategy_funcs <<
-			slg::ocl::KernelSource_sphericaltriangle_funcs <<
 			slg::ocl::KernelSource_light_funcs <<
 			slg::ocl::KernelSource_filter_funcs <<
 			slg::ocl::KernelSource_sampleresult_funcs <<

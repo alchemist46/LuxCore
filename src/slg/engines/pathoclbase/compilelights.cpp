@@ -122,6 +122,9 @@ void CompiledScene::CompileDLSC(const LightStrategyDLSCache& dlscLightStrategy) 
 void CompiledScene::CompileLightStrategy() {
 	dlscRadius2 = 0.f;
 	dlscNormalCosAngle = 0.f;
+	lightTreeNodes.clear();
+	lightTreeDistantLights.clear();
+	lightTreeLightIndex.clear();
 			
 	//--------------------------------------------------------------------------
 	// Compile lightDistribution
@@ -165,9 +168,14 @@ void CompiledScene::CompileLightStrategy() {
 				lightsDistribution.clear();
 				lightsDistributionSize = 0;
 
-				// TODO: the light tree on the GPU. Until then, its log power
-				// distribution.
-				SLG_LOG("WARNING: the light tree is not supported by the GPU engines yet, using LOG_POWER");
+				// The tree (lighttree_funcs.cl walks the same arrays as the
+				// CPU) and, for the code paths that don't use it, its log
+				// power distribution
+				if (treeLightStrategy.UseTree()) {
+					lightTreeNodes = treeLightStrategy.GetNodes();
+					lightTreeDistantLights = treeLightStrategy.GetDistantLights();
+					lightTreeLightIndex = treeLightStrategy.GetLightIndex();
+				}
 				if (treeLightStrategy.GetLightsDistribution()) {
 					std::tie(lightsDistribution, lightsDistributionSize) =
 						CompileDistribution1D(
