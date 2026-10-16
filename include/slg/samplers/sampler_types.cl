@@ -70,10 +70,6 @@ OPENCL_FORCE_INLINE bool Sampler_IsHalfSample(const uint sampleIndex) {
 //------------------------------------------------------------------------------
 
 typedef struct {
-	unsigned int bucketIndex, pixelOffset, passOffset, pass;
-} RandomSample;
-
-typedef struct {
 	float totalI;
 
 	// Using ushort here totally freeze the ATI driver
@@ -107,10 +103,6 @@ typedef struct {
 //------------------------------------------------------------------------------
 // Sampler shared data types
 //------------------------------------------------------------------------------
-
-typedef struct {
-	unsigned int bucketIndex;
-} RandomSamplerSharedData;
 
 typedef struct {
 	unsigned int seedBase;
@@ -148,8 +140,8 @@ typedef struct {
 // Sampler data types
 //------------------------------------------------------------------------------
 
+// 0 was the RANDOM sampler
 typedef enum {
-	RANDOM = 0,
 	METROPOLIS = 1,
 	SOBOL = 2,
 	TILEPATHSAMPLER = 3
@@ -158,10 +150,6 @@ typedef enum {
 typedef struct {
 	SamplerType type;
 	union {
-		struct {
-			float adaptiveStrength, adaptiveUserImportanceWeight;
-			unsigned int bucketSize, tileSize, superSampling, overlapping;
-		} random;
 		struct {
 			float adaptiveStrength, adaptiveUserImportanceWeight;
 			unsigned int bucketSize, tileSize, superSampling, overlapping;

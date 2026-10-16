@@ -32,7 +32,7 @@ class TestDuplicateObject(unittest.TestCase):
 
 		# Change the render engine to PATHCPU
 		props.Set(pyluxcore.Property("renderengine.type", ["PATHCPU"]))
-		props.Set(pyluxcore.Property("sampler.type", ["RANDOM"]))
+		props.Set(pyluxcore.Property("sampler.type", ["SOBOL"]))
 		props.Set(GetDefaultEngineProperties("PATHCPU"))
 
 		config = pyluxcore.RenderConfig(props)

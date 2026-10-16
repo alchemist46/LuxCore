@@ -300,7 +300,7 @@ void SobolSampler::InitNewSample() {
 			// error of the whole sequence where it converges well (measured
 			// on luxball-hdr at 256 spp: 1-8x the actual error on 8x8 pixel
 			// blocks; 0.8-1.35x with the replicas, the spread of the estimate
-			// itself, as with the RANDOM sampler). The cost: the two replicas
+			// itself, as with an unstratified sampler). The cost: the two replicas
 			// are not stratified together (measured with uniform sampling:
 			// no difference on the CPU, 7-21% more error at 128-1024 spp on
 			// the GPU, cornell 640x480).

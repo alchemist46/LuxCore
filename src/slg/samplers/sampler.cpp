@@ -157,8 +157,6 @@ STATICTABLE_DECLARATION(SamplerSharedDataRegistry, string, FromProperties);
 
 //------------------------------------------------------------------------------
 
-SAMPLERSHAREDDATA_STATICTABLE_REGISTER(RandomSampler::GetObjectTag(), RandomSamplerSharedData);
-
 SAMPLERSHAREDDATA_STATICTABLE_REGISTER(SobolSampler::GetObjectTag(), SobolSamplerSharedData);
 
 SAMPLERSHAREDDATA_STATICTABLE_REGISTER(MetropolisSampler::GetObjectTag(), MetropolisSamplerSharedData);
@@ -182,7 +180,6 @@ SAMPLER_OBJECTSTATICREGISTRY_STATICFIELDS(SamplerRegistry);
 
 //------------------------------------------------------------------------------
 
-SAMPLER_OBJECTSTATICREGISTRY_REGISTER(SamplerRegistry, RandomSampler);
 SAMPLER_OBJECTSTATICREGISTRY_REGISTER(SamplerRegistry, SobolSampler);
 SAMPLER_OBJECTSTATICREGISTRY_REGISTER(SamplerRegistry, MetropolisSampler);
 SAMPLER_OBJECTSTATICREGISTRY_REGISTER(SamplerRegistry, RTPathCPUSampler);

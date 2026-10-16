@@ -106,14 +106,12 @@ def GetDefaultEngineProperties(engineType):
 USE_SUBSET = False
 def GetTestCases():
 	el = [
-		("PATHCPU", "RANDOM", GetDefaultEngineProperties("PATHCPU")),
+		("PATHCPU", "SOBOL", GetDefaultEngineProperties("PATHCPU")),
 	]
 
 	if (not USE_SUBSET):
 		el += [
-			("BIDIRCPU", "RANDOM", GetDefaultEngineProperties("BIDIRCPU")),
 			("TILEPATHCPU", "TILEPATHSAMPLER", GetDefaultEngineProperties("TILEPATHCPU")),
-			("PATHCPU", "SOBOL", GetDefaultEngineProperties("PATHCPU")),
 			("PATHCPU", "METROPOLIS", GetDefaultEngineProperties("PATHCPU")),
 			("BIDIRCPU", "SOBOL", GetDefaultEngineProperties("BIDIRCPU")),
 			("BIDIRCPU", "METROPOLIS", GetDefaultEngineProperties("BIDIRCPU")),
@@ -121,7 +119,6 @@ def GetTestCases():
 	
 		if LuxCoreHasOpenCL():
 			el += [
-			("PATHOCL", "RANDOM", GetDefaultEngineProperties("PATHOCL")),
 			("PATHOCL", "SOBOL", GetDefaultEngineProperties("PATHOCL")),
 			("PATHOCL", "METROPOLIS", GetDefaultEngineProperties("PATHOCL")),
 			("TILEPATHOCL", "TILEPATHSAMPLER", GetDefaultEngineProperties("TILEPATHOCL"))

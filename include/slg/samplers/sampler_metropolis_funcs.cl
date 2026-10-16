@@ -93,7 +93,7 @@ OPENCL_FORCE_INLINE float MutateScaled(const float x, const float range, const f
 OPENCL_FORCE_INLINE void SmallStep(__constant const GPUTaskConfiguration* restrict taskConfig,
 		Seed *seed, __global float *currentU, __global float *proposedU) {
 	// Metropolis return IDX_SCREEN_X and IDX_SCREEN_Y between [0.0, 1.0] instead
-	// that in film pixels like RANDOM and SOBOL samplers
+	// that in film pixels like the SOBOL sampler
 	proposedU[IDX_SCREEN_X] = MutateScaled(currentU[IDX_SCREEN_X],
 			taskConfig->sampler.metropolis.imageMutationRange, Rnd_FloatValue(seed));
 	proposedU[IDX_SCREEN_Y] = MutateScaled(currentU[IDX_SCREEN_Y],

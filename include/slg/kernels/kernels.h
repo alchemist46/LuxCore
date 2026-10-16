@@ -35,7 +35,6 @@ extern std::string KernelSource_tilepathocl_kernels_common;
 extern std::string KernelSource_tilepathocl_kernels_micro;
 extern std::string KernelSource_sampler_types;
 extern std::string KernelSource_sampler_funcs;
-extern std::string KernelSource_sampler_random_funcs;
 extern std::string KernelSource_sampler_sobol_funcs;
 extern std::string KernelSource_sampler_metropolis_funcs;
 extern std::string KernelSource_sampler_tilepath_funcs;

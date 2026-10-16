@@ -30,7 +30,6 @@
 #include "slg/film/imagepipeline/plugins/gammacorrection.h"
 #include "slg/film/imagepipeline/plugins/tonemaps/linear.h"
 #include "slg/film/imagepipeline/plugins/tonemaps/autolinear.h"
-#include "slg/samplers/random.h"
 #include "slg/samplers/sobol.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/samplers/tilepathsampler.h"
@@ -227,11 +226,9 @@ void RenderEngine::UpdateFilm() {
 void RenderEngine::CheckSamplersForNoTile(const string &engineName, const Properties &cfg) {
 	// Sobol is the default sampler
 	const string samplerType = cfg.Get(Property("sampler.type")(SobolSampler::GetObjectTag())).Get<string>();
-	if ((samplerType != RandomSampler::GetObjectTag()) &&
-			(samplerType != SobolSampler::GetObjectTag()) &&
+	if ((samplerType != SobolSampler::GetObjectTag()) &&
 			(samplerType != MetropolisSampler::GetObjectTag()))
 		throw runtime_error(engineName + " render engine can use only " +
-				RandomSampler::GetObjectTag() + ", " +
 				SobolSampler::GetObjectTag() + " or " +
 				MetropolisSampler::GetObjectTag() + " samplers ");
 }

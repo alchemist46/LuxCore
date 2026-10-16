@@ -34,7 +34,6 @@
 #include "slg/engines/renderengine.h"
 #include "slg/film/film.h"
 
-#include "slg/samplers/random.h"
 #include "slg/samplers/sobol.h"
 #include "slg/samplers/metropolis.h"
 
@@ -153,6 +152,8 @@ RenderConfig::RenderConfig(
 	if (internalScene) {
 		sceneRef = internalScene.get();
 	}
+
+	ReplaceRemovedSampler(*cfg);
 }
 
 
@@ -169,6 +170,24 @@ void RenderConfig::InitDefaultProperties() {
 	}
 }
 
+
+void RenderConfig::ReplaceRemovedSampler(Properties &cfg) {
+	if (!cfg.IsDefined("sampler.type") || (cfg.Get("sampler.type").Get<string>() != "RANDOM"))
+		return;
+
+	SLG_LOG("WARNING: the RANDOM sampler has been removed, the SOBOL sampler is used instead");
+	cfg.Set(Property("sampler.type")(SobolSampler::GetObjectTag()));
+
+	// sampler.random.<option> becomes sampler.sobol.<option>, unless that is set too
+	const string randomPrefix = "sampler.random.";
+	const vector<string> randomNames = cfg.GetAllNames(randomPrefix);
+	for (const string &name : randomNames) {
+		const string sobolName = "sampler.sobol." + name.substr(randomPrefix.size());
+		if (!cfg.IsDefined(sobolName))
+			cfg.Set(*cfg.Get(name).Renamed(sobolName));
+	}
+	cfg.DeleteAll(randomNames);
+}
 
 PropertiesRPtr RenderConfig::GetDefaultProperties() {
 	InitDefaultProperties();
@@ -214,6 +233,7 @@ void RenderConfig::Parse(const Properties &props) {
 	propsCache->Clear();
 
 	GetConfig().Set(props);
+	ReplaceRemovedSampler(GetConfig());
 	// I can not use GetProperty() here because it triggers a ToProperties() and it can
 	// be a problem with OpenCL disabled (PATHOCL is not defined, etc.)
 	GetScene().SetEnableParsePrint(GetConfig().Get(Property("debug.scene.parse.print")(false)).Get<bool>());

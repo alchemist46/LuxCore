@@ -159,7 +159,7 @@ void ResetParser() {
 			Property("opencl.cpu.use")(false) <<
 			Property("opencl.gpu.use")(true) <<
 			Property("renderengine.type")("PATHOCL") <<
-			Property("sampler.type")("RANDOM") <<
+			Property("sampler.type")("SOBOL") <<
 			Property("film.filter.type")("BLACKMANHARRIS") <<
 			Property("accelerator.instances.enable")(false);
 
@@ -1507,13 +1507,13 @@ ri_stmt: ACCELERATOR STRING paramlist
 	} else if ((name == "sobol") || (name == "lowdiscrepancy")) {
 		*renderConfigProps <<
 				Property("sampler.type")("SOBOL");
-	} else if (name == "random") {
-		*renderConfigProps <<
-				Property("sampler.type")("RANDOM");
 	} else {
-		LC_LOG("LuxCore doesn't support the sampler type " + name + ", falling back to random sampler");
+		// LuxRender's random sampler and any other: LuxCore's RANDOM sampler
+		// was removed, SOBOL replaces it
+		if (name != "random")
+			LC_LOG("LuxCore doesn't support the sampler type " + name + ", falling back to the Sobol sampler");
 		*renderConfigProps <<
-				Property("sampler.type")("RANDOM");
+				Property("sampler.type")("SOBOL");
 	}
 
 	FreeArgs();

@@ -411,7 +411,6 @@ void BakeCPURenderThread::RenderFunc(std::stop_token stop_token) {
 	Properties samplerAdditionalProps;
 	samplerAdditionalProps <<
 		// II'm not working in screen space so I can not use adaptive sampling
-		Property("sampler.random.adaptive.strength")(0.f) <<
 		Property("sampler.sobol.adaptive.strength")(0.f) <<
 		// Disable image plane meaning for samples 0 and 1
 		Property("sampler.imagesamples.enable")(false);

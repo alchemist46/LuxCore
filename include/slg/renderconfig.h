@@ -143,6 +143,9 @@ private:
 	RenderConfig(PropertiesUPtr&& p_cfg, SceneRef p_scn, SceneUPtr&& p_internalscene);
 
 	static void InitDefaultProperties();
+	// The RANDOM sampler was removed: a configuration asking for it gets the
+	// SOBOL sampler, with the same options
+	static void ReplaceRemovedSampler(luxrays::Properties &cfg);
 
 	mutable luxrays::PropertiesUPtr propsCache{std::make_unique<luxrays::Properties>()};
 	// This is a temporary field used to exchange data between SaveSerialized())

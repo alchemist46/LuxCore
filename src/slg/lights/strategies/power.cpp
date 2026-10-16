@@ -18,7 +18,6 @@
 
 #include "slg/lights/strategies/power.h"
 #include "slg/scene/scene.h"
-#include "slg/samplers/random.h"
 
 using namespace std;
 using namespace luxrays;

@@ -401,9 +401,7 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 	const u_int filmRegionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
 
 	size_t size = 0;
-	if (renderEngine->oclSampler->type == slg::ocl::RANDOM) {
-		size += sizeof(slg::ocl::RandomSamplerSharedData);
-	} else if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {
+	if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {
 		// Nothing
 	} else if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
 		size += sizeof(slg::ocl::SobolSamplerSharedData);
@@ -441,12 +439,7 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 		intersectionDevice.AllocBufferRW(&samplerSharedDataBuff, nullptr, size, "SamplerSharedData");
 
 	// Initialize the sampler shared data
-	if (renderEngine->oclSampler->type == slg::ocl::RANDOM) {
-		slg::ocl::RandomSamplerSharedData rssd;
-		rssd.bucketIndex = 0;
-
-		intersectionDevice.EnqueueWriteBuffer(samplerSharedDataBuff, CL_TRUE, size, &rssd);
-	} else if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
+	if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
 		auto _buffer = std::make_unique<char[]>(size);
 		auto buffer = _buffer.get();
 
@@ -549,11 +542,6 @@ void PathOCLBaseOCLRenderThread::InitSamplesBuffer() {
 
 	// Add Sample memory size
 	switch (renderEngine->oclSampler->type) {
-		case slg::ocl::RANDOM: {
-			// pixelIndexBase, pixelIndexOffset and pixelIndexRandomStart fields
-			sampleSize += sizeof(slg::ocl::RandomSample);
-			break;
-		}
 		case  slg::ocl::METROPOLIS: {
 			const size_t sampleResultSize = sizeof(slg::ocl::SampleResult);
 			sampleSize += 2 * sizeof(float) + 5 * sizeof(u_int) + sampleResultSize;	
@@ -589,10 +577,7 @@ void PathOCLBaseOCLRenderThread::InitSampleDataBuffer() {
 	const u_int taskCount = renderEngine->taskCount;
 
 	size_t uDataSize;
-	if (renderEngine->oclSampler->type == slg::ocl::RANDOM) {
-		// To store IDX_SCREEN_X and IDX_SCREEN_Y
-		uDataSize = 2 * sizeof(float);
-	} else if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
+	if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
 		// To store IDX_SCREEN_X and IDX_SCREEN_Y
 		uDataSize = 2 * sizeof(float);
 	} else if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {

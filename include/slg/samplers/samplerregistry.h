@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "slg/core/objectstaticregistry.h"
-#include "slg/samplers/random.h"
 #include "slg/samplers/sobol.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/samplers/rtpathcpusampler.h"
@@ -54,7 +53,6 @@ protected:
 	STATICTABLE_DECLARE_DECLARATION(SamplerSharedDataRegistry, std::string, FromProperties);
 
 	// For the registration of each SamplerSharedData sub-class with SamplerSharedData StaticTable
-	SAMPLERSHAREDDATA_STATICTABLE_DECLARE_REGISTRATION(SamplerSharedDataRegistry, RandomSamplerSharedData);
 	SAMPLERSHAREDDATA_STATICTABLE_DECLARE_REGISTRATION(SamplerSharedDataRegistry, SobolSamplerSharedData);
 	SAMPLERSHAREDDATA_STATICTABLE_DECLARE_REGISTRATION(SamplerSharedDataRegistry, MetropolisSamplerSharedData);
 	SAMPLERSHAREDDATA_STATICTABLE_DECLARE_REGISTRATION(SamplerSharedDataRegistry, RTPathCPUSamplerSharedData);
@@ -111,7 +109,6 @@ protected:
 
 	//--------------------------------------------------------------------------
 
-	SAMPLER_OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(SamplerRegistry, RandomSampler);
 	SAMPLER_OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(SamplerRegistry, SobolSampler);
 	SAMPLER_OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(SamplerRegistry, MetropolisSampler);
 	SAMPLER_OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(SamplerRegistry, RTPathCPUSampler);

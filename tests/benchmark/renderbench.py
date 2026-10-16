@@ -123,7 +123,6 @@ def render(scene_cfg, engine, args, device_select):
         # renderer (seen on manylights: -14% samples/sec for a build that was
         # +5% at equal spp).
         props.Set(pyluxcore.Property("sampler.sobol.adaptive.strength", 0.0))
-        props.Set(pyluxcore.Property("sampler.random.adaptive.strength", 0.0))
     for define in args.define or []:
         props.Set(pyluxcore.Properties().SetFromString(define))
 

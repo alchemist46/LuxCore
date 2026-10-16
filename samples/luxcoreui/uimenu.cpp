@@ -283,9 +283,6 @@ void LuxCoreApp::MenuSampler() {
     RenderConfigParse(props);
   };
 
-  if (ImGui::MenuItem("RANDOM", NULL, (currentSamplerType == "RANDOM"))) {
-    set_sampler("RANDOM");
-  }
   if (ImGui::MenuItem("SOBOL", NULL, (currentSamplerType == "SOBOL"))) {
     set_sampler("SOBOL");
   }

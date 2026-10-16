@@ -100,7 +100,6 @@ set(SLG_KERNELS
     include/slg/lights/visibility/elvc_funcs.cl
     include/slg/samplers/sampler_types.cl
     include/slg/samplers/sampler_funcs.cl
-    include/slg/samplers/sampler_random_funcs.cl
     include/slg/samplers/sampler_sobol_funcs.cl
     include/slg/samplers/sampler_metropolis_funcs.cl
     include/slg/samplers/sampler_tilepath_funcs.cl

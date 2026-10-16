@@ -65,8 +65,10 @@ public:
 // Sampler
 //------------------------------------------------------------------------------
 
+// 0 was the RANDOM sampler (removed, SOBOL replaces it: see
+// RenderConfig::ReplaceRemovedSampler())
 typedef enum {
-	RANDOM, METROPOLIS, SOBOL, RTPATHCPUSAMPLER, TILEPATHSAMPLER,
+	METROPOLIS = 1, SOBOL, RTPATHCPUSAMPLER, TILEPATHSAMPLER,
 	SAMPLER_TYPE_COUNT
 } SamplerType;
 

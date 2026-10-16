@@ -259,7 +259,6 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/twosided.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/velvet.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/sampler.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/samplers/random.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/rtpathcpusampler.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/tilepathsampler.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/sobol.cpp

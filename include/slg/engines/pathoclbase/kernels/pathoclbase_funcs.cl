@@ -50,7 +50,7 @@ OPENCL_FORCE_INLINE void InitSampleResult(
 	float filmY = Sampler_GetSample(taskConfig, IDX_SCREEN_Y SAMPLER_PARAM);
 
 	// Metropolis return IDX_SCREEN_X and IDX_SCREEN_Y between [0.0, 1.0] instead
-	// that in film pixels like RANDOM and SOBOL samplers
+	// that in film pixels like the SOBOL sampler
 	if (taskConfig->sampler.type == METROPOLIS) {
 		filmX = filmSubRegion0 + filmX * (filmSubRegion1 - filmSubRegion0 + 1);
 		filmY = filmSubRegion2 + filmY * (filmSubRegion3 - filmSubRegion2 + 1);

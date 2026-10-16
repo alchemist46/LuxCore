@@ -27,8 +27,6 @@ OPENCL_FORCE_INLINE float Sampler_GetSample(
 		const uint index
 		SAMPLER_PARAM_DECL) {
 	switch (taskConfig->sampler.type) {
-		case RANDOM:
-			return RandomSampler_GetSample(taskConfig, index SAMPLER_PARAM);
 		case SOBOL:
 			return SobolSampler_GetSample(taskConfig, index SAMPLER_PARAM);
 		case METROPOLIS:
@@ -48,10 +46,6 @@ OPENCL_FORCE_INLINE void Sampler_SplatSample(
 		FILM_PARAM_DECL
 		) {
 	switch (taskConfig->sampler.type) {
-		case RANDOM:
-			return RandomSampler_SplatSample(taskConfig
-					SAMPLER_PARAM
-					FILM_PARAM);
 		case SOBOL:
 			return SobolSampler_SplatSample(taskConfig
 					SAMPLER_PARAM
@@ -79,14 +73,6 @@ OPENCL_HOT_FUNCTION void Sampler_NextSample(
 		const uint filmSubRegion2, const uint filmSubRegion3
 		SAMPLER_PARAM_DECL) {
 	switch (taskConfig->sampler.type) {
-		case RANDOM:
-			return RandomSampler_NextSample(taskConfig,
-					filmNoise,
-					filmUserImportance,
-					filmWidth, filmHeight,
-					filmSubRegion0, filmSubRegion1,
-					filmSubRegion2, filmSubRegion3
-					SAMPLER_PARAM);
 		case SOBOL:
 			return SobolSampler_NextSample(taskConfig,
 					filmNoise,
@@ -126,14 +112,6 @@ OPENCL_FORCE_NOT_INLINE bool Sampler_Init(
 		const uint filmSubRegion2, const uint filmSubRegion3
 		SAMPLER_PARAM_DECL) {
 	switch (taskConfig->sampler.type) {
-		case RANDOM:
-			return RandomSampler_Init(taskConfig,
-					filmNoise,
-					filmUserImportance,
-					filmWidth, filmHeight,
-					filmSubRegion0, filmSubRegion1,
-					filmSubRegion2, filmSubRegion3
-					SAMPLER_PARAM);
 		case SOBOL:
 			return SobolSampler_Init(taskConfig,
 					filmNoise,

@@ -53,11 +53,10 @@ namespace slg {
 //   standard deviation, the allocation with the lowest mean squared error,
 //   and the threshold is the RMS error of the image. A converged pixel stays
 //   converged until the film is reset, the SOBOL sampler draws its pixels
-//   from the list of the unconverged ones (GetTodoPixels(); RANDOM skips the
-//   converged ones) and the rendering stops when every pixel is converged
+//   from the list of the unconverged ones (GetTodoPixels()) and the rendering stops when every pixel is converged
 //   (minus the tolerance). It reads the
 //   radiance channels, not the image pipeline output. Used when the film has
-//   the half channel (the SOBOL and RANDOM samplers add it), the classic
+//   the half channel (the SOBOL sampler adds it), the classic
 //   test otherwise. Measured on 2026-10-14 (see MODERNIZATION_PLAN.md): about
 //   the classic test's quality at the same render time where the classic
 //   test does well, much better where its halt time explodes, and always

@@ -31,9 +31,8 @@ using namespace luxcore;
 
 SamplerWindow::SamplerWindow(LuxCoreApp *a) : ObjectEditorWindow(a, "Sampler") {
 	typeTable
-		.Add("RANDOM", 0)
-		.Add("SOBOL", 1)
-		.Add("METROPOLIS", 2)
+		.Add("SOBOL", 0)
+		.Add("METROPOLIS", 1)
 		.SetDefault("SOBOL");
 }
 
@@ -71,26 +70,6 @@ bool SamplerWindow::DrawObjectGUI(const std::unique_ptr<Properties> & props, boo
 	ImGui::TextDisabled("(?)");
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("sampler.type");
-
-	//--------------------------------------------------------------------------
-	// RANDOM
-	//--------------------------------------------------------------------------
-
-	if (typeIndex == typeTable.GetVal("RANDOM")) {
-		float fval = props->Get("sampler.random.adaptive.strength").Get<float>();
-		if (ImGui::SliderFloat("Adaptive strength", &fval, 0.f, .95f)) {
-			props->Set(Property("sampler.random.adaptive.strength")(fval));
-			modifiedProps = true;
-		}
-		LuxCoreApp::HelpMarker("sampler.random.adaptive.strength");
-
-		fval = props->Get("sampler.random.adaptive.userimportanceweight").Get<float>();
-		if (ImGui::SliderFloat("User importance weight", &fval, 0.f, 1.f)) {
-			props->Set(Property("sampler.random.adaptive.userimportanceweight")(fval));
-			modifiedProps = true;
-		}
-		LuxCoreApp::HelpMarker("sampler.random.adaptive.userimportanceweight");
-	}
 
 	//--------------------------------------------------------------------------
 	// SOBOL
