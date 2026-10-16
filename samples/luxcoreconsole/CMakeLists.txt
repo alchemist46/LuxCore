@@ -48,7 +48,10 @@ install(
       GROUP_READ GROUP_EXECUTE
       WORLD_READ WORLD_EXECUTE
 )
+# In the component, so "--install --component luxcoreconsole" (make luxcoreconsole) installs
+# the shared libraries too, next to the $ORIGIN/../lib rpath
 install(RUNTIME_DEPENDENCY_SET LUXCONSOLE_DEPS
+    COMPONENT luxcoreconsole
     PRE_EXCLUDE_REGEXES "api-ms-" "ext-ms-"
     POST_EXCLUDE_REGEXES ${INSTALL_EXCLUDE_REGEXES}
     DIRECTORIES "${CONAN_RUNTIME_LIB_DIRS}"
@@ -57,3 +60,6 @@ install(RUNTIME_DEPENDENCY_SET LUXCONSOLE_DEPS
       GROUP_READ GROUP_EXECUTE
       WORLD_READ WORLD_EXECUTE
 )
+
+include(LuxInstallRuntimeModules)
+lux_install_runtime_modules(luxcoreconsole)

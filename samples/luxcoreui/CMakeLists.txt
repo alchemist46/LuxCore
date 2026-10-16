@@ -79,7 +79,10 @@ install(
     GROUP_READ GROUP_EXECUTE
     WORLD_READ WORLD_EXECUTE
 )
+# In the component, so "--install --component luxcoreui" (make luxcoreui) installs
+# the shared libraries too, next to the $ORIGIN/../lib rpath
 install(RUNTIME_DEPENDENCY_SET LUXUI_DEPS
+  COMPONENT luxcoreui
   PRE_EXCLUDE_REGEXES ${DEP_EXCLUDE}
   POST_EXCLUDE_REGEXES ${INSTALL_EXCLUDE_REGEXES}
   DIRECTORIES "${CONAN_RUNTIME_LIB_DIRS}"
@@ -88,6 +91,9 @@ install(RUNTIME_DEPENDENCY_SET LUXUI_DEPS
     GROUP_READ GROUP_EXECUTE
     WORLD_READ WORLD_EXECUTE
 )
+include(LuxInstallRuntimeModules)
+lux_install_runtime_modules(luxcoreui)
+
 # Install pdb file (if msvc and debug)
 if(MSVC)
   install(FILES "$<$<CONFIG:Debug>:$<TARGET_PDB_FILE:luxcoreui>>"

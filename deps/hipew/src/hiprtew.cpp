@@ -18,6 +18,7 @@
 
 #include <hiprtew.h>
 
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@ typedef HMODULE DynamicLibrary;
 #  define dynamic_library_find(lib, symbol)  GetProcAddress(lib, symbol)
 #else
 #  include <dlfcn.h>
+#  include <link.h>
 
 typedef void* DynamicLibrary;
 
@@ -42,11 +44,17 @@ typedef void* DynamicLibrary;
 // HIPRT calls its own exported functions: they would be resolved to the
 // other version (and crash). The sanitizer runtimes refuse to load a library
 // with RTLD_DEEPBIND: it isn't used in sanitized builds.
+//
+// Only when this code is in a library loaded by a host (pyluxcore): in a
+// non-PIE executable (luxcoreui, luxcoreconsole) RTLD_DEEPBIND breaks HIPRT.
+// The executable holds copy relocations of libstdc++ data (i.e.
+// std::ctype<char>::id) that every other module uses, while a deep-bound
+// HIPRT reads the unused originals in libstdc++ and its std::regex crashes
+// at the first BVH build. There is no other HIPRT in a LuxCore executable.
 #  if defined(RTLD_DEEPBIND) && !defined(__SANITIZE_ADDRESS__)
-#    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND)
-#  else
-#    define dynamic_library_open(path)       dlopen(path, RTLD_NOW | RTLD_LOCAL)
+#    define HIPRTEW_USE_DEEPBIND
 #  endif
+#  define dynamic_library_open(path)         dlopen(path, HiprtOpenFlags())
 #  define dynamic_library_close(lib)         dlclose(lib)
 #  define dynamic_library_find(lib, symbol)  dlsym(lib, symbol)
 #endif
@@ -129,6 +137,45 @@ std::string ThisModuleDir() {
 	const size_t pos = path.find_last_of(pathSeparator);
 	return (pos == std::string::npos) ? std::string() : path.substr(0, pos);
 }
+
+#if !defined(_WIN32)
+#if defined(HIPRTEW_USE_DEEPBIND)
+// True when this code is linked into the main executable, not into a library
+// loaded by a host application
+bool InMainExecutable() {
+	struct Search {
+		uintptr_t address;
+		bool found;
+	} search = { (uintptr_t)&ThisModuleDir, false };
+
+	dl_iterate_phdr([](struct dl_phdr_info *info, size_t, void *data) -> int {
+		Search *s = (Search *)data;
+		for (int i = 0; i < info->dlpi_phnum; ++i) {
+			const ElfW(Phdr) &phdr = info->dlpi_phdr[i];
+			if (phdr.p_type != PT_LOAD)
+				continue;
+
+			const uintptr_t start = info->dlpi_addr + phdr.p_vaddr;
+			if ((s->address >= start) && (s->address < start + phdr.p_memsz))
+				s->found = true;
+		}
+
+		// The main executable is always the first object listed
+		return 1;
+	}, &search);
+
+	return search.found;
+}
+#endif
+
+int HiprtOpenFlags() {
+#if defined(HIPRTEW_USE_DEEPBIND)
+	if (!InMainExecutable())
+		return RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND;
+#endif
+	return RTLD_NOW | RTLD_LOCAL;
+}
+#endif
 
 void HiprtInit() {
 	std::vector<std::string> paths;
