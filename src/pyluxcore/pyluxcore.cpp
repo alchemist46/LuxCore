@@ -116,6 +116,17 @@ static void LuxCore_SetLogHandler(py::object &logHandler) {
     SetLogHandler(NULL);
 }
 
+// Registered with Python's atexit: the log handler is a Python object and must
+// be released while the interpreter is alive. Otherwise the static py::object
+// is destroyed by a C++ exit handler after Python has finalized, and the
+// process segfaults at exit. LuxCore stops calling it first: render threads
+// and destructors can still log during the finalization.
+static void LuxCore_ReleaseLogHandler() {
+  std::unique_lock<std::mutex> lock(luxCoreInitMutex);
+  SetLogHandler(NULL);
+  luxCoreLogHandler = py::object();
+}
+
 static const char *LuxCoreVersion() {
   static const char *luxCoreVersion = LUXCORE_VERSION;
   return luxCoreVersion;
@@ -2185,6 +2196,7 @@ PYBIND11_MODULE(pyluxcore, m) {
   m.def("Init", &LuxCore_Init);
   m.def("Init", &LuxCore_InitDefaultHandler);
   m.def("SetLogHandler", &LuxCore_SetLogHandler);
+  py::module_::import("atexit").attr("register")(py::cpp_function(&LuxCore_ReleaseLogHandler));
   m.def("ParseLXS", &ParseLXS);
   m.def("MakeTx", &MakeTx);
 
