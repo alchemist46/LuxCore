@@ -101,7 +101,10 @@ typedef struct {
 // The state used to keep track of the rendered path
 typedef struct {
 	Spectrum throughput;
-	BSDF bsdf; // Variable size structure
+	// The BSDF of the last path vertex. On CUDA and HIP the vertex is shaded
+	// with a private copy, and only what the next iteration reads is stored
+	// here (see AdvancePaths_MK_RT)
+	BSDF bsdf;
 
 	Seed seedPassThroughEvent;
 	

@@ -28,18 +28,34 @@
 // The steps of a path vertex, called by AdvancePaths_MK_RT
 //------------------------------------------------------------------------------
 
+#if defined(LUXRAYS_CUDA_DEVICE)
+// The members of the vertex BSDF that the next iteration reads when it doesn't
+// sample the BSDF: AdvancePaths_ShadowRayHit() (event types, shading normal),
+// AdvancePaths_HitNothing() (the environment light visibility cache, the shadow
+// transparency flag) and Scene_Intersect() on a miss (the light ID of a volume
+// emission)
+OPENCL_FORCE_INLINE void AdvancePaths_SaveVertexBSDF(__global BSDF *dst, const BSDF *src) {
+	dst->materialIndex = src->materialIndex;
+	dst->isVolume = src->isVolume;
+	dst->hitPoint.p = src->hitPoint.p;
+	dst->hitPoint.shadeN = src->hitPoint.shadeN;
+	dst->hitPoint.intoObject = src->hitPoint.intoObject;
+	dst->hitPoint.throughShadowTransparency = src->hitPoint.throughShadowTransparency;
+}
+#endif
+
 // The next vertex ray: sample the BSDF, Russian roulette (the next state is
 // MK_RT_NEXT_VERTEX or MK_SPLAT_SAMPLE)
 OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
 		__global EyePathInfo *pathInfo,
 		__global Ray *ray,
 		__global SampleResult *sampleResult,
 		const DirectLightResult directLightResult
 		SAMPLER_PARAM_DECL
 		MATERIALS_PARAM_DECL) {
-	__global BSDF *bsdf = &taskState->bsdf;
 	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
 
 	// Sample the BSDF
@@ -113,7 +129,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		// This is valid for irradiance AOV only if it is not a SPECULAR material and
 		// first path vertex. Set or update sampleResult.irradiancePathThroughput
 		if (sampleResult->firstPathVertex) {
-			if (!(BSDF_GetEventTypes(&taskState->bsdf
+			if (!(BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM) & SPECULAR))
 				VSTORE3F(TO_FLOAT3(M_1_PI_F * fabs(dot(
 						VLOAD3F(&bsdf->hitPoint.shadeN.x),
@@ -147,15 +163,17 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 
 // The trace result of the shadow ray: add the direct light if the light is
 // visible (the next state is MK_GENERATE_NEXT_VERTEX_RAY or MK_SPLAT_SAMPLE,
-// or MK_RT_DL to continue the trace). The BSDF is still the one of the vertex
-// of the shadow ray, but with a taskDirectLightVertex the path has moved to
-// the next vertex: the path values of the vertex come from it.
+// or MK_RT_DL to continue the trace). The BSDF is the one of the vertex of the
+// shadow ray (only the members of AdvancePaths_SaveVertexBSDF() are read), but
+// with a taskDirectLightVertex the path has moved to the next vertex: the path
+// values of the vertex come from it.
 OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTaskTmp *taskTmp,
 		__global HitPoint *intersectHitPoint,
 		__global GPUTaskDirectLight *taskDirectLight,
 		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
 		__global PathVolumeInfo *directLightVolInfo,
 		__global Ray *ray,
 		__global RayHit *rayHit,
@@ -198,9 +216,6 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 	if (!continueToTrace) {
 		if (rayMiss) {
 			// Nothing was hit, the light source is visible
-
-			__global BSDF *bsdf = &taskState->bsdf;
-
 			if (!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)) {
 				const bool firstPathVertex = taskDirectLightVertex ?
 					taskDirectLightVertex->firstPathVertex : sampleResult->firstPathVertex;
@@ -240,10 +255,13 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 	return MK_RT_DL;
 }
 
-// Nothing was hit (the next state is MK_SPLAT_SAMPLE)
+// Nothing was hit (the next state is MK_SPLAT_SAMPLE). The BSDF is the one of
+// the previous path vertex (only the members of AdvancePaths_SaveVertexBSDF()
+// are read).
 OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
 		__global EyePathInfo *pathInfo,
 		__global const Ray *ray,
 		__global SampleResult *sampleResult
@@ -267,7 +285,7 @@ OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 				pathInfo,
 				&taskState->throughput,
 				ray,
-				sampleResult->firstPathVertex ? NULL : &taskState->bsdf,
+				sampleResult->firstPathVertex ? NULL : bsdf,
 				sampleResult
 				LIGHTS_PARAM);
 	}
@@ -304,6 +322,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		__global GPUTaskTmp *taskTmp,
 		__global GPUTaskDirectLight *taskDirectLight,
 		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
 		__global EyePathInfo *pathInfo,
 		__global PathVolumeInfo *directLightVolInfo,
 		__global Ray *ray,
@@ -317,8 +336,6 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		KERNEL_ARGS_INFINITELIGHTS
 		KERNEL_ARGS_PHOTONGI
 		LIGHTS_PARAM_DECL) {
-	__global BSDF *bsdf = &taskState->bsdf;
-
 	if (taskState->albedoToDo && BSDF_IsAlbedoEndPoint(bsdf, taskConfig->pathTracer.albedo.specularSetting,
 			taskConfig->pathTracer.albedo.specularGlossinessThreshold MATERIALS_PARAM)) {
 		const float3 albedo = VLOAD3F(taskState->throughput.c) * BSDF_Albedo(bsdf
@@ -644,10 +661,29 @@ __kernel void AdvancePaths_MK_RT(
 	// memory: a private one makes the ray marching of heterogeneous volumes
 	// 7% slower (luxball-hdr-vol)
 	__global HitPoint *intersectHitPoint = &tasksIntersectHitPoint[gid];
+	// The BSDF of the vertex hit in this iteration. taskState->bsdf keeps,
+	// for the next iteration, the members of AdvancePaths_SaveVertexBSDF() or,
+	// in the two-iteration flow (MK_RT_DL), the whole BSDF for the next vertex
+	// ray
+	BSDF bsdfValue;
+	BSDF *bsdf = &bsdfValue;
+	// Scene_Intersect() initializes the BSDF through a pointer the compiler
+	// can't see is bsdf. Otherwise it forwards the values BSDF_Init() stores
+	// to the reads of the shading code and keeps them in registers all along:
+	// 14 spilled VGPRs instead of 2, manylights 3% slower.
+	BSDF *initBsdf = bsdf;
+#if defined(LUXRAYS_HIP_DEVICE)
+	asm volatile("" : "+s"(initBsdf));
+#endif
 #else
 	__global GPUTaskTmp *taskTmp = &tasksTmp[gid];
 	__global HitPoint *intersectHitPoint = &taskTmp->tmpHitPoint;
+	__global BSDF *bsdf = &taskState->bsdf;
+	__global BSDF *initBsdf = bsdf;
 #endif
+	// The BSDF of the previous vertex (the vertex of the shadow ray, or the
+	// last one before a miss)
+	__global const BSDF *prevBsdf = &taskState->bsdf;
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
 	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
 	__constant const Scene* restrict scene = &taskConfig->scene;
@@ -672,7 +708,7 @@ __kernel void AdvancePaths_MK_RT(
 			(pathState == MK_RT_DL_SPLAT)) {
 		const size_t shadowRayIndex = (pathState == MK_RT_NEXT_VERTEX_DL) ? secondRayIndex : gid;
 		const PathState shadowRayState = AdvancePaths_ShadowRayHit(taskConfig, taskTmp, intersectHitPoint, &tasksDirectLight[gid], taskState,
-				&directLightVolInfos[gid], &rays[shadowRayIndex], &rayHits[shadowRayIndex], sampleResult,
+				prevBsdf, &directLightVolInfos[gid], &rays[shadowRayIndex], &rayHits[shadowRayIndex], sampleResult,
 				(pathState == MK_RT_DL) ? NULL : &tasksDirectLightVertex[gid]
 				MATERIALS_PARAM);
 
@@ -681,9 +717,15 @@ __kernel void AdvancePaths_MK_RT(
 		if (pathState == MK_RT_NEXT_VERTEX_DL)
 			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
 
-		if (pathState == MK_RT_DL)
+		if (pathState == MK_RT_DL) {
 			pathState = shadowRayState;
-		else if (pathState == MK_RT_DL_SPLAT)
+#if defined(LUXRAYS_CUDA_DEVICE)
+			// The next vertex ray samples the BSDF the previous iteration
+			// stored
+			if (pathState == MK_GENERATE_NEXT_VERTEX_RAY)
+				*bsdf = taskState->bsdf;
+#endif
+		} else if (pathState == MK_RT_DL_SPLAT)
 			pathState = MK_SPLAT_SAMPLE;
 		else
 			pathState = MK_RT_NEXT_VERTEX;
@@ -705,6 +747,13 @@ __kernel void AdvancePaths_MK_RT(
 		const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
 		taskState->seedPassThroughEvent = seedPassThroughEvent;
 
+#if defined(LUXRAYS_CUDA_DEVICE)
+		// On a miss, Scene_Intersect() reads the light ID of the previous
+		// vertex for the emission of a volume
+		if (rayHits[gid].meshIndex == NULL_INDEX)
+			bsdf->materialIndex = prevBsdf->materialIndex;
+#endif
+
 		int throughShadowTransparency = taskState->throughShadowTransparency;
 		const bool continueToTrace = Scene_Intersect(taskConfig,
 				EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
@@ -712,7 +761,7 @@ __kernel void AdvancePaths_MK_RT(
 				&pathInfo->volume,
 				intersectHitPoint,
 				passThroughEvent,
-				&rays[gid], &rayHits[gid], &taskState->bsdf,
+				&rays[gid], &rayHits[gid], initBsdf,
 				&connectionThroughput, VLOAD3F(taskState->throughput.c),
 				sampleResult,
 				false
@@ -724,12 +773,12 @@ __kernel void AdvancePaths_MK_RT(
 		// If continueToTrace, there is nothing to do, just keep the same state
 		if (!continueToTrace) {
 			if (rayHits[gid].meshIndex == NULL_INDEX) {
-				AdvancePaths_HitNothing(taskConfig, taskState, pathInfo, &rays[gid], sampleResult
+				AdvancePaths_HitNothing(taskConfig, taskState, prevBsdf, pathInfo, &rays[gid], sampleResult
 						LIGHTS_PARAM);
 
 				pathState = MK_SPLAT_SAMPLE;
 			} else {
-				const BSDFEvent eventTypes = BSDF_GetEventTypes(&taskState->bsdf
+				const BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM);
 
 				sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
@@ -741,10 +790,10 @@ __kernel void AdvancePaths_MK_RT(
 				// The last vertex has no next vertex ray.
 				const bool sampleNextVertexRayNow = scene->shadowRayAnyHit &&
 						!sampleResult->lastPathVertex &&
-						!BSDF_IsShadowCatcher(&taskState->bsdf MATERIALS_PARAM);
+						!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM);
 
 				pathState = AdvancePaths_HitObject(taskConfig,
-						task, taskTmp, &tasksDirectLight[gid], taskState, pathInfo,
+						task, taskTmp, &tasksDirectLight[gid], taskState, bsdf, pathInfo,
 						&directLightVolInfos[gid], &rays[gid], &rayHits[gid],
 						&rays[sampleNextVertexRayNow ? secondRayIndex : gid], sampleResult,
 						samplerSharedDataBuff, samplesBuff, samplesDataBuff, sampleResultsBuff,
@@ -768,6 +817,17 @@ __kernel void AdvancePaths_MK_RT(
 				}
 			}
 		}
+
+#if defined(LUXRAYS_CUDA_DEVICE)
+		// Keep what the next iteration reads of the BSDF (there is one if
+		// something was hit, or on a volume scatter event)
+		if (rayHits[gid].meshIndex != NULL_INDEX) {
+			if ((pathState == MK_RT_DL) && !sampleResult->lastPathVertex)
+				taskState->bsdf = *bsdf;
+			else
+				AdvancePaths_SaveVertexBSDF(&taskState->bsdf, bsdf);
+		}
+#endif
 	}
 
 	if (pathState == MK_GENERATE_NEXT_VERTEX_RAY) {
@@ -776,7 +836,7 @@ __kernel void AdvancePaths_MK_RT(
 		// This trick is required by SAMPLER_PARAM macro
 		Seed *seed = &seedValue;
 
-		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, pathInfo,
+		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, bsdf, pathInfo,
 				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult
 				SAMPLER_PARAM
 				MATERIALS_PARAM);

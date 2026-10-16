@@ -111,7 +111,9 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 	VSTORE3F(geometryN, &bsdf->hitPoint.fixedDir.x);
 
 	bsdf->sceneObjectIndex = NULL_INDEX;
-	Matrix4x4_IdentityGlobal(&bsdf->hitPoint.localToWorld.m);
+	// Both matrices: the BSDF may be a private variable, so nothing of a
+	// previous hit is left in it
+	Transform_Init(&bsdf->hitPoint.localToWorld);
 	bsdf->materialIndex = volumeIndex;
 
 	VSTORE3F(geometryN, &bsdf->hitPoint.geometryN.x);

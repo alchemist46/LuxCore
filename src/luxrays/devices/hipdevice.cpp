@@ -246,6 +246,28 @@ static void DumpKernelSource(const vector<string> &params, const string &source,
 	file << "// " << oclKernelPersistentCache::ToOptsString(params) << "\n" << source;
 }
 
+// Debugging aid, the reverse of LUXRAYS_KERNEL_DUMP_DIR: with
+// LUXRAYS_KERNEL_LOAD_DIR set, a program with a file there (as written by the
+// dump, the first line is skipped) is compiled from that file instead, so a
+// kernel change can be tried without rebuilding
+static void LoadKernelSource(string &source, const string &programName) {
+	const char *dir = getenv("LUXRAYS_KERNEL_LOAD_DIR");
+	if (!dir)
+		return;
+
+	string fileName = programName;
+	for (char &c : fileName)
+		if (!isalnum(c))
+			c = '_';
+	ifstream file((string(dir) + "/" + fileName + ".hip").c_str());
+	if (!file)
+		return;
+
+	string optsLine;
+	getline(file, optsLine);
+	source.assign(istreambuf_iterator<char>(file), istreambuf_iterator<char>());
+}
+
 string HIPDevice::GetKernelSource(const string &kernelSource) {
 	// The pragma only covers functions: file scope tables (always declared at
 	// the start of a line as "__constant <type> <name>[] = { ... }", while the
@@ -278,8 +300,9 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 
 	auto startTime = std::chrono::high_resolution_clock::now();
 
-	const string hipProgramSource = GetKernelSource(programSource);
+	string hipProgramSource = GetKernelSource(programSource);
 	DumpKernelSource(hipProgramParameters, hipProgramSource, programName);
+	LoadKernelSource(hipProgramSource, programName);
 
 	bool cached;
 	string error;
@@ -325,6 +348,7 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 		kernels.push_back(std::make_tuple(hipProgramParameters,
 			GetKernelSource(request.source), request.name));
 		DumpKernelSource(hipProgramParameters, std::get<1>(kernels.back()), request.name);
+		LoadKernelSource(std::get<1>(kernels.back()), request.name);
 	}
 
 	LR_LOG(deviceContext, "[" << requests.size() << " programs] Compiling kernels in parallel for " << deviceDesc.GetHIPArch());
