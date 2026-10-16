@@ -95,6 +95,8 @@ set(SLG_KERNELS
     include/slg/lights/light_funcs.cl
     include/slg/lights/strategies/dlsc_types.cl
     include/slg/lights/strategies/dlsc_funcs.cl
+    include/slg/lights/strategies/lighttree_types.cl
+    include/slg/lights/strategies/lighttree_funcs.cl
     include/slg/lights/strategies/lightstrategy_funcs.cl
     include/slg/lights/visibility/elvc_types.cl
     include/slg/lights/visibility/elvc_funcs.cl

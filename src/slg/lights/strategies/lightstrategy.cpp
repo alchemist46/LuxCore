@@ -121,5 +121,6 @@ OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyUniform);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyPower);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyLogPower);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyDLSCache);
+OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyLightTree);
 // Just add here any new LightStrategy (don't forget in the .h too)
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

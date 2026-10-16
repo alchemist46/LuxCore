@@ -45,6 +45,7 @@
 #include "slg/lights/mapspherelight.h"
 #include "slg/lights/strategies/dlscache.h"
 #include "slg/lights/strategies/dlscacheimpl/dlscbvh.h"
+#include "slg/lights/strategies/lighttree.h"
 
 using namespace std;
 using namespace luxrays;
@@ -157,7 +158,25 @@ void CompiledScene::CompileLightStrategy() {
 
 			CompileDLSC(dlscLightStrategy);
 		} catch(std::bad_cast&) {
-			throw runtime_error("Unsupported illuminate light strategy in CompiledScene::CompileLights()");
+			// Check if it is an LightStrategyLightTree
+			try {
+				auto& treeLightStrategy =
+					dynamic_cast<const LightStrategyLightTree&>(illuminateLightStrategy);
+				lightsDistribution.clear();
+				lightsDistributionSize = 0;
+
+				// TODO: the light tree on the GPU. Until then, its log power
+				// distribution.
+				SLG_LOG("WARNING: the light tree is not supported by the GPU engines yet, using LOG_POWER");
+				if (treeLightStrategy.GetLightsDistribution()) {
+					std::tie(lightsDistribution, lightsDistributionSize) =
+						CompileDistribution1D(
+							*treeLightStrategy.GetLightsDistribution()
+						);
+				}
+			} catch(std::bad_cast&) {
+				throw runtime_error("Unsupported illuminate light strategy in CompiledScene::CompileLights()");
+			}
 		}
 	}
 
@@ -179,17 +198,20 @@ void CompiledScene::CompileLightStrategy() {
 				);
 		}
 	} catch(std::bad_cast&) {
-		// Check if it is an LightStrategyDLSCache
-		try {
-			auto& dlscLightStrategy =
-				dynamic_cast<const LightStrategyDLSCache&>(illuminateLightStrategy);
-			if (dlscLightStrategy.GetLightsDistribution()) {
-				std::tie(
-					infiniteLightSourcesDistribution, infiniteLightSourcesDistributionSize
-				) = CompileDistribution1D(*dlscLightStrategy.GetLightsDistribution());
-			}
-		} catch (std::bad_cast&) {
+		// Check if it is an LightStrategyDLSCache or a LightStrategyLightTree:
+		// both use a log power distribution for the infinite lights
+		const Distribution1D *dist = nullptr;
+		if (auto dlscLightStrategy = dynamic_cast<const LightStrategyDLSCache *>(&infiniteLightStrategy))
+			dist = dlscLightStrategy->GetLightsDistribution().get();
+		else if (auto treeLightStrategy = dynamic_cast<const LightStrategyLightTree *>(&infiniteLightStrategy))
+			dist = treeLightStrategy->GetLightsDistribution().get();
+		else
 			throw runtime_error("Unsupported infinite light strategy in CompiledScene::CompileLights()");
+
+		if (dist) {
+			std::tie(
+				infiniteLightSourcesDistribution, infiniteLightSourcesDistributionSize
+			) = CompileDistribution1D(*dist);
 		}
 	}
 }

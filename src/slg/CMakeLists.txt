@@ -231,6 +231,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscacheimpl/dlscbvh.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/distributionlightstrategy.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/lightstrategy.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/lighttree.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/logpower.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/power.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/uniform.cpp
