@@ -98,13 +98,13 @@ typedef struct {
 	unsigned int lightID;
 } DirectLightIlluminateInfo;
 
-// The state used to keep track of the rendered path
+// The state used to keep track of the rendered path. The BSDF of the last path
+// vertex has its own buffer (tasksBSDF), so the accesses to these members
+// don't each touch a cache line per lane: on CUDA and HIP the vertex is shaded
+// with a private copy of it, and only what the next iteration reads is stored
+// there (see AdvancePaths_MK_RT)
 typedef struct {
 	Spectrum throughput;
-	// The BSDF of the last path vertex. On CUDA and HIP the vertex is shaded
-	// with a private copy, and only what the next iteration reads is stored
-	// here (see AdvancePaths_MK_RT)
-	BSDF bsdf;
 
 	Seed seedPassThroughEvent;
 	

@@ -269,6 +269,7 @@ protected:
 	luxrays::HardwareDeviceBuffer *tasksDirectLightBuff;
 	luxrays::HardwareDeviceBuffer *tasksDirectLightVertexBuff;
 	luxrays::HardwareDeviceBuffer *tasksStateBuff;
+	luxrays::HardwareDeviceBuffer *tasksBSDFBuff;
 	luxrays::HardwareDeviceBuffer *pathStatesBuff;
 	luxrays::HardwareDeviceBuffer *samplerSharedDataBuff;
 	// The last list uploaded by UpdateSamplerTodoPixels()

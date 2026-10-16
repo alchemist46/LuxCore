@@ -133,9 +133,13 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 
 	// Initialize the path state (the PathState is set by the caller)
 	VSTORE3F(WHITE, taskState->throughput.c);
-	taskState->albedoToDo = true;
-	VSTORE3F(BLACK, sampleResult->albedo.c);  // Just in case albedoToDo is never true
-	VSTORE3F(BLACK, &sampleResult->shadingNormal.x);
+	// The albedo and the shading normal are computed only for the film
+	// channels that read them
+	taskState->albedoToDo = SampleResult_HasAlbedoChannels(&taskConfig->film);
+	if (taskState->albedoToDo) {
+		VSTORE3F(BLACK, sampleResult->albedo.c);  // Just in case albedoToDo is never true
+		VSTORE3F(BLACK, &sampleResult->shadingNormal.x);
+	}
 	taskState->photonGICacheEnabledOnLastHit = false;
 	taskState->photonGICausticCacheUsed = false;
 	taskState->photonGIShowIndirectPathMixUsed = false;
@@ -459,6 +463,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global GPUTaskDirectLight *tasksDirectLight \
 		, __global GPUTaskDirectLightVertex *tasksDirectLightVertex \
 		, __global GPUTaskState *tasksState \
+		, __global BSDF *tasksBSDF \
 		, __global PathState *pathStates \
 		, __global GPUTaskStats *taskStats \
 		KERNEL_ARGS_FAST_PIXEL_FILTER \

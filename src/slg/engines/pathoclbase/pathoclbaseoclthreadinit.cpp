@@ -381,6 +381,13 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	intersectionDevice.AllocBufferRW(&tasksStateBuff, nullptr, sizeof(slg::ocl::pathoclbase::GPUTaskState) * taskCount, "GPUTaskState");
 
 	//--------------------------------------------------------------------------
+	// Allocate tasksBSDFBuff: the BSDF of the last path vertex, in its own
+	// buffer to keep GPUTaskState small
+	//--------------------------------------------------------------------------
+
+	intersectionDevice.AllocBufferRW(&tasksBSDFBuff, nullptr, sizeof(slg::ocl::BSDF) * taskCount, "GPUTask BSDF");
+
+	//--------------------------------------------------------------------------
 	// Allocate pathStatesBuff: the state of each path is kept in its own
 	// compact array, so the kernels can check it without touching the large
 	// GPUTaskState

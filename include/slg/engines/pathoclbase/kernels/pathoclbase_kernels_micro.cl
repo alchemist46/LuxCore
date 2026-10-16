@@ -128,7 +128,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 
 		// This is valid for irradiance AOV only if it is not a SPECULAR material and
 		// first path vertex. Set or update sampleResult.irradiancePathThroughput
-		if (sampleResult->firstPathVertex) {
+		if (!taskConfig->film.hasChannelIrradiance) {
+		} else if (sampleResult->firstPathVertex) {
 			if (!(BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM) & SPECULAR))
 				VSTORE3F(TO_FLOAT3(M_1_PI_F * fabs(dot(
@@ -181,7 +182,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__global const GPUTaskDirectLightVertex *taskDirectLightVertex
 		MATERIALS_PARAM_DECL) {
 	// Count the shadow ray traced by the RT kernel
-	sampleResult->rayCount += 1;
+	if (taskConfig->film.hasChannelRayCount)
+		sampleResult->rayCount += 1;
 
 	float3 connectionThroughput = WHITE;
 
@@ -234,7 +236,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 				//
 				// Note: irradiance samples the light sources only here (i.e. no
 				// direct hit, no MIS, it would be useless)
-				if (firstPathVertex && !(BSDF_GetEventTypes(bsdf
+				if (taskConfig->film.hasChannelIrradiance && firstPathVertex && !(BSDF_GetEventTypes(bsdf
 							MATERIALS_PARAM) & SPECULAR)) {
 					const float3 irradiance = (M_1_PI_F * fabs(dot(
 								VLOAD3F(&bsdf->hitPoint.shadeN.x),
@@ -583,8 +585,10 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		taskDirectLight->throughShadowTransparency = false;
 
 		// Make a copy of current PathVolumeInfo for tracing the
-		// shadow ray
-		*directLightVolInfo = pathInfo->volume;
+		// shadow ray (an any-hit shadow ray doesn't use it, see
+		// AdvancePaths_ShadowRayHit())
+		if (!taskConfig->scene.shadowRayAnyHit)
+			*directLightVolInfo = pathInfo->volume;
 
 		// The shadow ray was initialized by Light_Illuminate(): flag it for
 		// an any-hit trace if the scene allows it
@@ -661,7 +665,7 @@ __kernel void AdvancePaths_MK_RT(
 	// memory: a private one makes the ray marching of heterogeneous volumes
 	// 7% slower (luxball-hdr-vol)
 	__global HitPoint *intersectHitPoint = &tasksIntersectHitPoint[gid];
-	// The BSDF of the vertex hit in this iteration. taskState->bsdf keeps,
+	// The BSDF of the vertex hit in this iteration. tasksBSDF[gid] keeps,
 	// for the next iteration, the members of AdvancePaths_SaveVertexBSDF() or,
 	// in the two-iteration flow (MK_RT_DL), the whole BSDF for the next vertex
 	// ray
@@ -678,12 +682,13 @@ __kernel void AdvancePaths_MK_RT(
 #else
 	__global GPUTaskTmp *taskTmp = &tasksTmp[gid];
 	__global HitPoint *intersectHitPoint = &taskTmp->tmpHitPoint;
-	__global BSDF *bsdf = &taskState->bsdf;
+	__global BSDF *bsdf = &tasksBSDF[gid];
 	__global BSDF *initBsdf = bsdf;
 #endif
 	// The BSDF of the previous vertex (the vertex of the shadow ray, or the
 	// last one before a miss)
-	__global const BSDF *prevBsdf = &taskState->bsdf;
+	__global BSDF *vertexBsdf = &tasksBSDF[gid];
+	__global const BSDF *prevBsdf = vertexBsdf;
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
 	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
 	__constant const Scene* restrict scene = &taskConfig->scene;
@@ -723,7 +728,7 @@ __kernel void AdvancePaths_MK_RT(
 			// The next vertex ray samples the BSDF the previous iteration
 			// stored
 			if (pathState == MK_GENERATE_NEXT_VERTEX_RAY)
-				*bsdf = taskState->bsdf;
+				*bsdf = *vertexBsdf;
 #endif
 		} else if (pathState == MK_RT_DL_SPLAT)
 			pathState = MK_SPLAT_SAMPLE;
@@ -739,7 +744,8 @@ __kernel void AdvancePaths_MK_RT(
 	if (pathState == MK_RT_NEXT_VERTEX) {
 		// Count the ray traced by the RT kernel (the shadow rays are counted
 		// by AdvancePaths_ShadowRayHit())
-		sampleResult->rayCount += 1;
+		if (taskConfig->film.hasChannelRayCount)
+			sampleResult->rayCount += 1;
 
 		float3 connectionThroughput;
 
@@ -809,7 +815,8 @@ __kernel void AdvancePaths_MK_RT(
 					// AdvancePaths_ShadowRayHit()
 					__global GPUTaskDirectLightVertex *taskDirectLightVertex = &tasksDirectLightVertex[gid];
 					taskDirectLightVertex->throughput = taskState->throughput;
-					taskDirectLightVertex->irradiancePathThroughput = sampleResult->irradiancePathThroughput;
+					if (taskConfig->film.hasChannelIrradiance)
+						taskDirectLightVertex->irradiancePathThroughput = sampleResult->irradiancePathThroughput;
 					taskDirectLightVertex->firstPathVertex = sampleResult->firstPathVertex;
 
 					shadowRayToTrace = true;
@@ -823,9 +830,9 @@ __kernel void AdvancePaths_MK_RT(
 		// something was hit, or on a volume scatter event)
 		if (rayHits[gid].meshIndex != NULL_INDEX) {
 			if ((pathState == MK_RT_DL) && !sampleResult->lastPathVertex)
-				taskState->bsdf = *bsdf;
+				*vertexBsdf = *bsdf;
 			else
-				AdvancePaths_SaveVertexBSDF(&taskState->bsdf, bsdf);
+				AdvancePaths_SaveVertexBSDF(vertexBsdf, bsdf);
 		}
 #endif
 	}

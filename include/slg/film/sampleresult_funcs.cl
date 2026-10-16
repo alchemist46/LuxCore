@@ -29,30 +29,58 @@ OPENCL_FORCE_INLINE void SampleResult_ClearRadiance(__global SampleResult *sampl
 	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[7].c);
 }
 
+//------------------------------------------------------------------------------
+// The members of the AOV channels are computed only when the film has a channel
+// that reads them (Film_AddSample(), VarianceClamping_Clamp()): on the GPU each
+// update is a read-modify-write of a large per-task structure.
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE bool SampleResult_HasDirectChannels(__constant const Film* restrict film) {
+	return film->hasChannelDirectDiffuse || film->hasChannelDirectDiffuseReflect || film->hasChannelDirectDiffuseTransmit ||
+			film->hasChannelDirectGlossy || film->hasChannelDirectGlossyReflect || film->hasChannelDirectGlossyTransmit;
+}
+
+OPENCL_FORCE_INLINE bool SampleResult_HasIndirectChannels(__constant const Film* restrict film) {
+	return film->hasChannelIndirectDiffuse || film->hasChannelIndirectDiffuseReflect || film->hasChannelIndirectDiffuseTransmit ||
+			film->hasChannelIndirectGlossy || film->hasChannelIndirectGlossyReflect || film->hasChannelIndirectGlossyTransmit ||
+			film->hasChannelIndirectSpecular || film->hasChannelIndirectSpecularReflect || film->hasChannelIndirectSpecularTransmit;
+}
+
+// The shading normal is set with the albedo (see AdvancePaths_HitObject())
+OPENCL_FORCE_INLINE bool SampleResult_HasAlbedoChannels(__constant const Film* restrict film) {
+	return film->hasChannelAlbedo || film->hasChannelAvgShadingNormal || film->hasChannelShadingNormal;
+}
+
 OPENCL_FORCE_INLINE void SampleResult_Init(__constant const Film* restrict film,
 		__global SampleResult *sampleResult) {
 	// Initialize only Spectrum fields
 
 	SampleResult_ClearRadiance(sampleResult);
 
-	VSTORE3F(BLACK, sampleResult->directDiffuse.c);
-	VSTORE3F(BLACK, sampleResult->directDiffuseReflect.c);
-	VSTORE3F(BLACK, sampleResult->directDiffuseTransmit.c);
-	VSTORE3F(BLACK, sampleResult->directGlossy.c);
-	VSTORE3F(BLACK, sampleResult->directGlossyReflect.c);
-	VSTORE3F(BLACK, sampleResult->directGlossyTransmit.c);
-	VSTORE3F(BLACK, sampleResult->emission.c);
-	VSTORE3F(BLACK, sampleResult->indirectDiffuse.c);
-	VSTORE3F(BLACK, sampleResult->indirectDiffuseReflect.c);
-	VSTORE3F(BLACK, sampleResult->indirectDiffuseTransmit.c);
-	VSTORE3F(BLACK, sampleResult->indirectGlossy.c);
-	VSTORE3F(BLACK, sampleResult->indirectGlossyReflect.c);
-	VSTORE3F(BLACK, sampleResult->indirectGlossyTransmit.c);
-	VSTORE3F(BLACK, sampleResult->indirectSpecular.c);
-	VSTORE3F(BLACK, sampleResult->indirectSpecularReflect.c);
-	VSTORE3F(BLACK, sampleResult->indirectSpecularTransmit.c);
+	if (SampleResult_HasDirectChannels(film)) {
+		VSTORE3F(BLACK, sampleResult->directDiffuse.c);
+		VSTORE3F(BLACK, sampleResult->directDiffuseReflect.c);
+		VSTORE3F(BLACK, sampleResult->directDiffuseTransmit.c);
+		VSTORE3F(BLACK, sampleResult->directGlossy.c);
+		VSTORE3F(BLACK, sampleResult->directGlossyReflect.c);
+		VSTORE3F(BLACK, sampleResult->directGlossyTransmit.c);
+	}
+	if (film->hasChannelEmission)
+		VSTORE3F(BLACK, sampleResult->emission.c);
+	if (SampleResult_HasIndirectChannels(film)) {
+		VSTORE3F(BLACK, sampleResult->indirectDiffuse.c);
+		VSTORE3F(BLACK, sampleResult->indirectDiffuseReflect.c);
+		VSTORE3F(BLACK, sampleResult->indirectDiffuseTransmit.c);
+		VSTORE3F(BLACK, sampleResult->indirectGlossy.c);
+		VSTORE3F(BLACK, sampleResult->indirectGlossyReflect.c);
+		VSTORE3F(BLACK, sampleResult->indirectGlossyTransmit.c);
+		VSTORE3F(BLACK, sampleResult->indirectSpecular.c);
+		VSTORE3F(BLACK, sampleResult->indirectSpecularReflect.c);
+		VSTORE3F(BLACK, sampleResult->indirectSpecularTransmit.c);
+	}
 	sampleResult->rayCount = 0.f;
-	VSTORE3F(BLACK, sampleResult->irradiance.c);
+	if (film->hasChannelIrradiance)
+		VSTORE3F(BLACK, sampleResult->irradiance.c);
 	VSTORE3F(BLACK, sampleResult->albedo.c);
 
 	sampleResult->firstPathVertexEvent = NONE;
@@ -73,11 +101,14 @@ OPENCL_FORCE_INLINE void SampleResult_AddEmission(__constant const Film* restric
 	VADD3F(sampleResult->radiancePerPixelNormalized[id].c, radiance);
 
 	if (sampleResult->firstPathVertex) {
-		VADD3F(sampleResult->emission.c, radiance);
+		if (film->hasChannelEmission)
+			VADD3F(sampleResult->emission.c, radiance);
 	} else {
-		sampleResult->indirectShadowMask = 0.f;
+		if (film->hasChannelIndirectShadowMask)
+			sampleResult->indirectShadowMask = 0.f;
 
-		const BSDFEvent firstPathVertexEvent = sampleResult->firstPathVertexEvent;
+		const BSDFEvent firstPathVertexEvent = SampleResult_HasIndirectChannels(film) ?
+			sampleResult->firstPathVertexEvent : NONE;
 		if ((firstPathVertexEvent & (DIFFUSE | REFLECT)) == (DIFFUSE | REFLECT)) {
 			VADD3F(sampleResult->indirectDiffuseReflect.c, radiance);
 		} else if ((firstPathVertexEvent & (DIFFUSE | TRANSMIT)) == (DIFFUSE | TRANSMIT)) {
@@ -109,9 +140,11 @@ OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* rest
 	VADD3F(sampleResult->radiancePerPixelNormalized[id].c, radiance);
 
 	if (firstPathVertex) {
-		sampleResult->directShadowMask = fmax(0.f, sampleResult->directShadowMask - lightScale);
+		if (film->hasChannelDirectShadowMask)
+			sampleResult->directShadowMask = fmax(0.f, sampleResult->directShadowMask - lightScale);
 
-		if ((bsdfEvent & (DIFFUSE | REFLECT)) == (DIFFUSE | REFLECT)) {
+		if (!SampleResult_HasDirectChannels(film)) {
+		} else if ((bsdfEvent & (DIFFUSE | REFLECT)) == (DIFFUSE | REFLECT)) {
 			VADD3F(sampleResult->directDiffuseReflect.c, radiance);
 		} else if ((bsdfEvent & (DIFFUSE | TRANSMIT)) == (DIFFUSE | TRANSMIT)) {
 			VADD3F(sampleResult->directDiffuseTransmit.c, radiance);
@@ -121,9 +154,11 @@ OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* rest
 			VADD3F(sampleResult->directGlossyTransmit.c, radiance);
 		}
 	} else {
-		sampleResult->indirectShadowMask = fmax(0.f, sampleResult->indirectShadowMask - lightScale);
+		if (film->hasChannelIndirectShadowMask)
+			sampleResult->indirectShadowMask = fmax(0.f, sampleResult->indirectShadowMask - lightScale);
 
-		const BSDFEvent firstPathVertexEvent = sampleResult->firstPathVertexEvent;
+		const BSDFEvent firstPathVertexEvent = SampleResult_HasIndirectChannels(film) ?
+			sampleResult->firstPathVertexEvent : NONE;
 		if ((firstPathVertexEvent & (DIFFUSE | REFLECT)) == (DIFFUSE | REFLECT)) {
 			VADD3F(sampleResult->indirectDiffuseReflect.c, radiance);
 		} else if ((firstPathVertexEvent & (DIFFUSE | TRANSMIT)) == (DIFFUSE | TRANSMIT)) {
@@ -138,7 +173,8 @@ OPENCL_FORCE_INLINE void SampleResult_AddDirectLight(__constant const Film* rest
 			VADD3F(sampleResult->indirectSpecularTransmit.c, radiance);
 		}
 
-		VADD3F(sampleResult->irradiance.c, irradiancePathThroughput * incomingRadiance);
+		if (film->hasChannelIrradiance)
+			VADD3F(sampleResult->irradiance.c, irradiancePathThroughput * incomingRadiance);
 	}
 }
 
