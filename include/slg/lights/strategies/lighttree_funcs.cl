@@ -83,11 +83,7 @@ OPENCL_FORCE_INLINE float LightTree_TriangleImportance(__global const LightTreeN
 	if (hasNormal) {
 		// theta_u: the half angle of the cone of directions from p that holds
 		// the bounding sphere of the triangle around its centroid
-		const float3 centroid = p + toCentroid;
-		const float radius2 = fmax(fmax(
-				dot(v0 - centroid, v0 - centroid),
-				dot(v1 - centroid, v1 - centroid)),
-				dot(v2 - centroid, v2 - centroid));
+		const float radius2 = node->radius * node->radius;
 		const float cosThetaU = (centroidDistance2 > radius2) ?
 				sqrt(1.f - radius2 / centroidDistance2) : -1.f;
 		const float cosThetaI = fabs(dot(n, wi));
@@ -119,26 +115,30 @@ OPENCL_FORCE_INLINE void LightTree_NodeImportance(__global const LightTreeNode *
 
 	const float3 toCentroid = .5f * (bboxMin + bboxMax) - p;
 	const float centroidDistance = length(toCentroid);
+	const float invCentroidDistance = 1.f / centroidDistance;
 	// The direction from p to the centroid (any direction at the centroid)
-	const float3 wi = (centroidDistance > 0.f) ? (toCentroid / centroidDistance) : MAKE_FLOAT3(0.f, 0.f, 1.f);
+	const float3 wi = (centroidDistance > 0.f) ? (toCentroid * invCentroidDistance) : MAKE_FLOAT3(0.f, 0.f, 1.f);
 
 	// The radius of the bounding sphere of the box
-	const float radius = .5f * length(bboxMax - bboxMin);
+	const float radius = node->radius;
 
-	// The distance used for the largest contribution, clamped to the bounding
-	// sphere (it would diverge at the centroid), and the distance of the
-	// farthest corner for the smallest one
-	const float minDistance = fmax(centroidDistance, radius);
-	const float maxDistance = length(fmax(p - bboxMin, bboxMax - p));
+	// The distance used for the largest contribution, clamped to half the
+	// radius of the bounding sphere (it would diverge at the centroid), and the
+	// distance of the farthest corner for the smallest one. Half the radius is
+	// Cycles' clamp: with the whole radius, a point inside a large node (e.g.
+	// the root, in a room) underrates the node 4x against the distant lights
+	// (a sun behind blinds took 66% of the picks on the Blender classroom, 55%
+	// with this clamp)
+	const float minDistance = fmax(centroidDistance, .5f * radius);
+	const float3 toFarthestCorner = fmax(p - bboxMin, bboxMax - p);
 	const float minDistance2 = fmax(minDistance * minDistance, 1e-12f);
-	const float maxDistance2 = fmax(maxDistance * maxDistance, 1e-12f);
+	const float maxDistance2 = fmax(dot(toFarthestCorner, toFarthestCorner), 1e-12f);
 
 	// theta_u: the half angle of the cone of directions from p that holds the
 	// bounding sphere of the box (pbrt-v4; Cycles bounds the 8 corners, which is
 	// tighter and costs 8 normalizations)
-	const float cosThetaU = (centroidDistance > radius) ?
-		sqrt(fmax(0.f, 1.f - (radius * radius) / (centroidDistance * centroidDistance))) : -1.f;
-	const float sinThetaU = LightTree_SinFromCos(cosThetaU);
+	const float sinThetaU = (centroidDistance > radius) ? (radius * invCentroidDistance) : 0.f;
+	const float cosThetaU = (centroidDistance > radius) ? sqrt(fmax(0.f, 1.f - sinThetaU * sinThetaU)) : -1.f;
 
 	// theta: the angle between the axis of the cone and the direction from
 	// the centroid to p

@@ -84,8 +84,6 @@ using std::atanh;
 using std::cos;
 using std::exp;
 using std::fabs;
-using std::fmax;
-using std::fmin;
 using std::isinf;
 using std::isnan;
 using std::log;
@@ -93,9 +91,16 @@ using std::pow;
 using std::sin;
 using std::sqrt;
 using ::floorf;
-using ::fmaxf;
-using ::fminf;
 using ::fmodf;
+
+// fmaxf() and fminf() are calls to the C library on x86-64 (no instruction
+// has their NaN rule before AVX-512). These are inline and return the same
+// values as glibc's (maxss/minss, which return y when x == y, and the other
+// argument when one is a NaN).
+inline float fmaxf(const float x, const float y) { return ((x > y) || (y != y)) ? x : y; }
+inline float fminf(const float x, const float y) { return ((x < y) || (y != y)) ? x : y; }
+inline float fmax(const float x, const float y) { return fmaxf(x, y); }
+inline float fmin(const float x, const float y) { return fminf(x, y); }
 
 // The CUDA built-ins used by cudadevice_math.cl
 inline int min(const int a, const int b) { return (a < b) ? a : b; }

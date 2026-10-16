@@ -356,6 +356,7 @@ void ToOCL(const LightBounds &bounds, ocl::LightTreeNode *node) {
 	node->bboxMax[0] = bounds.bbox.pMax.x;
 	node->bboxMax[1] = bounds.bbox.pMax.y;
 	node->bboxMax[2] = bounds.bbox.pMax.z;
+	node->radius = .5f * (bounds.bbox.pMax - bounds.bbox.pMin).Length();
 	node->axis[0] = bounds.axis.x;
 	node->axis[1] = bounds.axis.y;
 	node->axis[2] = bounds.axis.z;
@@ -387,6 +388,11 @@ u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 				node.bboxMax[j] = bounds.vertices[1][j];
 				node.axis[j] = bounds.vertices[2][j];
 			}
+			const Point centroid = (bounds.vertices[0] + bounds.vertices[1] + bounds.vertices[2]) * (1.f / 3.f);
+			node.radius = sqrtf(Max(Max(
+					DistanceSquared(bounds.vertices[0], centroid),
+					DistanceSquared(bounds.vertices[1], centroid)),
+					DistanceSquared(bounds.vertices[2], centroid)));
 			node.flags |= LIGHTTREE_NODE_TRIANGLE;
 		}
 		nodes[nodeIndex].childOrLightIndex = lights[start].first;
@@ -508,6 +514,10 @@ void LightStrategyLightTree::Build(SceneConstRef scene) {
 	BuildLights lights;
 	for (u_int i = 0; i < lightCount; ++i) {
 		auto& l = scene.GetLightSources().GetLightSource(i);
+		// The emissive meshes over the 256 triangles of the AUTO direct light
+		// sampling stay out, as with the other strategies: in the tree they
+		// take the picks of the lights next to them (measured on the Blender
+		// classroom, whose lamp meshes sit around its sphere lights)
 		if (!l.IsDirectLightSamplingEnabled())
 			continue;
 

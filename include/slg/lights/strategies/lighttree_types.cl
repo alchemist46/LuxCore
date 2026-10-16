@@ -34,6 +34,9 @@
 typedef struct {
 	// The bounding box of the lights below the node
 	float bboxMin[3], bboxMax[3];
+	// The radius of the bounding sphere of the box around its center (of a
+	// triangle leaf: of its vertices around their centroid)
+	float radius;
 	// The bounding cone of their emission: the normals are within theta_o of
 	// the axis and each light emits up to theta_e away from its normal
 	float axis[3];
