@@ -174,10 +174,6 @@ MAX_MEAN_DIFFERENCE = 0.015
 
 # Tests with a larger, known, mean brightness noise (image name: maximum)
 MAX_MEAN_DIFFERENCE_OVERRIDES = {
-	# Metropolis normalizes the image with a brightness estimated from its
-	# first samples: with the small laser light, it varies up to ~4% between
-	# GPU runs
-	"LaserLight_PATHOCL_METROPOLIS.png": 0.06,
 }
 
 # Set by the --strict command line option: fail if a reference is missing

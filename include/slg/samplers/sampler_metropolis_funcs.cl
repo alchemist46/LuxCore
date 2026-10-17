@@ -22,7 +22,18 @@
 // Metropolis Sampler Kernel
 //------------------------------------------------------------------------------
 
-#define METROPOLISSAMPLER_TOTAL_U_SIZE (IDX_BSDF_OFFSET + taskConfig->pathTracer.maxPathDepth.depth * VERTEX_SAMPLE_SIZE)
+// The size of a sample vector, as allocated by the host
+#define METROPOLISSAMPLER_TOTAL_U_SIZE (taskConfig->pathTracer.eyeSampleSize)
+
+// Each task owns two sample vectors (the current sample and the proposed
+// mutation), so a task's data is 2 * METROPOLISSAMPLER_TOTAL_U_SIZE floats
+OPENCL_FORCE_INLINE __global float *MetropolisSampler_GetSampleData(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global float *samplesDataBuff, const uint index) {
+	const size_t gid = get_global_id(0);
+
+	return &samplesDataBuff[(gid * 2 + index) * METROPOLISSAMPLER_TOTAL_U_SIZE];
+}
 
 
 OPENCL_FORCE_INLINE float MetropolisSampler_GetSample(
@@ -33,8 +44,8 @@ OPENCL_FORCE_INLINE float MetropolisSampler_GetSample(
 	__global MetropolisSample *samples = (__global MetropolisSample *)samplesBuff;
 	__global MetropolisSample *sample = &samples[gid];
 
-	__global float *samplesData = &samplesDataBuff[gid * METROPOLISSAMPLER_TOTAL_U_SIZE] +
-			sample->proposed * METROPOLISSAMPLER_TOTAL_U_SIZE;
+	__global float *samplesData = MetropolisSampler_GetSampleData(taskConfig,
+			samplesDataBuff, sample->proposed);
 
 	return samplesData[index];
 }
@@ -247,14 +258,14 @@ OPENCL_FORCE_INLINE void MetropolisSampler_NextSample(
 	// Mutate the sample
 	//--------------------------------------------------------------------------
 
-	__global float *proposedU = &samplesDataBuff[gid * METROPOLISSAMPLER_TOTAL_U_SIZE] +
-			sample->proposed * METROPOLISSAMPLER_TOTAL_U_SIZE;
+	__global float *proposedU = MetropolisSampler_GetSampleData(taskConfig,
+			samplesDataBuff, sample->proposed);
 	if (Rnd_FloatValue(seed) < taskConfig->sampler.metropolis.largeMutationProbability) {
 		LargeStep(taskConfig, seed, proposedU);
 		sample->smallMutationCount = 0;
 	} else {
-		__global float *currentU = &samplesDataBuff[gid * METROPOLISSAMPLER_TOTAL_U_SIZE] +
-			sample->current * METROPOLISSAMPLER_TOTAL_U_SIZE;
+		__global float *currentU = MetropolisSampler_GetSampleData(taskConfig,
+			samplesDataBuff, sample->current);
 
 		SmallStep(taskConfig, seed, currentU, proposedU);
 		sample->smallMutationCount += 1;
@@ -284,8 +295,8 @@ OPENCL_FORCE_INLINE bool MetropolisSampler_Init(
 
 	sample->weight = 0.f;
 
-	__global float *samplesData = &samplesDataBuff[gid * METROPOLISSAMPLER_TOTAL_U_SIZE] +
-			sample->proposed * METROPOLISSAMPLER_TOTAL_U_SIZE;
+	__global float *samplesData = MetropolisSampler_GetSampleData(taskConfig,
+			samplesDataBuff, sample->proposed);
 	LargeStep(taskConfig, seed, samplesData);
 
 	return true;
