@@ -56,7 +56,7 @@ jobs:
     needs: [check-version]
     uses: ./.github/workflows/sample-builder.yml
     with:
-      repository: LuxCoreRender/LuxCore
+      repository: ${{ github.repository }}
       version: ${{ inputs.release-version }}
 
   create-release:
@@ -109,7 +109,7 @@ jobs:
           body: |
             ## LuxCore C++ Samples
 
-            This release was built from the following point in LuxCoreRender/LuxCore:
+            This release was built from the following point in ${{ github.repository }}:
             - Branch: ${{ needs.call-build-samples.outputs.branch }}
             - Commit: ${{ needs.call-build-samples.outputs.commit }}
 

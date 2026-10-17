@@ -143,7 +143,7 @@ jobs:
           import json
           from pathlib import Path
 
-          if (input_version := "${{ inputs.release-version }}"):
+          if (input_version := "${{ inputs.version }}"):
             version = input_version
           else:
             # Fall back to default

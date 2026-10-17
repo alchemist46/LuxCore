@@ -1,8 +1,8 @@
 {
   "DefaultVersion": {
-    "major": "2",
-    "minor": "11",
-    "patch": "2",
+    "major": "3",
+    "minor": "0",
+    "patch": "0",
     "prerelease": ""
   },
   "Dependencies": {

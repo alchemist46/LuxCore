@@ -43,7 +43,7 @@ jobs:
         run: |
           # Warning: Target release must not be in 'draft' status,
           # otherwise gh release won't find it
-          gh release download wheels-v${{ inputs.release-tag}} -D tmp -R LuxCoreRender/LuxCore
+          gh release download wheels-v${{ inputs.release-tag}} -D tmp -R ${{ github.repository }}
           mkdir dist
           for d in tmp/*.zip ; do
               echo "unzip ${d}"
