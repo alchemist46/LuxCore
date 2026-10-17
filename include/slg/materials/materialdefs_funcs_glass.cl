@@ -193,6 +193,19 @@ OPENCL_FORCE_INLINE float3 GlassMaterial_EvalSpecularTransmission(__global const
 	return lkt * ce;
 }
 
+// Path regularization (HitPoint::regularization > 0): the glass is a rough
+// glass with the alpha floor, without dispersion
+#define GLASS_REGULARIZED_PARAMS \
+	const float3 kt = Spectrum_Clamp(Texture_GetSpectrumValue(material->glass.ktTexIndex, hitPoint TEXTURES_PARAM)); \
+	const float3 kr = Spectrum_Clamp(Texture_GetSpectrumValue(material->glass.krTexIndex, hitPoint TEXTURES_PARAM)); \
+	const float nc = ExtractExteriorIors(hitPoint, material->glass.exteriorIorTexIndex TEXTURES_PARAM); \
+	const float nt = ExtractInteriorIors(hitPoint, material->glass.interiorIorTexIndex TEXTURES_PARAM); \
+	const float alpha = Microfacet_Regularize(0.f, hitPoint->regularization); \
+	const float localFilmThickness = (material->glass.filmThicknessTexIndex != NULL_INDEX) \
+		? Texture_GetFloatValue(material->glass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f; \
+	const float localFilmIor = (localFilmThickness > 0.f && material->glass.filmIorTexIndex != NULL_INDEX) \
+		? Texture_GetFloatValue(material->glass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
+
 OPENCL_FORCE_INLINE void GlassMaterial_Evaluate(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -200,6 +213,24 @@ OPENCL_FORCE_INLINE void GlassMaterial_Evaluate(__global const Material* restric
 	float3 lightDir, eyeDir;
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
+
+	if (hitPoint->regularization > 0.f) {
+		GLASS_REGULARIZED_PARAMS
+
+		BSDFEvent event;
+		float directPdfW;
+		const float3 result = RoughGlassMaterial_EvaluateRough(hitPoint, lightDir, eyeDir,
+				kt, kr, nc, nt, alpha, alpha, false, localFilmThickness, localFilmIor,
+				&event, &directPdfW);
+		if (Spectrum_IsBlack(result)) {
+			MATERIAL_EVALUATE_RETURN_BLACK;
+		}
+
+		EvalStack_PushFloat3(result);
+		EvalStack_PushBSDFEvent(event);
+		EvalStack_PushFloat(directPdfW);
+		return;
+	}
 
 	MATERIAL_EVALUATE_RETURN_BLACK;
 }
@@ -214,6 +245,26 @@ OPENCL_FORCE_INLINE void GlassMaterial_Sample(__global const Material* restrict 
 	EvalStack_PopFloat(u0);
 	float3 fixedDir;
 	EvalStack_PopFloat3(fixedDir);
+
+	if (hitPoint->regularization > 0.f) {
+		GLASS_REGULARIZED_PARAMS
+
+		float3 sampledDir;
+		float pdfW;
+		BSDFEvent event;
+		const float3 result = RoughGlassMaterial_SampleRough(hitPoint, fixedDir, u0, u1, passThroughEvent,
+				kt, kr, nc, nt, alpha, alpha, false, localFilmThickness, localFilmIor,
+				&sampledDir, &pdfW, &event);
+		if (Spectrum_IsBlack(result)) {
+			MATERIAL_SAMPLE_RETURN_BLACK;
+		}
+
+		EvalStack_PushFloat3(result);
+		EvalStack_PushFloat3(sampledDir);
+		EvalStack_PushFloat(pdfW);
+		EvalStack_PushBSDFEvent(event);
+		return;
+	}
 
 	const float3 ktTexVal = Texture_GetSpectrumValue(material->glass.ktTexIndex, hitPoint TEXTURES_PARAM);
 	const float3 krTexVal = Texture_GetSpectrumValue(material->glass.krTexIndex, hitPoint TEXTURES_PARAM);

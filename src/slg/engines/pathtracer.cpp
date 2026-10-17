@@ -25,7 +25,22 @@
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
+#include <boost/algorithm/string.hpp>
+
 #include "slg/cameras/camera.h"
+
+// The code shared with the PathOCL kernels, compiled through the OpenCL
+// emulation (see luxrays/devices/cpudevice_oclemul.h)
+namespace slg { namespace ocl { namespace {
+#include "luxrays/devices/cpudevice_oclemul.h"
+#include "slg/engines/pathtracer_funcs.cl"
+
+float3 ToFloat3(const luxrays::Spectrum &s) {
+	return MAKE_FLOAT3(s.c[0], s.c[1], s.c[2]);
+}
+
+} } }
+
 using namespace std;
 using namespace luxrays;
 using namespace slg;
@@ -217,10 +232,12 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							if ((directLightDepthInfo.GetRRDepth() >= rrDepth) && (bsdfPdfW > 0.f)) {
 								// Russian Roulette: the BSDF technique continues the path
 								// with the probability RenderEyePath() computes from the
-								// sample weight of the direction, f cos / pdf (the MIS
-								// weight of a BSDF hit on the light uses the same product,
-								// see EyePathInfo::lastBSDFPdfW)
-								bsdfPdfW *= RenderEngine::RussianRouletteProb(bsdfEval / bsdfPdfW, rrImportanceCap);
+								// sample weight of the direction, f cos / pdf, and the
+								// path throughput (the MIS weight of a BSDF hit on the
+								// light uses the same product, see EyePathInfo::lastBSDFPdfW)
+								const float etaScale = pathInfo.etaScale *
+										(((rrType != slg::ocl::RR_BOUNCE) && (event & TRANSMIT)) ? bsdf.GetRefractionEtaScale() : 1.f);
+								bsdfPdfW *= RussianRouletteProb(bsdfEval / bsdfPdfW, pathThroughput, etaScale);
 							}
 
 							// Account for material transparency
@@ -491,6 +508,12 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			sampleResult.uv = bsdf.hitPoint.GetUV(0);
 			sampleResult.isHoldout = bsdf.IsHoldout();
 		}
+		// Path regularization: after the first non-specular bounce the GGX
+		// lobes of the vertex get a roughness floor and its delta lobes become
+		// rough (see HitPoint::regularization)
+		bsdf.hitPoint.regularization = (regularizationEnable && pathInfo.anyNonSpecularBounce) ?
+			regularizationRoughness : 0.f;
+
 		sampleResult.lastPathVertex = pathInfo.depth.IsLastPathVertex(maxPathDepth, bsdf.GetEventTypes());
 
 		//----------------------------------------------------------------------
@@ -646,12 +669,13 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		if (sampleResult.firstPathVertex)
 			sampleResult.firstPathVertexEvent = bsdfEvent;
 
-		pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold);
+		pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold,
+				rrType != slg::ocl::RR_BOUNCE);
 
 		// Russian Roulette
 		float rrProb = 1.f;
 		if (pathInfo.UseRR(rrDepth)) {
-			 rrProb = RenderEngine::RussianRouletteProb(bsdfSample, rrImportanceCap);
+			rrProb = RussianRouletteProb(bsdfSample, pathThroughput, pathInfo.etaScale);
 			if (rrProb < sampler.GetSample(sampleOffset + IDX_RR))
 				break;
 
@@ -1075,6 +1099,7 @@ void PathTracer::ParseOptions(
 	}
 
 	// Russian Roulette settings
+	rrType = String2RussianRouletteType(cfg.Get(defaultProps.Get("path.russianroulette.type")).Get<string>());
 	rrDepth = (u_int)Max(1, cfg.Get(defaultProps.Get("path.russianroulette.depth")).Get<int>());
 	rrImportanceCap = Clamp(cfg.Get(defaultProps.Get("path.russianroulette.cap")).Get<double>(), 0.0, 1.0);
 
@@ -1095,6 +1120,17 @@ void PathTracer::ParseOptions(
 		hybridBackForwardPartition = Clamp(cfg.Get(defaultProps.Get("path.hybridbackforward.partition")).Get<double>(), 0.0, 1.0);
 		hybridBackForwardGlossinessThreshold = Clamp(cfg.Get(defaultProps.Get("path.hybridbackforward.glossinessthreshold")).Get<double>(), 0.0, 1.0);
 	}
+
+	// Path regularization settings. Not with the light tracing: the eye paths
+	// drop their caustics there, and the light paths carry them unblurred.
+	regularizationEnable = cfg.Get(defaultProps.Get("path.regularization.enable")).Get<bool>();
+	regularizationRoughness = Clamp(cfg.Get(defaultProps.Get("path.regularization.roughness")).Get<float>(), 0.f, 1.f);
+	if (regularizationEnable && hybridBackForwardEnable) {
+		SLG_LOG("WARNING: path.regularization.enable is ignored when path.hybridbackforward.enable is set");
+		regularizationEnable = false;
+	}
+	if (!(regularizationRoughness > 0.f))
+		regularizationEnable = false;
 
 	// Albedo AOV settings
 	albedoSpecularSetting = String2AlbedoSpecularSetting(cfg.Get(defaultProps.Get("path.albedospecular.type")).Get<string>());
@@ -1147,8 +1183,11 @@ PropertiesUPtr PathTracer::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("path.hybridbackforward.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("path.hybridbackforward.partition")) <<
 			cfg.Get(GetDefaultProps()->Get("path.hybridbackforward.glossinessthreshold")) <<
+			cfg.Get(GetDefaultProps()->Get("path.russianroulette.type")) <<
 			cfg.Get(GetDefaultProps()->Get("path.russianroulette.depth")) <<
 			cfg.Get(GetDefaultProps()->Get("path.russianroulette.cap")) <<
+			cfg.Get(GetDefaultProps()->Get("path.regularization.enable")) <<
+			cfg.Get(GetDefaultProps()->Get("path.regularization.roughness")) <<
 			cfg.Get(GetDefaultProps()->Get("path.clamping.variance.maxvalue")) <<
 			cfg.Get(GetDefaultProps()->Get("path.forceblackbackground.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("path.albedospecular.type")) <<
@@ -1168,13 +1207,51 @@ PropertiesUPtr PathTracer::GetDefaultProps() {
 			Property("path.pathdepth.diffuse")(4) <<
 			Property("path.pathdepth.glossy")(4) <<
 			Property("path.pathdepth.specular")(6) <<
+			Property("path.russianroulette.type")("BOUNCE") <<
 			Property("path.russianroulette.depth")(3) <<
 			Property("path.russianroulette.cap")(.5f) <<
+			Property("path.regularization.enable")(false) <<
+			Property("path.regularization.roughness")(.1f) <<
 			Property("path.clamping.variance.maxvalue")(0.f) <<
 			Property("path.forceblackbackground.enable")(false) <<
 			Property("path.albedospecular.type")("REFLECT_TRANSMIT") <<
 			Property("path.albedospecular.glossinessthreshold")(.05f);
 
 	return props;
+}
+
+//------------------------------------------------------------------------------
+// Russian roulette
+//------------------------------------------------------------------------------
+
+slg::ocl::RussianRouletteType PathTracer::String2RussianRouletteType(const string &type) {
+	const string t = boost::to_upper_copy(type);
+	if (t == "BOUNCE")
+		return slg::ocl::RR_BOUNCE;
+	else if (t == "PATH")
+		return slg::ocl::RR_PATH;
+	else if (t == "PATH_SQRT")
+		return slg::ocl::RR_PATH_SQRT;
+	else
+		throw runtime_error("Unknown Russian roulette type: " + type);
+}
+
+string PathTracer::RussianRouletteType2String(const slg::ocl::RussianRouletteType type) {
+	switch (type) {
+		case slg::ocl::RR_BOUNCE:
+			return "BOUNCE";
+		case slg::ocl::RR_PATH:
+			return "PATH";
+		case slg::ocl::RR_PATH_SQRT:
+			return "PATH_SQRT";
+		default:
+			throw runtime_error("Unknown Russian roulette type: " + to_string((int)type));
+	}
+}
+
+float PathTracer::RussianRouletteProb(const Spectrum &bounceWeight,
+		const Spectrum &pathThroughput, const float etaScale) const {
+	return slg::ocl::PathTracer_RussianRouletteProb(rrType, rrImportanceCap,
+			slg::ocl::ToFloat3(bounceWeight), slg::ocl::ToFloat3(pathThroughput), etaScale);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

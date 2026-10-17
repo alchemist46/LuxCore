@@ -133,7 +133,6 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_clearvol <<
 			slg::ocl::KernelSource_materialdefs_funcs_cloth <<
 			slg::ocl::KernelSource_materialdefs_funcs_disney <<
-			slg::ocl::KernelSource_materialdefs_funcs_glass <<
 			slg::ocl::KernelSource_materialdefs_funcs_glossy2 <<
 			slg::ocl::KernelSource_materialdefs_funcs_glossycoating <<
 			slg::ocl::KernelSource_materialdefs_funcs_glossytranslucent <<
@@ -145,7 +144,8 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_mirror <<
 			slg::ocl::KernelSource_materialdefs_funcs_mix <<
 			slg::ocl::KernelSource_materialdefs_funcs_null <<
-			slg::ocl::KernelSource_materialdefs_funcs_roughglass <<
+			slg::ocl::KernelSource_materialdefs_funcs_roughglass << // Before glass: the regularized glass uses it
+			slg::ocl::KernelSource_materialdefs_funcs_glass <<
 			slg::ocl::KernelSource_materialdefs_funcs_roughmatte_translucent <<
 			slg::ocl::KernelSource_materialdefs_funcs_twosided <<
 			slg::ocl::KernelSource_materialdefs_funcs_velvet <<
@@ -166,6 +166,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_pathdepthinfo_funcs <<
 			slg::ocl::KernelSource_pathvolumeinfo_funcs <<
 			slg::ocl::KernelSource_pathinfo_funcs <<
+			slg::ocl::KernelSource_pathtracer_funcs <<
 			slg::ocl::KernelSource_camera_funcs <<
 			slg::ocl::KernelSource_dlsc_funcs <<
 			slg::ocl::KernelSource_elvc_funcs <<

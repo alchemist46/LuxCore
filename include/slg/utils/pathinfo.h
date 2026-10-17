@@ -74,8 +74,10 @@ public:
 	EyePathInfo();
 	~EyePathInfo() { }
 
+	// trackEtaScale: update etaScale (the Russian roulette on the path
+	// throughput is in use)
 	void AddVertex(const BSDF &bsdf, const BSDFEvent event, const float pdfW,
-			const float glossinessThreshold);
+			const float glossinessThreshold, const bool trackEtaScale = false);
 	
 	bool IsCausticPath() const { return isNearlyCaustic && (depth.depth > 1); }
 	bool IsCausticPath(const BSDFEvent event, const float glossiness, const float glossinessThreshold) const;
@@ -87,6 +89,12 @@ public:
 	float lastGlossiness;
 	luxrays::Normal lastShadeN;
 	bool lastFromVolume, isTransmittedPath;
+	// The product of the eta^2 of the refractions of the path, for the
+	// Russian roulette on the path throughput (see
+	// PathTracer_RussianRouletteProb()); 1 when the rule is not in use
+	float etaScale;
+	// A non-specular bounce happened (the path regularization starts after it)
+	bool anyNonSpecularBounce;
 
 private:
 	bool isNearlyCaustic;

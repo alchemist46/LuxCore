@@ -27,6 +27,7 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 		MATERIALS_PARAM_DECL) {
 	hitPoint->throughShadowTransparency = throughShadowTransp;
 	hitPoint->passThroughEvent = passThroughEvnt;
+	hitPoint->regularization = 0.f;
 
 	VSTORE3F(pnt, &hitPoint->p.x);
 	VSTORE3F(fixedDir, &hitPoint->fixedDir.x);
@@ -99,6 +100,7 @@ OPENCL_FORCE_INLINE void HitPoint_InitDefault(__global HitPoint *hitPoint) {
 	hitPoint->exteriorVolumeIndex = NULL_INDEX;
 	hitPoint->interiorIorTexIndex = NULL_INDEX;
 	hitPoint->exteriorIorTexIndex = NULL_INDEX;
+	hitPoint->regularization = 0.f;
 }
 
 OPENCL_FORCE_INLINE void HitPoint_GetFrame(__global const HitPoint *hitPoint, Frame *frame) {

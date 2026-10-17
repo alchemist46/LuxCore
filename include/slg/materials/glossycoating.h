@@ -52,6 +52,9 @@ public:
 		return (Material::IsLightSource() || matBase->IsLightSource());
 	}
 
+	virtual const Material *GetRefractiveMaterial() const { return matBase->GetRefractiveMaterial(); }
+	virtual bool IsRegularizedDelta() const { return matBase->IsRegularizedDelta(); }
+	virtual BSDFEvent GetRegularizedEventTypes() const { return (GLOSSY | REFLECT | matBase->GetRegularizedEventTypes()); }
 	virtual bool IsDelta() const {
 		return matBase->IsDelta();
 	}

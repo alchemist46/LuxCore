@@ -107,8 +107,8 @@ OPENCL_FORCE_INLINE void Glossy2Material_Evaluate(__global const Material* restr
 	const float nuVal = Texture_GetFloatValue(material->glossy2.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->glossy2.nvTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float u = clamp(nuVal, 1e-9f, 1.f);
-	const float v = clamp(nvVal, 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
 
 	// Direct pdf
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
@@ -211,8 +211,8 @@ OPENCL_FORCE_INLINE void Glossy2Material_Sample(__global const Material* restric
 	const float nuVal = Texture_GetFloatValue(material->glossy2.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->glossy2.nvTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float u = clamp(nuVal, 1e-9f, 1.f);
-	const float v = clamp(nvVal, 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
 
 	// Coating is used only on the front face
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);

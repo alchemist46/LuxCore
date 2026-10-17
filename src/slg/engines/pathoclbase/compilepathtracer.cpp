@@ -34,8 +34,10 @@ void CompiledScene::CompilePathTracer() {
 	compiledPathTracer.maxPathDepth.glossyDepth = pathTracer->maxPathDepth.glossyDepth;
 	compiledPathTracer.maxPathDepth.specularDepth = pathTracer->maxPathDepth.specularDepth;
 	
+	compiledPathTracer.rrType = pathTracer->rrType;
 	compiledPathTracer.rrDepth = pathTracer->rrDepth;
 	compiledPathTracer.rrImportanceCap = pathTracer->rrImportanceCap;
+	compiledPathTracer.regularization = pathTracer->regularizationEnable ? pathTracer->regularizationRoughness : 0.f;
 	
 	compiledPathTracer.sqrtVarianceClampMaxValue = pathTracer->sqrtVarianceClampMaxValue;
 

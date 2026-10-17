@@ -18,6 +18,7 @@
 
 #include "slg/textures/fresnel/fresneltexture.h"
 #include "slg/materials/glass.h"
+#include "slg/materials/roughglass.h"
 #include "slg/materials/thinfilmcoating.h"
 
 using namespace std;
@@ -38,9 +39,26 @@ GlassMaterial::GlassMaterial(TextureConstPtr frontTransp, TextureConstPtr backTr
 			cauchyB(B), filmThickness(filmThickness), filmIor(filmIor) {
 }
 
+// Path regularization (HitPoint::regularization > 0): the glass is a rough
+// glass with the alpha floor, without dispersion
+#define GLASS_REGULARIZED_PARAMS \
+	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f); \
+	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f); \
+	const float nc = ExtractExteriorIors(hitPoint, exteriorIor); \
+	const float nt = ExtractInteriorIors(hitPoint, interiorIor); \
+	const float alpha = Microfacet_Regularize(0.f, hitPoint.regularization); \
+	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f; \
+	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+
 Spectrum GlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
+	if (hitPoint.regularization > 0.f) {
+		GLASS_REGULARIZED_PARAMS
+		return RoughGlassMaterial::EvaluateRough(hitPoint, localLightDir, localEyeDir, event, directPdfW, reversePdfW,
+				kt, kr, nc, nt, alpha, alpha, false, localFilmThickness, localFilmIor, workingColorSpace);
+	}
+
 	return Spectrum();
 }
 
@@ -190,10 +208,23 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 	return lkt * ce;
 }
 
+bool GlassMaterial::GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const {
+	*nc = ExtractExteriorIors(hitPoint, exteriorIor);
+	*nt = ExtractInteriorIors(hitPoint, interiorIor);
+
+	return true;
+}
+
 Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
 		float *pdfW, BSDFEvent *event) const {
+	if (hitPoint.regularization > 0.f) {
+		GLASS_REGULARIZED_PARAMS
+		return RoughGlassMaterial::SampleRough(hitPoint, localFixedDir, localSampledDir, u0, u1, passThroughEvent, pdfW, event,
+				kt, kr, nc, nt, alpha, alpha, false, localFilmThickness, localFilmIor, workingColorSpace);
+	}
+
 	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 
@@ -260,6 +291,13 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 void GlassMaterial::Pdf(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 	float *directPdfW, float *reversePdfW) const {
+	if (hitPoint.regularization > 0.f) {
+		GLASS_REGULARIZED_PARAMS
+		RoughGlassMaterial::PdfRough(hitPoint, localLightDir, localEyeDir, directPdfW, reversePdfW,
+				kt, kr, nc, nt, alpha, alpha);
+		return;
+	}
+
 	if (directPdfW)
 		*directPdfW = 0.f;
 	if (reversePdfW)

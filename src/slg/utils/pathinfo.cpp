@@ -52,12 +52,13 @@ bool PathInfo::CanBeNearlySpecular(const BSDF &bsdf, const float glossinessThres
 
 EyePathInfo::EyePathInfo() : isPassThroughPath(true),
 		lastBSDFPdfW(1.f), lastGlossiness(0.f), lastFromVolume(false),
-		isTransmittedPath(true), isNearlyCaustic(false) {
+		isTransmittedPath(true), etaScale(1.f), anyNonSpecularBounce(false),
+		isNearlyCaustic(false) {
 }
 
 void EyePathInfo::AddVertex(const BSDF &bsdf,
 		const BSDFEvent event, const float pdfW,
-		const float glossinessThreshold) {
+		const float glossinessThreshold, const bool trackEtaScale) {
 	//--------------------------------------------------------------------------
 	// PathInfo::AddVertex() inlined here for performances
 	//--------------------------------------------------------------------------
@@ -103,6 +104,12 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 	lastGlossiness = glossiness;
 
 	isTransmittedPath = isTransmittedPath && (event & TRANSMIT) && (event & (SPECULAR | GLOSSY));
+
+	// Undo the eta^2 radiance scaling of a refraction
+	if (trackEtaScale && (event & TRANSMIT))
+		etaScale *= bsdf.GetRefractionEtaScale();
+
+	anyNonSpecularBounce = anyNonSpecularBounce || !(event & SPECULAR);
 }
 
 bool EyePathInfo::IsCausticPath(const BSDFEvent event,

@@ -75,6 +75,9 @@ typedef struct HitPoint_t {
 	bool fromLight, intoObject;
 	// If I got here going trough a shadow transparency. It can be used to disable MIS.
 	bool throughShadowTransparency;
+	// Path regularization (see PathTracer): the floor of the GGX alphas of
+	// the materials at this vertex, 0 when the vertex is not regularized
+	float regularization;
 
 	// Used when hitting a surface
 	//

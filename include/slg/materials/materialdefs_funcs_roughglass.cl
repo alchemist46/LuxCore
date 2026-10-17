@@ -62,9 +62,9 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_GetEmittedRadiance(__global const Ma
 // The multiple-scattering scale of the whole interface seen from eyeDir:
 // 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
 // other side over the eye side as relative IOR), as in Cycles
-OPENCL_FORCE_INLINE float RoughGlassMaterial_MSScale(__global const Material* restrict material,
+OPENCL_FORCE_INLINE float RoughGlassMaterial_MSScale(const int multiscattering,
 		const float u, const float v, const float3 eyeDir, const float ntc) {
-	if (!material->multiscattering)
+	if (!multiscattering)
 		return 1.f;
 
 	const float eta = (eyeDir.z > 0.f) ? ntc : 1.f / ntc;
@@ -72,36 +72,22 @@ OPENCL_FORCE_INLINE float RoughGlassMaterial_MSScale(__global const Material* re
 	return 1.f / fmax(GGXEnergy_GlassE(u, v, fabs(eyeDir.z), eta), 1e-3f);
 }
 
-OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
-		__global float *evalStack, uint *evalStackOffset
-		MATERIALS_PARAM_DECL) {
-	float3 lightDir, eyeDir;
-	EvalStack_PopFloat3(eyeDir);
-	EvalStack_PopFloat3(lightDir);
-
-	const float3 ktVal = Texture_GetSpectrumValue(material->roughglass.ktTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 krVal = Texture_GetSpectrumValue(material->roughglass.krTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 kt = Spectrum_Clamp(ktVal);
-	const float3 kr = Spectrum_Clamp(krVal);
-
+// The rough dielectric interface with the parameters evaluated at the hit
+// point; the glass material uses it at a regularized vertex (see
+// HitPoint::regularization). BLACK when there is no contribution.
+OPENCL_FORCE_INLINE float3 RoughGlassMaterial_EvaluateRough(__global const HitPoint *hitPoint,
+		const float3 lightDir, const float3 eyeDir,
+		const float3 kt, const float3 kr, const float nc, const float nt,
+		const float u, const float v, const int multiscattering,
+		const float localFilmThickness, const float localFilmIor,
+		BSDFEvent *event, float *directPdfW) {
 	const bool isKtBlack = Spectrum_IsBlack(kt);
 	const bool isKrBlack = Spectrum_IsBlack(kr);
-	if (isKtBlack && isKrBlack) {
-		MATERIAL_EVALUATE_RETURN_BLACK;
-	}
+	if (isKtBlack && isKrBlack)
+		return BLACK;
 	
-	const float nc = ExtractExteriorIors(hitPoint, material->roughglass.exteriorIorTexIndex TEXTURES_PARAM);
-	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
 	const float ntc = nt / nc;
 
-	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
-	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = clamp(nuVal, 1e-9f, 1.f);
-	const float v = clamp(nvVal, 1e-9f, 1.f);
-
-	float directPdfW;
-	BSDFEvent event;
 	float3 result;
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (lightDir.z * eyeDir.z < 0.f) {
@@ -116,7 +102,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 
 		const float lengthSquared = dot(wh, wh);
 		if (!(lengthSquared > 0.f)) {
-			MATERIAL_EVALUATE_RETURN_BLACK;
+			return BLACK;
 		}
 		wh /= sqrt(lengthSquared);
 		const float cosThetaI = fabs(CosTheta(eyeDir));
@@ -128,26 +114,26 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 		const float specPdf = Microfacet_PdfH(u, v, eyeDir, wh);
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
 
-		directPdfW = threshold * specPdf * (fabs(cosThetaOH) * eta * eta) / lengthSquared;
+		*directPdfW = threshold * specPdf * (fabs(cosThetaOH) * eta * eta) / lengthSquared;
 
 		//if (reversePdfW)
 		//	*reversePdfW = threshold * specPdf * cosThetaIH / lengthSquared;
 
 		result = (fabs(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
-			kt * (1.f - F) * RoughGlassMaterial_MSScale(material, u, v, eyeDir, ntc);
+			kt * (1.f - F) * RoughGlassMaterial_MSScale(multiscattering, u, v, eyeDir, ntc);
 
-        event = GLOSSY | TRANSMIT;
+		*event = GLOSSY | TRANSMIT;
 	} else {
 		// Reflect
 		const float cosThetaO = fabs(CosTheta(lightDir));
 		const float cosThetaI = fabs(CosTheta(eyeDir));
 		if (cosThetaO == 0.f || cosThetaI == 0.f) {
-			MATERIAL_EVALUATE_RETURN_BLACK;
+			return BLACK;
 		}
 		float3 wh = lightDir + eyeDir;
 		if (all(isequal(wh, BLACK))) {
-			MATERIAL_EVALUATE_RETURN_BLACK;
+			return BLACK;
 		}
 		wh = normalize(wh);
 		if (wh.z < 0.f)
@@ -159,22 +145,50 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 		const float specPdf = Microfacet_PdfH(u, v, eyeDir, wh);
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaH);
 
-		directPdfW = (1.f - threshold) * specPdf / (4.f * fabs(dot(lightDir, wh)));
+		*directPdfW = (1.f - threshold) * specPdf / (4.f * fabs(dot(lightDir, wh)));
 
 		//if (reversePdfW)
 		//	*reversePdfW = (1.f - threshold) * specPdf / (4.f * fabs(dot(lightDir, wh));
 
-		result = (D * G / (4.f * cosThetaI)) * kr * F * RoughGlassMaterial_MSScale(material, u, v, eyeDir, ntc);
+		result = (D * G / (4.f * cosThetaI)) * kr * F * RoughGlassMaterial_MSScale(multiscattering, u, v, eyeDir, ntc);
 		
-		const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
-										 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
-		if (localFilmThickness > 0.f) {
-			const float localFilmIor = (material->roughglass.filmIorTexIndex != NULL_INDEX) 
-									   ? Texture_GetFloatValue(material->roughglass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
+		if (localFilmThickness > 0.f)
 			result *= CalcFilmColor(eyeDir, localFilmThickness, localFilmIor);
-		}
 
-        event = GLOSSY | REFLECT;
+		*event = GLOSSY | REFLECT;
+	}
+
+	return result;
+}
+
+OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	const float3 kt = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughglass.ktTexIndex, hitPoint TEXTURES_PARAM));
+	const float3 kr = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughglass.krTexIndex, hitPoint TEXTURES_PARAM));
+	const float nc = ExtractExteriorIors(hitPoint, material->roughglass.exteriorIorTexIndex TEXTURES_PARAM);
+	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
+	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
+	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
+	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
+									 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
+	const float localFilmIor = (localFilmThickness > 0.f && material->roughglass.filmIorTexIndex != NULL_INDEX) 
+							   ? Texture_GetFloatValue(material->roughglass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
+
+	BSDFEvent event;
+	float directPdfW;
+	const float3 result = RoughGlassMaterial_EvaluateRough(hitPoint, lightDir, eyeDir,
+			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			&event, &directPdfW);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
 	}
 
 	EvalStack_PushFloat3(result);
@@ -182,36 +196,20 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 	EvalStack_PushFloat(directPdfW);
 }
 
-OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
-		__global float *evalStack, uint *evalStackOffset
-		MATERIALS_PARAM_DECL) {
-	float u0, u1, passThroughEvent;
-	EvalStack_PopFloat(passThroughEvent);
-	EvalStack_PopFloat(u1);
-	EvalStack_PopFloat(u0);
-	float3 fixedDir;
-	EvalStack_PopFloat3(fixedDir);
-
-	if (fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC) {
-		MATERIAL_SAMPLE_RETURN_BLACK;
-	}
-
-	const float3 ktVal = Texture_GetSpectrumValue(material->roughglass.ktTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 krVal = Texture_GetSpectrumValue(material->roughglass.krTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 kt = Spectrum_Clamp(ktVal);
-	const float3 kr = Spectrum_Clamp(krVal);
+// BLACK when there is no sample
+OPENCL_FORCE_INLINE float3 RoughGlassMaterial_SampleRough(__global const HitPoint *hitPoint,
+		const float3 fixedDir, const float u0, const float u1, const float passThroughEvent,
+		const float3 kt, const float3 kr, const float nc, const float nt,
+		const float u, const float v, const int multiscattering,
+		const float localFilmThickness, const float localFilmIor,
+		float3 *sampledDir, float *pdfW, BSDFEvent *event) {
+	if (fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
+		return BLACK;
 
 	const bool isKtBlack = Spectrum_IsBlack(kt);
 	const bool isKrBlack = Spectrum_IsBlack(kr);
-	if (isKtBlack && isKrBlack) {
-		MATERIAL_SAMPLE_RETURN_BLACK;
-	}
-
-	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
-	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = clamp(nuVal, 1e-9f, 1.f);
-	const float v = clamp(nvVal, 1e-9f, 1.f);
+	if (isKtBlack && isKrBlack)
+		return BLACK;
 
 	float3 wh;
 	float d, specPdf;
@@ -220,8 +218,6 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		wh = -wh;
 	const float cosThetaOH = dot(fixedDir, wh);
 
-	const float nc = ExtractExteriorIors(hitPoint, material->roughglass.exteriorIorTexIndex TEXTURES_PARAM);
-	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
 	const float ntc = nt / nc;
 
 	const float coso = fabs(fixedDir.z);
@@ -237,13 +233,10 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		if (!isKtBlack)
 			threshold = 1.f;
 		else {
-			MATERIAL_SAMPLE_RETURN_BLACK;
+			return BLACK;
 		}
 	}
 
-	float pdfW;
-	BSDFEvent event;
-	float3 sampledDir;
 	float3 result;
 	if (passThroughEvent < threshold) {
 		// Transmit
@@ -253,23 +246,23 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		const float eta2 = eta * eta;
 		const float sinThetaIH2 = eta2 * fmax(0.f, 1.f - cosThetaOH * cosThetaOH);
 		if (sinThetaIH2 >= 1.f) {
-			MATERIAL_SAMPLE_RETURN_BLACK;
+			return BLACK;
 		}
 		float cosThetaIH = sqrt(1.f - sinThetaIH2);
 		if (entering)
 			cosThetaIH = -cosThetaIH;
 		const float length = eta * cosThetaOH + cosThetaIH;
-		sampledDir = length * wh - eta * fixedDir;
+		*sampledDir = length * wh - eta * fixedDir;
 
 		const float lengthSquared = length * length;
-		pdfW = specPdf * fabs(cosThetaIH) / lengthSquared;
-		if (pdfW <= 0.f) {
-			MATERIAL_SAMPLE_RETURN_BLACK;
+		*pdfW = specPdf * fabs(cosThetaIH) / lengthSquared;
+		if (*pdfW <= 0.f) {
+			return BLACK;
 		}
 
-		const float cosi = fabs(sampledDir.z);
+		const float cosi = fabs(sampledDir->z);
 
-		const float G = Microfacet_G(u, v, fixedDir, sampledDir);
+		const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
 		float factor = (d / specPdf) * G * fabs(cosThetaOH) / threshold;
 
 		//if (!hitPoint.fromLight) {
@@ -280,23 +273,23 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		//	result = (factor / cosi) * kt * (Spectrum(1.f) - F);
 		//}
 
-		pdfW *= threshold;
-		event = GLOSSY | TRANSMIT;
+		*pdfW *= threshold;
+		*event = GLOSSY | TRANSMIT;
 	} else {
 		// Reflect
-		pdfW = specPdf / (4.f * fabs(cosThetaOH));
-		if (pdfW <= 0.f) {
-			MATERIAL_SAMPLE_RETURN_BLACK;
+		*pdfW = specPdf / (4.f * fabs(cosThetaOH));
+		if (*pdfW <= 0.f) {
+			return BLACK;
 		}
 
-		sampledDir = 2.f * cosThetaOH * wh - fixedDir;
+		*sampledDir = 2.f * cosThetaOH * wh - fixedDir;
 
-		const float cosi = fabs(sampledDir.z);
-		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (fixedDir.z * sampledDir.z < 0.f)) {
-			MATERIAL_SAMPLE_RETURN_BLACK;
+		const float cosi = fabs(sampledDir->z);
+		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (fixedDir.z * sampledDir->z < 0.f)) {
+			return BLACK;
 		}
 
-		const float G = Microfacet_G(u, v, fixedDir, sampledDir);
+		const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
 		float factor = (d / specPdf) * G * fabs(cosThetaOH) / (1.f - threshold);
 
 		const float F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
@@ -304,19 +297,51 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 		factor /= coso;
 		result = factor * F * kr;
 		
-		const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
-										 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
-		if (localFilmThickness > 0.f) {
-			const float localFilmIor = (material->roughglass.filmIorTexIndex != NULL_INDEX) 
-									   ? Texture_GetFloatValue(material->roughglass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
+		if (localFilmThickness > 0.f)
 			result *= CalcFilmColor(fixedDir, localFilmThickness, localFilmIor);
-		}
 
-		pdfW *= (1.f - threshold);
-		event = GLOSSY | REFLECT;
+		*pdfW *= (1.f - threshold);
+		*event = GLOSSY | REFLECT;
 	}
 
-	result *= RoughGlassMaterial_MSScale(material, u, v, fixedDir, ntc);
+	result *= RoughGlassMaterial_MSScale(multiscattering, u, v, fixedDir, ntc);
+
+	return result;
+}
+
+OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float u0, u1, passThroughEvent;
+	EvalStack_PopFloat(passThroughEvent);
+	EvalStack_PopFloat(u1);
+	EvalStack_PopFloat(u0);
+	float3 fixedDir;
+	EvalStack_PopFloat3(fixedDir);
+
+	const float3 kt = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughglass.ktTexIndex, hitPoint TEXTURES_PARAM));
+	const float3 kr = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughglass.krTexIndex, hitPoint TEXTURES_PARAM));
+	const float nc = ExtractExteriorIors(hitPoint, material->roughglass.exteriorIorTexIndex TEXTURES_PARAM);
+	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
+	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
+	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
+	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
+									 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
+	const float localFilmIor = (localFilmThickness > 0.f && material->roughglass.filmIorTexIndex != NULL_INDEX) 
+							   ? Texture_GetFloatValue(material->roughglass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
+
+	float3 sampledDir;
+	float pdfW;
+	BSDFEvent event;
+	const float3 result = RoughGlassMaterial_SampleRough(hitPoint, fixedDir, u0, u1, passThroughEvent,
+			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			&sampledDir, &pdfW, &event);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

@@ -356,6 +356,16 @@ typedef struct {
 	BSDFEvent eventTypes;
 	// The result of calling Material::IsDelta()
 	int isDelta; 
+	// Material::IsRegularizedDelta() and Material::GetRegularizedEventTypes():
+	// the same at a regularized vertex (HitPoint::regularization > 0)
+	int isRegularizedDelta;
+	BSDFEvent regularizedEventTypes;
+
+	// Material::GetRefractiveMaterial(): the IOR textures of the glass or
+	// rough glass reached through the composite materials, for the Russian
+	// roulette on the path throughput (BSDF_GetRefractionEtaScale())
+	int isRefractive;
+	unsigned int refractionExteriorIorTexIndex, refractionInteriorIorTexIndex;
 
 	// Multiple-scattering energy compensation (EON for RoughMatte)
 	int multiscattering;

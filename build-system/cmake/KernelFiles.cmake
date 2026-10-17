@@ -63,6 +63,7 @@ set(SLG_KERNELS
     include/slg/engines/pathoclbase/kernels/pathoclbase_funcs.cl
     include/slg/engines/pathoclbase/kernels/pathoclbase_kernels_micro.cl
     include/slg/engines/pathtracer_types.cl
+    include/slg/engines/pathtracer_funcs.cl
     include/slg/film/film_types.cl
     include/slg/film/film_funcs.cl
     include/slg/film/film_mergesamplebuffer_funcs.cl

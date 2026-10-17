@@ -94,12 +94,12 @@ Spectrum DisneyMaterial::Evaluate(
 		float *reversePdfW) const  {
 	const Spectrum color = BaseColor->GetSpectrumValue(hitPoint).Clamp(0.0f, 1.0f);
 	const float subsurface = Clamp(Subsurface->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float roughness = Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float specular = Clamp(Specular->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float specularTint = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	// I allow sheen values > 1.0 to accentuate the effect. The result is still
 	// clamped between 0.0 and 1.0 to not break the energy conservation law.
@@ -272,12 +272,12 @@ Spectrum DisneyMaterial::Sample(
 		BSDFEvent *event) const {
 	const Spectrum color = BaseColor->GetSpectrumValue(hitPoint).Clamp(0.0f, 1.0f);
 	const float subsurface = Clamp(Subsurface->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float roughness = Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float specular = Clamp(Specular->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float specularTint = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	// I allow sheen values > 1.0 to accentuate the effect. The result is still
 	// clamped between 0.0 and 1.0 to not break the energy conservation law.
@@ -379,10 +379,10 @@ void DisneyMaterial::Pdf(
 		const Vector &localEyeDir,
 		float *directPdfW, 
 		float *reversePdfW) const {
-	const float roughness = Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
 	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 
 	DisneyPdf(hitPoint.fromLight, roughness, metallic, clearcoat, clearcoatGloss,

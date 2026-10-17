@@ -107,16 +107,16 @@ Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 		if (localEyeDir.z >= 0.f) {
 			ks = Ks->GetSpectrumValue(hitPoint);
 			i = index->GetFloatValue(hitPoint);
-			u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 			alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 			d = depth->GetFloatValue(hitPoint);
 			mbounce = multibounce;
 		} else {
 			ks = Ks_bf->GetSpectrumValue(hitPoint);
 			i = index_bf->GetFloatValue(hitPoint);
-			u = Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 			alpha = Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 			d = depth_bf->GetFloatValue(hitPoint);
 			mbounce = multibounce_bf;
@@ -178,16 +178,16 @@ Spectrum GlossyTranslucentMaterial::Sample(const HitPoint &hitPoint,
 		if (localFixedDir.z >= 0.f) {
 			ks = Ks->GetSpectrumValue(hitPoint);
 			i = index->GetFloatValue(hitPoint);
-			u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 			alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 			d = depth->GetFloatValue(hitPoint);
 			mbounce = multibounce;
 		} else {
 			ks = Ks_bf->GetSpectrumValue(hitPoint);
 			i = index_bf->GetFloatValue(hitPoint);
-			u = Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 			alpha = Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 			d = depth_bf->GetFloatValue(hitPoint);
 			mbounce = multibounce_bf;
@@ -301,13 +301,13 @@ void GlossyTranslucentMaterial::Pdf(const HitPoint &hitPoint,
 		if (localEyeDir.z >= 0.f) {
 			ks = Ks->GetSpectrumValue(hitPoint);
 			i = index->GetFloatValue(hitPoint);
-			u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 		} else {
 			ks = Ks_bf->GetSpectrumValue(hitPoint);
 			i = index_bf->GetFloatValue(hitPoint);
-			u = Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
-			v = Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f);
+			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 		}
 
 		if (i > 0.f) {

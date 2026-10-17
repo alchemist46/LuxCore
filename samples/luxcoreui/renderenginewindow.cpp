@@ -182,6 +182,15 @@ void RenderEngineWindow::PathGUI(const std::unique_ptr<Properties> & props, bool
 	}
 
 	if (ImGui::CollapsingHeader("Russian Roulette", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+		const string rrTypeStr = props->Get("path.russianroulette.type").Get<string>();
+		int rrTypeIndex = (rrTypeStr == "PATH") ? 1 : ((rrTypeStr == "PATH_SQRT") ? 2 : 0);
+		if (ImGui::Combo("Russian Roulette rule", &rrTypeIndex, "BOUNCE\0PATH\0PATH_SQRT\0")) {
+			static const char *rrTypeNames[] = { "BOUNCE", "PATH", "PATH_SQRT" };
+			props->Set(Property("path.russianroulette.type")(rrTypeNames[rrTypeIndex]));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.russianroulette.type");
+
 		ival = props->Get("path.russianroulette.depth").Get<int>();
 		if (ImGui::InputInt("Russian Roulette start depth", &ival)) {
 			props->Set(Property("path.russianroulette.depth")(ival));
@@ -195,6 +204,22 @@ void RenderEngineWindow::PathGUI(const std::unique_ptr<Properties> & props, bool
 			modifiedProps = true;
 		}
 		LuxCoreApp::HelpMarker("path.russianroulette.cap");
+	}
+
+	if (ImGui::CollapsingHeader("Path regularization", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool bval = props->Get("path.regularization.enable").Get<bool>();
+		if (ImGui::Checkbox("Regularize the paths after the first non-specular vertex", &bval)) {
+			props->Set(Property("path.regularization.enable")(bval));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.regularization.enable");
+
+		fval = props->Get("path.regularization.roughness").Get<float>();
+		if (ImGui::SliderFloat("Roughness floor", &fval, 0.f, 1.f)) {
+			props->Set(Property("path.regularization.roughness")(fval));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.regularization.roughness");
 	}
 
 	if (ImGui::CollapsingHeader("Clamping", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -381,6 +406,15 @@ void RenderEngineWindow::BiDirGUI(const std::unique_ptr<Properties> & props, boo
 	}
 
 	if (ImGui::CollapsingHeader("Russian Roulette", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+		const string rrTypeStr = props->Get("path.russianroulette.type").Get<string>();
+		int rrTypeIndex = (rrTypeStr == "PATH") ? 1 : ((rrTypeStr == "PATH_SQRT") ? 2 : 0);
+		if (ImGui::Combo("Russian Roulette rule", &rrTypeIndex, "BOUNCE\0PATH\0PATH_SQRT\0")) {
+			static const char *rrTypeNames[] = { "BOUNCE", "PATH", "PATH_SQRT" };
+			props->Set(Property("path.russianroulette.type")(rrTypeNames[rrTypeIndex]));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.russianroulette.type");
+
 		ival = props->Get("path.russianroulette.depth").Get<int>();
 		if (ImGui::InputInt("Russian Roulette start depth", &ival)) {
 			props->Set(Property("path.russianroulette.depth")(ival));
@@ -394,6 +428,22 @@ void RenderEngineWindow::BiDirGUI(const std::unique_ptr<Properties> & props, boo
 			modifiedProps = true;
 		}
 		LuxCoreApp::HelpMarker("path.russianroulette.cap");
+	}
+
+	if (ImGui::CollapsingHeader("Path regularization", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool bval = props->Get("path.regularization.enable").Get<bool>();
+		if (ImGui::Checkbox("Regularize the paths after the first non-specular vertex", &bval)) {
+			props->Set(Property("path.regularization.enable")(bval));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.regularization.enable");
+
+		fval = props->Get("path.regularization.roughness").Get<float>();
+		if (ImGui::SliderFloat("Roughness floor", &fval, 0.f, 1.f)) {
+			props->Set(Property("path.regularization.roughness")(fval));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.regularization.roughness");
 	}
 
 	ThreadsGUI(props, modifiedProps);

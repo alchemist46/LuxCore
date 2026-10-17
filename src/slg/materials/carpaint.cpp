@@ -75,7 +75,7 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 
 	// 1st glossy layer
 	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = M1->GetFloatValue(hitPoint);
+	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks1.Filter() > 0.f && m1 > 0.f)
 	{
 		const float r1 = R1->GetFloatValue(hitPoint);
@@ -87,7 +87,7 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 		++n;
 	}
 	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = M2->GetFloatValue(hitPoint);
+	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks2.Filter() > 0.f && m2 > 0.f)
 	{
 		const float r2 = R2->GetFloatValue(hitPoint);
@@ -99,7 +99,7 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 		++n;
 	}
 	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = M3->GetFloatValue(hitPoint);
+	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks3.Filter() > 0.f && m3 > 0.f)
 	{
 		const float r3 = R3->GetFloatValue(hitPoint);
@@ -138,7 +138,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 	bool l1 = false, l2 = false, l3 = false;
 	// 1st glossy layer
 	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = M1->GetFloatValue(hitPoint);
+	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks1.Filter() > 0.f && m1 > 0.f)
 	{
 		l1 = true;
@@ -146,7 +146,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 	}
 	// 2nd glossy layer
 	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = M2->GetFloatValue(hitPoint);
+	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks2.Filter() > 0.f && m2 > 0.f)
 	{
 		l2 = true;
@@ -154,7 +154,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 	}
 	// 3rd glossy layer
 	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = M3->GetFloatValue(hitPoint);
+	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks3.Filter() > 0.f && m3 > 0.f) {
 		l3 = true;
 		++n;
@@ -359,7 +359,7 @@ void CarPaintMaterial::Pdf(const HitPoint &hitPoint,
 
 	// First specular lobe
 	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = M1->GetFloatValue(hitPoint);
+	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks1.Filter() > 0.f && m1 > 0.f)
 	{
 		pdf += Microfacet_PdfReflect(m1, m1, localFixedDir, localSampledDir);
@@ -369,7 +369,7 @@ void CarPaintMaterial::Pdf(const HitPoint &hitPoint,
 
 	// Second specular lobe
 	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = M2->GetFloatValue(hitPoint);
+	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks2.Filter() > 0.f && m2 > 0.f)
 	{
 		pdf += Microfacet_PdfReflect(m2, m2, localFixedDir, localSampledDir);
@@ -379,7 +379,7 @@ void CarPaintMaterial::Pdf(const HitPoint &hitPoint,
 
 	// Third specular lobe
 	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = M3->GetFloatValue(hitPoint);
+	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
 	if (ks3.Filter() > 0.f && m3 > 0.f)
 	{
 		pdf += Microfacet_PdfReflect(m3, m3, localFixedDir, localSampledDir);

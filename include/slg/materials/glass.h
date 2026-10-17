@@ -41,6 +41,10 @@ public:
 	virtual BSDFEvent GetEventTypes() const { return SPECULAR | REFLECT | TRANSMIT; };
 
 	virtual bool IsDelta() const { return true; }
+	virtual bool IsRegularizedDelta() const { return false; }
+	virtual BSDFEvent GetRegularizedEventTypes() const { return GLOSSY | REFLECT | TRANSMIT; };
+	virtual const Material *GetRefractiveMaterial() const { return this; }
+	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const;
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,

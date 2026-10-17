@@ -38,6 +38,7 @@ void HitPoint::Init(const bool fixedFromLight, const bool throughShadowTransp,
 	fromLight = fixedFromLight;
 	throughShadowTransparency = throughShadowTransp;
 	passThroughEvent = passThroughEvnt;
+	regularization = 0.f;
 
 	p = pnt;
 	fixedDir = dir;
@@ -83,5 +84,6 @@ void HitPoint::Init() {
 	fromLight = false;
 	intoObject = true;
 	throughShadowTransparency = false;
+	regularization = 0.f;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

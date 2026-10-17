@@ -109,7 +109,11 @@ public:
 	
 	bool IsEmpty() const { return (not material); }
 	bool IsLightSource() const { return material->IsLightSource(); }
-	bool IsDelta() const { return material->IsDelta(); }
+	// At a regularized vertex (see HitPoint::regularization) the delta lobes
+	// of glass and mirror are GGX lobes
+	bool IsDelta() const {
+		return (hitPoint.regularization > 0.f) ? material->IsRegularizedDelta() : material->IsDelta();
+	}
 	bool IsVisibleIndirectDiffuse() const { return material->IsVisibleIndirectDiffuse(); }
 	bool IsVisibleIndirectGlossy() const { return material->IsVisibleIndirectGlossy(); }
 	bool IsVisibleIndirectSpecular() const { return material->IsVisibleIndirectSpecular(); }
@@ -136,10 +140,19 @@ public:
 		return material->GetExteriorVolume(hitPoint, hitPoint.passThroughEvent);
 	}
 
-	float GetGlossiness() const { return material->GetGlossiness(); }
+	float GetGlossiness() const {
+		return (hitPoint.regularization > 0.f) ?
+			luxrays::Max(material->GetGlossiness(), hitPoint.regularization) : material->GetGlossiness();
+	}
+	// The factor undoing the eta^2 radiance scaling of a transmission through
+	// this surface (1 for the materials without refraction), see
+	// EyePathInfo::etaScale
+	float GetRefractionEtaScale() const;
 	SceneObjectConstRef GetSceneObject() const { return *sceneObject; }
 
-	BSDFEvent GetEventTypes() const { return material->GetEventTypes(); }
+	BSDFEvent GetEventTypes() const {
+		return (hitPoint.regularization > 0.f) ? material->GetRegularizedEventTypes() : material->GetEventTypes();
+	}
 	MaterialType GetMaterialType() const { return material->GetType(); }
 
 	luxrays::Spectrum GetPassThroughTransparency(const bool backTracing) const;

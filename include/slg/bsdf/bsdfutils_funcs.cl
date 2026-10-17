@@ -18,16 +18,42 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// At a regularized vertex (see HitPoint::regularization) the delta lobes of
+// glass and mirror are GGX lobes
 OPENCL_FORCE_INLINE BSDFEvent BSDF_GetEventTypes(__global const BSDF *bsdf
 		MATERIALS_PARAM_DECL) {
-	return Material_GetEventTypes(bsdf->materialIndex
-			MATERIALS_PARAM);
+	__global const Material *mat = &mats[bsdf->materialIndex];
+
+	return (bsdf->hitPoint.regularization > 0.f) ? mat->regularizedEventTypes : mat->eventTypes;
 }
 
 OPENCL_FORCE_INLINE bool BSDF_IsDelta(__global const BSDF *bsdf
 		MATERIALS_PARAM_DECL) {
-	return Material_IsDelta(bsdf->materialIndex
-			MATERIALS_PARAM);
+	__global const Material *mat = &mats[bsdf->materialIndex];
+
+	return (bsdf->hitPoint.regularization > 0.f) ? mat->isRegularizedDelta : mat->isDelta;
+}
+
+// The factor undoing the eta^2 radiance scaling of a transmission through
+// this surface (1 for the materials without refraction), see
+// EyePathInfo::etaScale and BSDF::GetRefractionEtaScale()
+OPENCL_FORCE_INLINE float BSDF_GetRefractionEtaScale(__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	__global const Material *mat = &mats[bsdf->materialIndex];
+	if (!mat->isRefractive)
+		return 1.f;
+
+	const float nc = ExtractExteriorIors(&bsdf->hitPoint, mat->refractionExteriorIorTexIndex
+			TEXTURES_PARAM);
+	const float nt = ExtractInteriorIors(&bsdf->hitPoint, mat->refractionInteriorIorTexIndex
+			TEXTURES_PARAM);
+	if (!(nc > 0.f) || !(nt > 0.f))
+		return 1.f;
+
+	// Entering the object, the glass scales the radiance by (nc / nt)^2
+	const float eta = bsdf->hitPoint.intoObject ? (nt / nc) : (nc / nt);
+
+	return eta * eta;
 }
 
 OPENCL_FORCE_INLINE uint BSDF_GetObjectID(__global const BSDF *bsdf, __global const SceneObject* restrict sceneObjs) {
@@ -62,8 +88,10 @@ OPENCL_FORCE_INLINE uint BSDF_GetMaterialExteriorVolume(__global const BSDF *bsd
 
 OPENCL_FORCE_INLINE float BSDF_GetGlossiness(__global const BSDF *bsdf
 		MATERIALS_PARAM_DECL) {
-	return Material_GetGlossiness(bsdf->materialIndex
+	const float glossiness = Material_GetGlossiness(bsdf->materialIndex
 			MATERIALS_PARAM);
+
+	return (bsdf->hitPoint.regularization > 0.f) ? fmax(glossiness, bsdf->hitPoint.regularization) : glossiness;
 }
 
 OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughShadowTransparency(__global const BSDF *bsdf

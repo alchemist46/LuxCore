@@ -152,8 +152,8 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Evaluate(__global const Mater
 			index = i;
 			const float nuVal = Texture_GetFloatValue(material->glossytranslucent.nuTexIndex, hitPoint TEXTURES_PARAM);
 			const float nvVal = Texture_GetFloatValue(material->glossytranslucent.nvTexIndex, hitPoint TEXTURES_PARAM);
-			u = clamp(nuVal, 1e-9f, 1.f);
-			v = clamp(nvVal, 1e-9f, 1.f);
+			u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+			v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
 			alpha = Spectrum_Clamp(kaVal);
 			depth = d;
 			mbounce = material->glossytranslucent.multibounce;
@@ -162,8 +162,8 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Evaluate(__global const Mater
 			index = i_bf;
 			const float nuVal_bf = Texture_GetFloatValue(material->glossytranslucent.nubfTexIndex, hitPoint TEXTURES_PARAM);
 			const float nvVal_bf = Texture_GetFloatValue(material->glossytranslucent.nvbfTexIndex, hitPoint TEXTURES_PARAM);
-			u = clamp(nuVal_bf, 1e-9f, 1.f);
-			v = clamp(nvVal_bf, 1e-9f, 1.f);
+			u = Microfacet_Regularize(clamp(nuVal_bf, 1e-9f, 1.f), hitPoint->regularization);
+			v = Microfacet_Regularize(clamp(nvVal_bf, 1e-9f, 1.f), hitPoint->regularization);
 			alpha = Spectrum_Clamp(kaVal_bf);
 			depth = d_bf;
 			mbounce = material->glossytranslucent.multibouncebf;
@@ -248,8 +248,8 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 			index = i;
 			const float nuVal = Texture_GetFloatValue(material->glossytranslucent.nuTexIndex, hitPoint TEXTURES_PARAM);
 			const float nvVal = Texture_GetFloatValue(material->glossytranslucent.nvTexIndex, hitPoint TEXTURES_PARAM);
-			u = clamp(nuVal, 1e-9f, 1.f);
-			v = clamp(nvVal, 1e-9f, 1.f);
+			u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+			v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
 			alpha = Spectrum_Clamp(kaVal);
 			depth = d;
 			mbounce = material->glossytranslucent.multibounce;
@@ -258,8 +258,8 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 			index = i_bf;
 			const float nuVal_bf = Texture_GetFloatValue(material->glossytranslucent.nubfTexIndex, hitPoint TEXTURES_PARAM);
 			const float nvVal_bf = Texture_GetFloatValue(material->glossytranslucent.nvbfTexIndex, hitPoint TEXTURES_PARAM);
-			u = clamp(nuVal_bf, 1e-9f, 1.f);
-			v = clamp(nvVal_bf, 1e-9f, 1.f);
+			u = Microfacet_Regularize(clamp(nuVal_bf, 1e-9f, 1.f), hitPoint->regularization);
+			v = Microfacet_Regularize(clamp(nvVal_bf, 1e-9f, 1.f), hitPoint->regularization);
 			alpha = Spectrum_Clamp(kaVal_bf);
 			depth = d_bf;
 			mbounce = material->glossytranslucent.multibouncebf;

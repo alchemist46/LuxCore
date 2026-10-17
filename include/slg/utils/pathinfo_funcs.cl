@@ -33,6 +33,8 @@ OPENCL_FORCE_INLINE void EyePathInfo_Init(__global EyePathInfo *pathInfo) {
 	pathInfo->lastGlossiness = 0.f;
 	pathInfo->lastFromVolume = false;
 	pathInfo->isTransmittedPath = true;
+	pathInfo->etaScale = 1.f;
+	pathInfo->anyNonSpecularBounce = false;
 
 	pathInfo->isNearlyCaustic = false;
 	pathInfo->isNearlyS = false;
@@ -58,9 +60,11 @@ OPENCL_FORCE_INLINE bool EyePathInfo_CanBeNearlySpecular(__global EyePathInfo *p
 	return (eventTypes & SPECULAR) || ((eventTypes & GLOSSY) && (BSDF_GetGlossiness(bsdf MATERIALS_PARAM) <= glossinessThreshold));
 }
 
+// trackEtaScale: update etaScale (the Russian roulette on the path throughput
+// is in use)
 OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 		__global const BSDF *bsdf, const BSDFEvent event, const float pdfW,
-		const float glossinessThreshold
+		const float glossinessThreshold, const bool trackEtaScale
 		MATERIALS_PARAM_DECL) {
 	//--------------------------------------------------------------------------
 	// PathInfo::AddVertex() inlined here for performances
@@ -109,6 +113,12 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	pathInfo->lastGlossiness = glossiness;
 	
 	pathInfo->isTransmittedPath = pathInfo->isTransmittedPath && (event & TRANSMIT) && (event & (SPECULAR | GLOSSY));
+
+	// Undo the eta^2 radiance scaling of a refraction
+	if (trackEtaScale && (event & TRANSMIT))
+		pathInfo->etaScale *= BSDF_GetRefractionEtaScale(bsdf MATERIALS_PARAM);
+
+	pathInfo->anyNonSpecularBounce = pathInfo->anyNonSpecularBounce || !(event & SPECULAR);
 }
 
 OPENCL_FORCE_INLINE bool EyePathInfo_IsCausticPath(__global EyePathInfo *pathInfo) {

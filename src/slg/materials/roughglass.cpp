@@ -56,26 +56,22 @@ static float RoughGlass_MSScale(const bool multiscattering,
 	return 1.f / Max(GGXEnergy_GlassE(u, v, fabsf(localEyeDir.z), eta), 1e-3f);
 }
 
-Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
+Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
-	float *directPdfW, float *reversePdfW) const {
-	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-
+	float *directPdfW, float *reversePdfW,
+	const Spectrum &kt, const Spectrum &kr, const float nc, const float nt,
+	const float u, const float v, const bool multiscattering,
+	const float localFilmThickness, const float localFilmIor,
+	const WorkingColorSpace &workingColorSpace) {
 	const bool isKtBlack = kt.Black();
 	const bool isKrBlack = kr.Black();
 	if (isKtBlack && isKrBlack)
 		return Spectrum();
 
-	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
-	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
 	const float ntc = nt / nc;
 
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
-
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
-	const float msScale = RoughGlass_MSScale(IsMultiscattering(), u, v, localEyeDir, ntc);
+	const float msScale = RoughGlass_MSScale(multiscattering, u, v, localEyeDir, ntc);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
 		// Transmit
 
@@ -143,32 +139,35 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 
 		*event = GLOSSY | REFLECT;
 		
-		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 		if (localFilmThickness > 0.f) {
-			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
 			return result * CalcFilmColor(localEyeDir, localFilmThickness, localFilmIor, workingColorSpace);
 		}
 		return result;
 	}
 }
 
-Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
+bool RoughGlassMaterial::GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const {
+	*nc = ExtractExteriorIors(hitPoint, exteriorIor);
+	*nt = ExtractInteriorIors(hitPoint, interiorIor);
+
+	return true;
+}
+
+Spectrum RoughGlassMaterial::SampleRough(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, BSDFEvent *event) const {
+		float *pdfW, BSDFEvent *event,
+		const Spectrum &kt, const Spectrum &kr, const float nc, const float nt,
+		const float u, const float v, const bool multiscattering,
+		const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace) {
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
-
-	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 
 	const bool isKtBlack = kt.Black();
 	const bool isKrBlack = kr.Black();
 	if (isKtBlack && isKrBlack)
 		return Spectrum();
-
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
 
 	Vector wh;
 	float d, specPdf;
@@ -177,8 +176,6 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		wh = -wh;
 	const float cosThetaOH = Dot(localFixedDir, wh);
 
-	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
-	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
 	const float ntc = nt / nc;
 
 	const float coso = fabsf(localFixedDir.z);
@@ -252,9 +249,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		factor /= (!hitPoint.fromLight) ? coso : cosi;
 		result = factor * F * kr;
 		
-		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 		if (localFilmThickness > 0.f) {
-			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
 			result *= CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
 		}
 
@@ -262,32 +257,26 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		*event = GLOSSY | REFLECT;
 	}
 
-	return result * RoughGlass_MSScale(IsMultiscattering(), u, v,
+	return result * RoughGlass_MSScale(multiscattering, u, v,
 			hitPoint.fromLight ? *localSampledDir : localFixedDir, ntc);
 }
 
-void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
+void RoughGlassMaterial::PdfRough(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
-		float *directPdfW, float *reversePdfW) const {
+		float *directPdfW, float *reversePdfW,
+		const Spectrum &kt, const Spectrum &kr, const float nc, const float nt,
+		const float u, const float v) {
 	if (directPdfW)
 		*directPdfW = 0.f;
 	if (reversePdfW)
 		*reversePdfW = 0.f;
-
-	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 
 	const bool isKtBlack = kt.Black();
 	const bool isKrBlack = kr.Black();
 	if (isKtBlack && isKrBlack)
 		return;
 
-	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
-	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
 	const float ntc = nt / nc;
-
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
 
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
@@ -333,6 +322,56 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 		if (reversePdfW)
 			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localEyeDir, wh) / (4.f * AbsDot(localLightDir, wh));
 	}
+}
+
+//------------------------------------------------------------------------------
+// The material parameters at the hit point
+//------------------------------------------------------------------------------
+
+Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
+	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
+	float *directPdfW, float *reversePdfW) const {
+	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
+	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+
+	return EvaluateRough(hitPoint, localLightDir, localEyeDir, event, directPdfW, reversePdfW,
+			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+}
+
+Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
+		const Vector &localFixedDir, Vector *localSampledDir,
+		const float u0, const float u1, const float passThroughEvent,
+		float *pdfW, BSDFEvent *event) const {
+	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
+	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+
+	return SampleRough(hitPoint, localFixedDir, localSampledDir, u0, u1, passThroughEvent, pdfW, event,
+			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+}
+
+void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir,
+		float *directPdfW, float *reversePdfW) const {
+	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
+	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+
+	PdfRough(hitPoint, localLightDir, localEyeDir, directPdfW, reversePdfW, kt, kr, nc, nt, u, v);
 }
 
 void RoughGlassMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {

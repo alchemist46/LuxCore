@@ -101,6 +101,7 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 		const uint volumeIndex, const float t, const float passThroughEvent) {
 	bsdf->hitPoint.throughShadowTransparency = throughShadowTransparency;
 	bsdf->hitPoint.passThroughEvent = passThroughEvent;
+	bsdf->hitPoint.regularization = 0.f;
 
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);
@@ -209,7 +210,7 @@ OPENCL_FORCE_INLINE float3 BSDF_Evaluate(__global const BSDF *bsdf,
 
 		// Check geometry normal and light direction side
 		const float sideTest = dotEyeDirNG * dotLightDirNG;
-		const BSDFEvent matEvents = Material_GetEventTypes(bsdf->materialIndex
+		const BSDFEvent matEvents = BSDF_GetEventTypes(bsdf
 				MATERIALS_PARAM);
 		if (((sideTest > 0.f) && !(matEvents & REFLECT)) ||
 				((sideTest < 0.f) && !(matEvents & TRANSMIT)))

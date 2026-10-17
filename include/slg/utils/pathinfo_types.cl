@@ -30,6 +30,12 @@ typedef struct {
 	float lastGlossiness;
 	Normal lastShadeN;
 	bool lastFromVolume, isTransmittedPath;
+	// The product of the eta^2 of the refractions of the path, for the
+	// Russian roulette on the path throughput (see
+	// PathTracer_RussianRouletteProb()); 1 when the rule is not in use
+	float etaScale;
+	// A non-specular bounce happened (the path regularization starts after it)
+	int anyNonSpecularBounce;
 
 	int isNearlyCaustic;
 	// Specular, Specular+ Diffuse and Specular+ Diffuse Specular+ paths

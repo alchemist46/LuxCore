@@ -39,6 +39,12 @@ public:
 
 	virtual bool IsLightSource() const { return isLightSource; }
 	virtual bool IsDelta() const { return isDelta; }
+	virtual const Material *GetRefractiveMaterial() const {
+		const Material *m = matA->GetRefractiveMaterial();
+		return m ? m : matB->GetRefractiveMaterial();
+	}
+	virtual bool IsRegularizedDelta() const { return matA->IsRegularizedDelta() && matB->IsRegularizedDelta(); }
+	virtual BSDFEvent GetRegularizedEventTypes() const { return matA->GetRegularizedEventTypes() | matB->GetRegularizedEventTypes(); }
 
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,

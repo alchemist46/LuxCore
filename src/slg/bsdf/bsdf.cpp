@@ -305,7 +305,7 @@ Spectrum BSDF::Evaluate(const Vector &generatedDir,
 
 		// Check geometry normal and light direction side
 		const float sideTestNG = dotEyeDirNG * dotLightDirNG;
-		const BSDFEvent matEvents = material->GetEventTypes();
+		const BSDFEvent matEvents = GetEventTypes();
 		if (((sideTestNG > 0.f) && !(matEvents & REFLECT)) ||
 				((sideTestNG < 0.f) && !(matEvents & TRANSMIT)))
 			return Spectrum();
@@ -403,6 +403,19 @@ void BSDF::Pdf(const Vector &sampledDir, float *directPdfW, float *reversePdfW) 
 	Vector localEyeDir = frame.ToLocal(eyeDir);
 
 	material->Pdf(hitPoint, localLightDir, localEyeDir, directPdfW, reversePdfW);
+}
+
+float BSDF::GetRefractionEtaScale() const {
+	const Material *refractive = material->GetRefractiveMaterial();
+	float nc, nt;
+	if (!refractive || !refractive->GetRefractionIors(hitPoint, &nc, &nt) ||
+			!(nc > 0.f) || !(nt > 0.f))
+		return 1.f;
+
+	// Entering the object, the glass scales the radiance by (nc / nt)^2
+	const float eta = hitPoint.intoObject ? (nt / nc) : (nc / nt);
+
+	return eta * eta;
 }
 
 Spectrum BSDF::GetPassThroughTransparency(const bool backTracing) const {

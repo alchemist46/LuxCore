@@ -160,6 +160,16 @@ public:
 	static luxrays::PropertiesUPtr ToProperties(const luxrays::Properties &cfg);
 	static luxrays::PropertiesUPtr GetDefaultProps();
 
+	static ocl::RussianRouletteType String2RussianRouletteType(const std::string &type);
+	static std::string RussianRouletteType2String(const ocl::RussianRouletteType type);
+
+	// The continuation probability of the Russian roulette of the eye paths
+	// (PathTracer_RussianRouletteProb() in pathtracer_funcs.cl): bounceWeight
+	// is f cos / pdf of the bounce, pathThroughput the throughput before it
+	// and etaScale EyePathInfo::etaScale after it
+	float RussianRouletteProb(const luxrays::Spectrum &bounceWeight,
+			const luxrays::Spectrum &pathThroughput, const float etaScale) const;
+
 	// Used for Sampler indices
 	u_int eyeSampleBootSize, eyeSampleStepSize, eyeSampleSize;
 	u_int lightSampleBootSize, lightSampleStepSize, lightSampleSize;
@@ -167,8 +177,16 @@ public:
 	// Path depth settings
 	PathDepthInfo maxPathDepth;
 
+	// Russian roulette settings (see PathTracer_RussianRouletteProb() in
+	// pathtracer_funcs.cl)
+	ocl::RussianRouletteType rrType;
 	u_int rrDepth;
 	float rrImportanceCap;
+
+	// Path regularization settings (see HitPoint::regularization and
+	// Microfacet_Regularize())
+	float regularizationRoughness;
+	bool regularizationEnable;
 
 	// Clamping settings
 	float sqrtVarianceClampMaxValue;

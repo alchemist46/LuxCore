@@ -55,5 +55,8 @@ typedef struct {
 	unsigned int objectID;
 
 	int intoObject, throughShadowTransparency;
+	// Path regularization (see PathTracer): the floor of the GGX alphas of
+	// the materials at this vertex, 0 when the vertex is not regularized
+	float regularization;
 } HitPoint;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

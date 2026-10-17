@@ -133,6 +133,18 @@ public:
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
 
 	virtual bool IsDelta() const { return false; }
+	// The material whose transmission scales the radiance by eta^2 (glass and
+	// rough glass), reached through the mix, glossy coating and two-sided
+	// materials; nullptr when there is none. Used by the Russian roulette on
+	// the path throughput (see BSDF::GetRefractionEtaScale()).
+	virtual const Material *GetRefractiveMaterial() const { return nullptr; }
+	// The exterior and interior IORs of a refractive material at the hit point
+	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const { return false; }
+	// Path regularization (HitPoint::regularization > 0): the delta lobes of
+	// the glass and mirror materials become GGX lobes, so these replace
+	// IsDelta() and GetEventTypes() at a regularized vertex (see BSDF)
+	virtual bool IsRegularizedDelta() const { return IsDelta(); }
+	virtual BSDFEvent GetRegularizedEventTypes() const { return GetEventTypes(); }
 	virtual float GetAvgPassThroughTransparency() const { return avgPassThroughTransparency; }
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
@@ -392,6 +404,29 @@ extern luxrays::Spectrum Microfacet_MSScale(const bool multiscattering,
 	const float u, const float v, const float mu, const luxrays::Spectrum &Fss);
 
 //------------------------------------------------------------------------------
+// Path regularization (Kaplanyan & Dachsbacher 2013, pbrt-v4's rule): after
+// the first non-specular vertex of an eye path the GGX alphas become
+// max(alpha, clamp(2 alpha, f, 3 f)), f = HitPoint::regularization (0 = off),
+// so a delta lobe gets the alpha f
+inline float Microfacet_Regularize(const float alpha, const float regularization) {
+	return (regularization > 0.f) ?
+		luxrays::Max(alpha, luxrays::Clamp(2.f * alpha, regularization, 3.f * regularization)) :
+		alpha;
+}
+
+// The Disney material: its GGX alpha is roughness^2 and the clearcoat alpha
+// is Lerp(clearcoatGloss, 0.1, 0.001), regularized through the parameters
+inline float Disney_RegularizeRoughness(const float roughness, const float regularization) {
+	return (regularization > 0.f) ?
+		sqrtf(Microfacet_Regularize(roughness * roughness, regularization)) : roughness;
+}
+inline float Disney_RegularizeClearcoatGloss(const float clearcoatGloss, const float regularization) {
+	if (!(regularization > 0.f))
+		return clearcoatGloss;
+	const float alpha = Microfacet_Regularize(luxrays::Lerp(clearcoatGloss, .1f, .001f), regularization);
+	return luxrays::Clamp((alpha - .1f) / (.001f - .1f), 0.f, 1.f);
+}
+
 // SchlickBSDF related functions (the coating lobe)
 //------------------------------------------------------------------------------
 extern float SchlickBSDF_CoatingWeight(const luxrays::Spectrum &ks, const luxrays::Vector &localFixedDir);

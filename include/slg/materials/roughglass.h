@@ -41,6 +41,8 @@ public:
 	virtual MaterialType GetType() const { return ROUGHGLASS; }
 	virtual BSDFEvent GetEventTypes() const { return GLOSSY | REFLECT | TRANSMIT; };
 	virtual float GetGlossiness() const { return glossiness; }
+	virtual const Material *GetRefractiveMaterial() const { return this; }
+	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const;
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,
@@ -67,6 +69,30 @@ public:
 	TexRef GetNv() const { return nv; }
 	TexRef GetFilmThickness() const { return filmThickness; }
 	TexRef GetFilmIOR() const { return filmIor; }
+
+	// The rough dielectric interface with the parameters evaluated at the hit
+	// point; GlassMaterial uses them at a regularized vertex (see
+	// HitPoint::regularization)
+	static luxrays::Spectrum EvaluateRough(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,
+		float *directPdfW, float *reversePdfW,
+		const luxrays::Spectrum &kt, const luxrays::Spectrum &kr, const float nc, const float nt,
+		const float u, const float v, const bool multiscattering,
+		const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace);
+	static luxrays::Spectrum SampleRough(const HitPoint &hitPoint,
+		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
+		const float u0, const float u1, const float passThroughEvent,
+		float *pdfW, BSDFEvent *event,
+		const luxrays::Spectrum &kt, const luxrays::Spectrum &kr, const float nc, const float nt,
+		const float u, const float v, const bool multiscattering,
+		const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace);
+	static void PdfRough(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+		float *directPdfW, float *reversePdfW,
+		const luxrays::Spectrum &kt, const luxrays::Spectrum &kr, const float nc, const float nt,
+		const float u, const float v);
 
 private:
 	TexRef Kr;

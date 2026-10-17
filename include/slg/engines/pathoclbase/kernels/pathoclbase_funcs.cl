@@ -279,10 +279,6 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 	}
 }
 
-OPENCL_FORCE_INLINE float RussianRouletteProb(const float importanceCap, const float3 color) {
-	return clamp(Spectrum_Filter(color), importanceCap, 1.f);
-}
-
 OPENCL_FORCE_INLINE bool DirectLight_Illuminate(
 		__global const BSDF *bsdf,
 		__global Ray *shadowRay,
@@ -360,6 +356,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		__global EyePathInfo *pathInfo,
 		__global PathDepthInfo *tmpDepthInfo,
 		__global const BSDF *bsdf,
+		const float3 pathThroughput,
 		const float3 shadowRayDir
 		LIGHTS_PARAM_DECL) {
 	// Sample the BSDF
@@ -388,12 +385,15 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 	const float factor = 1.f / directLightSamplingPdfW;
 
 	// Russian Roulette: the BSDF technique continues the path with the
-	// probability computed from the sample weight of the direction, f cos / pdf
-	// (the MIS weight of a BSDF hit on the light uses the same product, see
-	// pathInfo->lastBSDFPdfW)
-	bsdfPdfW *= ((PathDepthInfo_GetRRDepth(tmpDepthInfo) >= taskConfig->pathTracer.rrDepth) && (bsdfPdfW > 0.f)) ?
-		RussianRouletteProb(taskConfig->pathTracer.rrImportanceCap, bsdfEval / bsdfPdfW) :
-		1.f;
+	// probability computed from the sample weight of the direction, f cos / pdf,
+	// and the path throughput (the MIS weight of a BSDF hit on the light uses
+	// the same product, see pathInfo->lastBSDFPdfW)
+	if ((PathDepthInfo_GetRRDepth(tmpDepthInfo) >= taskConfig->pathTracer.rrDepth) && (bsdfPdfW > 0.f)) {
+		const float etaScale = pathInfo->etaScale *
+				(((taskConfig->pathTracer.rrType != RR_BOUNCE) && (event & TRANSMIT)) ? BSDF_GetRefractionEtaScale(bsdf MATERIALS_PARAM) : 1.f);
+		bsdfPdfW *= PathTracer_RussianRouletteProb(taskConfig->pathTracer.rrType,
+				taskConfig->pathTracer.rrImportanceCap, bsdfEval / bsdfPdfW, pathThroughput, etaScale);
+	}
 
 	// Account for material transparency
 	__global const LightSource* restrict light = &lights[info->lightIndex];

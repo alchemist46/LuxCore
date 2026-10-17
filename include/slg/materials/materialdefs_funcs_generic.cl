@@ -241,6 +241,29 @@ OPENCL_FORCE_INLINE float GGXDistribution_PdfBoundedReflect(const float alphaU, 
 // Glossy2, GlossyCoating and GlossyTranslucent (GGX, see material.h)
 //------------------------------------------------------------------------------
 
+// Path regularization (Kaplanyan & Dachsbacher 2013, pbrt-v4's rule): after
+// the first non-specular vertex of an eye path the GGX alphas become
+// max(alpha, clamp(2 alpha, f, 3 f)), f = HitPoint::regularization (0 = off),
+// so a delta lobe gets the alpha f
+OPENCL_FORCE_INLINE float Microfacet_Regularize(const float alpha, const float regularization) {
+	return (regularization > 0.f) ?
+		fmax(alpha, clamp(2.f * alpha, regularization, 3.f * regularization)) :
+		alpha;
+}
+
+// The Disney material: its GGX alpha is roughness^2 and the clearcoat alpha
+// is Lerp(clearcoatGloss, 0.1, 0.001), regularized through the parameters
+OPENCL_FORCE_INLINE float Disney_RegularizeRoughness(const float roughness, const float regularization) {
+	return (regularization > 0.f) ?
+		sqrt(Microfacet_Regularize(roughness * roughness, regularization)) : roughness;
+}
+OPENCL_FORCE_INLINE float Disney_RegularizeClearcoatGloss(const float clearcoatGloss, const float regularization) {
+	if (!(regularization > 0.f))
+		return clearcoatGloss;
+	const float alpha = Microfacet_Regularize(Lerp(clearcoatGloss, .1f, .001f), regularization);
+	return clamp((alpha - .1f) / (.001f - .1f), 0.f, 1.f);
+}
+
 OPENCL_FORCE_INLINE float Microfacet_D(const float u, const float v,
 		const float3 wh) {
 	return GGXDistribution_D(u, v, wh);

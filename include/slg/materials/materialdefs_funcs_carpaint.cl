@@ -94,7 +94,7 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	// 1st glossy layer
 	const float3 ks1Val = Texture_GetSpectrumValue(material->carpaint.Ks1TexIndex, hitPoint TEXTURES_PARAM);
 	const float3 ks1 = Spectrum_Clamp(ks1Val);
-	const float m1 = Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM);
+	const float m1 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 	if (Spectrum_Filter(ks1) > 0.f && m1 > 0.f)
 	{
 		const float r1 = Texture_GetFloatValue(material->carpaint.R1TexIndex, hitPoint TEXTURES_PARAM);
@@ -105,7 +105,7 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	}
 	const float3 ks2Val = Texture_GetSpectrumValue(material->carpaint.Ks2TexIndex, hitPoint TEXTURES_PARAM);
 	const float3 ks2 = Spectrum_Clamp(ks2Val);
-	const float m2 = Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM);
+	const float m2 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 	if (Spectrum_Filter(ks2) > 0.f && m2 > 0.f)
 	{
 		const float r2 = Texture_GetFloatValue(material->carpaint.R2TexIndex, hitPoint TEXTURES_PARAM);
@@ -116,7 +116,7 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Evaluate(__global const Material* rest
 	}
 	const float3 ks3Val = Texture_GetSpectrumValue(material->carpaint.Ks3TexIndex, hitPoint TEXTURES_PARAM);
 	const float3 ks3 = Spectrum_Clamp(ks3Val);
-	const float m3 = Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM);
+	const float m3 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 	if (Spectrum_Filter(ks3) > 0.f && m3 > 0.f)
 	{
 		const float r3 = Texture_GetFloatValue(material->carpaint.R3TexIndex, hitPoint TEXTURES_PARAM);
@@ -156,9 +156,9 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 	const float d = Texture_GetFloatValue(material->carpaint.depthTexIndex, hitPoint TEXTURES_PARAM);
 	const float3 kdVal = Texture_GetSpectrumValue(material->carpaint.KdTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float m1 = Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM);
-	const float m2 = Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM);
-	const float m3 = Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM);
+	const float m1 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
+	const float m2 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
+	const float m3 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 
 	const float r1 = Texture_GetFloatValue(material->carpaint.R1TexIndex, hitPoint TEXTURES_PARAM);
 	const float r2 = Texture_GetFloatValue(material->carpaint.R2TexIndex, hitPoint TEXTURES_PARAM);

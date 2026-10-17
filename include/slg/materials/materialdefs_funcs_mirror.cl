@@ -67,6 +67,23 @@ OPENCL_FORCE_INLINE void MirrorMaterial_Evaluate(__global const Material* restri
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
+	// Path regularization (HitPoint::regularization > 0): a GGX reflection
+	// with the alpha floor and Kr as its Fresnel term
+	if ((hitPoint->regularization > 0.f) && (lightDir.z * eyeDir.z > 0.f)) {
+		const float alpha = Microfacet_Regularize(0.f, hitPoint->regularization);
+		const float3 wh = normalize(lightDir + eyeDir);
+		const float directPdfW = Microfacet_PdfReflect(alpha, alpha, eyeDir, lightDir);
+		const float3 kr = Spectrum_Clamp(Texture_GetSpectrumValue(material->mirror.krTexIndex, hitPoint TEXTURES_PARAM));
+		const float3 result = (Microfacet_D(alpha, alpha, wh) * Microfacet_G(alpha, alpha, lightDir, eyeDir) /
+				(4.f * fabs(eyeDir.z))) * kr;
+		const BSDFEvent event = GLOSSY | REFLECT;
+
+		EvalStack_PushFloat3(result);
+		EvalStack_PushBSDFEvent(event);
+		EvalStack_PushFloat(directPdfW);
+		return;
+	}
+
 	MATERIAL_EVALUATE_RETURN_BLACK;
 }
 
@@ -81,13 +98,45 @@ OPENCL_FORCE_INLINE void MirrorMaterial_Sample(__global const Material* restrict
 	float3 fixedDir;
 	EvalStack_PopFloat3(fixedDir);
 
+	const float3 kr = Spectrum_Clamp(Texture_GetSpectrumValue(material->mirror.krTexIndex, hitPoint TEXTURES_PARAM));
+
+	// Path regularization (HitPoint::regularization > 0): a GGX reflection
+	// with the alpha floor and Kr as its Fresnel term
+	if (hitPoint->regularization > 0.f) {
+		if (fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC) {
+			MATERIAL_SAMPLE_RETURN_BLACK;
+		}
+
+		const float alpha = Microfacet_Regularize(0.f, hitPoint->regularization);
+		float3 sampledDir;
+		const float pdfW = Microfacet_SampleReflect(alpha, alpha, fixedDir, u0, u1, &sampledDir);
+
+		const float cosi = fabs(sampledDir.z);
+		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (fixedDir.z * sampledDir.z < 0.f) || (pdfW <= 0.f)) {
+			MATERIAL_SAMPLE_RETURN_BLACK;
+		}
+
+		const float3 wh = normalize(fixedDir + sampledDir);
+		const float G = Microfacet_G(alpha, alpha, fixedDir, sampledDir);
+		const float d = Microfacet_D(alpha, alpha, wh);
+
+		// f * |cos(sampled)| / pdf
+		const float3 result = (d * G / (4.f * pdfW * fabs(fixedDir.z))) * kr;
+		const BSDFEvent event = GLOSSY | REFLECT;
+
+		EvalStack_PushFloat3(result);
+		EvalStack_PushFloat3(sampledDir);
+		EvalStack_PushFloat(pdfW);
+		EvalStack_PushBSDFEvent(event);
+		return;
+	}
+
 	const BSDFEvent event = SPECULAR | REFLECT;
 
 	const float3 sampledDir = MAKE_FLOAT3(-fixedDir.x, -fixedDir.y, fixedDir.z);
 	const float pdfW = 1.f;
 
-	const float3 krVal = Texture_GetSpectrumValue(material->mirror.krTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 result = Spectrum_Clamp(krVal);
+	const float3 result = kr;
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

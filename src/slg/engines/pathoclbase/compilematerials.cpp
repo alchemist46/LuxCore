@@ -639,6 +639,30 @@ void CompiledScene::CompileMaterials() {
 		// Bake Material::GetEventTypes() and Material::IsDelta()
 		mat->eventTypes = m.GetEventTypes();
 		mat->isDelta = m.IsDelta();
+		mat->regularizedEventTypes = m.GetRegularizedEventTypes();
+		mat->isRegularizedDelta = m.IsRegularizedDelta();
+
+		// Bake Material::GetRefractiveMaterial()
+		const Material *refractive = m.GetRefractiveMaterial();
+		mat->isRefractive = refractive ? 1 : 0;
+		mat->refractionExteriorIorTexIndex = NULL_INDEX;
+		mat->refractionInteriorIorTexIndex = NULL_INDEX;
+		if (refractive) {
+			TextureConstPtr extIor, intIor;
+			if (refractive->GetType() == GLASS) {
+				auto &gm = dynamic_cast<const GlassMaterial &>(*refractive);
+				extIor = gm.GetExteriorIOR();
+				intIor = gm.GetInteriorIOR();
+			} else if (refractive->GetType() == ROUGHGLASS) {
+				auto &gm = dynamic_cast<const RoughGlassMaterial &>(*refractive);
+				extIor = gm.GetExteriorIOR();
+				intIor = gm.GetInteriorIOR();
+			}
+			if (extIor)
+				mat->refractionExteriorIorTexIndex = scene.GetTextures().GetTextureIndex(extIor);
+			if (intIor)
+				mat->refractionInteriorIorTexIndex = scene.GetTextures().GetTextureIndex(intIor);
+		}
 
 		mat->multiscattering = m.IsMultiscattering() ? 1 : 0;
 

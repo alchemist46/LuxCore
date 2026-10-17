@@ -286,12 +286,12 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateImpl(
 
 	const float3 color = Spectrum_Clamp(colorVal);
 	const float subsurface = clamp(subsurfaceVal, 0.0f, 1.0f);
-	const float roughness = clamp(roughnessVal, 0.0f, 1.0f);
+	const float roughness = Disney_RegularizeRoughness(clamp(roughnessVal, 0.0f, 1.0f), hitPoint->regularization);
 	const float metallic = clamp(metallicVal, 0.0f, 1.0f);
 	const float specular = clamp(specularVal, 0.0f, 1.0f);
 	const float specularTint = clamp(specularTintVal, 0.0f, 1.0f);
 	const float clearcoat = clamp(clearcoatVal, 0.0f, 1.0f);
-	const float clearcoatGloss = clamp(clearcoatGlossVal, 0.0f, 1.0f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(clamp(clearcoatGlossVal, 0.0f, 1.0f), hitPoint->regularization);
 	const float anisotropicGloss = clamp(anisotropicGlossVal, 0.0f, 1.0f);
 	// I allow sheen values > 1.0 to accentuate the effect. The result is still
 	// clamped between 0.0 and 1.0 to not break the energy conservation law.
@@ -450,10 +450,10 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Sample(__global const Material* restrict
 	const float sheenVal = Texture_GetFloatValue(material->disney.sheenTexIndex, hitPoint TEXTURES_PARAM);
 	const float sheenTintVal = Texture_GetFloatValue(material->disney.sheenTintTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float roughness = clamp(roughnessVal, 0.0f, 1.0f);
+	const float roughness = Disney_RegularizeRoughness(clamp(roughnessVal, 0.0f, 1.0f), hitPoint->regularization);
 	const float metallic = clamp(metallicVal, 0.0f, 1.0f);
 	const float clearcoat = clamp(clearcoatVal, 0.0f, 1.0f);
-	const float clearcoatGloss = clamp(clearcoatGlossVal, 0.0f, 1.0f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(clamp(clearcoatGlossVal, 0.0f, 1.0f), hitPoint->regularization);
 	const float anisotropicGloss = clamp(anisotropicGlossVal, 0.0f, 1.0f);
 
 	const float3 wo = fixedDir;

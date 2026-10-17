@@ -225,7 +225,8 @@ void BakeCPURenderThread::RenderEyeSample(const BakeMapInfo &mapInfo, PathTracer
 						state.GetEyeSampler().GetSample(pathTracer.eyeSampleSize + 2),
 						&bsdfPdfW, &cosSampledDir, &bsdfEvent);
 
-				pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, pathTracer.hybridBackForwardGlossinessThreshold);
+				pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, pathTracer.hybridBackForwardGlossinessThreshold,
+						pathTracer.rrType != slg::ocl::RR_BOUNCE);
 
 				// Ray origin
 				const Point rayOrig = bsdf.GetRayOrigin(sampledDir);
@@ -291,7 +292,8 @@ void BakeCPURenderThread::RenderEyeSample(const BakeMapInfo &mapInfo, PathTracer
 				const Vector sampledDir = bsdf.GetFrame().ToWorld(localSampledDir);
 
 				const float samplePdf = UniformHemispherePdf(u1, u2);
-				pathInfo.AddVertex(bsdf, DIFFUSE | REFLECT, samplePdf, pathTracer.hybridBackForwardGlossinessThreshold);
+				pathInfo.AddVertex(bsdf, DIFFUSE | REFLECT, samplePdf, pathTracer.hybridBackForwardGlossinessThreshold,
+						pathTracer.rrType != slg::ocl::RR_BOUNCE);
 
 				// Ray origin
 				const Point rayOrig = bsdf.GetRayOrigin(sampledDir);

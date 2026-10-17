@@ -137,6 +137,7 @@ extern std::string KernelSource_hitpoint_funcs;
 extern std::string KernelSource_pgic_types;
 extern std::string KernelSource_pgic_funcs;
 extern std::string KernelSource_pathtracer_types;
+extern std::string KernelSource_pathtracer_funcs;
 
 // Film and image pipeline kernels
 extern std::string KernelSource_film_mergesamplebuffer_funcs;

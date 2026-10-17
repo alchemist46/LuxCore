@@ -16,14 +16,24 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// The Russian roulette rule, see PathTracer_RussianRouletteProb()
+typedef enum {
+	RR_BOUNCE, RR_PATH, RR_PATH_SQRT
+} RussianRouletteType;
+
 typedef struct {
 	unsigned int eyeSampleBootSize, eyeSampleStepSize, eyeSampleSize;
 
 	PathDepthInfo maxPathDepth;
 
 	// Russian roulette
+	RussianRouletteType rrType;
 	unsigned int rrDepth;
 	float rrImportanceCap;
+
+	// Path regularization: the roughness floor (HitPoint::regularization) of
+	// the vertices after the first non-specular bounce, 0 when disabled
+	float regularization;
 
 	// Clamping settings
 	float sqrtVarianceClampMaxValue;

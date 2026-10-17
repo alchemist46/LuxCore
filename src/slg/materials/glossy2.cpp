@@ -74,8 +74,8 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
 	if (directPdfW) {
 		if ((!doublesided) && (localFixedDir.z < 0.f)) {
@@ -159,8 +159,8 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
 	// Coating is used only on the front face
 	const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
@@ -235,8 +235,8 @@ void Glossy2Material::Pdf(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f);
-	const float v = Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
 	if (directPdfW) {
 		if ((!doublesided) && (localFixedDir.z < 0.f)) {

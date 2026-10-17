@@ -123,8 +123,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 	const float uVal = Texture_GetFloatValue(material->metal2.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float vVal = Texture_GetFloatValue(material->metal2.nvTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float u = clamp(uVal, 1e-9f, 1.f);
-	const float v = clamp(vVal, 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(clamp(uVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(vVal, 1e-9f, 1.f), hitPoint->regularization);
 
 	const float3 wh = normalize(lightDir + eyeDir);
 	const float cosWH = dot(lightDir, wh);
@@ -168,8 +168,8 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 	const float uVal = Texture_GetFloatValue(material->metal2.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float vVal = Texture_GetFloatValue(material->metal2.nvTexIndex, hitPoint TEXTURES_PARAM);
 
-	const float u = clamp(uVal, 1e-9f, 1.f);
-	const float v = clamp(vVal, 1e-9f, 1.f);
+	const float u = Microfacet_Regularize(clamp(uVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(vVal, 1e-9f, 1.f), hitPoint->regularization);
 
 	float3 sampledDir;
 	const float pdfW = Microfacet_SampleReflect(u, v, fixedDir, u0, u1, &sampledDir);

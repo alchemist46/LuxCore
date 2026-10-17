@@ -98,13 +98,16 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		sampleResult->firstPathVertexEvent = bsdfEvent;
 
 	EyePathInfo_AddVertex(pathInfo, bsdf, bsdfEvent, bsdfPdfW,
-			taskConfig->pathTracer.hybridBackForward.glossinessThreshold
+			taskConfig->pathTracer.hybridBackForward.glossinessThreshold,
+			taskConfig->pathTracer.rrType != RR_BOUNCE
 			MATERIALS_PARAM);
 
-	// Russian Roulette
+	// Russian Roulette (the throughput is still the one before the bounce)
 	const bool rrEnabled = EyePathInfo_UseRR(pathInfo, taskConfig->pathTracer.rrDepth);
 	const float rrProb = rrEnabled ?
-		RussianRouletteProb(taskConfig->pathTracer.rrImportanceCap, bsdfSample) :
+		PathTracer_RussianRouletteProb(taskConfig->pathTracer.rrType,
+			taskConfig->pathTracer.rrImportanceCap, bsdfSample,
+			VLOAD3F(taskState->throughput.c), pathInfo->etaScale) :
 		1.f;
 	const bool rrContinuePath = !rrEnabled ||
 		!(rrProb < Sampler_GetSample(taskConfig, sampleOffset + IDX_RR SAMPLER_PARAM));
@@ -581,6 +584,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				pathInfo,
 				&taskTmp->tmpPathDepthInfo,
 				bsdf,
+				VLOAD3F(taskState->throughput.c),
 				VLOAD3F(&shadowRay->d.x)
 				LIGHTS_PARAM)) {
 		// Initialize the pass-through event for the shadow ray
@@ -792,6 +796,12 @@ __kernel void AdvancePaths_MK_RT(
 
 				pathState = MK_SPLAT_SAMPLE;
 			} else {
+				// Path regularization: after the first non-specular bounce the
+				// GGX lobes of the vertex get a roughness floor and its delta
+				// lobes become rough (see HitPoint::regularization)
+				bsdf->hitPoint.regularization = ((taskConfig->pathTracer.regularization > 0.f) && pathInfo->anyNonSpecularBounce) ?
+					taskConfig->pathTracer.regularization : 0.f;
+
 				const BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM);
 
