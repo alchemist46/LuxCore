@@ -409,10 +409,14 @@ OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
 			} else {
 				const uint p = first ? (pass - 1) : pass;
 				if (p < chunkSize) {
+					// The pixels ordered by the base-4 scramble of the Morton
+					// code, the samples shuffled by the base-2 nested scramble
+					// of the whole index (see SobolSampler::InitNewSample() on
+					// the CPU)
 					const uint chunkSeed = SobolSequence_Hash(SobolSequence_HashCombine(seedBase, 0xb3u));
-					sample->pass = SobolSequence_NestedUniformScrambleBase4(
-							(morton << chunkBits) | p,
-							chunkSeed, mortonDigits + (chunkBits + 1u) / 2u);
+					const uint pixelOrder = SobolSequence_NestedUniformScrambleBase4(morton, chunkSeed, mortonDigits);
+					sample->pass = SobolSequence_NestedUniformScramble((pixelOrder << chunkBits) | p,
+							SobolSequence_Hash(SobolSequence_HashCombine(chunkSeed, 0xb6u)));
 					sample->seed = SobolSequence_Hash(SobolSequence_HashCombine(chunkSeed, 0xb4u));
 				} else {
 					// Past its chunk, a pixel continues with one sequence of

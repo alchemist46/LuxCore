@@ -365,10 +365,19 @@ void SobolSampler::InitNewSample() {
 				} else {
 					const u_int p = blueNoiseFirstSample ? (pass - 1) : pass;
 					if (p < chunkSize) {
+						// The base-4 scramble orders the pixels (the Morton
+						// code only), then the base-2 nested scramble of the
+						// whole index (as Cycles) shuffles the samples of each
+						// pixel. A base-4 scramble of the whole index splits
+						// the chunk digits wrongly when the chunk bits are
+						// odd: 2 of 3 pixels got a chunk of two unrelated
+						// halves (10-50% more error at 32 and 128 spp). The
+						// base-2 scramble keeps each chunk, and each power of
+						// 2 prefix of it, an aligned block of the sequence.
 						const u_int chunkSeed = SobolSequence::Hash(SobolSequence::HashCombine(seedBase, 0xb3u));
-						sobolIndex = SobolSequence::NestedUniformScrambleBase4(
-								(morton << blueNoiseChunkBits) | p,
-								chunkSeed, mortonDigits + (blueNoiseChunkBits + 1u) / 2u);
+						const u_int pixelOrder = SobolSequence::NestedUniformScrambleBase4(morton, chunkSeed, mortonDigits);
+						sobolIndex = SobolSequence::ShuffledIndex((pixelOrder << blueNoiseChunkBits) | p,
+								SobolSequence::Hash(SobolSequence::HashCombine(chunkSeed, 0xb6u)));
 						sobolSequence.seed = SobolSequence::Hash(SobolSequence::HashCombine(chunkSeed, 0xb4u));
 					} else {
 						// Past its chunk (no halt spp, a halt spp over the
