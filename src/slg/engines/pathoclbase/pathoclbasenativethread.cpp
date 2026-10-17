@@ -84,7 +84,9 @@ void PathOCLBaseNativeRenderThread::StartRenderThread() {
 void PathOCLBaseNativeRenderThread::StopRenderThread() {
 	if (renderThread) {
 		renderThread->request_stop();
-		renderThread->join();
+		// WaitForDone() may have joined it already
+		if (renderThread->joinable())
+			renderThread->join();
 	}
 }
 
@@ -104,7 +106,7 @@ bool PathOCLBaseNativeRenderThread::HasDone() const {
 }
 
 void PathOCLBaseNativeRenderThread::WaitForDone() const {
-	if (renderThread)
+	if (renderThread && renderThread->joinable())
 		renderThread->join();
 }
 

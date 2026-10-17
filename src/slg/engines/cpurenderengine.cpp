@@ -79,7 +79,9 @@ void CPURenderThread::StartRenderThread() {
 void CPURenderThread::StopRenderThread() {
 	if (renderThread) {
 		renderThread->request_stop();
-		renderThread->join();
+		// WaitForDone() may have joined it already
+		if (renderThread->joinable())
+			renderThread->join();
 		renderThread.reset();
 	}
 }
@@ -97,7 +99,7 @@ bool CPURenderThread::HasDone() const {
 }
 
 void CPURenderThread::WaitForDone() const {
-	if (renderThread)
+	if (renderThread && renderThread->joinable())
 		renderThread->join();
 }
 

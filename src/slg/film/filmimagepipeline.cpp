@@ -140,7 +140,7 @@ bool Film::HasDoneAsyncExecuteImagePipeline() {
 }
 
 void Film::WaitAsyncExecuteImagePipeline() {
-	if (isAsyncImagePipelineRunning)
+	if (isAsyncImagePipelineRunning && imagePipelineThread->joinable())
 		imagePipelineThread->join();
 }
 

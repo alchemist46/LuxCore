@@ -42,9 +42,7 @@ FilmUPtr Film::Create(
 	const u_int height,
 	const u_int *subRegion
 ) {
-	auto result = std::make_unique<Film>(Private(), width, height, subRegion);
-	result->InitFilmDenoiser();
-	return result;
+	return std::make_unique<Film>(Private(), width, height, subRegion);
 }
 
 void Film::InitFilmDenoiser() {
@@ -116,6 +114,10 @@ Film::Film() {
 
 	// Initialize variables to nullptr
 	SetUpHW();
+
+	// In every constructor: the default one is used by the deserialization
+	// (Film::LoadSerialized(), a resumed film, pyluxcore.Film(fileName))
+	InitFilmDenoiser();
 }
 
 Film::Film(Private p, const u_int w, const u_int h, const u_int * sr)
@@ -208,12 +210,18 @@ Film::Film(Private p, const u_int w, const u_int h, const u_int * sr)
 
 	// Initialize variables to nullptr
 	SetUpHW();
+
+	// In every constructor: the default one is used by the deserialization
+	// (Film::LoadSerialized(), a resumed film, pyluxcore.Film(fileName))
+	InitFilmDenoiser();
 }
 
 Film::~Film() {
 	if (imagePipelineThread) {
 		imagePipelineThread->request_stop();
-		imagePipelineThread->join();
+		// WaitAsyncExecuteImagePipeline() may have joined it already
+		if (imagePipelineThread->joinable())
+			imagePipelineThread->join();
 	}
 
 	// The image pipeline plugin destructor can use the hardware device to free
