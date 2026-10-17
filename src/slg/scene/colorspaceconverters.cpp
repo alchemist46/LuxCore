@@ -17,6 +17,7 @@
  ***************************************************************************/
 	
 #include "luxrays/utils/strutils.h"
+#include "slg/core/sdl.h"
 #include "slg/scene/colorspaceconverters.h"
 #include "slg/utils/filenameresolver.h"
 
@@ -126,6 +127,11 @@ void ColorSpaceConverters::ConvertFromOpenColorIO(const string &configFileName,
 				else {
 					OCIO::ConstColorSpaceRcPtr cs = config->getColorSpace(inputColorSpace.c_str());
 					if (!(cs && cs->isData())) {
+						// Once per config, colour space and working space (the cache)
+						SDL_LOG("WARNING: the OpenColorIO config \"" << configFileName << "\" has no " <<
+								WorkingColorSpace::WorkingColorSpaceType2String(workingColorSpace.GetType()) <<
+								" color space, the scene_linear role is taken as Linear Rec.709: " << inputColorSpace);
+
 						// Append Rec.709 to the working space to the transform
 						const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
 						const double m44[16] = {

@@ -56,6 +56,7 @@ namespace OCIO = OCIO_NAMESPACE;
 #include "slg/film/imagepipeline/plugins/bakemapmargin.h"
 #include "slg/film/imagepipeline/plugins/colorlut.h"
 #include "slg/film/imagepipeline/plugins/optixdenoiser.h"
+#include "slg/utils/filenameresolver.h"
 
 using namespace std;
 using namespace luxrays;
@@ -782,30 +783,56 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "TONEMAP_OPENCOLORIO") {
 				const string mode = props.Get(Property(prefix + ".mode")("COLORSPACE_CONVERSION")).Get<string>();
 
+				// The Rec.709 source: the rendering role, or the scene linear
+				// one in the configs without it (e.g. filmic-blender)
+				auto ocioRec709Source = [&](const string &configName) -> string {
+					try {
+						OCIO::ConstConfigRcPtr config = (configName == "") ?
+							OCIO::GetCurrentConfig() :
+							OCIO::Config::CreateFromFile(SLG_FileNameResolver.ResolveFile(configName).c_str());
+						if (!config->hasRole(OCIO::ROLE_RENDERING) && config->hasRole(OCIO::ROLE_SCENE_LINEAR))
+							return OCIO::ROLE_SCENE_LINEAR;
+					} catch (OCIO::Exception &) {
+						// The error is reported by the plugin
+					}
+					return OCIO::ROLE_RENDERING;
+				};
+
 				// The default source is the working space (the rendering role
 				// in Rec.709, or if the config has no such colour space)
 				auto ocioSource = [&](const string &prefix) -> string {
+					const string configName = props.Get(Property(prefix + ".config")("")).Get<string>();
 					if (workingColorSpace.IsRec709())
-						return OCIO::ROLE_RENDERING;
-					const string name = workingColorSpace.FindOpenColorIOColorSpace(
-							props.Get(Property(prefix + ".config")("")).Get<string>());
-					return (name == "") ? string(OCIO::ROLE_RENDERING) : name;
+						return ocioRec709Source(configName);
+					const string name = workingColorSpace.FindOpenColorIOColorSpace(configName);
+					if (name == "") {
+						const string role = ocioRec709Source(configName);
+						SLG_LOG("WARNING: the OpenColorIO config \"" << configName << "\" has no " <<
+								WorkingColorSpace::WorkingColorSpaceType2String(workingColorSpace.GetType()) <<
+								" color space, the pixels are taken as its " << role <<
+								" role (set " << prefix << ".src)");
+						return role;
+					}
+					return name;
 				};
 
 				if (mode == "COLORSPACE_CONVERSION") {
+					// The default destination is the colour picking role, a
+					// display referred space in every config (sRGB in Blender's)
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateColorSpaceConversion(
 						props.Get(Property(prefix + ".config")("")).Get<string>(),
 						props.Get(Property(prefix + ".src")(ocioSource(prefix))).Get<string>(),
-						props.Get(Property(prefix + ".dst")(OCIO::ROLE_INTERCHANGE_DISPLAY)).Get<string>()));
+						props.Get(Property(prefix + ".dst")(OCIO::ROLE_COLOR_PICKING)).Get<string>()));
 				} else if (mode == "LUT_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateLUTConversion(
 						props.Get(Property(prefix + ".lutfile")("file.lut")).Get<string>()));
 				} else if (mode == "DISPLAY_CONVERSION") {
+					// An empty display or view is the default one of the config
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateDisplayConversion(
 						props.Get(Property(prefix + ".config")("")).Get<string>(),
 						props.Get(Property(prefix + ".src")(ocioSource(prefix))).Get<string>(),
-						props.Get(Property(prefix + ".display")(OCIO::ROLE_INTERCHANGE_DISPLAY)).Get<string>(),
-						props.Get(Property(prefix + ".view")(OCIO::OCIO_VIEW_USE_DISPLAY_NAME)).Get<string>(),
+						props.Get(Property(prefix + ".display")("")).Get<string>(),
+						props.Get(Property(prefix + ".view")("")).Get<string>(),
 						props.Get(Property(prefix + ".look")("")).Get<string>()));
 				} else if (mode == "LOOK_CONVERSION") {
 					imagePipeline->AddPlugin(OpenColorIOToneMap::CreateLookConversion(

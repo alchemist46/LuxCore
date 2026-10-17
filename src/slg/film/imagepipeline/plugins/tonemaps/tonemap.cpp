@@ -56,7 +56,7 @@ ToneMapType slg::String2ToneMapType(const std::string &type) {
 	else if ((type.compare("3") == 0) || (type.compare("LUXLINEAR") == 0))
 		return TONEMAP_LUXLINEAR;
 	else if ((type.compare("4") == 0) || (type.compare("OPENCOLORIO") == 0))
-		return TONEMAP_LUXLINEAR;
+		return TONEMAP_OPENCOLORIO;
 	else
 		throw runtime_error("Unknown tone mapping type: " + type);
 }

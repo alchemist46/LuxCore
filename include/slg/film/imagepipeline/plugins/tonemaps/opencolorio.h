@@ -20,6 +20,7 @@
 #define	_SLG_OPENCOLOR_TONEMAP_H
 
 #include <cmath>
+#include <memory>
 #include <string>
 
 #include "luxrays/utils/serializationutils.h"
@@ -46,6 +47,7 @@ public:
 	static OpenColorIOToneMap *CreateColorSpaceConversion(const std::string &configFileName,
 			const std::string &inputColorSpace, const std::string &outputColorSpace);
 	static OpenColorIOToneMap *CreateLUTConversion(const std::string &lutFileName);
+	// An empty display name or view name means the default one of the config
 	static OpenColorIOToneMap *CreateDisplayConversion(const std::string &configFileName,
 			const std::string &inputColorSpace, const std::string &displayName,
 			const std::string &viewName, const std::string &lookName);
@@ -71,15 +73,29 @@ private:
 		ar & outputColorSpace;
 		ar & lutFileName;
 
-		ar & displayConversion.inputColorSpace;
-		ar & displayConversion.displayName;
-		ar & displayConversion.viewName;
-		ar & displayConversion.lookName;
+		if (version < 2) {
+			// Versions 0 and 1 had no looks: the display conversion shared
+			// the input colour space and stored only the display and the view
+			ar & displayConversion.displayName;
+			ar & displayConversion.viewName;
+			displayConversion.inputColorSpace = inputColorSpace;
+		} else {
+			ar & displayConversion.inputColorSpace;
+			ar & displayConversion.displayName;
+			ar & displayConversion.viewName;
+			ar & displayConversion.lookName;
 
-		ar & lookInputColorSpace;
-		ar & lookName;
+			ar & lookInputColorSpace;
+			ar & lookName;
+		}
 	}
-	
+
+	// The OpenColorIO processor is built at the first Apply() and reused: the
+	// settings can't change after the construction. It is not copied nor
+	// serialized.
+	struct ProcessorCache;
+	std::unique_ptr<ProcessorCache> processorCache;
+
 	OCIOConversionType conversionType;
 	
 	std::string configFileName;
