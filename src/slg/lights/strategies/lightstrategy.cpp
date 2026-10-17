@@ -27,9 +27,11 @@ using namespace slg;
 // LightStrategy
 //------------------------------------------------------------------------------
 
+// The default is LIGHT_TREE (LOG_POWER until 2026-10-17): at equal error it
+// was 1.3-1.55x as fast on the GPU and 1.0-1.08x on the CPU in the G0 scenes
 LightStrategyType LightStrategy::GetType(const luxrays::Properties &cfg) {
 	const string type = cfg.Get(
-		Property("lightstrategy.type")(LightStrategyLogPower::GetObjectTag())
+		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
 	).Get<string>();
 
 	return String2LightStrategyType(type);
@@ -41,7 +43,7 @@ LightStrategyType LightStrategy::GetType(const luxrays::Properties &cfg) {
 
 PropertiesUPtr LightStrategy::ToProperties(const Properties &cfg) {
 	const string type = cfg.Get(
-		Property("lightstrategy.type")(LightStrategyLogPower::GetObjectTag())
+		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
 	).Get<string>();
 
 	LightStrategyRegistry::ToProperties func;
@@ -56,7 +58,7 @@ PropertiesUPtr LightStrategy::ToProperties(const Properties &cfg) {
 
 LightStrategyUPtr LightStrategy::FromProperties(const Properties &cfg) {
 	const string type = cfg.Get(
-		Property("lightstrategy.type")(LightStrategyLogPower::GetObjectTag())
+		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
 	).Get<string>();
 
 	LightStrategyRegistry::FromProperties func;

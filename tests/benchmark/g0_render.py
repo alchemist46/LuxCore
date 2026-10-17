@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""G0 renders: one engine, one scene prepared by g0_prepare.py, on the HIP GPU.
+"""G0 renders: one engine, one scene prepared by g0_prepare.py, on the HIP GPU
+(or LuxCore on the CPU with --luxcore-cpu).
 
 The renders go through Blender, as a user would run them (Cycles, or
 BlendLuxCore with PATHOCL). The process renders:
@@ -46,6 +47,7 @@ parser.add_argument("--seed", type=int, default=1, help="seed of the first rende
 parser.add_argument("--percentage", type=int, default=100, help="resolution percentage")
 parser.add_argument("--cycles-hiprt", action="store_true", help="HIPRT for Cycles (off by default)")
 parser.add_argument("--no-hiprt", action="store_true", help="LuxCore BVH instead of HIPRT")
+parser.add_argument("--luxcore-cpu", action="store_true", help="LuxCore on the CPU (PATHCPU) instead of the HIP GPU")
 parser.add_argument("--addon", help="BlendLuxCore source directory (LUXCORE)")
 parser.add_argument("--site-packages", help="site-packages with pyluxcore (LUXCORE)")
 parser.add_argument("--bounces", type=int,
@@ -142,20 +144,27 @@ else:
                     props.Set(pyluxcore.Property(f"scene.materials.{name}.transparency.shadowoverride", True))
             return scene_parse(self, props)
         pyluxcore.Scene.Parse = scene_parse_with_shadow_transparency
-    prefs = g0_blc.preferences()
-    prefs.gpu_backend = "HIP"
-    prefs.use_hiprt = not args.no_hiprt
-    devices = scene.luxcore.devices
-    devices.use_native_cpu = False
-    devices.update_devices_if_necessary()
-    for d in devices.devices:
-        d.enabled = d.type == "HIP_GPU"
-    used = [d.name for d in devices.devices if d.enabled]
-    if not used:
-        sys.exit("[G0] no HIP device for LuxCore")
-    log["devices"] = used
-    log["selection"] = devices.devices_to_selection_string()
-    log["hiprt"] = not args.no_hiprt
+    if args.luxcore_cpu:
+        # PATHCPU with every thread
+        scene.luxcore.config.device = "CPU"
+        log["devices"] = [f"CPU, {os.cpu_count()} threads"]
+        log["hiprt"] = False
+    else:
+        scene.luxcore.config.device = "OCL"
+        prefs = g0_blc.preferences()
+        prefs.gpu_backend = "HIP"
+        prefs.use_hiprt = not args.no_hiprt
+        devices = scene.luxcore.devices
+        devices.use_native_cpu = False
+        devices.update_devices_if_necessary()
+        for d in devices.devices:
+            d.enabled = d.type == "HIP_GPU"
+        used = [d.name for d in devices.devices if d.enabled]
+        if not used:
+            sys.exit("[G0] no HIP device for LuxCore")
+        log["devices"] = used
+        log["selection"] = devices.devices_to_selection_string()
+        log["hiprt"] = not args.no_hiprt
     tonemapper = scene.camera.data.luxcore.imagepipeline.tonemapper
     tonemapper.type = "TONEMAP_LINEAR"
     tonemapper.use_autolinear = False

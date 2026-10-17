@@ -34,7 +34,8 @@ LightStrategyWindow::LightStrategyWindow(LuxCoreApp *a) : ObjectEditorWindow(a, 
 		.Add("UNIFORM", 0)
 		.Add("POWER", 1)
 		.Add("LOG_POWER", 2)
-		.SetDefault("LOG_POWER");
+		.Add("LIGHT_TREE", 3)
+		.SetDefault("LIGHT_TREE");
 }
 
 void LightStrategyWindow::RefreshObjectProperties(const std::unique_ptr<Properties> & props) {
