@@ -180,7 +180,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 		__global RayHit *rayHit,
 		__global SampleResult *sampleResult,
 		__global const GPUTaskDirectLightVertex *taskDirectLightVertex
-		MATERIALS_PARAM_DECL) {
+		LIGHTS_PARAM_DECL) {
 	// Count the shadow ray traced by the RT kernel
 	if (taskConfig->film.hasChannelRayCount)
 		sampleResult->rayCount += 1;
@@ -230,6 +230,14 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 						VLOAD3F(taskDirectLightVertex ? taskDirectLightVertex->throughput.c : taskState->throughput.c),
 						lightRadiance, 1.f, firstPathVertex,
 						VLOAD3F(taskDirectLightVertex ? taskDirectLightVertex->irradiancePathThroughput.c : sampleResult->irradiancePathThroughput.c));
+
+				// The light tree learns what the light added at this vertex
+				if (lightTreeLearn && !BSDF_IsShadowCatcherOnlyInfiniteLights(bsdf MATERIALS_PARAM))
+					LightTree_LearnAddContribution(lightTreeNodes, lightTreeLightIndex,
+							lightTreeLearn, lightTreeLearnSums,
+							VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf), !bsdf->isVolume,
+							taskDirectLight->illumInfo.lightIndex, taskDirectLight->illumInfo.pickPdf,
+							Spectrum_Y(lightRadiance));
 
 				// The first path vertex is not handled by AddDirectLight(). This is valid
 				// for irradiance AOV only if it is not a SPECULAR material.
@@ -715,7 +723,7 @@ __kernel void AdvancePaths_MK_RT(
 		const PathState shadowRayState = AdvancePaths_ShadowRayHit(taskConfig, taskTmp, intersectHitPoint, &tasksDirectLight[gid], taskState,
 				prevBsdf, &directLightVolInfos[gid], &rays[shadowRayIndex], &rayHits[shadowRayIndex], sampleResult,
 				(pathState == MK_RT_DL) ? NULL : &tasksDirectLightVertex[gid]
-				MATERIALS_PARAM);
+				LIGHTS_PARAM);
 
 		// The second slot is free again (the merged flow is used only when the
 		// shadow ray is final after one trace)

@@ -21,6 +21,7 @@
 // luxrays/devices/cpudevice_oclemul.h).
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <memory>
 
@@ -63,7 +64,7 @@ namespace slg { namespace {
 
 struct LightBounds {
 	LightBounds() : axis(0.f, 0.f, 1.f), cosThetaO(1.f), cosThetaE(1.f),
-			phi(0.f), twoSided(false), isTriangle(false) { }
+			phi(0.f), twoSided(false), isotropic(false), isTriangle(false) { }
 
 	Point Centroid() const { return bbox.Center(); }
 
@@ -75,6 +76,8 @@ struct LightBounds {
 	// The maximum radiant intensity (luminance)
 	float phi;
 	bool twoSided;
+	// The light emits the same in every direction (point and sphere lights)
+	bool isotropic;
 
 	// A triangle light with a fixed position and a Lambertian emission: its
 	// vertices, in the order of its emitting normal
@@ -132,6 +135,7 @@ LightBounds Union(const LightBounds &a, const LightBounds &b) {
 	result.cosThetaE = Min(a.cosThetaE, b.cosThetaE);
 	result.phi = a.phi + b.phi;
 	result.twoSided = a.twoSided || b.twoSided;
+	result.isotropic = a.isotropic && b.isotropic;
 	result.isTriangle = false;
 
 	return result;
@@ -241,6 +245,7 @@ LightKind GetLightBounds(SceneConstRef scene, LightSourceConstRef l,
 			// Isotropic: every direction
 			bounds->cosThetaO = -1.f;
 			bounds->cosThetaE = 0.f;
+			bounds->isotropic = true;
 			bounds->phi = l.GetPower(scene) * (1.f / (4.f * M_PI)) * importance;
 			break;
 		}
@@ -360,10 +365,14 @@ void ToOCL(const LightBounds &bounds, ocl::LightTreeNode *node) {
 	node->axis[0] = bounds.axis.x;
 	node->axis[1] = bounds.axis.y;
 	node->axis[2] = bounds.axis.z;
-	node->cosThetaO = bounds.cosThetaO;
+	// Normals within 0.06 degrees are parallel (the union of the cones of two
+	// coplanar triangles is a little wider than zero in float, and the plane
+	// cull of LightTree_NodeImportance() asks for exactly parallel normals)
+	node->cosThetaO = (bounds.cosThetaO > .9999995f) ? 1.f : bounds.cosThetaO;
 	node->cosThetaE = bounds.cosThetaE;
 	node->phi = bounds.phi;
-	node->flags = bounds.twoSided ? LIGHTTREE_NODE_TWOSIDED : 0u;
+	node->flags = (bounds.twoSided ? LIGHTTREE_NODE_TWOSIDED : 0u) |
+			(bounds.isotropic ? LIGHTTREE_NODE_ISOTROPIC : 0u);
 }
 
 typedef vector<pair<u_int, LightBounds> > BuildLights;
@@ -372,10 +381,12 @@ typedef vector<pair<u_int, LightBounds> > BuildLights;
 // (pbrt-v4 BVHLightSampler::buildBVH())
 u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 		const u_int parentIndex, const u_int depth,
-		vector<ocl::LightTreeNode> &nodes, vector<u_int> &lightIndex) {
+		vector<ocl::LightTreeNode> &nodes, vector<u_int> &lightIndex,
+		vector<u_int> &nodeDepths) {
 	const u_int nodeIndex = nodes.size();
 	nodes.emplace_back();
 	nodes[nodeIndex].parentIndex = parentIndex;
+	nodeDepths.push_back(depth);
 
 	if (end - start == 1) {
 		const LightBounds &bounds = lights[start].second;
@@ -469,8 +480,8 @@ u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 	}
 
 	// The first child is the next node
-	BuildNode(lights, start, mid, nodeIndex, depth + 1, nodes, lightIndex);
-	const u_int child1 = BuildNode(lights, mid, end, nodeIndex, depth + 1, nodes, lightIndex);
+	BuildNode(lights, start, mid, nodeIndex, depth + 1, nodes, lightIndex, nodeDepths);
+	const u_int child1 = BuildNode(lights, mid, end, nodeIndex, depth + 1, nodes, lightIndex, nodeDepths);
 
 	ToOCL(nodeBounds, &nodes[nodeIndex]);
 	nodes[nodeIndex].childOrLightIndex = child1;
@@ -484,8 +495,24 @@ u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 // LightStrategyLightTree
 //------------------------------------------------------------------------------
 
-LightStrategyLightTree::LightStrategyLightTree() : LightStrategy(TYPE_LIGHT_TREE),
-		taskType(TASK_ILLUMINATE) {
+// The slot probabilities from the bounds of the last pick of the thread,
+// kept for the AddSample() that follows it (the same point: no second walk)
+namespace {
+struct LearnPickStash {
+	float boundsProb[LIGHTTREE_MAX_SLOTS];
+	float px, py, pz;
+	bool valid = false;
+};
+thread_local LearnPickStash learnPickStash;
+}
+
+
+LightStrategyLightTree::LightStrategyLightTree(const bool learnEnbl, const u_int learnDpth,
+		const float learnMaxWght, const float learnCellSz, const float learnSmpls) : LightStrategy(TYPE_LIGHT_TREE),
+		taskType(TASK_ILLUMINATE), learnEnable(learnEnbl), learnDepth(learnDpth),
+		learnMaxWeight(learnMaxWght), learnCellSize(learnCellSz), learnSamples(learnSmpls), learnCellCount(0),
+		learnLiveIndex(0), learnSampleCount(0), learnNextEpoch(0), learnRebuilding(false) {
+	memset(&learn, 0, sizeof(learn));
 }
 
 LightStrategyLightTree::~LightStrategyLightTree() {
@@ -500,6 +527,12 @@ void LightStrategyLightTree::Preprocess(SceneConstRef scn, const LightStrategyTa
 	nodes.clear();
 	distantLights.clear();
 	lightIndex.clear();
+	learnCellCount = 0;
+	learnCells[0].clear();
+	learnCells[1].clear();
+	learnSums.reset();
+	learnBoundsSums.reset();
+	learnCounts.reset();
 
 	if (UseTree())
 		Build(scn);
@@ -540,14 +573,151 @@ void LightStrategyLightTree::Build(SceneConstRef scene) {
 		}
 	}
 
+	vector<u_int> nodeDepths;
 	if (lights.size() > 0) {
 		nodes.reserve(2 * lights.size() - 1);
-		BuildNode(lights, 0, lights.size(), NULL_INDEX, 0, nodes, lightIndex);
+		nodeDepths.reserve(2 * lights.size() - 1);
+		BuildNode(lights, 0, lights.size(), NULL_INDEX, 0, nodes, lightIndex, nodeDepths);
 	}
 
+	if (learnEnable)
+		BuildLearning(scene, nodeDepths);
+
 	SLG_LOG("Light tree: " << lights.size() << " lights in " << nodes.size() << " nodes, " <<
-			distantLights.size() << " distant lights, built in " <<
-			(WallClockTime() - startTime) << " secs");
+			distantLights.size() << " distant lights, " <<
+			(UseLearning() ? ToString(learn.slotCount) + " learned slots in " + ToString(learnCellCount) + " cells, " : string("")) <<
+			"built in " << (WallClockTime() - startTime) << " secs");
+}
+
+//------------------------------------------------------------------------------
+// The learned slots
+//------------------------------------------------------------------------------
+
+void LightStrategyLightTree::BuildLearning(SceneConstRef scene, const vector<u_int> &nodeDepths) {
+	memset(&learn, 0, sizeof(learn));
+	learnCellCount = 0;
+
+	// The cut: the nodes at the learning depth and the leaves above it, at a
+	// smaller depth if they would not fit the slots with the distant lights
+	vector<u_int> cut;
+	for (int depth = learnDepth; depth >= 0; --depth) {
+		cut.clear();
+		for (u_int i = 0; i < nodes.size(); ++i) {
+			if ((nodeDepths[i] == (u_int)depth) ||
+					((nodeDepths[i] < (u_int)depth) && (nodes[i].flags & LIGHTTREE_NODE_LEAF)))
+				cut.push_back(i);
+		}
+		if (cut.size() + distantLights.size() <= LIGHTTREE_MAX_SLOTS)
+			break;
+	}
+	const u_int slotCount = cut.size() + distantLights.size();
+	if ((slotCount > LIGHTTREE_MAX_SLOTS) || (slotCount < 2))
+		return;
+
+	learn.slotCount = slotCount;
+	learn.distantCount = distantLights.size();
+	for (u_int i = 0; i < cut.size(); ++i) {
+		learn.cutNodes[i] = cut[i];
+		nodes[cut[i]].flags |= (distantLights.size() + i + 1) << LIGHTTREE_NODE_SLOT_SHIFT;
+	}
+
+	const BSphere &bsphere = scene.GetSceneBSphere();
+	learn.center[0] = bsphere.center.x;
+	learn.center[1] = bsphere.center.y;
+	learn.center[2] = bsphere.center.z;
+	learn.invCellSize = 1.f / Max(learnCellSize * bsphere.rad, 1e-6f);
+
+	learnCellCount = 1u << 17;
+	learn.cellMask = learnCellCount - 1;
+	for (u_int i = 0; i < 2; ++i)
+		learnCells[i].assign((size_t)learnCellCount * (slotCount + 1), 0.f);
+	learnLiveIndex = 0;
+	learnSums.reset(new atomic<float>[(size_t)learnCellCount * slotCount]);
+	learnBoundsSums.reset(new atomic<float>[(size_t)learnCellCount * slotCount]);
+	for (size_t i = 0; i < (size_t)learnCellCount * slotCount; ++i) {
+		learnSums[i] = 0.f;
+		learnBoundsSums[i] = 0.f;
+	}
+	learnCounts.reset(new atomic<u_int>[learnCellCount]);
+	for (size_t i = 0; i < learnCellCount; ++i)
+		learnCounts[i] = 0;
+	learnSampleCount = 0;
+	learnNextEpoch = 1u << 16;
+	learnRebuilding = false;
+}
+
+u_int LightStrategyLightTree::SlotOf(const u_int lightIdx) const {
+	const u_int entry = lightIndex[lightIdx];
+	if (entry == NULL_INDEX)
+		return NULL_INDEX;
+	if (entry & LIGHTTREE_DISTANT_LIGHT)
+		return entry & ~LIGHTTREE_DISTANT_LIGHT;
+
+	u_int nodeIndex = entry;
+	for (;;) {
+		const u_int slot = nodes[nodeIndex].flags >> LIGHTTREE_NODE_SLOT_SHIFT;
+		if (slot)
+			return slot - 1;
+		nodeIndex = nodes[nodeIndex].parentIndex;
+		if (nodeIndex == NULL_INDEX)
+			return NULL_INDEX;
+	}
+}
+
+void LightStrategyLightTree::AddSample(const Point &p, const Normal &n,
+		const bool isVolume, const u_int lightIdx, const float pickPdf,
+		const float contribution) const {
+	if (!UseLearning())
+		return;
+
+	const ocl::float3 p3 = ocl::ToFloat3(p);
+	const ocl::float3 n3 = ocl::ToFloat3(n);
+	const u_int cell = ocl::LightTree_LearnCell(&learn, p3, n3, !isVolume);
+	++learnCounts[cell];
+
+	// The bounds probabilities of the slots at the point, the denominators
+	// of the learned ratios: the ones of the pick, if it was made by this
+	// thread at this point
+	float boundsProbRecomputed[LIGHTTREE_MAX_SLOTS];
+	const float *boundsProb;
+	if (learnPickStash.valid && (learnPickStash.px == p.x) && (learnPickStash.py == p.y) && (learnPickStash.pz == p.z))
+		boundsProb = learnPickStash.boundsProb;
+	else {
+		ocl::LightTree_SlotBoundsProbabilities(nodes.size() > 0 ? nodes.data() : nullptr,
+				distantLights.data(), &learn, p3, n3, !isVolume, boundsProbRecomputed);
+		boundsProb = boundsProbRecomputed;
+	}
+	learnPickStash.valid = false;
+	for (u_int j = 0; j < learn.slotCount; ++j)
+		if (boundsProb[j] > 0.f)
+			learnBoundsSums[(size_t)cell * learn.slotCount + j].fetch_add(boundsProb[j]);
+
+	if ((lightIdx != NULL_INDEX) && (contribution > 0.f) && (pickPdf > 0.f)) {
+		const u_int slot = SlotOf(lightIdx);
+		if (slot != NULL_INDEX)
+			learnSums[(size_t)cell * learn.slotCount + slot].fetch_add(contribution / pickPdf);
+	}
+
+	// An epoch: rebuild the cells the sampling reads
+	const unsigned long long count = ++learnSampleCount;
+	if (count >= learnNextEpoch.load()) {
+		bool expected = false;
+		if (learnRebuilding.compare_exchange_strong(expected, true)) {
+			if (count >= learnNextEpoch.load()) {
+				RebuildLearnedCells();
+				learnNextEpoch = 2 * count;
+			}
+			learnRebuilding = false;
+		}
+	}
+}
+
+void LightStrategyLightTree::RebuildLearnedCells() const {
+	const u_int next = 1 - learnLiveIndex.load();
+	BuildLearnedCells(learnSums.get(), learnBoundsSums.get(), learnCounts.get(),
+			learnCellCount, learn.slotCount, learnMaxWeight, learnSamples,
+			learnCells[next].data());
+	learnLiveIndex = next;
 }
 
 LightSourcePtr LightStrategyLightTree::SampleLights(
@@ -560,11 +730,19 @@ LightSourcePtr LightStrategyLightTree::SampleLights(
 	if (!UseTree())
 		return distributionStrategy->SampleLights(scene, u, p, n, isVolume, pdf);
 
+	const bool learning = UseLearning();
 	const u_int index = ocl::LightTree_SampleLights(
 			nodes.size() > 0 ? nodes.data() : nullptr,
 			distantLights.data(), distantLights.size(),
+			learning ? &learn : nullptr, learning ? LiveLearnCells() : nullptr,
 			ocl::ToFloat3(p), ocl::ToFloat3(n), isVolume,
-			u, pdf);
+			u, pdf, learning ? learnPickStash.boundsProb : nullptr);
+	if (learning) {
+		learnPickStash.px = p.x;
+		learnPickStash.py = p.y;
+		learnPickStash.pz = p.z;
+		learnPickStash.valid = true;
+	}
 
 	if ((index == NULL_INDEX) || !(*pdf > 0.f))
 		return nullptr;
@@ -577,10 +755,12 @@ float LightStrategyLightTree::SampleLightPdf(LightSourceConstRef light,
 	if (!UseTree())
 		return distributionStrategy->SampleLightPdf(light, p, n, isVolume);
 
+	const bool learning = UseLearning();
 	return ocl::LightTree_SampleLightPdf(
 			nodes.size() > 0 ? nodes.data() : nullptr,
 			distantLights.data(), distantLights.size(),
 			lightIndex.data(),
+			learning ? &learn : nullptr, learning ? LiveLearnCells() : nullptr,
 			ocl::ToFloat3(p), ocl::ToFloat3(n), isVolume,
 			light.lightSceneIndex);
 }
@@ -594,7 +774,12 @@ PropertiesUPtr LightStrategyLightTree::ToProperties() const {
 	PropertiesUPtr props = std::make_unique<Properties>();
 
 	*props <<
-			Property("lightstrategy.type")(LightStrategyType2String(GetType()));
+			Property("lightstrategy.type")(LightStrategyType2String(GetType())) <<
+			Property("lightstrategy.lighttree.learning.enable")(learnEnable) <<
+			Property("lightstrategy.lighttree.learning.depth")(learnDepth) <<
+			Property("lightstrategy.lighttree.learning.maxweight")(learnMaxWeight) <<
+			Property("lightstrategy.lighttree.learning.cellsize")(learnCellSize) <<
+			Property("lightstrategy.lighttree.learning.samples")(learnSamples);
 
 	return props;
 }
@@ -605,20 +790,43 @@ PropertiesUPtr LightStrategyLightTree::ToProperties(const Properties &cfg) {
 	PropertiesUPtr props = std::make_unique<Properties>();
 
 	*props <<
-			cfg.Get(GetDefaultProps()->Get("lightstrategy.type"));
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.type")) <<
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.enable")) <<
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.depth")) <<
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.maxweight")) <<
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.cellsize")) <<
+			cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.samples"));
 
 	return props;
 }
 
 LightStrategyUPtr LightStrategyLightTree::FromProperties(const Properties &cfg) {
-	return std::make_unique<LightStrategyLightTree>();
+	const bool learnEnable = cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.enable")).Get<bool>();
+	const u_int learnDepth = Clamp(cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.depth")).Get<u_int>(), 0u, 4u);
+	const float learnMaxWeight = Clamp(cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.maxweight")).Get<float>(), 0.f, .99f);
+	const float learnCellSize = Max(cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.cellsize")).Get<float>(), 1e-4f);
+
+	const float learnSamples = Max(cfg.Get(GetDefaultProps()->Get("lightstrategy.lighttree.learning.samples")).Get<float>(), 1.f);
+
+	return std::make_unique<LightStrategyLightTree>(learnEnable, learnDepth, learnMaxWeight, learnCellSize, learnSamples);
 }
 
 PropertiesUPtr LightStrategyLightTree::GetDefaultProps() {
 	auto props = std::make_unique<Properties>();
 	*props <<
 			LightStrategy::GetDefaultProps() <<
-			Property("lightstrategy.type")(GetObjectTag());
+			Property("lightstrategy.type")(GetObjectTag()) <<
+			// The learned slots (see LightTreeLearn in lighttree_types.cl):
+			// the depth of the cut of the tree, the largest weight of the
+			// learned probabilities against the ones from the bounds, and the
+			// cell size as a fraction of the scene radius
+			Property("lightstrategy.lighttree.learning.enable")(true) <<
+			Property("lightstrategy.lighttree.learning.depth")(2u) <<
+			Property("lightstrategy.lighttree.learning.maxweight")(.8f) <<
+			Property("lightstrategy.lighttree.learning.cellsize")(.015f) <<
+			// The samples a cell needs to weigh what it learned as much as
+			// the bounds
+			Property("lightstrategy.lighttree.learning.samples")(64.f);
 
 	return props;
 }

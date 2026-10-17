@@ -185,6 +185,11 @@ typedef struct {
 	__global const LightTreeDistantLight* restrict lightTreeDistantLights, \
 	const uint lightTreeDistantLightCount, \
 	__global const uint* restrict lightTreeLightIndex, \
+	__global const LightTreeLearn* restrict lightTreeLearn, \
+	__global const float* restrict lightTreeLearnCells, \
+	__global float* restrict lightTreeLearnSums, \
+	__global float* restrict lightTreeLearnBoundsSums, \
+	__global float* restrict lightTreeLearnCounts, \
 	__global const ELVCacheEntry* restrict elvcAllEntries, \
 	__global const float* restrict elvcDistributions, \
 	__global const uint* restrict elvcTileDistributionOffsets, \
@@ -207,6 +212,11 @@ typedef struct {
 	lightTreeDistantLights, \
 	lightTreeDistantLightCount, \
 	lightTreeLightIndex, \
+	lightTreeLearn, \
+	lightTreeLearnCells, \
+	lightTreeLearnSums, \
+	lightTreeLearnBoundsSums, \
+	lightTreeLearnCounts, \
 	elvcAllEntries, \
 	elvcDistributions, \
 	elvcTileDistributionOffsets, \

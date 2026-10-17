@@ -28,6 +28,9 @@
 // A leaf of a triangle light: bboxMin, bboxMax and axis hold its vertices,
 // in the order of its emitting normal
 #define LIGHTTREE_NODE_TRIANGLE 4u
+// All the lights of the node emit the same in every direction (point and
+// sphere lights): their contribution has no outgoing cosine
+#define LIGHTTREE_NODE_ISOTROPIC 8u
 
 // A node of the tree. The nodes are stored depth first: the first child of an
 // interior node is the next node.
@@ -50,6 +53,10 @@ typedef struct {
 	unsigned int flags;
 } LightTreeNode;
 
+// The slot of a node of the learned cut (see LightTreeLearn) plus one, in
+// the flags from this bit up: 0 for the other nodes
+#define LIGHTTREE_NODE_SLOT_SHIFT 8
+
 // A light outside the tree, whose importance doesn't depend on the distance:
 // the environment, sun and distant lights, and the lasers
 typedef struct {
@@ -66,3 +73,30 @@ typedef struct {
 // index of a distant light with this flag, or NULL_INDEX for a light the
 // strategy never picks
 #define LIGHTTREE_DISTANT_LIGHT 0x80000000u
+
+//------------------------------------------------------------------------------
+// The learned correction of the top of the tree: the lights are split in
+// slots (each distant light, and each node of a cut of the tree at a small
+// depth), and the probability of a slot at a point is the one computed from
+// the bounds blended with the one learned from the shadow rays traced
+// around that point, which the bounds can't know: a sun behind blinds, a
+// window light in a corridor. The space is a hash grid of cells over the
+// positions and the normal octants; each cell holds the weight of its learned
+// distribution (0 until it has samples) followed by the distribution.
+//------------------------------------------------------------------------------
+
+#define LIGHTTREE_MAX_SLOTS 16
+
+typedef struct {
+	// The origin of the grid and the inverse of the cell size
+	float center[3];
+	float invCellSize;
+	// The number of cells (a power of 2) minus 1, and the floats of a cell
+	// (1 + slotCount)
+	unsigned int cellMask;
+	unsigned int slotCount;
+	// The first distantCount slots are the distant lights, in their order;
+	// the other slots the nodes of the cut
+	unsigned int distantCount;
+	unsigned int cutNodes[LIGHTTREE_MAX_SLOTS];
+} LightTreeLearn;

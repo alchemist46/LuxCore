@@ -26,7 +26,6 @@
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
 #include "slg/cameras/camera.h"
-
 using namespace std;
 using namespace luxrays;
 using namespace slg;
@@ -161,6 +160,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 			&lightPickPdf
 		);
 
+		float learnContribution = 0.f;
 		if (light) {
 			Ray shadowRay;
 			float directPdfW;
@@ -238,6 +238,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							const Spectrum incomingRadiance = bsdfEval * (weight * factor) * connectionThroughput * lightRadiance;
 
 							sampleResult->AddDirectLight(light->GetID(), event, pathThroughput, incomingRadiance, 1.f);
+							learnContribution = RGBColor(incomingRadiance.c[0], incomingRadiance.c[1], incomingRadiance.c[2]).Y();
 
 							// The first path vertex is not handled by AddDirectLight(). This is valid
 							// for irradiance AOV only if it is not a SPECULAR material.
@@ -252,12 +253,21 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 										factor) * connectionThroughput * lightRadiance;
 						}
 
+						lightStrategy.AddSample(bsdf.hitPoint.p, landingNormal, bsdf.IsVolume(),
+								light->lightSceneIndex, lightPickPdf, learnContribution);
 						return ILLUMINATED;
-					} else
-						return SHADOWED; 
+					} else {
+						lightStrategy.AddSample(bsdf.hitPoint.p, landingNormal, bsdf.IsVolume(),
+								light->lightSceneIndex, lightPickPdf, 0.f);
+						return SHADOWED;
+					}
 				}
 			}
 		}
+
+		// A sample that added nothing (no light picked, or a black one)
+		lightStrategy.AddSample(bsdf.hitPoint.p, landingNormal, bsdf.IsVolume(),
+				light ? light->lightSceneIndex : NULL_INDEX, lightPickPdf, 0.f);
 	}
 
 	return NOT_VISIBLE;

@@ -207,6 +207,7 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 						dlscRadius2, dlscNormalCosAngle,
 						lightTreeNodes, lightTreeDistantLights,
 						lightTreeDistantLightCount, lightTreeLightIndex,
+						lightTreeLearn, lightTreeLearnCells,
 						VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
 						pathInfo->lastFromVolume,
 						light->lightSceneIndex);
@@ -250,6 +251,7 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 					dlscRadius2, dlscNormalCosAngle,
 					lightTreeNodes, lightTreeDistantLights,
 					lightTreeDistantLightCount, lightTreeLightIndex,
+						lightTreeLearn, lightTreeLearnCells,
 					VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
 					pathInfo->lastFromVolume,
 					light->lightSceneIndex);
@@ -301,15 +303,23 @@ OPENCL_FORCE_INLINE bool DirectLight_Illuminate(
 	// Pick a light source to sample (with the landing shading normal, as the
 	// CPU and the pdf of a BSDF hit on a light do)
 	float lightPickPdf;
+	float learnBoundsProb[LIGHTTREE_MAX_SLOTS];
 	const uint lightIndex = LightStrategy_SampleLights(lightDist,
 			dlscAllEntries,
 			dlscDistributions, dlscBVHNodes,
 			dlscRadius2, dlscNormalCosAngle,
 			lightTreeNodes, lightTreeDistantLights,
 			lightTreeDistantLightCount, onlyInfiniteLights ? NULL : lightTreeLightIndex,
+			lightTreeLearn, lightTreeLearnCells,
 			VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf),
 			bsdf->isVolume,
-			u0, &lightPickPdf);
+			u0, &lightPickPdf, learnBoundsProb);
+	// The light tree learns from every pick (AdvancePaths_ShadowRayHit() adds
+	// the contribution of the ones that reach their light)
+	if (lightTreeLearn && !onlyInfiniteLights)
+		LightTree_LearnAddPick(lightTreeLearn, lightTreeLearnBoundsSums, lightTreeLearnCounts,
+				VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf), !bsdf->isVolume,
+				learnBoundsProb);
 	if ((lightIndex == NULL_INDEX) || (lightPickPdf <= 0.f))
 		return false;
 
@@ -527,6 +537,11 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global const LightTreeDistantLight* restrict lightTreeDistantLights \
 		, const uint lightTreeDistantLightCount \
 		, __global const uint* restrict lightTreeLightIndex \
+		, __global const LightTreeLearn* restrict lightTreeLearn \
+		, __global const float* restrict lightTreeLearnCells \
+		, __global float* restrict lightTreeLearnSums \
+		, __global float* restrict lightTreeLearnBoundsSums \
+		, __global float* restrict lightTreeLearnCounts \
 		, __global const ELVCacheEntry* restrict elvcAllEntries \
 		, __global const float* restrict elvcDistributions \
 		, __global const uint* restrict elvcTileDistributionOffsets \

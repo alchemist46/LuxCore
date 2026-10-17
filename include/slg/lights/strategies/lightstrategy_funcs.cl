@@ -31,14 +31,17 @@ OPENCL_FORCE_INLINE uint LightStrategy_SampleLights(
 		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
 		const uint lightTreeDistantLightCount,
 		__global const uint* restrict lightTreeLightIndex,
+		__global const LightTreeLearn* restrict lightTreeLearn,
+		__global const float* restrict lightTreeLearnCells,
 		const float3 p, const float3 n,
 		const bool isVolume,
-		const float u, float *pdf) {
+		const float u, float *pdf, float *learnBoundsProb) {
 	if (lightTreeLightIndex) {
 		// Light tree strategy
 		const uint lightIndex = LightTree_SampleLights(lightTreeNodes,
 				lightTreeDistantLights, lightTreeDistantLightCount,
-				p, n, isVolume, u, pdf);
+				lightTreeLearn, lightTreeLearnCells,
+				p, n, isVolume, u, pdf, learnBoundsProb);
 
 		return ((lightIndex != NULL_INDEX) && (*pdf > 0.f)) ? lightIndex : NULL_INDEX;
 	}
@@ -86,6 +89,8 @@ OPENCL_FORCE_INLINE float LightStrategy_SampleLightPdf(
 		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
 		const uint lightTreeDistantLightCount,
 		__global const uint* restrict lightTreeLightIndex,
+		__global const LightTreeLearn* restrict lightTreeLearn,
+		__global const float* restrict lightTreeLearnCells,
 		const float3 p, const float3 n,
 		const bool isVolume,
 		const uint lightIndex) {
@@ -93,7 +98,8 @@ OPENCL_FORCE_INLINE float LightStrategy_SampleLightPdf(
 		// Light tree strategy
 		return LightTree_SampleLightPdf(lightTreeNodes,
 				lightTreeDistantLights, lightTreeDistantLightCount,
-				lightTreeLightIndex, p, n, isVolume, lightIndex);
+				lightTreeLightIndex, lightTreeLearn, lightTreeLearnCells,
+				p, n, isVolume, lightIndex);
 	}
 
 #if !defined(RENDER_ENGINE_RTPATHOCL)

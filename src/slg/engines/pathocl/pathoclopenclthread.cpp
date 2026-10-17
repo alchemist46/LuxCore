@@ -201,6 +201,8 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 				totalCount += gpuTaskStats[i].sampleCount;
 			threadFilms[0]->GetFilm().SetSampleCount(totalCount, totalCount, 0.0);
 
+			UpdateLightTreeLearning(totalCount);
+
 			totalTransferTime += WallClockTime() - timeTransferStart;
 			++transferCount;
 

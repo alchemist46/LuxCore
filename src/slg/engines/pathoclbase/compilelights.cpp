@@ -125,6 +125,7 @@ void CompiledScene::CompileLightStrategy() {
 	lightTreeNodes.clear();
 	lightTreeDistantLights.clear();
 	lightTreeLightIndex.clear();
+	lightTreeLearnCellCount = 0;
 			
 	//--------------------------------------------------------------------------
 	// Compile lightDistribution
@@ -175,6 +176,12 @@ void CompiledScene::CompileLightStrategy() {
 					lightTreeNodes = treeLightStrategy.GetNodes();
 					lightTreeDistantLights = treeLightStrategy.GetDistantLights();
 					lightTreeLightIndex = treeLightStrategy.GetLightIndex();
+					if (treeLightStrategy.UseLearning()) {
+						lightTreeLearn = treeLightStrategy.GetLearn();
+						lightTreeLearnCellCount = treeLightStrategy.GetLearnCellCount();
+						lightTreeLearnMaxWeight = treeLightStrategy.GetLearnMaxWeight();
+						lightTreeLearnSamples = treeLightStrategy.GetLearnSamples();
+					}
 				}
 				if (treeLightStrategy.GetLightsDistribution()) {
 					std::tie(lightsDistribution, lightsDistributionSize) =

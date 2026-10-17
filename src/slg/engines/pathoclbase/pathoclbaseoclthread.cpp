@@ -32,6 +32,7 @@
 #include "slg/kernels/kernels.h"
 #include "slg/renderconfig.h"
 #include "slg/engines/pathoclbase/pathoclbase.h"
+#include "slg/lights/strategies/lighttree.h"
 #include "slg/samplers/sobol.h"
 
 using namespace std;
@@ -76,6 +77,12 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	lightTreeNodesBuff = nullptr;
 	lightTreeDistantLightsBuff = nullptr;
 	lightTreeLightIndexBuff = nullptr;
+	lightTreeLearnBuff = nullptr;
+	lightTreeLearnCellsBuff = nullptr;
+	lightTreeLearnSumsBuff = nullptr;
+	lightTreeLearnBoundsSumsBuff = nullptr;
+	lightTreeLearnCountsBuff = nullptr;
+	lightTreeLearnNextSamples = 0.0;
 	elvcAllEntriesBuff = nullptr;
 	elvcDistributionsBuff = nullptr;
 	elvcTileDistributionOffsetsBuff = nullptr;
@@ -197,6 +204,11 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	intersectionDevice.FreeBuffer(&lightTreeNodesBuff);
 	intersectionDevice.FreeBuffer(&lightTreeDistantLightsBuff);
 	intersectionDevice.FreeBuffer(&lightTreeLightIndexBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLearnBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLearnCellsBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLearnSumsBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLearnBoundsSumsBuff);
+	intersectionDevice.FreeBuffer(&lightTreeLearnCountsBuff);
 	intersectionDevice.FreeBuffer(&elvcAllEntriesBuff);
 	intersectionDevice.FreeBuffer(&elvcDistributionsBuff);
 	intersectionDevice.FreeBuffer(&elvcTileDistributionOffsetsBuff);
@@ -388,3 +400,34 @@ void PathOCLBaseOCLRenderThread::FreeThreadFilms() {
 
 #endif
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
+
+//------------------------------------------------------------------------------
+// The learned slots of the light tree
+//------------------------------------------------------------------------------
+
+void PathOCLBaseOCLRenderThread::UpdateLightTreeLearning(const double sampleCount) {
+	if (!lightTreeLearnCellsBuff)
+		return;
+
+	// The epochs: a quarter of a sample per pixel, then each doubling
+	if (lightTreeLearnNextSamples <= 0.0)
+		lightTreeLearnNextSamples = .25 * threadFilms[0]->GetFilm().GetWidth() * threadFilms[0]->GetFilm().GetHeight();
+	if (sampleCount < lightTreeLearnNextSamples)
+		return;
+	lightTreeLearnNextSamples = 2.0 * sampleCount;
+
+	const CompiledScene *cscene = renderEngine->compiledScene;
+	intersectionDevice.EnqueueReadBuffer(lightTreeLearnSumsBuff, false,
+			lightTreeLearnSums.size() * sizeof(float), lightTreeLearnSums.data());
+	intersectionDevice.EnqueueReadBuffer(lightTreeLearnBoundsSumsBuff, false,
+			lightTreeLearnBoundsSums.size() * sizeof(float), lightTreeLearnBoundsSums.data());
+	intersectionDevice.EnqueueReadBuffer(lightTreeLearnCountsBuff, true,
+			lightTreeLearnCounts.size() * sizeof(float), lightTreeLearnCounts.data());
+
+	LightStrategyLightTree::BuildLearnedCells(lightTreeLearnSums.data(), lightTreeLearnBoundsSums.data(),
+			lightTreeLearnCounts.data(), cscene->lightTreeLearnCellCount, cscene->lightTreeLearn.slotCount,
+			cscene->lightTreeLearnMaxWeight, cscene->lightTreeLearnSamples, lightTreeLearnCells.data());
+
+	intersectionDevice.EnqueueWriteBuffer(lightTreeLearnCellsBuff, false,
+			lightTreeLearnCells.size() * sizeof(float), lightTreeLearnCells.data());
+}

@@ -19,6 +19,8 @@
 #ifndef _SLG_LIGHTSTRATEGY_LIGHTTREE_H
 #define	_SLG_LIGHTSTRATEGY_LIGHTTREE_H
 
+#include <atomic>
+#include <memory>
 #include <vector>
 
 #include "slg/slg.h"
@@ -43,7 +45,8 @@ namespace ocl {
 
 class LightStrategyLightTree : public LightStrategy {
 public:
-	LightStrategyLightTree();
+	LightStrategyLightTree(const bool learnEnable, const u_int learnDepth,
+			const float learnMaxWeight, const float learnCellSize, const float learnSamples);
 	virtual ~LightStrategyLightTree();
 
 	virtual void Preprocess(SceneConstRef scene, const LightStrategyTask taskType,
@@ -60,6 +63,10 @@ public:
 	virtual float SampleLightPdf(LightSourceConstRef light,
 			const luxrays::Point &p, const luxrays::Normal &n,
 			const bool isVolume) const;
+
+	virtual void AddSample(const luxrays::Point &p, const luxrays::Normal &n,
+			const bool isVolume, const u_int lightIndex, const float pickPdf,
+			const float contribution) const;
 
 	// Used for light emission
 	virtual LightSourcePtr SampleLights(
@@ -78,6 +85,45 @@ public:
 	const std::vector<ocl::LightTreeNode> &GetNodes() const { return nodes; }
 	const std::vector<ocl::LightTreeDistantLight> &GetDistantLights() const { return distantLights; }
 	const std::vector<u_int> &GetLightIndex() const { return lightIndex; }
+	// True if the sampling uses the learned slots (see LightTreeLearn)
+	bool UseLearning() const { return UseTree() && (learnCellCount > 0); }
+	const ocl::LightTreeLearn &GetLearn() const { return learn; }
+	u_int GetLearnCellCount() const { return learnCellCount; }
+	float GetLearnMaxWeight() const { return learnMaxWeight; }
+	float GetLearnSamples() const { return learnSamples; }
+
+	// The cells of the learned slots from the sums of the samples (sums and
+	// boundsSums have cellCount * slotCount entries, counts cellCount, cells
+	// cellCount * (slotCount + 1)); the device threads use it too
+	template <class Sums, class Counts>
+	static void BuildLearnedCells(const Sums &sums, const Sums &boundsSums, const Counts &counts,
+			const u_int cellCount, const u_int slotCount,
+			const float maxWeight, const float samples, float *cells) {
+		for (size_t c = 0; c < cellCount; ++c) {
+			float *cell = &cells[c * (slotCount + 1)];
+			const float count = counts[c];
+
+			// The ratio of the contribution of each slot to its bounds
+			// probability (what the sampling scales the bounds probabilities
+			// with; their normalization makes the units irrelevant)
+			float total = 0.f;
+			for (u_int j = 0; j < slotCount; ++j) {
+				const float sum = sums[c * slotCount + j];
+				const float boundsSum = boundsSums[c * slotCount + j];
+				cell[1 + j] = (boundsSum > 0.f) ? (sum / boundsSum) : 0.f;
+				total += sum;
+			}
+			if (!(count > 0.f) || !(total > 0.f)) {
+				cell[0] = 0.f;
+				continue;
+			}
+
+			// The weight of what the cell has learned grows with its samples
+			cell[0] = luxrays::Min(maxWeight, count / (count + samples));
+		}
+	}
+	// The cells of the learned slots, as the sampling reads them now
+	const std::vector<float> &GetLearnCells() const { return learnCells[learnLiveIndex.load()]; }
 
 	//--------------------------------------------------------------------------
 	// Static methods used by LightStrategyRegistry
@@ -92,6 +138,11 @@ protected:
 	static luxrays::PropertiesUPtr GetDefaultProps();
 
 	void Build(SceneConstRef scene);
+	void BuildLearning(SceneConstRef scene, const std::vector<u_int> &nodeDepths);
+	void RebuildLearnedCells() const;
+	// The slot of a light (NULL_INDEX if the strategy never picks it)
+	u_int SlotOf(const u_int lightIndex) const;
+	const float *LiveLearnCells() const { return learnCells[learnLiveIndex.load()].data(); }
 
 	LightStrategyTask taskType;
 	LightStrategyLogPowerUPtr distributionStrategy = std::make_unique<LightStrategyLogPower>();
@@ -101,6 +152,24 @@ protected:
 	std::vector<ocl::LightTreeNode> nodes;
 	std::vector<ocl::LightTreeDistantLight> distantLights;
 	std::vector<u_int> lightIndex;
+
+	// The learned slots (lighttree_funcs.cl, LightTreeLearn). The sampling
+	// reads one of two copies of the cells; the other is rebuilt from the
+	// sums of the samples at each epoch (a doubling of the sample count),
+	// then the copies are swapped.
+	bool learnEnable;
+	u_int learnDepth;
+	float learnMaxWeight, learnCellSize, learnSamples;
+	ocl::LightTreeLearn learn;
+	u_int learnCellCount;
+	mutable std::vector<float> learnCells[2];
+	mutable std::atomic<u_int> learnLiveIndex;
+	// Per cell and slot: the sum of the contribution estimates and the sum
+	// of the bounds probabilities
+	mutable std::unique_ptr<std::atomic<float>[]> learnSums, learnBoundsSums;
+	mutable std::unique_ptr<std::atomic<u_int>[]> learnCounts;
+	mutable std::atomic<unsigned long long> learnSampleCount, learnNextEpoch;
+	mutable std::atomic<bool> learnRebuilding;
 };
 
 }

@@ -151,6 +151,10 @@ public:
 protected:
 	// Implementation specific methods
 	virtual void RenderThreadImpl(std::stop_token stop_token) = 0;
+
+	// Rebuilds the cells of the learned light tree slots from the samples
+	// the device has done, when their count has doubled since the last time
+	void UpdateLightTreeLearning(const double sampleCount);
 	virtual void GetThreadFilmSize(u_int *filmWidth, u_int *filmHeight, u_int *filmSubRegion) = 0;
 
 	virtual void StartRenderThread();
@@ -235,6 +239,16 @@ protected:
 	luxrays::HardwareDeviceBuffer *lightTreeNodesBuff;
 	luxrays::HardwareDeviceBuffer *lightTreeDistantLightsBuff;
 	luxrays::HardwareDeviceBuffer *lightTreeLightIndexBuff;
+	// The learned slots of the light tree: the parameters and the cells the
+	// kernels read, the sums they write, and the host copies the cells are
+	// rebuilt from at each epoch (see UpdateLightTreeLearning())
+	luxrays::HardwareDeviceBuffer *lightTreeLearnBuff;
+	luxrays::HardwareDeviceBuffer *lightTreeLearnCellsBuff;
+	luxrays::HardwareDeviceBuffer *lightTreeLearnSumsBuff;
+	luxrays::HardwareDeviceBuffer *lightTreeLearnBoundsSumsBuff;
+	luxrays::HardwareDeviceBuffer *lightTreeLearnCountsBuff;
+	std::vector<float> lightTreeLearnCells, lightTreeLearnSums, lightTreeLearnBoundsSums, lightTreeLearnCounts;
+	double lightTreeLearnNextSamples;
 	luxrays::HardwareDeviceBuffer *elvcAllEntriesBuff;
 	luxrays::HardwareDeviceBuffer *elvcDistributionsBuff;
 	luxrays::HardwareDeviceBuffer *elvcTileDistributionOffsetsBuff;

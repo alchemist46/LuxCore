@@ -103,6 +103,11 @@ public:
 	std::vector<slg::ocl::LightTreeNode> lightTreeNodes;
 	std::vector<slg::ocl::LightTreeDistantLight> lightTreeDistantLights;
 	std::vector<u_int> lightTreeLightIndex;
+	// The learned slots of the tree (lightTreeLearnCellCount is 0 when off);
+	// each device thread learns from its own samples, with these parameters
+	slg::ocl::LightTreeLearn lightTreeLearn;
+	u_int lightTreeLearnCellCount;
+	float lightTreeLearnMaxWeight, lightTreeLearnSamples;
 	// EnvLightVisibilityCache related data
 	std::vector<slg::ocl::ELVCacheEntry> elvcAllEntries;
 	std::vector<float> elvcDistributions;

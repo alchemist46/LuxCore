@@ -134,21 +134,56 @@ OPENCL_FORCE_INLINE void LightTree_NodeImportance(__global const LightTreeNode *
 	const float minDistance2 = fmax(minDistance * minDistance, 1e-12f);
 	const float maxDistance2 = fmax(dot(toFarthestCorner, toFarthestCorner), 1e-12f);
 
+	const float3 axis = MAKE_FLOAT3(node->axis[0], node->axis[1], node->axis[2]);
+	const float cosThetaO = node->cosThetaO;
+
+	// The lights of a node whose normals are all parallel (a quad, a panel,
+	// the two triangles of a window) can't light a point behind every point
+	// of the box: the cone bound below only sees that past theta_u, which
+	// leaves the points near the plane of the lights, and all the points
+	// inside the bounding sphere, with an importance no child can confirm
+	// (on the Blender classroom 17% of the walks ended this way)
+	if ((cosThetaO >= 1.f) && !(node->flags & LIGHTTREE_NODE_TWOSIDED)) {
+		const float3 halfExtent = .5f * (bboxMax - bboxMin);
+		if (!(-dot(axis, toCentroid) + dot(fabs(axis), halfExtent) > 0.f))
+			return;
+	}
+
 	// theta_u: the half angle of the cone of directions from p that holds the
-	// bounding sphere of the box (pbrt-v4; Cycles bounds the 8 corners, which is
-	// tighter and costs 8 normalizations)
-	const float sinThetaU = (centroidDistance > radius) ? (radius * invCentroidDistance) : 0.f;
-	const float cosThetaU = (centroidDistance > radius) ? sqrt(fmax(0.f, 1.f - sinThetaU * sinThetaU)) : -1.f;
+	// node: of its bounding sphere when p is outside it (pbrt-v4), of its 8
+	// corners when p is inside the sphere but outside the box (the directions
+	// of a convex box are within the cone of its corners if that cone is
+	// inside a hemisphere; otherwise, or inside the box, every direction)
+	float cosThetaU, sinThetaU;
+	if (centroidDistance > radius) {
+		sinThetaU = radius * invCentroidDistance;
+		cosThetaU = sqrt(fmax(0.f, 1.f - sinThetaU * sinThetaU));
+	} else {
+		const bool insideBox = (p.x >= bboxMin.x) && (p.x <= bboxMax.x) &&
+				(p.y >= bboxMin.y) && (p.y <= bboxMax.y) &&
+				(p.z >= bboxMin.z) && (p.z <= bboxMax.z);
+		float minCos = -1.f;
+		if (!insideBox) {
+			minCos = 1.f;
+			for (uint i = 0; i < 8; ++i) {
+				const float3 corner = MAKE_FLOAT3(
+						(i & 1) ? bboxMax.x : bboxMin.x,
+						(i & 2) ? bboxMax.y : bboxMin.y,
+						(i & 4) ? bboxMax.z : bboxMin.z) - p;
+				minCos = fmin(minCos, dot(wi, corner) / sqrt(fmax(dot(corner, corner), 1e-24f)));
+			}
+		}
+		cosThetaU = (minCos > 0.f) ? minCos : -1.f;
+		sinThetaU = LightTree_SinFromCos(cosThetaU);
+	}
 
 	// theta: the angle between the axis of the cone and the direction from
 	// the centroid to p
-	const float3 axis = MAKE_FLOAT3(node->axis[0], node->axis[1], node->axis[2]);
 	float cosTheta = -dot(axis, wi);
 	if (node->flags & LIGHTTREE_NODE_TWOSIDED)
 		cosTheta = fabs(cosTheta);
 	const float sinTheta = LightTree_SinFromCos(cosTheta);
 
-	const float cosThetaO = node->cosThetaO;
 	const float sinThetaO = LightTree_SinFromCos(cosThetaO);
 
 	// The smallest angle an emitter normal can make with the direction to p:
@@ -182,8 +217,11 @@ OPENCL_FORCE_INLINE void LightTree_NodeImportance(__global const LightTreeNode *
 
 	// The largest angle an emitter normal can make with the direction to p:
 	// theta + theta_u + theta_o, zero contribution past theta_e (which is
-	// never more than 90 degrees)
-	if ((cosTheta >= 0.f) && (cosThetaU >= 0.f) && (cosThetaO >= 0.f)) {
+	// never more than 90 degrees). The isotropic lights have no outgoing
+	// cosine (their cone is the whole sphere, which would make it zero)
+	if (node->flags & LIGHTTREE_NODE_ISOTROPIC)
+		*minImportance = node->phi * cosMaxIncidence / maxDistance2;
+	else if ((cosTheta >= 0.f) && (cosThetaU >= 0.f) && (cosThetaO >= 0.f)) {
 		const float cosThetaPlusU = cosTheta * cosThetaU - sinTheta * sinThetaU;
 
 		if (cosThetaPlusU > 0.f) {
@@ -285,56 +323,194 @@ OPENCL_FORCE_INLINE float LightTree_NodeFirstChildProbability(
 			maxImportance1, minImportance1);
 }
 
+//------------------------------------------------------------------------------
+// The learned slots (see LightTreeLearn)
+//------------------------------------------------------------------------------
+
+// The cell of the point p with the normal n
+OPENCL_FORCE_INLINE uint LightTree_LearnCell(__global const LightTreeLearn* restrict learn,
+		const float3 p, const float3 n, const bool hasNormal) {
+	const int ix = (int)floor((p.x - learn->center[0]) * learn->invCellSize);
+	const int iy = (int)floor((p.y - learn->center[1]) * learn->invCellSize);
+	const int iz = (int)floor((p.z - learn->center[2]) * learn->invCellSize);
+	const uint octant = hasNormal ?
+		(((n.x < 0.f) ? 1u : 0u) | ((n.y < 0.f) ? 2u : 0u) | ((n.z < 0.f) ? 4u : 0u)) : 8u;
+
+	uint h = ((uint)ix * 73856093u) ^ ((uint)iy * 19349663u) ^ ((uint)iz * 83492791u) ^ (octant * 2654435761u);
+	h ^= h >> 13;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15;
+
+	return h & learn->cellMask;
+}
+
+// The probabilities of the slots at the point p from the bounds, as
+// LightTree_FirstChildProbability() computes them for two children, normalized
+// (all 0 when no slot can contribute)
+OPENCL_FORCE_INLINE void LightTree_SlotBoundsProbabilities(
+		__global const LightTreeNode* restrict lightTreeNodes,
+		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
+		__global const LightTreeLearn* restrict learn,
+		const float3 p, const float3 n, const bool hasNormal,
+		float *prob) {
+	const uint slotCount = learn->slotCount;
+	const uint distantCount = learn->distantCount;
+
+	float minImportance[LIGHTTREE_MAX_SLOTS];
+	float totalMax = 0.f;
+	float totalMin = 0.f;
+	for (uint j = 0; j < slotCount; ++j) {
+		if (j < distantCount) {
+			prob[j] = LightTree_DistantLightImportance(&lightTreeDistantLights[j], n, hasNormal);
+			minImportance[j] = prob[j];
+		} else
+			LightTree_NodeImportance(&lightTreeNodes[learn->cutNodes[j - distantCount]], p, n, hasNormal,
+					&prob[j], &minImportance[j]);
+		totalMax += prob[j];
+		totalMin += minImportance[j];
+	}
+
+	// The average of the probabilities by the largest and by the smallest
+	// importance, the largest alone when no slot has a smallest one
+	const float maxScale = (totalMax > 0.f) ? (((totalMin > 0.f) ? .5f : 1.f) / totalMax) : 0.f;
+	const float minScale = (totalMin > 0.f) ? (.5f / totalMin) : 0.f;
+	for (uint j = 0; j < slotCount; ++j)
+		prob[j] = prob[j] * maxScale + minImportance[j] * minScale;
+}
+
+// The probabilities of the slots at the point p (not normalized: the sum is
+// returned, 0 when no slot can be picked): the ones from the bounds, scaled
+// by the ratio of the contribution to the bounds probability the cell has
+// learned for each slot, and blended with the plain ones by the weight the
+// cell has earned
+OPENCL_FORCE_INLINE float LightTree_SlotProbabilities(
+		__global const LightTreeNode* restrict lightTreeNodes,
+		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
+		__global const LightTreeLearn* restrict learn,
+		__global const float* restrict learnCells,
+		const float3 p, const float3 n, const bool hasNormal,
+		float *prob, float *boundsProbOut) {
+	const uint slotCount = learn->slotCount;
+	LightTree_SlotBoundsProbabilities(lightTreeNodes, lightTreeDistantLights, learn,
+			p, n, hasNormal, prob);
+	if (boundsProbOut) {
+		for (uint j = 0; j < slotCount; ++j)
+			boundsProbOut[j] = prob[j];
+	}
+
+	__global const float* restrict cell = &learnCells[LightTree_LearnCell(learn, p, n, hasNormal) * (slotCount + 1)];
+	float learnedWeight = cell[0];
+
+	float learned[LIGHTTREE_MAX_SLOTS];
+	float learnedSum = 0.f;
+	for (uint j = 0; j < slotCount; ++j) {
+		learned[j] = prob[j] * cell[1 + j];
+		learnedSum += learned[j];
+	}
+	if (!(learnedSum > 0.f))
+		learnedWeight = 0.f;
+	const float learnedScale = (learnedSum > 0.f) ? (learnedWeight / learnedSum) : 0.f;
+	const float boundsWeight = 1.f - learnedWeight;
+
+	float sum = 0.f;
+	for (uint j = 0; j < slotCount; ++j) {
+		prob[j] = boundsWeight * prob[j] + learnedScale * learned[j];
+		sum += prob[j];
+	}
+
+	return sum;
+}
+
 // Picks a light for the direct light sampling of the point p
 OPENCL_FORCE_INLINE uint LightTree_SampleLights(
 		__global const LightTreeNode* restrict lightTreeNodes,
 		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
 		const uint lightTreeDistantLightCount,
+		__global const LightTreeLearn* restrict learn,
+		__global const float* restrict learnCells,
 		const float3 p, const float3 n, const bool isVolume,
-		float u, float *pdf) {
+		float u, float *pdf, float *learnBoundsProb) {
 	*pdf = 0.f;
 	const bool hasNormal = !isVolume;
 
-	float distantImportance;
-	const float treeProb = LightTree_TreeProbability(lightTreeNodes,
-			lightTreeDistantLights, lightTreeDistantLightCount,
-			p, n, hasNormal, &distantImportance);
-	if (treeProb < 0.f)
-		return NULL_INDEX;
+	float pmf;
+	uint nodeIndex;
+	if (learn) {
+		// A slot first (learnBoundsProb, if given, receives the slot
+		// probabilities from the bounds, for the learning)
+		float prob[LIGHTTREE_MAX_SLOTS];
+		const float sum = LightTree_SlotProbabilities(lightTreeNodes, lightTreeDistantLights,
+				learn, learnCells, p, n, hasNormal, prob, learnBoundsProb);
+		if (!(sum > 0.f))
+			return NULL_INDEX;
 
-	if (u >= treeProb) {
-		// A distant light
-		const float distantProb = 1.f - treeProb;
-		const float target = fmin((u - treeProb) / distantProb, 1.f) * distantImportance;
-
-		float sum = 0.f;
-		uint lastIndex = NULL_INDEX;
-		float lastImportance = 0.f;
-		for (uint i = 0; i < lightTreeDistantLightCount; ++i) {
-			const float importance = LightTree_DistantLightImportance(&lightTreeDistantLights[i], n, hasNormal);
-			if (importance > 0.f) {
-				lastIndex = i;
-				lastImportance = importance;
-
-				sum += importance;
-				if (target < sum)
+		const float target = u * sum;
+		float below = 0.f;
+		uint slot = NULL_INDEX;
+		for (uint j = 0; j < learn->slotCount; ++j) {
+			if (prob[j] > 0.f) {
+				slot = j;
+				if (target < below + prob[j])
 					break;
+				below += prob[j];
 			}
 		}
-
-		// The last light with an importance if the float rounding of the sum
-		// left the target above it
-		if (lastIndex == NULL_INDEX)
+		if (slot == NULL_INDEX)
 			return NULL_INDEX;
-		*pdf = distantProb * lastImportance / distantImportance;
-		return lightTreeDistantLights[lastIndex].lightIndex;
+		// The last slot with a probability if the rounding of the sum left
+		// the target above it
+		below = fmin(below, target);
+
+		pmf = prob[slot] / sum;
+		u = fmin((target - below) / prob[slot], 0x1.fffffep-1f);
+
+		if (slot < learn->distantCount) {
+			*pdf = pmf;
+			return lightTreeDistantLights[slot].lightIndex;
+		}
+		nodeIndex = learn->cutNodes[slot - learn->distantCount];
+	} else {
+		float distantImportance;
+		const float treeProb = LightTree_TreeProbability(lightTreeNodes,
+				lightTreeDistantLights, lightTreeDistantLightCount,
+				p, n, hasNormal, &distantImportance);
+		if (treeProb < 0.f)
+			return NULL_INDEX;
+
+		if (u >= treeProb) {
+			// A distant light
+			const float distantProb = 1.f - treeProb;
+			const float target = fmin((u - treeProb) / distantProb, 1.f) * distantImportance;
+
+			float sum = 0.f;
+			uint lastIndex = NULL_INDEX;
+			float lastImportance = 0.f;
+			for (uint i = 0; i < lightTreeDistantLightCount; ++i) {
+				const float importance = LightTree_DistantLightImportance(&lightTreeDistantLights[i], n, hasNormal);
+				if (importance > 0.f) {
+					lastIndex = i;
+					lastImportance = importance;
+
+					sum += importance;
+					if (target < sum)
+						break;
+				}
+			}
+
+			// The last light with an importance if the float rounding of the
+			// sum left the target above it
+			if (lastIndex == NULL_INDEX)
+				return NULL_INDEX;
+			*pdf = distantProb * lastImportance / distantImportance;
+			return lightTreeDistantLights[lastIndex].lightIndex;
+		}
+
+		// The tree
+		pmf = treeProb;
+		u = fmin(u / treeProb, 0x1.fffffep-1f);
+		nodeIndex = 0;
 	}
 
-	// The tree
-	float pmf = treeProb;
-	u = fmin(u / treeProb, 0x1.fffffep-1f);
-
-	uint nodeIndex = 0;
 	for (;;) {
 		__global const LightTreeNode *node = &lightTreeNodes[nodeIndex];
 		if (node->flags & LIGHTTREE_NODE_LEAF) {
@@ -366,6 +542,8 @@ OPENCL_FORCE_INLINE float LightTree_SampleLightPdf(
 		__global const LightTreeDistantLight* restrict lightTreeDistantLights,
 		const uint lightTreeDistantLightCount,
 		__global const uint* restrict lightTreeLightIndex,
+		__global const LightTreeLearn* restrict learn,
+		__global const float* restrict learnCells,
 		const float3 p, const float3 n, const bool isVolume,
 		const uint lightIndex) {
 	const uint entry = lightTreeLightIndex[lightIndex];
@@ -373,6 +551,35 @@ OPENCL_FORCE_INLINE float LightTree_SampleLightPdf(
 		return 0.f;
 
 	const bool hasNormal = !isVolume;
+
+	if (learn) {
+		float prob[LIGHTTREE_MAX_SLOTS];
+		const float sum = LightTree_SlotProbabilities(lightTreeNodes, lightTreeDistantLights,
+				learn, learnCells, p, n, hasNormal, prob, NULL);
+		if (!(sum > 0.f))
+			return 0.f;
+
+		if (entry & LIGHTTREE_DISTANT_LIGHT)
+			return prob[entry & ~LIGHTTREE_DISTANT_LIGHT] / sum;
+
+		// Walk up from the leaf to its slot
+		float pmf = 1.f;
+		uint nodeIndex = entry;
+		for (;;) {
+			const uint slot = lightTreeNodes[nodeIndex].flags >> LIGHTTREE_NODE_SLOT_SHIFT;
+			if (slot)
+				return pmf * prob[slot - 1] / sum;
+
+			const uint parentIndex = lightTreeNodes[nodeIndex].parentIndex;
+			const float prob0 = LightTree_NodeFirstChildProbability(lightTreeNodes, parentIndex,
+					p, n, hasNormal);
+			if (prob0 < 0.f)
+				return 0.f;
+
+			pmf *= (nodeIndex == parentIndex + 1) ? prob0 : (1.f - prob0);
+			nodeIndex = parentIndex;
+		}
+	}
 
 	float distantImportance;
 	const float treeProb = LightTree_TreeProbability(lightTreeNodes,
@@ -408,3 +615,61 @@ OPENCL_FORCE_INLINE float LightTree_SampleLightPdf(
 		nodeIndex = parentIndex;
 	}
 }
+
+#if defined(SLG_OPENCL_KERNEL)
+//------------------------------------------------------------------------------
+// The learning updates on the GPU (LightStrategyLightTree::AddSample() does
+// them on the CPU): a pick, with the slot probabilities from the bounds it
+// was made with, and the contribution of a light that was visible
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE void LightTree_LearnAddPick(
+		__global const LightTreeLearn* restrict learn,
+		__global float* restrict learnBoundsSums,
+		__global float* restrict learnCounts,
+		const float3 p, const float3 n, const bool hasNormal,
+		const float *boundsProb) {
+	const uint cell = LightTree_LearnCell(learn, p, n, hasNormal);
+	AtomicAdd(&learnCounts[cell], 1.f);
+
+	__global float* restrict sums = &learnBoundsSums[cell * learn->slotCount];
+	for (uint j = 0; j < learn->slotCount; ++j) {
+		if (boundsProb[j] > 0.f)
+			AtomicAdd(&sums[j], boundsProb[j]);
+	}
+}
+
+OPENCL_FORCE_INLINE void LightTree_LearnAddContribution(
+		__global const LightTreeNode* restrict lightTreeNodes,
+		__global const uint* restrict lightTreeLightIndex,
+		__global const LightTreeLearn* restrict learn,
+		__global float* restrict learnSums,
+		const float3 p, const float3 n, const bool hasNormal,
+		const uint lightIndex, const float pickPdf, const float contribution) {
+	if (!(contribution > 0.f) || !(pickPdf > 0.f))
+		return;
+	const uint entry = lightTreeLightIndex[lightIndex];
+	if (entry == NULL_INDEX)
+		return;
+
+	uint slot;
+	if (entry & LIGHTTREE_DISTANT_LIGHT)
+		slot = entry & ~LIGHTTREE_DISTANT_LIGHT;
+	else {
+		uint nodeIndex = entry;
+		for (;;) {
+			const uint s = lightTreeNodes[nodeIndex].flags >> LIGHTTREE_NODE_SLOT_SHIFT;
+			if (s) {
+				slot = s - 1;
+				break;
+			}
+			nodeIndex = lightTreeNodes[nodeIndex].parentIndex;
+			if (nodeIndex == NULL_INDEX)
+				return;
+		}
+	}
+
+	const uint cell = LightTree_LearnCell(learn, p, n, hasNormal);
+	AtomicAdd(&learnSums[cell * learn->slotCount + slot], contribution / pickPdf);
+}
+#endif

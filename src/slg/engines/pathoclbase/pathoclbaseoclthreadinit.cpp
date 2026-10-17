@@ -271,6 +271,35 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 		intersectionDevice.FreeBuffer(&lightTreeLightIndexBuff);
 	}
 
+	// The learned slots of the tree: the cells start with no learned weight
+	// and the sums at zero (each render starts learning afresh)
+	if ((cscene->lightTreeLightIndex.size() > 0) && (cscene->lightTreeLearnCellCount > 0)) {
+		const u_int cellCount = cscene->lightTreeLearnCellCount;
+		const u_int slotCount = cscene->lightTreeLearn.slotCount;
+		lightTreeLearnCells.assign((size_t)cellCount * (slotCount + 1), 0.f);
+		lightTreeLearnSums.assign((size_t)cellCount * slotCount, 0.f);
+		lightTreeLearnBoundsSums.assign((size_t)cellCount * slotCount, 0.f);
+		lightTreeLearnCounts.assign(cellCount, 0.f);
+		lightTreeLearnNextSamples = 0.0;
+
+		intersectionDevice.AllocBufferRO(&lightTreeLearnBuff, &cscene->lightTreeLearn,
+			sizeof(slg::ocl::LightTreeLearn), "Light tree learning parameters");
+		intersectionDevice.AllocBufferRW(&lightTreeLearnCellsBuff, lightTreeLearnCells.data(),
+			lightTreeLearnCells.size() * sizeof(float), "Light tree learned cells");
+		intersectionDevice.AllocBufferRW(&lightTreeLearnSumsBuff, lightTreeLearnSums.data(),
+			lightTreeLearnSums.size() * sizeof(float), "Light tree learning sums");
+		intersectionDevice.AllocBufferRW(&lightTreeLearnBoundsSumsBuff, lightTreeLearnBoundsSums.data(),
+			lightTreeLearnBoundsSums.size() * sizeof(float), "Light tree learning bounds sums");
+		intersectionDevice.AllocBufferRW(&lightTreeLearnCountsBuff, lightTreeLearnCounts.data(),
+			lightTreeLearnCounts.size() * sizeof(float), "Light tree learning counts");
+	} else {
+		intersectionDevice.FreeBuffer(&lightTreeLearnBuff);
+		intersectionDevice.FreeBuffer(&lightTreeLearnCellsBuff);
+		intersectionDevice.FreeBuffer(&lightTreeLearnSumsBuff);
+		intersectionDevice.FreeBuffer(&lightTreeLearnBoundsSumsBuff);
+		intersectionDevice.FreeBuffer(&lightTreeLearnCountsBuff);
+	}
+
 	if (cscene->elvcAllEntries.size() > 0) {
 		intersectionDevice.AllocBufferRO(&elvcAllEntriesBuff, &cscene->elvcAllEntries[0],
 			cscene->elvcAllEntries.size() * sizeof(slg::ocl::ELVCacheEntry), "ELVC all entries");

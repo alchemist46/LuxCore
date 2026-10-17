@@ -64,6 +64,15 @@ public:
 			const luxrays::Normal &n,
 			const bool isVolume) const = 0;
 
+	// The result of a direct light sample picked by SampleLights() at the
+	// point p: the light (NULL_INDEX when none was picked), the pick pdf and
+	// the luminance the sample added (the MIS weighted estimate, without
+	// the path throughput; 0 when shadowed). The strategies that learn from
+	// the shadow rays use it.
+	virtual void AddSample(const luxrays::Point &p, const luxrays::Normal &n,
+			const bool isVolume, const u_int lightIndex, const float pickPdf,
+			const float contribution) const { }
+
 	// Used for light emission
 	virtual LightSourcePtr SampleLights(
 		SceneConstRef, const float u, float *pdf
