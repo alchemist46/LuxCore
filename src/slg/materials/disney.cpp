@@ -348,8 +348,12 @@ Vector DisneyMaterial::DisneyMetallicSample(const float anisotropic, const float
 	const float sinTheta = sqrtf(Max(0.0f, 1.0f - cosTheta * cosTheta));
 	Vector wh = Vector(sinTheta * cosPhi, sinTheta * sinPhi, cosTheta);
 
+	// The material is two-sided: on the back side, the half vector goes to the
+	// hemisphere of wo, as on the GPU and in DisneyClearcoatSample() (the pdf
+	// is symmetric). Returning no direction lost every sample of this lobe on
+	// back faces: the G0 Cornell box, seen from inside, was 23% too dark.
 	if (CosTheta(wo) * CosTheta(wh) <= 0.0f)
-		return Vector();
+		wh *= -1.f;
 
 	return Normalize(2.0f * Dot(wh, wo) * wh - wo);
 }
@@ -377,7 +381,7 @@ void DisneyMaterial::Pdf(
 		float *reversePdfW) const {
 	const float roughness = Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoat = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
+	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float clearcoatGloss = Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f);
 	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
 
