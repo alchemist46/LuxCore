@@ -110,10 +110,11 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 			SAMPLER_PARAM);
 
 	// Generate the came ray
-	const float timeSample = Sampler_GetSample(taskConfig, IDX_EYE_TIME SAMPLER_PARAM);
+	const uint eyeSampleSize = taskConfig->pathTracer.eyeSampleSize;
+	const float timeSample = Sampler_GetSample(taskConfig, IDX_EYE_TIME(eyeSampleSize) SAMPLER_PARAM);
 
-	const float dofSampleX = Sampler_GetSample(taskConfig, IDX_DOF_X SAMPLER_PARAM);
-	const float dofSampleY = Sampler_GetSample(taskConfig, IDX_DOF_Y SAMPLER_PARAM);
+	const float dofSampleX = Sampler_GetSample(taskConfig, IDX_DOF_X(eyeSampleSize) SAMPLER_PARAM);
+	const float dofSampleY = Sampler_GetSample(taskConfig, IDX_DOF_Y(eyeSampleSize) SAMPLER_PARAM);
 
 #if defined(RENDER_ENGINE_TILEPATHOCL) || defined(RENDER_ENGINE_RTPATHOCL)
 	Camera_GenerateRay(camera, cameraBokehDistribution, cameraFilmWidth, cameraFilmHeight,
@@ -149,7 +150,7 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 	// Initialize the pass-through event seed
 	//
 	// Note: using the IDX_PASSTHROUGH of path depth 0
-	const float passThroughEvent = Sampler_GetSample(taskConfig, IDX_BSDF_OFFSET + IDX_PASSTHROUGH SAMPLER_PARAM);
+	const float passThroughEvent = Sampler_GetSample(taskConfig, EYE_SAMPLE_BOOT_SIZE + IDX_PASSTHROUGH SAMPLER_PARAM);
 	Seed seedPassThroughEvent;
 	Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
 	taskState->seedPassThroughEvent = seedPassThroughEvent;

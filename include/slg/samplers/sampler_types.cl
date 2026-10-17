@@ -19,19 +19,25 @@
  ***************************************************************************/
 
 //------------------------------------------------------------------------------
-// Indices of Sample related u[] array
+// The layout of the eye path sample (the dimensions of the sampler)
+//
+// Shared by PathTracer (the CPU) and the PATHOCL kernels: the two must read
+// the same dimensions. The quality of the Sobol dimensions falls as their
+// index grows, so the decisions with the most variance come first: the pixel
+// position, then the path vertices (BSDF direction, light pick and light
+// point, pass-throughs, Russian roulette), then the camera time and lens
+// position, which are constant in most scenes, at the end.
+//
+// The eye sample vector is EYE_SAMPLE_BOOT_SIZE +
+// (maxPathDepth + 1) * VERTEX_SAMPLE_SIZE + EYE_SAMPLE_TAIL_SIZE floats
+// (PathTracer::eyeSampleSize).
 //------------------------------------------------------------------------------
-
-#if defined(SLG_OPENCL_KERNEL)
 
 #define IDX_SCREEN_X 0
 #define IDX_SCREEN_Y 1
-#define IDX_EYE_TIME 2
-#define IDX_DOF_X 3
-#define IDX_DOF_Y 4
-#define IDX_BSDF_OFFSET 5
+#define EYE_SAMPLE_BOOT_SIZE 2
 
-// Relative to IDX_BSDF_OFFSET + PathDepth * VERTEX_SAMPLE_SIZE
+// Relative to EYE_SAMPLE_BOOT_SIZE + PathDepth * VERTEX_SAMPLE_SIZE
 #define IDX_PASSTHROUGH 0
 #define IDX_BSDF_X 1
 #define IDX_BSDF_Y 2
@@ -41,8 +47,15 @@
 #define IDX_DIRECTLIGHT_W 6
 #define IDX_DIRECTLIGHT_A 7
 #define IDX_RR 8
-
 #define VERTEX_SAMPLE_SIZE 9
+
+// Relative to the end of the eye sample vector (eyeSampleSize)
+#define EYE_SAMPLE_TAIL_SIZE 3
+#define IDX_EYE_TIME(eyeSampleSize) ((eyeSampleSize) - 3)
+#define IDX_DOF_X(eyeSampleSize) ((eyeSampleSize) - 2)
+#define IDX_DOF_Y(eyeSampleSize) ((eyeSampleSize) - 1)
+
+#if defined(SLG_OPENCL_KERNEL)
 
 // The samples of a pixel are split in two halves for the per-pixel error
 // estimate of the noise threshold halt test (see FilmConvTest): the half is

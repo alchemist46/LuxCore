@@ -390,11 +390,11 @@ void PathTracer::GenerateEyeRay(CameraConstRef camera, FilmConstRef film, Ray &e
 	sampleResult.filmX = sampleResult.pixelX + .5f + distX;
 	sampleResult.filmY = sampleResult.pixelY + .5f + distY;
 
-	const float timeSample = sampler.GetSample(4);
+	const float timeSample = sampler.GetSample(IDX_EYE_TIME(eyeSampleSize));
 	const float time = camera.GenerateRayTime(timeSample);
 
 	camera.GenerateRay(time, sampleResult.filmX, sampleResult.filmY, &eyeRay, &volInfo,
-		sampler.GetSample(2), sampler.GetSample(3));
+		sampler.GetSample(IDX_DOF_X(eyeSampleSize)), sampler.GetSample(IDX_DOF_Y(eyeSampleSize)));
 }
 
 //------------------------------------------------------------------------------
@@ -426,7 +426,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 		RayHit eyeRayHit;
 		Spectrum connectionThroughput;
-		const float passThrough = sampler.GetSample(sampleOffset);
+		const float passThrough = sampler.GetSample(sampleOffset + IDX_PASSTHROUGH);
 		const bool hit = scene.Intersect(
 				IntersectionDevicePtr(&device),
 				EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
@@ -595,11 +595,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		const DirectLightResult directLightResult = DirectLightSampling(
 				device, scene,
 				eyeRay.time,
-				sampler.GetSample(sampleOffset + 1),
-				sampler.GetSample(sampleOffset + 2),
-				sampler.GetSample(sampleOffset + 3),
-				sampler.GetSample(sampleOffset + 4),
-				sampler.GetSample(sampleOffset + 5),
+				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_X),
+				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_Y),
+				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_Z),
+				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_W),
+				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A),
 				pathInfo, 
 				pathThroughput, bsdf, &sampleResult);
 
@@ -632,8 +632,8 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				bsdfEvent = pathInfo.lastBSDFEvent;
 			} else {
 				bsdfSample = bsdf.Sample(&sampledDir,
-						sampler.GetSample(sampleOffset + 6),
-						sampler.GetSample(sampleOffset + 7),
+						sampler.GetSample(sampleOffset + IDX_BSDF_X),
+						sampler.GetSample(sampleOffset + IDX_BSDF_Y),
 						&bsdfPdfW, &cosSampledDir, &bsdfEvent);
 				pathInfo.isPassThroughPath = false;
 			}
@@ -652,7 +652,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		float rrProb = 1.f;
 		if (pathInfo.UseRR(rrDepth)) {
 			 rrProb = RenderEngine::RussianRouletteProb(bsdfSample, rrImportanceCap);
-			if (rrProb < sampler.GetSample(sampleOffset + 8))
+			if (rrProb < sampler.GetSample(sampleOffset + IDX_RR))
 				break;
 
 			// Increase path contribution
@@ -1100,12 +1100,13 @@ void PathTracer::ParseOptions(
 	albedoSpecularSetting = String2AlbedoSpecularSetting(cfg.Get(defaultProps.Get("path.albedospecular.type")).Get<string>());
 	albedoSpecularGlossinessThreshold = Max(cfg.Get(defaultProps.Get("path.albedospecular.glossinessthreshold")).Get<double>(), 0.0);
 
-	// Update eye sample size
-	eyeSampleBootSize = 5;
-	eyeSampleStepSize = 9;
+	// Update eye sample size (the layout is in sampler_types.cl)
+	eyeSampleBootSize = EYE_SAMPLE_BOOT_SIZE;
+	eyeSampleStepSize = VERTEX_SAMPLE_SIZE;
 	eyeSampleSize = 
-		eyeSampleBootSize + // To generate eye ray
-		(maxPathDepth.depth + 1) * eyeSampleStepSize; // For each path vertex
+		eyeSampleBootSize + // The pixel position
+		(maxPathDepth.depth + 1) * eyeSampleStepSize + // For each path vertex
+		EYE_SAMPLE_TAIL_SIZE; // The camera time and lens position
 	
 	// Update light sample size
 	lightSampleBootSize = 9;

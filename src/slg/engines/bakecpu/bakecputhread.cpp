@@ -153,14 +153,18 @@ void BakeCPURenderThread::RenderEyeSample(const BakeMapInfo &mapInfo, PathTracer
 	float triPickPdf;
 	const u_int triangleIndex = engine->currentSceneObjDist[currentSceneObjIndex]->SampleDiscrete(state.GetEyeSampler().GetSample(1), &triPickPdf);
 
-	const float timeSample = state.GetEyeSampler().GetSample(4);
+	// The eye sample layout of PathTracer (sampler_types.cl): the camera
+	// time and lens dimensions are the mesh time and point here
+	const float timeSample = state.GetEyeSampler().GetSample(IDX_EYE_TIME(pathTracer.eyeSampleSize));
 	Transform localToWorld;
 	mesh.GetLocal2World(timeSample, localToWorld);
 
 	// Origin
 	Point samplePoint;
 	float b0, b1, b2;
-	mesh.Sample(localToWorld, triangleIndex, state.GetEyeSampler().GetSample(2), state.GetEyeSampler().GetSample(3),
+	mesh.Sample(localToWorld, triangleIndex,
+			state.GetEyeSampler().GetSample(IDX_DOF_X(pathTracer.eyeSampleSize)),
+			state.GetEyeSampler().GetSample(IDX_DOF_Y(pathTracer.eyeSampleSize)),
 			&samplePoint, &b0, &b1, &b2);
 
 	const u_int sceneObjIndex = state.scene.GetObjects().GetSceneObjectIndex(sceneObj);
