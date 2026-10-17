@@ -266,8 +266,10 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_SampleRough(__global const HitPoin
 		float factor = (d / specPdf) * G * fabs(cosThetaOH) / threshold;
 
 		//if (!hitPoint.fromLight) {
+			// The radiance form, like the evaluation and the glass: eta2 is
+			// (eta_eye / eta_light)^2
 			const float F = FresnelCauchy_Evaluate(ntc, cosThetaIH);
-			result = (factor / coso) * kt * (1.f - F);
+			result = (factor / coso) * kt * (1.f - F) * eta2;
 		//} else {
 		//	const Spectrum F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
 		//	result = (factor / cosi) * kt * (Spectrum(1.f) - F);

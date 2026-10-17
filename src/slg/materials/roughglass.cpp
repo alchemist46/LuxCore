@@ -221,8 +221,10 @@ Spectrum RoughGlassMaterial::SampleRough(const HitPoint &hitPoint,
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / threshold;
 
 		if (!hitPoint.fromLight) {
+			// The radiance form, like Evaluate() and GlassMaterial: eta2 is
+			// (eta_eye / eta_light)^2
 			const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaIH);
-			result = (factor / coso) * kt * (1.f - F);
+			result = (factor / coso) * kt * (1.f - F) * eta2;
 		} else {
 			const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
 			result = (factor / cosi) * kt * (1.f - F);
