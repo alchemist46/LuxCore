@@ -21,6 +21,10 @@ and aligns the render settings of the two engines:
 - every material uses its Cycles nodes in LuxCore, every light and the world
   use their Cycles settings, the lights are invisible to the camera (as
   BlendLuxCore exports the area lights);
+- the objects invisible to Cycles' shadow rays get their own copies of their
+  materials, flagged for g0_render.py, which makes them transparent to
+  LuxCore's shadow rays (the classroom's window portal: an opaque portal
+  blocks the sun);
 - the same path depth in both engines, no clamping, no glossy filter, no
   adaptive sampling (the addon defaults to an adaptive strength of 0.9), no denoiser, Blackman-Harris 1.5 pixel filter in both;
 - no scene animation (it would override the seed), only the combined pass,
@@ -64,6 +68,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import g0_blc
 restore_manifest = g0_blc.load(args.addon, args.site_packages)
 material_export = g0_blc.submodule("export.material")
+utils_mod = g0_blc.submodule("utils")
 errorlog = g0_blc.submodule("utils.errorlog").LuxCoreErrorLog
 
 # --- The node subset of the reader --------------------------------------------
@@ -338,6 +343,28 @@ for ob in scene.objects:
     bm.free()
     flipped.add(ob.data)
     print(f"[G0] flipped {len(faces)} faces of {ob.data.name}")
+
+# Objects that Cycles' shadow rays ignore (Ray Visibility > Shadow off, e.g. the
+# classroom's window portal, which would otherwise block the sun): LuxCore has
+# no such object flag, only a material one (transparency.shadow), which the
+# reader does not set. Their materials get their own copy, flagged here and
+# made transparent to shadow rays by g0_render.py when the addon exports them.
+shadow_copies = {}
+for ob in scene.objects:
+    if ob.type != "MESH" or ob.visible_shadow or not utils_mod.is_obj_visible_in_cycles(ob):
+        continue
+    for slot in ob.material_slots:
+        mat = slot.material
+        if mat is None:
+            continue
+        if mat not in shadow_copies:
+            copy = mat.copy()
+            copy.name = mat.name + ".noshadow"
+            copy["g0_shadow_transparent"] = True
+            shadow_copies[mat] = copy
+        slot.link = "OBJECT"
+        slot.material = shadow_copies[mat]
+        changes["material of a shadow-invisible object made shadow-transparent"] += 1
 
 def blackbody_rgb(temperature):
     """Linear Rec.709 color of a black body, normalized to luminance 1

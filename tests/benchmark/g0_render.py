@@ -126,6 +126,22 @@ else:
                 a[0].Set(extra)
             return render_config(*a)
         pyluxcore.RenderConfig = render_config_with_extra
+    # The materials g0_prepare.py flagged (objects invisible to Cycles' shadow
+    # rays): transparent to LuxCore's shadow rays, which the addon cannot export
+    get_luxcore_name = g0_blc.submodule("utils").get_luxcore_name
+    shadow_transparent = [get_luxcore_name(m, False) for m in bpy.data.materials
+                          if m.get("g0_shadow_transparent")]
+    if shadow_transparent:
+        log["shadow_transparent"] = shadow_transparent
+        scene_parse = pyluxcore.Scene.Parse
+
+        def scene_parse_with_shadow_transparency(self, props):
+            for name in shadow_transparent:
+                if props.IsDefined(f"scene.materials.{name}.type"):
+                    props.Set(pyluxcore.Property(f"scene.materials.{name}.transparency.shadow", [1.0, 1.0, 1.0]))
+                    props.Set(pyluxcore.Property(f"scene.materials.{name}.transparency.shadowoverride", True))
+            return scene_parse(self, props)
+        pyluxcore.Scene.Parse = scene_parse_with_shadow_transparency
     prefs = g0_blc.preferences()
     prefs.gpu_backend = "HIP"
     prefs.use_hiprt = not args.no_hiprt
