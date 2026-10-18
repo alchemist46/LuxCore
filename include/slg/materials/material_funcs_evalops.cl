@@ -132,6 +132,12 @@ OPENCL_FORCE_NOT_INLINE uint Material_EvalOp(
 			DisneyMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
 			break;
 		//----------------------------------------------------------------------
+		// OPENPBR
+		//----------------------------------------------------------------------
+		case OPENPBR:
+			OpenPBRMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
+			break;
+		//----------------------------------------------------------------------
 		// SUBSURFACE
 		//----------------------------------------------------------------------
 #if defined(PARAM_ENABLE_SUBSURFACE)

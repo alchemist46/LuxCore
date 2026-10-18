@@ -1,0 +1,196 @@
+#line 2 "materialdefs_funcs_openpbr.cl"
+
+/***************************************************************************
+ * Copyright 1998-2026 by authors (see AUTHORS.txt)                        *
+ *                                                                         *
+ *   This file is part of LuxCoreRender.                                   *
+ *                                                                         *
+ * Licensed under the Apache License, Version 2.0 (the "License");         *
+ * you may not use this file except in compliance with the License.        *
+ * You may obtain a copy of the License at                                 *
+ *                                                                         *
+ *     http://www.apache.org/licenses/LICENSE-2.0                          *
+ *                                                                         *
+ * Unless required by applicable law or agreed to in writing, software     *
+ * distributed under the License is distributed on an "AS IS" BASIS,       *
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.*
+ * See the License for the specific language governing permissions and     *
+ * limitations under the License.                                          *
+ ***************************************************************************/
+
+//------------------------------------------------------------------------------
+// OpenPBR material: the textures of the hit point into OpenPBRBSDF, the BSDF
+// itself is in materialdefs_funcs_openpbr_bsdf.cl. The GPU traces eye paths
+// only (fromLight = false).
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float OpenPBRMaterial_GetFloat(__global const Material* restrict material,
+		const OpenPBRInput input, __global const HitPoint *hitPoint
+		TEXTURES_PARAM_DECL) {
+	const uint texIndex = material->openpbr.texIndex[input];
+
+	return (texIndex != NULL_INDEX) ?
+		Texture_GetFloatValue(texIndex, hitPoint TEXTURES_PARAM) :
+		OpenPBR_Defaults[3 * input];
+}
+
+OPENCL_FORCE_INLINE float3 OpenPBRMaterial_GetSpectrum(__global const Material* restrict material,
+		const OpenPBRInput input, __global const HitPoint *hitPoint
+		TEXTURES_PARAM_DECL) {
+	const uint texIndex = material->openpbr.texIndex[input];
+
+	return (texIndex != NULL_INDEX) ?
+		Texture_GetSpectrumValue(texIndex, hitPoint TEXTURES_PARAM) :
+		MAKE_FLOAT3(OpenPBR_Defaults[3 * input], OpenPBR_Defaults[3 * input + 1], OpenPBR_Defaults[3 * input + 2]);
+}
+
+OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, OpenPBRBSDF *b
+		TEXTURES_PARAM_DECL) {
+	b->baseWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->baseColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_BASE_COLOR, hitPoint TEXTURES_PARAM);
+	b->baseDiffuseRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint TEXTURES_PARAM);
+	b->baseMetalness = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_METALNESS, hitPoint TEXTURES_PARAM);
+	b->specularWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->specularColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_SPECULAR_COLOR, hitPoint TEXTURES_PARAM);
+	b->specularRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ROUGHNESS, hitPoint TEXTURES_PARAM);
+	b->specularIor = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM);
+	b->specularAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ANISOTROPY, hitPoint TEXTURES_PARAM);
+	b->tangentRotation = OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM);
+	b->regularization = hitPoint->regularization;
+
+	OpenPBR_Init(b);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_Albedo(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	OpenPBRBSDF b;
+	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+	const float3 albedo = OpenPBR_Albedo(&b);
+
+	EvalStack_PushFloat3(albedo);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetInteriorVolume(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetInteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetExteriorVolume(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetExteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetPassThroughTransparency(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetEmittedRadiance(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_Evaluate(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	OpenPBRBSDF b;
+	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+	BSDFEvent event;
+	float directPdfW;
+	const float3 result = OpenPBR_Evaluate(&b, lightDir, eyeDir, false,
+			&event, &directPdfW, NULL);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
+OPENCL_FORCE_INLINE void OpenPBRMaterial_Sample(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float u0, u1, passThroughEvent;
+	EvalStack_PopFloat(passThroughEvent);
+	EvalStack_PopFloat(u1);
+	EvalStack_PopFloat(u0);
+	float3 fixedDir;
+	EvalStack_PopFloat3(fixedDir);
+
+	OpenPBRBSDF b;
+	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+	float3 sampledDir;
+	float pdfW;
+	BSDFEvent event;
+	const float3 result = OpenPBR_Sample(&b, fixedDir, u0, u1, passThroughEvent, false,
+			&sampledDir, &pdfW, &event);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushFloat3(sampledDir);
+	EvalStack_PushFloat(pdfW);
+	EvalStack_PushBSDFEvent(event);
+}
+
+//------------------------------------------------------------------------------
+// Material specific EvalOp
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_EvalOp(
+		__global const Material* restrict material,
+		const MaterialEvalOpType evalType,
+		__global float *evalStack,
+		uint *evalStackOffset,
+		__global const HitPoint *hitPoint
+		MATERIALS_PARAM_DECL) {
+	switch (evalType) {
+		case EVAL_ALBEDO:
+			OpenPBRMaterial_Albedo(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_INTERIOR_VOLUME:
+			OpenPBRMaterial_GetInteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_EXTERIOR_VOLUME:
+			OpenPBRMaterial_GetExteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_EMITTED_RADIANCE:
+			OpenPBRMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_PASS_TROUGH_TRANSPARENCY:
+			OpenPBRMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_EVALUATE:
+			OpenPBRMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_SAMPLE:
+			OpenPBRMaterial_Sample(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		default:
+			// Something wrong here
+			break;
+	}
+}
+// vim: autoindent noexpandtab tabstop=4 shiftwidth=4

@@ -49,6 +49,10 @@ estimator is G2(wo, wi) / G1(wo) with a negligible variance:
   reflection plus Walter's transmission, in the energy form used by the
   roughglass material) seen from the side with the relative IOR eta >= 1 and
   eta <= 1 respectively; the lossless interface needs no Eavg.
+- GGXEnergy_DielectricTable[eta][rough][mu] (8 x 16 x 16): the albedo of the
+  height-correlated reflection lobe weighted by the exact dielectric Fresnel of
+  the relative IOR eta >= 1, without the transmission (the specular reflection
+  over the opaque base of the openpbr material).
 
 The tables are indexed by rough = sqrt(alpha) (the roughness of the LuxCore
 materials is alpha itself, the table resolution is spent where E changes),
@@ -186,6 +190,23 @@ def albedo_glass(alpha, mu, eta):
     return float(np.mean(result))
 
 
+def albedo_dielectric_reflect(alpha, mu, eta):
+    """Albedo of the reflection lobe weighted by the exact Fresnel of the
+    relative IOR eta >= 1 (no transmission)."""
+    if alpha == 0.0:
+        f, _, _ = fresnel_dielectric(np.array([mu]), eta)
+        return float(f[0])
+    wo = np.array([np.sqrt(max(0.0, 1.0 - mu * mu)), 0.0, mu])
+    h = sample_vndf(alpha, wo)
+    woh = np.clip(wo[0] * h[0] + wo[1] * h[1] + wo[2] * h[2], 0.0, 1.0)
+    f, _, _ = fresnel_dielectric(woh, eta)
+    wr = 2.0 * woh * h - wo[:, None]
+    valid = wr[2] > 0.0
+    wrz = np.where(valid, wr[2], 1.0)
+    weight = g2_over_g1(alpha, wo, (wr[0], wr[1], wrz), False)
+    return float(np.mean(np.where(valid, f * weight, 0.0)))
+
+
 def rough_grid(n):
     return np.arange(n) / (n - 1)
 
@@ -241,6 +262,18 @@ def glass_tables(inverse):
     return E
 
 
+def dielectric_tables():
+    E = np.zeros((N_GLASS_ETA, N_GLASS, N_GLASS))
+    for k, eta in enumerate(np.linspace(ETA_MIN, ETA_MAX, N_GLASS_ETA)):
+        for i, rough in enumerate(rough_grid(N_GLASS)):
+            alpha = rough * rough
+            for j, mu in enumerate(mu_grid(N_GLASS)):
+                E[k, i, j] = albedo_dielectric_reflect(alpha, mu, eta)
+        print(f"  dielectric eta {eta:.3f}: E(rough 0, mu 1) {E[k, 0, -1]:.4f} "
+              f"E(rough 0.5, mu 0.5) {E[k, N_GLASS // 2, N_GLASS // 2]:.4f}", file=sys.stderr)
+    return E
+
+
 def literal(v):
     """A float literal valid in C++ and OpenCL C (always with a decimal point)."""
     t = f"{v:.6g}"
@@ -266,6 +299,8 @@ def main():
     print("Glass tables", file=sys.stderr)
     G = glass_tables(False)
     Ginv = glass_tables(True)
+    print("Dielectric reflection tables", file=sys.stderr)
+    D = dielectric_tables()
 
     with open(OUTPUT, "w") as out:
         out.write("#line 2 \"microfacet_energy_tables.cl\"\n\n")
@@ -304,6 +339,7 @@ def main():
         emit_table(out, "GGXEnergy_CoatAvg_HC", coat_avg, (4, N_ROUGH))
         emit_table(out, "GGXEnergy_GlassTable", G, (N_GLASS_ETA, N_GLASS, N_GLASS))
         emit_table(out, "GGXEnergy_GlassInvTable", Ginv, (N_GLASS_ETA, N_GLASS, N_GLASS))
+        emit_table(out, "GGXEnergy_DielectricTable", D, (N_GLASS_ETA, N_GLASS, N_GLASS))
         out.write(LOOKUP_CODE)
     print(f"Written {OUTPUT}", file=sys.stderr)
 
@@ -361,6 +397,21 @@ OPENCL_FORCE_INLINE float GGXEnergy_GlassE(const float u, const float v, const f
 
 	return (1.f - te) * GGXEnergy_Lerp2D(&table[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
 			te * GGXEnergy_Lerp2D(&table[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
+}
+
+// The albedo of the GGX reflection lobe (height-correlated, no energy
+// compensation) weighted by the exact Fresnel of the relative IOR eta >= 1,
+// without the transmission (the specular reflection of the openpbr material)
+OPENCL_FORCE_INLINE float GGXEnergy_DielectricE(const float u, const float v, const float mu, const float eta) {
+	const float rough = sqrt(sqrt(u * v));
+	const float e = clamp(eta, GGXENERGY_ETA_MIN, GGXENERGY_ETA_MAX);
+	const float fe = (e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN) * (float)(GGXENERGY_N_GLASS_ETA - 1);
+	const uint ie = min((uint)fe, (uint)(GGXENERGY_N_GLASS_ETA - 2));
+	const float te = fe - (float)ie;
+	const uint stride = GGXENERGY_N_GLASS * GGXENERGY_N_GLASS;
+
+	return (1.f - te) * GGXEnergy_Lerp2D(&GGXEnergy_DielectricTable[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
+			te * GGXEnergy_Lerp2D(&GGXEnergy_DielectricTable[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
 }
 
 // The coatings (glossy2, glossycoating, glossytranslucent): the GGX reflection

@@ -24,6 +24,10 @@
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 
+// The functions below read the material and texture buffers: GPU only (the
+// rest of this file is also compiled on the CPU, see openpbr.cpp)
+#if !defined(LUXRAYS_CPU_DEVICE)
+
 //------------------------------------------------------------------------------
 // Material_GetEventTypes
 //------------------------------------------------------------------------------
@@ -116,6 +120,8 @@ OPENCL_FORCE_INLINE float Material_IsHoldout(const uint matIndex
 		MATERIALS_PARAM_DECL) {
 	return mats[matIndex].isHoldout;
 }
+
+#endif
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

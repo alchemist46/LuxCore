@@ -173,7 +173,39 @@ vector<TestCase> BuildTestCases() {
 			"scene.materials.m.specular = 1\nscene.materials.m.clearcoat = 1\n"
 			"scene.materials.m.clearcoatgloss = 0.5\n" + disneyRough,
 			1.f, a >= 0.2f });
+
+		// OpenPBR (alpha = specular.roughness^2): white metal, white dielectric
+		// base, the anisotropic and rotated dielectric, a tinted specular with
+		// weight 2 over the white base (lossless: the base gets the rest)
+		const string openpbrRough = "scene.materials.m.specular.roughness = " + to_string(sqrtf(a)) + "\n";
+		cases.push_back({ "openpbr-metal-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n" + openpbrRough,
+			1.f, a >= 0.2f });
+		cases.push_back({ "openpbr-dielectric-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\n" + openpbrRough,
+			1.f, a >= 0.2f });
+		// The anisotropic lobe has no albedo target: the energy tables are
+		// isotropic (looked up with a view-dependent alpha), the albedo is
+		// within 1% of 1 down to mu = 0.25 and 1-1.6% high at mu = 0.08
+		cases.push_back({ "openpbr-aniso-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.anisotropy = 0.7\n"
+			"scene.materials.m.tangent.rotation = 0.3\n" + openpbrRough,
+			NO_EXPECT, a >= 0.2f });
+		cases.push_back({ "openpbr-tinted-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.weight = 2\n"
+			"scene.materials.m.specular.color = 1 0.5 0.25\nscene.materials.m.base.diffuseroughness = 0.5\n" + openpbrRough,
+			1.f, a >= 0.2f });
+		cases.push_back({ "openpbr-f82-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 0.9 0.6 0.3\nscene.materials.m.base.metalness = 0.7\n"
+			"scene.materials.m.specular.color = 0.8 0.9 1\n" + openpbrRough,
+			NO_EXPECT, a >= 0.2f });
 	}
+
+	// OpenPBR: the EON diffuse alone (no specular)
+	for (const float r : { 0.f, 0.5f, 1.f })
+		cases.push_back({ "openpbr-diffuse-r" + to_string(r).substr(0, 3), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.weight = 0\n"
+			"scene.materials.m.base.diffuseroughness = " + to_string(r) + "\n", 1.f, true });
 
 	// Carpaint: three white lobes summing to 1 (exposes the lobe sampling)
 	cases.push_back({ "carpaint-3lobes", "scene.materials.m.type = carpaint\n"

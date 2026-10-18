@@ -54,6 +54,7 @@
 #include "slg/volumes/heterogenous.h"
 #include "slg/volumes/homogenous.h"
 #include "slg/materials/disney.h"
+#include "slg/materials/openpbr.h"
 
 using namespace std;
 using namespace luxrays;
@@ -140,6 +141,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case ROUGHMATTETRANSLUCENT:
 		case GLOSSYTRANSLUCENT:
 		case DISNEY:
+		case OPENPBR:
 		case SUBSURFACEMAT:
 		case HOMOGENEOUS_VOL:
 		case CLEAR_VOL:
@@ -966,6 +968,17 @@ void CompiledScene::CompileMaterials() {
 					mat->disney.filmIorTexIndex = scene.GetTextures().GetTextureIndex(dm.GetFilmIOR());
 				else
 					mat->disney.filmIorTexIndex = NULL_INDEX;
+				break;
+			}
+			case OPENPBR: {
+				auto& opm = dynamic_cast<const OpenPBRMaterial &>(m);
+
+				mat->type = slg::ocl::OPENPBR;
+				for (u_int i = 0; i < slg::ocl::OPENPBR_INPUT_COUNT; ++i) {
+					auto tex = opm.GetInput(static_cast<slg::ocl::OpenPBRInput>(i));
+					mat->openpbr.texIndex[i] = tex ? scene.GetTextures().GetTextureIndex(tex) : NULL_INDEX;
+				}
+				mat->openpbr.thinWalled = opm.IsThinWalled() ? 1 : 0;
 				break;
 			}
 			case SUBSURFACEMAT: {

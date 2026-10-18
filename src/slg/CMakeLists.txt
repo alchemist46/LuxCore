@@ -240,6 +240,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/carpaint.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/cloth.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/disney.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/materials/openpbr.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glass.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glossy2.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glossycoating.cpp

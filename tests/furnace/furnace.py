@@ -128,6 +128,22 @@ def cases():
                   "scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 1\n"
                   "scene.materials.m.specular = 1\nscene.materials.m.clearcoat = 1\n"
                   "scene.materials.m.clearcoatgloss = 0.5\n" + dr, 1.0))
+        orr = f"scene.materials.m.specular.roughness = {math.sqrt(a):.4f}\n"
+        c.append((f"openpbr-metal-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n" + orr, 1.0))
+        c.append((f"openpbr-dielectric-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\n" + orr, 1.0))
+        c.append((f"openpbr-tinted-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.weight = 2\n"
+                  "scene.materials.m.specular.color = 1 0.5 0.25\n"
+                  "scene.materials.m.base.diffuseroughness = 0.5\n" + orr, 1.0))
+        c.append((f"openpbr-aniso-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.anisotropy = 0.7\n"
+                  "scene.materials.m.tangent.rotation = 0.3\n" + orr, None))
+    for r in (0.0, 0.5, 1.0):
+        c.append((f"openpbr-diffuse-r{r}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.weight = 0\n"
+                  f"scene.materials.m.base.diffuseroughness = {r}\n", 1.0))
     c.append(("carpaint-3lobes", "scene.materials.m.type = carpaint\nscene.materials.m.kd = 0 0 0\n"
               "scene.materials.m.ks1 = 0.333 0.333 0.333\nscene.materials.m.ks2 = 0.333 0.333 0.333\n"
               "scene.materials.m.ks3 = 0.334 0.334 0.334\n"

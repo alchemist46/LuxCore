@@ -62,6 +62,8 @@ extern std::string KernelSource_materialdefs_funcs_carpaint;
 extern std::string KernelSource_materialdefs_funcs_clearvol;
 extern std::string KernelSource_materialdefs_funcs_cloth;
 extern std::string KernelSource_materialdefs_funcs_disney;
+extern std::string KernelSource_materialdefs_funcs_openpbr_bsdf;
+extern std::string KernelSource_materialdefs_funcs_openpbr;
 extern std::string KernelSource_materialdefs_funcs_glass;
 extern std::string KernelSource_materialdefs_funcs_glossy2;
 extern std::string KernelSource_materialdefs_funcs_glossycoating;

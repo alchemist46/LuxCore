@@ -152,6 +152,8 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_twosided <<
 			slg::ocl::KernelSource_materialdefs_funcs_velvet <<
 			slg::ocl::KernelSource_materialdefs_funcs_subsurface <<
+			slg::ocl::KernelSource_materialdefs_funcs_openpbr_bsdf <<
+			slg::ocl::KernelSource_materialdefs_funcs_openpbr <<
 			slg::ocl::KernelSource_material_funcs_evalops <<
 			slg::ocl::KernelSource_material_funcs;
 

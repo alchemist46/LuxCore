@@ -74,6 +74,18 @@ class DisneyMaterial(ImageTest):
 DisneyMaterial = AddTests(DisneyMaterial, TestDisneyMaterial, GetTestCases())
 
 ################################################################################
+# OpenPBR material test
+################################################################################
+
+def TestOpenPBRMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-openpbr-area.cfg", "OpenPBRMaterial")
+
+class OpenPBRMaterial(ImageTest):
+    pass
+
+OpenPBRMaterial = AddTests(OpenPBRMaterial, TestOpenPBRMaterial, GetTestCases())
+
+################################################################################
 # Glass material test
 ################################################################################
 

@@ -51,6 +51,7 @@
 #include "slg/materials/roughmattetranslucent.h"
 #include "slg/materials/velvet.h"
 #include "slg/materials/disney.h"
+#include "slg/materials/openpbr.h"
 #include "slg/materials/twosided.h"
 #include "slg/materials/subsurface.h"
 
@@ -726,6 +727,29 @@ MaterialUPtr Scene::CreateMaterial(
 		mat = std::make_unique<SubsurfaceMaterial>(
 			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
 			color, radius, scale, anisotropy, ior, roughness
+		);
+	} else if (matType == "openpbr") {
+		// OpenPBR Surface (see openpbr.h): only the inputs that are set, the
+		// others have the default of the specification
+		OpenPBRMaterial::Inputs inputs;
+		for (u_int i = 0; i < slg::ocl::OPENPBR_INPUT_COUNT; ++i) {
+			const auto input = static_cast<slg::ocl::OpenPBRInput>(i);
+			const string inputName = OpenPBRMaterial::GetInputName(input);
+			inputs[i] = isDefined(inputName) ?
+				parseTex(inputName, OpenPBRMaterial::GetInputDefault(input)) : nullptr;
+		}
+
+		// The parts of the specification that are not implemented yet
+		for (const string inputName : { "transmission.weight", "subsurface.weight",
+				"fuzz.weight", "coat.weight", "thinfilm.weight",
+				"transmission.dispersionscale", "transmission.abbenumber", "coat.bumptex" }) {
+			if (isDefined(inputName))
+				SLG_LOG("WARNING: openpbr material " << matName << ": " << inputName << " is not supported yet and is ignored");
+		}
+
+		mat = std::make_unique<OpenPBRMaterial>(
+			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
+			inputs, parseBool("geometry.thinwalled", false)
 		);
 	} else
 		throw runtime_error("Unknown material type: " + matType);

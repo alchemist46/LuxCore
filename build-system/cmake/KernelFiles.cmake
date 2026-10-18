@@ -140,6 +140,8 @@ set(SLG_KERNELS
     include/slg/materials/materialdefs_funcs_subsurface.cl
     include/slg/materials/subsurface_funcs.cl
     include/slg/materials/materialdefs_funcs_disney.cl
+    include/slg/materials/materialdefs_funcs_openpbr_bsdf.cl
+    include/slg/materials/materialdefs_funcs_openpbr.cl
     include/slg/materials/materialdefs_funcs_twosided.cl
     include/slg/materials/material_funcs_evalops.cl
     include/slg/materials/material_funcs.cl
