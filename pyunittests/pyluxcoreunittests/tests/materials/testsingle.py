@@ -85,6 +85,14 @@ class OpenPBRMaterial(ImageTest):
 
 OpenPBRMaterial = AddTests(OpenPBRMaterial, TestOpenPBRMaterial, GetTestCases())
 
+def TestOpenPBRCoatMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-openpbr-coat-area.cfg", "OpenPBRCoatMaterial")
+
+class OpenPBRCoatMaterial(ImageTest):
+    pass
+
+OpenPBRCoatMaterial = AddTests(OpenPBRCoatMaterial, TestOpenPBRCoatMaterial, GetTestCases())
+
 ################################################################################
 # Glass material test
 ################################################################################

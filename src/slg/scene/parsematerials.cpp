@@ -741,7 +741,6 @@ MaterialUPtr Scene::CreateMaterial(
 
 		// The parts of the specification that are not implemented yet
 		for (const string inputName : { "transmission.weight", "subsurface.weight",
-				"fuzz.weight", "coat.weight", "thinfilm.weight",
 				"transmission.dispersionscale", "transmission.abbenumber", "coat.bumptex" }) {
 			if (isDefined(inputName))
 				SLG_LOG("WARNING: openpbr material " << matName << ": " << inputName << " is not supported yet and is ignored");

@@ -199,7 +199,35 @@ vector<TestCase> BuildTestCases() {
 			"scene.materials.m.base.color = 0.9 0.6 0.3\nscene.materials.m.base.metalness = 0.7\n"
 			"scene.materials.m.specular.color = 0.8 0.9 1\n" + openpbrRough,
 			NO_EXPECT, a >= 0.2f });
+
+		// OpenPBR coat of this roughness over a white dielectric (specular
+		// roughness 0.5) and over a white metal: lossless; a tinted coat with
+		// darkening over a coloured base (consistency only)
+		const string coatRough = "scene.materials.m.coat.weight = 1\n"
+			"scene.materials.m.coat.roughness = " + to_string(sqrtf(a)) + "\n";
+		cases.push_back({ "openpbr-coat-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n" + coatRough,
+			1.f, a >= 0.2f });
+		cases.push_back({ "openpbr-coatmetal-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n"
+			"scene.materials.m.specular.roughness = 0.5\n" + coatRough,
+			1.f, a >= 0.2f });
+		cases.push_back({ "openpbr-coattinted-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 0.2 0.5 0.8\nscene.materials.m.specular.roughness = 0.3\n"
+			"scene.materials.m.coat.color = 0.9 0.7 0.5\nscene.materials.m.coat.anisotropy = 0.5\n"
+			"scene.materials.m.coat.ior = 1.8\n" + coatRough,
+			NO_EXPECT, a >= 0.2f });
 	}
+
+	// OpenPBR: white fuzz over the white dielectric (lossless up to the LTC
+	// fit), and the thin film (consistency only)
+	for (const float r : { 0.2f, 0.5f, 1.f })
+		cases.push_back({ "openpbr-fuzz-r" + to_string(r).substr(0, 3), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.fuzz.weight = 1\n"
+			"scene.materials.m.fuzz.roughness = " + to_string(r) + "\n", 1.f, true });
+	cases.push_back({ "openpbr-thinfilm", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 0.5 0.5 0.5\nscene.materials.m.base.metalness = 0.5\n"
+		"scene.materials.m.thinfilm.weight = 1\nscene.materials.m.thinfilm.thickness = 0.4\n", NO_EXPECT, true });
 
 	// OpenPBR: the EON diffuse alone (no specular)
 	for (const float r : { 0.f, 0.5f, 1.f })

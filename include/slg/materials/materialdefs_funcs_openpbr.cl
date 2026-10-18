@@ -56,6 +56,36 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 	b->specularRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ROUGHNESS, hitPoint TEXTURES_PARAM);
 	b->specularIor = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM);
 	b->specularAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ANISOTROPY, hitPoint TEXTURES_PARAM);
+	b->coatWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_WEIGHT, hitPoint TEXTURES_PARAM);
+	if (b->coatWeight > 0.f) {
+		b->coatColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_COAT_COLOR, hitPoint TEXTURES_PARAM);
+		b->coatRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_ROUGHNESS, hitPoint TEXTURES_PARAM);
+		b->coatAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_ANISOTROPY, hitPoint TEXTURES_PARAM);
+		b->coatIor = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_IOR, hitPoint TEXTURES_PARAM);
+		b->coatDarkening = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_DARKENING, hitPoint TEXTURES_PARAM);
+	} else {
+		b->coatColor = WHITE;
+		b->coatRoughness = 0.f;
+		b->coatAnisotropy = 0.f;
+		b->coatIor = 1.6f;
+		b->coatDarkening = 0.f;
+	}
+	b->fuzzWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_WEIGHT, hitPoint TEXTURES_PARAM);
+	if (b->fuzzWeight > 0.f) {
+		b->fuzzColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_FUZZ_COLOR, hitPoint TEXTURES_PARAM);
+		b->fuzzRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_ROUGHNESS, hitPoint TEXTURES_PARAM);
+	} else {
+		b->fuzzColor = WHITE;
+		b->fuzzRoughness = .5f;
+	}
+	b->thinFilmWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_WEIGHT, hitPoint TEXTURES_PARAM);
+	if (b->thinFilmWeight > 0.f) {
+		b->thinFilmThickness = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_THICKNESS, hitPoint TEXTURES_PARAM);
+		b->thinFilmIor = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_IOR, hitPoint TEXTURES_PARAM);
+	} else {
+		b->thinFilmThickness = 0.f;
+		b->thinFilmIor = 1.4f;
+	}
 	b->tangentRotation = OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM);
 	b->regularization = hitPoint->regularization;
 

@@ -49,10 +49,12 @@ estimator is G2(wo, wi) / G1(wo) with a negligible variance:
   reflection plus Walter's transmission, in the energy form used by the
   roughglass material) seen from the side with the relative IOR eta >= 1 and
   eta <= 1 respectively; the lossless interface needs no Eavg.
-- GGXEnergy_DielectricTable[eta][rough][mu] (8 x 16 x 16): the albedo of the
+- GGXEnergy_DielectricTable[eta][rough][mu] (12 x 16 x 16): the albedo of the
   height-correlated reflection lobe weighted by the exact dielectric Fresnel of
   the relative IOR eta >= 1, without the transmission (the specular reflection
-  over the opaque base of the openpbr material).
+  over the opaque base of the openpbr material). Its eta axis is uniform in
+  sqrt((eta - 1) / 2): near eta = 1 (a base under a coat of a similar IOR) the
+  grazing albedo is far from linear in eta.
 
 The tables are indexed by rough = sqrt(alpha) (the roughness of the LuxCore
 materials is alpha itself, the table resolution is spent where E changes),
@@ -73,6 +75,7 @@ N_ROUGH = 32
 N_MU = 32
 N_GLASS = 16
 N_GLASS_ETA = 8  # the eta axis is coarser: E is smooth in eta and CUDA's constant memory is 64 KB
+N_DIEL_ETA = 12
 ETA_MIN, ETA_MAX = 1.0, 3.0
 MU_MIN = 1e-3
 STRATA = 256  # STRATA^2 half vectors per table entry
@@ -262,9 +265,14 @@ def glass_tables(inverse):
     return E
 
 
+def dielectric_eta_grid():
+    x = np.linspace(0.0, 1.0, N_DIEL_ETA)
+    return ETA_MIN + (ETA_MAX - ETA_MIN) * x * x
+
+
 def dielectric_tables():
-    E = np.zeros((N_GLASS_ETA, N_GLASS, N_GLASS))
-    for k, eta in enumerate(np.linspace(ETA_MIN, ETA_MAX, N_GLASS_ETA)):
+    E = np.zeros((N_DIEL_ETA, N_GLASS, N_GLASS))
+    for k, eta in enumerate(dielectric_eta_grid()):
         for i, rough in enumerate(rough_grid(N_GLASS)):
             alpha = rough * rough
             for j, mu in enumerate(mu_grid(N_GLASS)):
@@ -329,6 +337,7 @@ def main():
         out.write(f"#define GGXENERGY_N_MU {N_MU}\n")
         out.write(f"#define GGXENERGY_N_GLASS {N_GLASS}\n")
         out.write(f"#define GGXENERGY_N_GLASS_ETA {N_GLASS_ETA}\n")
+        out.write(f"#define GGXENERGY_N_DIEL_ETA {N_DIEL_ETA}\n")
         out.write(f"#define GGXENERGY_ETA_MIN {ETA_MIN}f\n")
         out.write(f"#define GGXENERGY_ETA_MAX {ETA_MAX}f\n\n")
         emit_table(out, "GGXEnergy_E_HC", E_hc, (N_ROUGH, N_MU))
@@ -339,7 +348,7 @@ def main():
         emit_table(out, "GGXEnergy_CoatAvg_HC", coat_avg, (4, N_ROUGH))
         emit_table(out, "GGXEnergy_GlassTable", G, (N_GLASS_ETA, N_GLASS, N_GLASS))
         emit_table(out, "GGXEnergy_GlassInvTable", Ginv, (N_GLASS_ETA, N_GLASS, N_GLASS))
-        emit_table(out, "GGXEnergy_DielectricTable", D, (N_GLASS_ETA, N_GLASS, N_GLASS))
+        emit_table(out, "GGXEnergy_DielectricTable", D, (N_DIEL_ETA, N_GLASS, N_GLASS))
         out.write(LOOKUP_CODE)
     print(f"Written {OUTPUT}", file=sys.stderr)
 
@@ -405,8 +414,9 @@ OPENCL_FORCE_INLINE float GGXEnergy_GlassE(const float u, const float v, const f
 OPENCL_FORCE_INLINE float GGXEnergy_DielectricE(const float u, const float v, const float mu, const float eta) {
 	const float rough = sqrt(sqrt(u * v));
 	const float e = clamp(eta, GGXENERGY_ETA_MIN, GGXENERGY_ETA_MAX);
-	const float fe = (e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN) * (float)(GGXENERGY_N_GLASS_ETA - 1);
-	const uint ie = min((uint)fe, (uint)(GGXENERGY_N_GLASS_ETA - 2));
+	// The eta axis is uniform in sqrt((eta - eta_min) / (eta_max - eta_min))
+	const float fe = sqrt((e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN)) * (float)(GGXENERGY_N_DIEL_ETA - 1);
+	const uint ie = min((uint)fe, (uint)(GGXENERGY_N_DIEL_ETA - 2));
 	const float te = fe - (float)ie;
 	const uint stride = GGXENERGY_N_GLASS * GGXENERGY_N_GLASS;
 

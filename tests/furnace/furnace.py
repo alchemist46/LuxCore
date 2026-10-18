@@ -140,6 +140,16 @@ def cases():
         c.append((f"openpbr-aniso-a{a}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.anisotropy = 0.7\n"
                   "scene.materials.m.tangent.rotation = 0.3\n" + orr, None))
+        coat = f"scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = {math.sqrt(a):.4f}\n"
+        c.append((f"openpbr-coat-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n" + coat, 1.0))
+        c.append((f"openpbr-coatmetal-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n"
+                  "scene.materials.m.specular.roughness = 0.5\n" + coat, 1.0))
+    for r in (0.2, 0.5, 1.0):
+        c.append((f"openpbr-fuzz-r{r}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\nscene.materials.m.fuzz.weight = 1\n"
+                  f"scene.materials.m.fuzz.roughness = {r}\n", 1.0))
     for r in (0.0, 0.5, 1.0):
         c.append((f"openpbr-diffuse-r{r}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.weight = 0\n"

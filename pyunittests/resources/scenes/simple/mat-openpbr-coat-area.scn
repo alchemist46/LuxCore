@@ -1,0 +1,44 @@
+scene.camera.lookat.orig = 4.34339 -8.09766 4.74567
+scene.camera.lookat.target = -2.1735 7.36445 -0.197534
+################################################################################
+scene.textures.roughtex.type = checkerboard3d
+scene.textures.roughtex.texture1 = 0.1
+scene.textures.roughtex.texture2 = 0.6
+scene.textures.roughtex.mapping.type = globalmapping3d
+scene.textures.roughtex.mapping.transformation = 2 0 0 0 0 2 0 0 0 0 2 0 0 0 0 1
+################################################################################
+scene.materials.whitematte.type = matte
+scene.materials.whitematte.kd = 0.75 0.75 0.75
+scene.materials.blumatte.type = matte
+scene.materials.blumatte.kd = 0.0 0.0 0.75
+scene.materials.whitelight.type = matte
+scene.materials.whitelight.emission = 120.0 120.0 120.0
+scene.materials.whitelight.kd = 0.0 0.0 0.0
+# A thin-film metal under a slightly rough, tinted clear coat
+scene.materials.mat_cube.type = openpbr
+scene.materials.mat_cube.base.color = 0.9 0.9 0.9
+scene.materials.mat_cube.base.metalness = 1
+scene.materials.mat_cube.specular.roughness = 0.3
+scene.materials.mat_cube.thinfilm.weight = 1
+scene.materials.mat_cube.thinfilm.thickness = 0.35
+scene.materials.mat_cube.coat.weight = 1
+scene.materials.mat_cube.coat.roughness = 0.1
+scene.materials.mat_cube.coat.color = 0.9 0.85 0.7
+# Fuzz over a red diffuse with a textured roughness
+scene.materials.mat_sphere.type = openpbr
+scene.materials.mat_sphere.base.color = 0.7 0.1 0.1
+scene.materials.mat_sphere.specular.roughness = 0.5
+scene.materials.mat_sphere.fuzz.weight = 1
+scene.materials.mat_sphere.fuzz.color = 1 0.9 0.8
+scene.materials.mat_sphere.fuzz.roughness = roughtex
+################################################################################
+scene.objects.lightplanes.ply = resources/scenes/simple/simple-lights.ply
+scene.objects.lightplanes.material = whitelight
+scene.objects.box3.ply = resources/scenes/simple/simple-mat-back2.ply
+scene.objects.box3.material = blumatte
+scene.objects.box4.ply = resources/scenes/simple/simple-mat-back.ply
+scene.objects.box4.material = whitematte
+scene.objects.box1.ply = resources/scenes/simple/simple-mat-cube1.ply
+scene.objects.box1.material = mat_cube
+scene.objects.box2.ply = resources/scenes/simple/simple-mat-sphere1.ply
+scene.objects.box2.material = mat_sphere

@@ -40,7 +40,10 @@ namespace slg { namespace ocl { namespace {
 #include "luxrays/core/color/color_funcs.cl"
 #include "luxrays/utils/mc_funcs.cl"
 #include "slg/materials/microfacet_energy_tables.cl"
+#include "slg/materials/sheen_ltc_tables.cl"
+#include "slg/materials/sheen_funcs.cl"
 #include "slg/materials/materialdefs_funcs_generic.cl"
+#include "slg/materials/materialdefs_funcs_thinfilmcoating.cl"
 #include "slg/materials/materialdefs_funcs_openpbr_bsdf.cl"
 
 #undef BLACK
@@ -96,9 +99,24 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.specularRoughness = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS, hitPoint);
 	b.specularIor = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
 	b.specularAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, hitPoint);
+	b.coatWeight = mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint);
+	b.coatColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_COAT_COLOR, hitPoint));
+	b.coatRoughness = mat.GetFloat(slg::ocl::OPENPBR_COAT_ROUGHNESS, hitPoint);
+	b.coatAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_COAT_ANISOTROPY, hitPoint);
+	b.coatIor = mat.GetFloat(slg::ocl::OPENPBR_COAT_IOR, hitPoint);
+	b.coatDarkening = mat.GetFloat(slg::ocl::OPENPBR_COAT_DARKENING, hitPoint);
+	b.fuzzWeight = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_WEIGHT, hitPoint);
+	b.fuzzColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_FUZZ_COLOR, hitPoint));
+	b.fuzzRoughness = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_ROUGHNESS, hitPoint);
+	b.thinFilmWeight = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_WEIGHT, hitPoint);
+	b.thinFilmThickness = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_THICKNESS, hitPoint);
+	b.thinFilmIor = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_IOR, hitPoint);
 	b.tangentRotation = mat.GetFloat(slg::ocl::OPENPBR_TANGENT_ROTATION, hitPoint);
 	b.regularization = hitPoint.regularization;
 	b.lumWeights = slg::ocl::ToFloat3(workingColorSpace.GetLuminanceWeights());
+	const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
+	for (u_int i = 0; i < 3; ++i)
+		b.fromRec709[i] = slg::ocl::make_float3(m[i][0], m[i][1], m[i][2]);
 
 	slg::ocl::OpenPBR_Init(&b);
 }
