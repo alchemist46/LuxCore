@@ -363,6 +363,12 @@ ConfigResult RunConfig(const Material &mat, const Config &cfg, const u_int sampl
 		const Spectrum value = mat.Sample(hp, fixedDir, &sampledDir, u0, u1, passThrough, &pdfW, &event);
 
 		if (value.IsNaN() || value.IsInf() || isnan(pdfW)) {
+			if (dumpCount < dumpMax) {
+				++dumpCount;
+				printf("  dump: nan/inf from fixed (%.4f %.4f %.4f) sampled (%.4f %.4f %.4f) pass %.4f: value %g pdf %g\n",
+						fixedDir.x, fixedDir.y, fixedDir.z, sampledDir.x, sampledDir.y, sampledDir.z,
+						passThrough, value.c[0], pdfW);
+			}
 			++res.nanCount;
 			continue;
 		}

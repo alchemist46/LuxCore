@@ -230,6 +230,26 @@ The survey found these specific gaps:
     - **Results**: bsdftest passes every check (value, pdf, reverse pdf, chi-square); the eye-path albedo equals the table within 0.1%; the furnace agrees on all four estimators, the GPU included.
     - **Test kit**: the reverse pdf is checked in the opposite mode (the pdf of the other path type), which a mode-dependent sampler needs.
     - **Addon**: a Roughness input on the velvet node; old nodes get it from the compatibility pass, with Thickness and p1-p3 hidden; Cycles' Sheen BSDF node maps to velvet.
+  - *Step 8 done 2026-10-18: Disney as an energy-conserving lobe stack* (both devices; the parameters are unchanged).
+    - **Stack**, from the top:
+      1. clearcoat w: GGX with Schlick F0 0.04 and Disney's gloss-to-alpha mapping, compensated; it scales everything beneath by 1 - w Ecc(mu_eye);
+      2. metallic part m: the specular lobe with the F0 of the base color;
+      3. dielectric part 1 - m:
+         - the microfiber sheen (Step 7, roughness 0.5, the sheen tint as its colour; sheen above 1 is clamped), scaling what is beneath by 1 - sheen albedo(mu_eye), as Cycles does;
+         - the specular lobe with F0 = specular 0.08 tint;
+         - EON diffuse (roughness r), blended with Disney's flattened subsurface lobe and scaled by the reciprocal layering of that specular lobe.
+    - **Specular lobe**: the shared GGX with height-correlated masking, visible-normal sampling and compensation (it is the coating lobe of Step 6). This replaces Disney's private GTR2 with separable masking and its NDF sampler, and the GTR1 clearcoat.
+    - **Tint**: the luminance weights are Disney's 0.3/0.6/0.1 (they were 0.3/0.6/1; "Known open issues").
+    - **Sampling**: every lobe in proportion to its albedo from the fixed direction. The sheen samples its LTC on eye paths and the cosine on light paths, so the pdf is defined per path type and the reverse pdf comes from the other type. Sample() takes its value from the evaluation.
+    - **Scaling rule** for every layered material: the reciprocal factor (1 - E(mu_l)) (1 - E(mu_e)) / (1 - Eavg) where it is exact, a coat over a Lambertian or EON base (glossy2, glossytranslucent, Disney's diffuse); the view-direction factor 1 - E(mu_eye) for a coat over an arbitrary base (glossycoating, Disney's clearcoat over its metal). Over a near-mirror base the reciprocal factor was off by 3-5%.
+    - **Working colour space**: the lobe probabilities use the luminance of the working space, and the sheen colour is clamped in Rec.709, so the sampling decisions are the same in every working space. With the plain channel average the 4 spp test image differed by 9.7% between Rec.709 and Rec.2020. What remains is the colour product of the layering (the coloured specular layer scales the diffuse one per channel), 0.04% on average. The working-colour-space Disney test now compares the mean pixel error (1e-3) instead of the maximum.
+    - **Found along the way**: `EON_E()` computed acos() of a cosine rounded slightly above 1. The NaN was multiplied by sin = 0 and stayed NaN, which also affected roughmatte now and then. The cosine is clamped now.
+    - **Results** (furnace, PATHCPU / PATHOCL / BSDF-only, alpha 0.05/0.2/0.5/1):
+      - Disney dielectric (base 1, specular 0.5): 1.023/1.030/1.037/1.055 -> 1.0003-1.0006;
+      - Disney clear coat on the metal: 1.040 -> 1.000;
+      - Disney metal: 1.000 unchanged;
+      - glossycoating over an F = 1 metal with the view-direction factor: 1.000;
+      - bsdftest: all 77 cases pass, every check of every material.
 - **Ray-cone texture LOD and stochastic filtering.** One cone width per path (Akenine-Möller et al. 2021, "Improved shader and texture level of detail using ray cones") selects the mip level per lookup; the level is sampled stochastically with one texel fetch (Pharr et al. 2024, "Filtering after shading with stochastic texture filtering") and the pixel filter does the rest. One float of path state, identical CPU and GPU code, fixes the load-time single-level choice in `imagemap.cpp`, and cuts GPU texture bandwidth. UDIM (`<UDIM>` tokens in the loader) goes on top of it. *Measure:* equal-spp RMSE and samples/sec on a scene with large `.tx` textures.
 - **Material/shader sorting in the wavefront.** Sort or compact paths by material before the shading `MK_` kernels in `pathoclbase_kernels_micro.cl`. *Re-prioritized: it is the last rung of the ladder in Phase 1b (G6); the compact state array (G2) and the shadow any-hit (G1) come first. Expect a moderate gain: Cycles' shader sorting (a partitioned bucket sort) is worth 2-3% in its tracker and is turned off above ~300 shaders, and a 2026 Vulkan study (Padilla et al.) found the wavefront ~16% faster than a megakernel with both latency-bound.*
 - **Fused trace on hardware-RT backends.** Call OptiX/HIPRT trace inline from the state kernels to avoid the ray-buffer round trip. This is partly enabled by the HIPRT work on this branch. *Deferred: the benchmark shows rays/sec flat across scenes, so the trace launch is not what limits throughput today (see Phase 1b). Shader Execution Reordering (OptiX 8 `optixReorder`, Ada and later; Karma XPU uses it) only exists inside OptiX programs and its gain shrinks with local memory use, so it is a late option for the OptiX path only, after the per-task state has been shrunk.*

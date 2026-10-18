@@ -493,3 +493,48 @@ OPENCL_FORCE_INLINE float FresnelCauchy_Evaluate(const float eta, const float co
 			entering ? eta : 1.f / eta);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
+
+//------------------------------------------------------------------------------
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025):
+// Fujii's single-scattering lobe with its exact albedo and a Lambertian-like
+// multiple-scattering term. The roughness r is sigma clamped to [0, 1]. Same
+// code as EON_E()/EON_Evaluate() in material.cpp.
+//------------------------------------------------------------------------------
+
+#define EON_CONST1 (.5f - 2.f / (3.f * M_PI_F))
+#define EON_CONST2 (2.f / 3.f - 28.f / (15.f * M_PI_F))
+
+OPENCL_FORCE_INLINE float EON_E(const float muIn, const float r) {
+	// A direction rounded to z slightly above 1 made acos() NaN (times Si = 0)
+	const float mu = clamp(muIn, 1e-4f, 1.f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+	const float Si = sqrt(fmax(0.f, 1.f - mu * mu));
+	const float G = Si * (acos(mu) - Si * mu) +
+			(2.f / 3.f) * ((Si / mu) * (1.f - Si * Si * Si) - Si);
+
+	return AF * (1.f + (r * M_1_PI_F) * G);
+}
+
+// f_ss + f_ms without the cosine term, for two directions in the same hemisphere
+OPENCL_FORCE_INLINE float3 EON_Evaluate(const float3 rho, const float r, const float3 wi, const float3 wo) {
+	const float mui = fmax(fabs(wi.z), 1e-4f);
+	const float muo = fmax(fabs(wo.z), 1e-4f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+
+	// dot(wi, wo) - mui * muo
+	const float s = wi.x * wo.x + wi.y * wo.y;
+	const float stinv = (s > 0.f) ? s / fmax(mui, muo) : s;
+	const float3 fss = rho * (M_1_PI_F * AF * (1.f + r * stinv));
+
+	const float Eo = EON_E(muo, r);
+	const float Ei = EON_E(mui, r);
+	const float Eavg = AF * (1.f + EON_CONST2 * r);
+	// Only the denominators are guarded (see material.cpp)
+	const float eps = 1e-6f;
+	const float3 denom = WHITE - rho * (1.f - Eavg);
+	const float3 rhoMS = (rho * rho) * Eavg / MAKE_FLOAT3(fmax(denom.x, eps), fmax(denom.y, eps), fmax(denom.z, eps));
+	const float3 fms = rhoMS * (M_1_PI_F * fmax(0.f, 1.f - Eo) * fmax(0.f, 1.f - Ei) / fmax(eps, 1.f - Eavg));
+
+	return fss + fms;
+}
+

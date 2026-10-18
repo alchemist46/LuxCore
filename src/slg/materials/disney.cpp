@@ -18,6 +18,7 @@
 
 #include "slg/materials/disney.h"
 #include "slg/materials/thinfilmcoating.h"
+#include "slg/materials/sheen.h"
 #include "slg/textures/fresnel/fresneltexture.h"
 
 using namespace std;
@@ -85,465 +86,328 @@ Spectrum DisneyMaterial::Albedo(const HitPoint &hitPoint) const {
 	return BaseColor->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 }
 
-Spectrum DisneyMaterial::Evaluate(
-		const HitPoint &hitPoint,
-		const Vector &localLightDir,
-		const Vector &localEyeDir,
-		BSDFEvent *event,
-		float *directPdfW,
-		float *reversePdfW) const  {
-	const Spectrum color = BaseColor->GetSpectrumValue(hitPoint).Clamp(0.0f, 1.0f);
-	const float subsurface = Clamp(Subsurface->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float specular = Clamp(Specular->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float specularTint = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	// I allow sheen values > 1.0 to accentuate the effect. The result is still
-	// clamped between 0.0 and 1.0 to not break the energy conservation law.
-	const float sheen = Sheen->GetFloatValue(hitPoint);
-	const float sheenTint = Clamp(SheenTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float localFilmAmount = filmAmount ? Clamp(filmAmount->GetFloatValue(hitPoint), 0.0f, 1.0f) : 1.f;
-	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
-	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+//------------------------------------------------------------------------------
+// Since 2026-10-18 the Disney parameters drive an energy-conserving stack of
+// lobes, as Cycles' Principled BSDF v2 does, from the top:
+//
+//  clearcoat  w_cc: GGX with the Schlick Fresnel of 0.04 and Disney's gloss to
+//             alpha mapping, energy compensated; the layers beneath are scaled
+//             by 1 - w_cc Ecc(mu_eye) (exact over any base, see glossycoating.cpp)
+//  metallic   m:  the specular lobe with the F0 of the base color
+//  dielectric 1 - m:
+//    sheen    s:  the microfiber sheen (Zeltner 2022, roughness 0.5, color
+//                 from the sheen tint), the layers beneath scaled by
+//                 1 - s albedo(mu_eye) as Cycles does
+//    specular     the specular lobe with F0 = specular 0.08 tint
+//    diffuse      EON (roughness r), blended with Disney's flattened
+//                 subsurface lobe, scaled by the reciprocal albedo layering of
+//                 the specular lobe above (see glossy2.cpp)
+//
+// The specular lobe is GGX with the height-correlated Smith masking and the
+// visible-normal sampling of the Microfacet_* layer, energy compensated
+// (alpha = roughness^2, the anisotropic split of Disney). A white material has
+// the albedo 1 for every combination of metallic, specular, sheen and
+// clearcoat. The
+// old model added the clearcoat and the sheen on top without taking their
+// energy away, used Burley's diffuse (no energy conservation) and a GTR1
+// clearcoat; the sheen above 1 is clamped now.
+//------------------------------------------------------------------------------
 
-	// DisneyEvaluate() already follows the LuxRender habit of returning the
-	// result multiplied by cosThetaToLight (it was multiplied twice before, so
-	// every light-sampled contribution of this material was too dark)
-	return DisneyEvaluate(hitPoint.fromLight, color, subsurface, roughness, metallic, specular, specularTint,
-			clearcoat, clearcoatGloss, anisotropicGloss, sheen, sheenTint, localFilmAmount, localFilmThickness, 
-			localFilmIor, localLightDir, localEyeDir, event, directPdfW, reversePdfW);
+namespace {
+
+const float DISNEY_SHEEN_ROUGHNESS = .5f;
+const float DISNEY_CLEARCOAT_F0 = .04f;
+
 }
 
-Spectrum DisneyMaterial::DisneyEvaluate(
-		const bool fromLight,
-		const Spectrum &color,
-		const float subsurface,
-		const float roughness,
-		const float metallic,
-		const float specular,
-		const float specularTint,
-		const float clearcoat,
-		const float clearcoatGloss,
-		const float anisotropicGloss,
-		const float sheen,
-		const float sheenTint,
-		const float localFilmAmount,
-		const float localFilmThickness,
-		const float localFilmIor,
-		const Vector &localLightDir,
-		const Vector &localEyeDir,
-		BSDFEvent *event,
-		float *directPdfW,
-		float *reversePdfW) const {
-	const Vector wo = Normalize(localEyeDir); 
-	const Vector wi = Normalize(localLightDir);
+struct DisneyMaterial::Params {
+	Spectrum color;
+	float subsurface, roughness, metallic;
+	// The specular alphas and the dielectric specular F0
+	float ax, ay;
+	Spectrum F0d;
+	float clearcoat, alphaCC;
+	float sheen;
+	Spectrum sheenColor;
+	float filmAmount, filmThickness, filmIor;
+	// The luminance weights of the working colour space (the lobe
+	// probabilities don't depend on the working space)
+	Spectrum lumWeights;
+};
 
-	const float NdotL = fabsf(CosTheta(wi));
-	const float NdotV = fabsf(CosTheta(wo));
+void DisneyMaterial::GetParams(const HitPoint &hitPoint, Params &p) const {
+	p.color = BaseColor->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	p.subsurface = Clamp(Subsurface->GetFloatValue(hitPoint), 0.f, 1.f);
+	p.roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.f, 1.f), hitPoint.regularization);
+	p.metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.f, 1.f);
 
-	if (NdotL < DEFAULT_COS_EPSILON_STATIC || NdotV < DEFAULT_COS_EPSILON_STATIC)
-		return Spectrum();
+	const float anisotropic = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float aspect = sqrtf(1.f - .9f * anisotropic);
+	p.ax = Max(.001f, Sqr(p.roughness) / aspect);
+	p.ay = Max(.001f, Sqr(p.roughness) * aspect);
 
-	const Vector H = Normalize(wo + wi);
+	const Spectrum tint = CalculateTint(p.color);
+	const float specular = Clamp(Specular->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float specularTint = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.f, 1.f);
+	p.F0d = (specular * .08f * Lerp(specularTint, Spectrum(1.f), tint)).Clamp(0.f, 1.f);
 
-	const float NdotH = fabsf(CosTheta(H));
-	const float LdotH = Dot(wi, H);
-	const float VdotH = Dot(wo, H);
+	p.clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.f, 1.f),
+			hitPoint.regularization);
+	p.alphaCC = Lerp(clearcoatGloss, .1f, .001f);
 
-	const Spectrum diffuseEval = DisneyDiffuse(color, roughness, NdotL, NdotV, LdotH);
+	p.sheen = Clamp(Sheen->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float sheenTint = Clamp(SheenTint->GetFloatValue(hitPoint), 0.f, 1.f);
+	// Clamped in Rec.709, so that the colour doesn't depend on the working space
+	p.sheenColor = workingColorSpace.FromRec709(
+			workingColorSpace.ToRec709(Lerp(sheenTint, Spectrum(1.f), tint)).Clamp(0.f, 1.f));
+	p.lumWeights = workingColorSpace.GetLuminanceWeights();
 
-	const Spectrum subsurfaceEval = DisneySubsurface(color, roughness, NdotL, NdotV, LdotH);
+	p.filmAmount = filmAmount ? Clamp(filmAmount->GetFloatValue(hitPoint), 0.f, 1.f) : 1.f;
+	p.filmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+	p.filmIor = (p.filmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+}
 
-	Spectrum metallicEval = DisneyMetallic(color, specular, specularTint, metallic, anisotropicGloss, roughness,
-										   NdotL, NdotV, NdotH, LdotH, VdotH, wi, wo, H);
-	
-	if (localFilmThickness > 0.f) {
-		const Spectrum metallicWithFilmColor = metallicEval * CalcFilmColor(wo, localFilmThickness, localFilmIor, workingColorSpace);
-		metallicEval = Lerp(localFilmAmount, metallicEval, metallicWithFilmColor);
+namespace {
+
+// The probabilities of the lobes from the direction with the cosine mu
+void Disney_LobeWeights(const DisneyMaterial::Params &p, const float mu,
+		float *wCC, float *wSpec, float *wSheen, float *wDiff, float *sheenA, float *sheenB) {
+	const float ccE = p.clearcoat * GGXEnergy_CoatE(p.alphaCC, p.alphaCC, mu, Spectrum(DISNEY_CLEARCOAT_F0)).c[0];
+	const float rest = 1.f - ccE;
+
+	const Spectrum EspecM = GGXEnergy_CoatE(p.ax, p.ay, mu, p.color);
+	const Spectrum EspecD = GGXEnergy_CoatE(p.ax, p.ay, mu, p.F0d);
+
+	float albedoSheen = 0.f;
+	*sheenA = 0.f;
+	*sheenB = 0.f;
+	if (p.sheen > 0.f) {
+		Sheen_Lookup(mu, DISNEY_SHEEN_ROUGHNESS, sheenA, sheenB, &albedoSheen);
+		if ((fabsf(*sheenA) < 1e-5f) || (albedoSheen < 1e-5f))
+			albedoSheen = 0.f;
 	}
-	
-	const Spectrum clearCoatEval = Spectrum(DisneyClearCoat(clearcoat, clearcoatGloss,
-											NdotL, NdotV, NdotH, LdotH));
-	const Spectrum glossyEval = metallicEval + clearCoatEval;
+	const float sheenW = p.sheen * albedoSheen;
 
-	const Spectrum sheenEval = DisneySheen(color, sheen, sheenTint, LdotH);
+	// By luminance: the same choices in every working colour space (the
+	// diffuse weight is (1 - Y(Espec)) Y(color), not Y((1 - Espec) color))
+	const Spectrum &w = p.lumWeights;
+	auto Y = [&w](const Spectrum &c) { return Max(0.f, w.c[0] * c.c[0] + w.c[1] * c.c[1] + w.c[2] * c.c[2]); };
+	*wCC = ccE;
+	*wSpec = rest * (p.metallic * Y(EspecM) + (1.f - p.metallic) * (1.f - sheenW) * Y(EspecD));
+	*wSheen = rest * (1.f - p.metallic) * sheenW * Y(p.sheenColor);
+	*wDiff = rest * (1.f - p.metallic) * (1.f - sheenW) * Max(0.f, 1.f - Y(EspecD)) * Y(p.color);
 
-	DisneyPdf(fromLight, roughness, metallic, clearcoat, clearcoatGloss,
-			anisotropicGloss, localLightDir, localEyeDir, directPdfW, reversePdfW);
-
-	*event = GLOSSY | REFLECT;
-
-	const Spectrum f = (Lerp(subsurface, diffuseEval, subsurfaceEval) + sheenEval) * (1.0f - metallic) + glossyEval;
-
-	return f * fabsf(NdotL);
+	const float sum = *wCC + *wSpec + *wSheen + *wDiff;
+	if (sum > 0.f) {
+		const float invSum = 1.f / sum;
+		*wCC *= invSum;
+		*wSpec *= invSum;
+		*wSheen *= invSum;
+		*wDiff *= invSum;
+	}
 }
 
-Spectrum DisneyMaterial::DisneyDiffuse(const Spectrum &color, const float roughness,
-		const float NdotL, const float NdotV, const float LdotH) const {
-	const float FL = Schlick_Weight(NdotL);
-	const float FV = Schlick_Weight(NdotV);
-
-	const float Fd90 = 0.5f + 2.0f * (LdotH * LdotH) * (roughness * roughness);
-	const float Fd = Lerp(FL, 1.0f, Fd90) * Lerp(FV, 1.0f, Fd90);
-
-	return INV_PI * Fd * color;
-}
-
-Spectrum DisneyMaterial::DisneySubsurface(const Spectrum &color, const float roughness,
-		const float NdotL, const float NdotV, const float LdotH) const {
-	const float FL = Schlick_Weight(NdotL);
-	const float FV = Schlick_Weight(NdotV);
-
+// Disney's flattened subsurface lobe (Hanrahan-Krueger approximation)
+Spectrum Disney_Subsurface(const Spectrum &color, const float roughness,
+		const float NdotL, const float NdotV, const float LdotH) {
+	const float FL = powf(1.f - NdotL, 5.f);
+	const float FV = powf(1.f - NdotV, 5.f);
 	const float Fss90 = LdotH * LdotH * roughness;
-	const float Fss = Lerp(FL, 1.0f, Fss90) * Lerp(FV, 1.0f, Fss90);
-	const float ss = 1.25f * (Fss * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
+	const float Fss = Lerp(FL, 1.f, Fss90) * Lerp(FV, 1.f, Fss90);
+	const float ss = 1.25f * (Fss * (1.f / (NdotL + NdotV) - .5f) + .5f);
 
 	return INV_PI * ss * color;
 }
 
-Spectrum DisneyMaterial::DisneyMetallic(const Spectrum &color,
-		const float specular, const float specularTint, const float metallic,
-		const float anisotropic, const float roughness,
-		const float NdotL, const float NdotV, const float NdotH,
-		const float LdotH, const float VdotH,
-		const Vector &wi, const Vector &wo, const Vector &H) const {
-	const Spectrum Ctint = CalculateTint(color);
-
-	const Spectrum CSpecTint = specular * 0.08f * Lerp(specularTint, Spectrum(1.0f), Ctint);
-	const Spectrum Cspec0 = Lerp(metallic, CSpecTint, color);
-
-	float ax, ay;
-	Anisotropic_Params(anisotropic, roughness, ax, ay);
-
-	const float Ds = GTR2_Aniso(NdotH, H.x, H.y, ax, ay);
-
-	const float FH = Schlick_Weight(LdotH);
-
-	const Spectrum Fs = Lerp(FH, Cspec0, Spectrum(1.0f));
-
-	const float Gl = SmithG_GGX_Aniso(NdotL, wi.x, wi.y, ax, ay);
-	const float Gv = SmithG_GGX_Aniso(NdotV, wo.x, wo.y, ax, ay);
-
-	const float Gs = Gl * Gv;
-
-	Spectrum result = Gs * Fs * Ds;
-
-	// Multiple-scattering energy compensation (the separable Smith masking of
-	// this lobe has its own albedo table)
-	if (IsMultiscattering())
-		result *= GGXEnergy_ReflectScale(ax, ay, NdotV, SchlickFresnel_Average(Cspec0), true);
-
-	return result;
 }
 
-float DisneyMaterial::DisneyClearCoat(const float clearcoat, const float clearcoatGloss,
-		float NdotL, float NdotV, float NdotH, float LdotH) const {
-	const float gloss = Lerp(clearcoatGloss, 0.1f, 0.001f);
+Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
+		const Vector &localLightDir, const Vector &localEyeDir) const {
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
 
-	const float Dr = GTR1(fabsf(NdotH), gloss);
-	const float FH = Schlick_Weight(LdotH);
-	const float Fr = Lerp(FH, 0.04f, 1.0f);
-	const float Gr = SmithG_GGX(NdotL, 0.25f) * SmithG_GGX(NdotV, 0.25f);
+	// Both faces: the back face is the mirror image of the front one
+	const float flip = (localEyeDir.z < 0.f) ? -1.f : 1.f;
+	const Vector lightDir(localLightDir.x, localLightDir.y, flip * localLightDir.z);
+	const Vector eyeDir(localEyeDir.x, localEyeDir.y, flip * localEyeDir.z);
+	const float muL = lightDir.z;
+	const float muE = eyeDir.z;
+	if ((muL < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC))
+		return Spectrum();
 
-	return clearcoat * Fr * Gr * Dr;
+	const Vector &fixedDir = fromLight ? lightDir : eyeDir;
+	const Vector &sampledDir = fromLight ? eyeDir : lightDir;
+
+	// The specular lobes (f |cos light|, energy compensated), with the thin film
+	Spectrum specM = SchlickBSDF_CoatingF(fromLight, p.color, p.ax, p.ay, false, true, fixedDir, sampledDir);
+	Spectrum specD = SchlickBSDF_CoatingF(fromLight, p.F0d, p.ax, p.ay, false, true, fixedDir, sampledDir);
+	if (p.filmThickness > 0.f) {
+		const Spectrum filmColor = CalcFilmColor(eyeDir, p.filmThickness, p.filmIor, workingColorSpace);
+		const Spectrum specMFilm = specM * filmColor;
+		const Spectrum specDFilm = specD * filmColor;
+		specM = Lerp(p.filmAmount, specM, specMFilm);
+		specD = Lerp(p.filmAmount, specD, specDFilm);
+	}
+
+	// The diffuse lobe under the dielectric specular
+	Spectrum diffuse = EON_Evaluate(p.color, p.roughness, lightDir, eyeDir) * muL;
+	if (p.subsurface > 0.f) {
+		const Vector H = Normalize(lightDir + eyeDir);
+		const Spectrum flattened = Disney_Subsurface(p.color, p.roughness, muL, muE, Dot(lightDir, H)) * muL;
+		diffuse = Lerp(p.subsurface, diffuse, flattened);
+	}
+	const Spectrum EdLight = GGXEnergy_CoatE(p.ax, p.ay, muL, p.F0d);
+	const Spectrum EdEye = GGXEnergy_CoatE(p.ax, p.ay, muE, p.F0d);
+	const Spectrum EdAvg = GGXEnergy_CoatEavg(p.ax, p.ay, p.F0d);
+	Spectrum layerD;
+	for (u_int c = 0; c < 3; ++c)
+		layerD.c[c] = (1.f - EdLight.c[c]) * (1.f - EdEye.c[c]) / Max(1.f - EdAvg.c[c], 1e-4f);
+
+	// The sheen above the dielectric part
+	Spectrum sheenF;
+	float sheenScale = 1.f;
+	if (p.sheen > 0.f) {
+		float a, b, albedo;
+		Sheen_Lookup(muE, DISNEY_SHEEN_ROUGHNESS, &a, &b, &albedo);
+		if ((fabsf(a) >= 1e-5f) && (albedo >= 1e-5f)) {
+			sheenF = p.sheen * albedo * Sheen_LTC(a, b, eyeDir, lightDir) * p.sheenColor;
+			sheenScale = 1.f - p.sheen * albedo;
+		}
+	}
+
+	const Spectrum dielectric = sheenF + sheenScale * (specD + layerD * diffuse);
+	const Spectrum base = p.metallic * specM + (1.f - p.metallic) * dielectric;
+
+	// The clearcoat above everything
+	if (p.clearcoat > 0.f) {
+		const Spectrum F0cc(DISNEY_CLEARCOAT_F0);
+		const Spectrum ccF = p.clearcoat * SchlickBSDF_CoatingF(fromLight, F0cc, p.alphaCC, p.alphaCC,
+				false, true, fixedDir, sampledDir);
+		// Albedo scaling by the eye direction, exact for any base (see
+		// glossycoating.cpp): the base is not Lambertian here
+		const float EccEye = p.clearcoat * GGXEnergy_CoatE(p.alphaCC, p.alphaCC, muE, F0cc).c[0];
+
+		return ccF + (1.f - EccEye) * base;
+	}
+
+	return base;
 }
 
-Spectrum DisneyMaterial::DisneySheen(const Spectrum &color, const float sheen,
-		const float sheenTint, float LdotH) const {
-	const float FH = Schlick_Weight(LdotH);
+float DisneyMaterial::PdfLobes(const Params &p, const bool fromLight,
+		const Vector &localFixedDir, const Vector &localSampledDir) const {
+	if (localFixedDir.z * localSampledDir.z <= 0.f)
+		return 0.f;
 
-	const Spectrum Ctint = CalculateTint(color);
-	const Spectrum Csheen = Lerp(sheenTint, Spectrum(1.0f), Ctint);
+	const float flip = (localFixedDir.z < 0.f) ? -1.f : 1.f;
+	const Vector fixedDir(localFixedDir.x, localFixedDir.y, flip * localFixedDir.z);
+	const Vector sampledDir(localSampledDir.x, localSampledDir.y, flip * localSampledDir.z);
 
-	return (FH * sheen * Csheen).Clamp(0.f, 1.f);
+	float wCC, wSpec, wSheen, wDiff, sheenA, sheenB;
+	Disney_LobeWeights(p, fixedDir.z, &wCC, &wSpec, &wSheen, &wDiff, &sheenA, &sheenB);
+
+	float pdf = wDiff * sampledDir.z * INV_PI;
+	if (wSpec > 0.f)
+		pdf += wSpec * Microfacet_PdfReflect(p.ax, p.ay, fixedDir, sampledDir);
+	if (wCC > 0.f)
+		pdf += wCC * Microfacet_PdfReflect(p.alphaCC, p.alphaCC, fixedDir, sampledDir);
+	if (wSheen > 0.f) {
+		// Eye paths sample the LTC of the eye direction, light paths the cosine
+		pdf += wSheen * (fromLight ? (sampledDir.z * INV_PI) : Sheen_LTC(sheenA, sheenB, fixedDir, sampledDir));
+	}
+
+	return pdf;
 }
 
-Spectrum DisneyMaterial::Sample(
-		const HitPoint &hitPoint,
-		const Vector &localFixedDir,
-		Vector *localSampledDir,
-		const float u0,
-		const float u1,
-		const float passThroughEvent,
-		float *pdfW,
-		BSDFEvent *event) const {
-	const Spectrum color = BaseColor->GetSpectrumValue(hitPoint).Clamp(0.0f, 1.0f);
-	const float subsurface = Clamp(Subsurface->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float specular = Clamp(Specular->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float specularTint = Clamp(SpecularTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	// I allow sheen values > 1.0 to accentuate the effect. The result is still
-	// clamped between 0.0 and 1.0 to not break the energy conservation law.
-	const float sheen = Sheen->GetFloatValue(hitPoint);
-	const float sheenTint = Clamp(SheenTint->GetFloatValue(hitPoint), 0.0f, 1.0f);
+Spectrum DisneyMaterial::Evaluate(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
+		float *directPdfW, float *reversePdfW) const {
+	Params p;
+	GetParams(hitPoint, p);
 
-	const Vector &wo = localFixedDir;
+	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+	// The reverse pdf is the one of the other path type generating the fixed
+	// direction (the sheen sampling depends on the path type)
+	if (directPdfW)
+		*directPdfW = PdfLobes(p, hitPoint.fromLight, localFixedDir, localSampledDir);
+	if (reversePdfW)
+		*reversePdfW = PdfLobes(p, !hitPoint.fromLight, localSampledDir, localFixedDir);
 
-	float ratioGlossy, ratioDiffuse, ratioClearcoat;
-	ComputeRatio(metallic, clearcoat, ratioGlossy, ratioDiffuse, ratioClearcoat);
+	*event = GLOSSY | REFLECT;
 
-	if (passThroughEvent <= ratioGlossy)
-		*localSampledDir = DisneyMetallicSample(anisotropicGloss, roughness, wo, u0, u1);
-	else if (passThroughEvent > ratioGlossy &&  passThroughEvent <= ratioGlossy + ratioClearcoat)
-		*localSampledDir = DisneyClearcoatSample(clearcoatGloss, wo, u0, u1);
-	else if (passThroughEvent > ratioGlossy + ratioClearcoat && passThroughEvent <= ratioGlossy + ratioClearcoat + ratioDiffuse)
-		*localSampledDir = DisneyDiffuseSample(wo, u0, u1);
-	else
+	return EvaluateLayers(p, hitPoint.fromLight, localLightDir, localEyeDir);
+}
+
+Spectrum DisneyMaterial::Sample(const HitPoint &hitPoint,
+		const Vector &localFixedDir, Vector *localSampledDir,
+		const float u0, const float u1, const float passThroughEvent,
+		float *pdfW, BSDFEvent *event) const {
+	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
+
+	Params p;
+	GetParams(hitPoint, p);
+
+	const float flip = (localFixedDir.z < 0.f) ? -1.f : 1.f;
+	const Vector fixedDir(localFixedDir.x, localFixedDir.y, flip * localFixedDir.z);
+
+	float wCC, wSpec, wSheen, wDiff, sheenA, sheenB;
+	Disney_LobeWeights(p, fixedDir.z, &wCC, &wSpec, &wSheen, &wDiff, &sheenA, &sheenB);
+	if (wCC + wSpec + wSheen + wDiff <= 0.f)
+		return Spectrum();
+
+	Vector sampledDir;
+	if (passThroughEvent < wCC) {
+		if (Microfacet_SampleReflect(p.alphaCC, p.alphaCC, fixedDir, u0, u1, &sampledDir) <= 0.f)
+			return Spectrum();
+	} else if (passThroughEvent < wCC + wSpec) {
+		if (Microfacet_SampleReflect(p.ax, p.ay, fixedDir, u0, u1, &sampledDir) <= 0.f)
+			return Spectrum();
+	} else if ((passThroughEvent < wCC + wSpec + wSheen) && !hitPoint.fromLight)
+		sampledDir = Sheen_SampleLTC(sheenA, sheenB, fixedDir, u0, u1);
+	else {
+		// The diffuse lobe, and the sheen on light paths
+		float pdf;
+		sampledDir = CosineSampleHemisphere(u0, u1, &pdf);
+	}
+	if (sampledDir.z < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
+	*localSampledDir = Vector(sampledDir.x, sampledDir.y, flip * sampledDir.z);
+
+	// The value and the pdf of the mixture
+	*pdfW = PdfLobes(p, hitPoint.fromLight, localFixedDir, *localSampledDir);
+	if (!(*pdfW > 0.f))
 		return Spectrum();
 
 	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
 	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
-
-	if (CosTheta(localLightDir) * CosTheta(localEyeDir) <= 0.f)
-		return Spectrum();
-
-	const float NdotL = fabsf(CosTheta(localLightDir));
-	const float NdotV = fabsf(CosTheta(localEyeDir));
-	if (NdotL < DEFAULT_COS_EPSILON_STATIC || NdotV < DEFAULT_COS_EPSILON_STATIC)
-		return Spectrum();
-
 	*event = GLOSSY | REFLECT;
-	
-	DisneyPdf(hitPoint.fromLight, roughness, metallic, clearcoat, clearcoatGloss, anisotropicGloss,
-			localLightDir, localEyeDir, pdfW, nullptr);
 
-	const float localFilmAmount = filmAmount ? Clamp(filmAmount->GetFloatValue(hitPoint), 0.0f, 1.0f) : 1.f;
-	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
-	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
-
-	const Spectrum f = DisneyEvaluate(hitPoint.fromLight, color, subsurface, roughness,
-			metallic, specular, specularTint, clearcoat, clearcoatGloss,
-			anisotropicGloss, sheen, sheenTint, localFilmAmount, localFilmThickness, localFilmIor,
-			localLightDir, localEyeDir, event, nullptr, nullptr);
-
-	return f / *pdfW;
+	return EvaluateLayers(p, hitPoint.fromLight, localLightDir, localEyeDir) / *pdfW;
 }
 
-Vector DisneyMaterial::DisneyDiffuseSample(const Vector &wo, float u0, float u1) const {
-	return Sgn(CosTheta(wo)) * CosineSampleHemisphere(u0, u1);
-}
-
-Vector DisneyMaterial::DisneyMetallicSample(const float anisotropic, const float roughness,
-		const Vector &wo, float u0, float u1) const {
-	float ax, ay;
-	Anisotropic_Params(anisotropic, roughness, ax, ay);
-
-	float phi = atanf(ay / ax * tan(2.0f * M_PI * u1 + 0.5f * M_PI));
-	if (u1 > 0.5f)
-		phi += M_PI;
-
-	const float sinPhi = sinf(phi), cosPhi = cosf(phi);
-	const float ax2 = ax * ax, ay2 = ay * ay;
-	const float alpha2 = 1.0f / (cosPhi * cosPhi / ax2 + sinPhi * sinPhi / ay2);
-	const float tanTheta2 = alpha2 * u0 / (1.0f - u0);
-	const float cosTheta = 1.0f / sqrtf(1.0f + tanTheta2);
-
-	const float sinTheta = sqrtf(Max(0.0f, 1.0f - cosTheta * cosTheta));
-	Vector wh = Vector(sinTheta * cosPhi, sinTheta * sinPhi, cosTheta);
-
-	// The material is two-sided: on the back side, the half vector goes to the
-	// hemisphere of wo, as on the GPU and in DisneyClearcoatSample() (the pdf
-	// is symmetric). Returning no direction lost every sample of this lobe on
-	// back faces: the G0 Cornell box, seen from inside, was 23% too dark.
-	if (CosTheta(wo) * CosTheta(wh) <= 0.0f)
-		wh *= -1.f;
-
-	return Normalize(2.0f * Dot(wh, wo) * wh - wo);
-}
-
-Vector DisneyMaterial::DisneyClearcoatSample(const float clearcoatGloss,
-		const Vector &wo, float u0, float u1) const {
-	const float gloss = Lerp(clearcoatGloss, 0.1f, 0.001f);
-	const float alpha2 = gloss * gloss;
-	const float cosTheta = sqrtf(Max(0.0001f, (1.0f - pow(alpha2, 1.0f - u0)) / (1.0f - alpha2)));
-	const float sinTheta = sqrtf(Max(0.0001f, 1.0f - cosTheta * cosTheta));
-	const float phi = 2.0f * M_PI * u1;
-
-	Vector wh = Vector(sinTheta * cosf(phi), sinTheta * sinf(phi), cosTheta);
-	if (CosTheta(wo) * CosTheta(wh) <= 0.0f)
-		wh *= -1.f;
-
-	return Normalize(2.0f * Dot(wh, wo) * wh - wo);
-}
-
-void DisneyMaterial::Pdf(
-		const HitPoint &hitPoint,
-		const Vector &localLightDir, 
-		const Vector &localEyeDir,
-		float *directPdfW, 
-		float *reversePdfW) const {
-	const float roughness = Disney_RegularizeRoughness(Clamp(Roughness->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float metallic = Clamp(Metallic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoat = Clamp(Clearcoat->GetFloatValue(hitPoint), 0.0f, 1.0f);
-	const float clearcoatGloss = Disney_RegularizeClearcoatGloss(Clamp(ClearcoatGloss->GetFloatValue(hitPoint), 0.0f, 1.0f), hitPoint.regularization);
-	const float anisotropicGloss = Clamp(Anisotropic->GetFloatValue(hitPoint), 0.0f, 1.0f);
-
-	DisneyPdf(hitPoint.fromLight, roughness, metallic, clearcoat, clearcoatGloss,
-			anisotropicGloss, localLightDir, localEyeDir, directPdfW, reversePdfW);
-}
-
-void DisneyMaterial::DisneyPdf(const bool fromLight,
-		const float roughness, const float metallic,
-		const float clearcoat, const float clearcoatGloss, const float anisotropic,
-		const Vector &localLightDir, const Vector &localEyeDir,
-		float *directPdfW,  float *reversePdfW) const {
-	if (CosTheta(localLightDir) * CosTheta(localEyeDir) <= 0.0f) {
-		if (directPdfW)
-			*directPdfW = 0.f;
-		if (reversePdfW)
-			*reversePdfW = 0.f;
-
-		return;
-	}
-
-	float ratioGlossy, ratioDiffuse, ratioClearcoat;
-	ComputeRatio(metallic, clearcoat, ratioGlossy, ratioDiffuse, ratioClearcoat);
-
-	float diffuseDirectPdfW, diffuseReversePdfW;
-	DiffusePdf(fromLight, localLightDir, localEyeDir, &diffuseDirectPdfW, &diffuseReversePdfW);
-
-	float metallicDirectPdfW, metallicReversePdfW;
-	MetallicPdf(fromLight, anisotropic, roughness, localLightDir, localEyeDir, &metallicDirectPdfW, &metallicReversePdfW);
-
-	float clearcoatDirectPdfW, clearcoatReversePdfW;
-	ClearcoatPdf(fromLight, clearcoatGloss, localLightDir, localEyeDir, &clearcoatDirectPdfW, &clearcoatReversePdfW);
-
-	if (directPdfW)
-		*directPdfW =  ratioDiffuse * diffuseDirectPdfW + ratioGlossy * metallicDirectPdfW + ratioClearcoat * clearcoatDirectPdfW;
-	if (reversePdfW)
-		*reversePdfW =  ratioDiffuse * diffuseReversePdfW + ratioGlossy * metallicReversePdfW + ratioClearcoat * clearcoatReversePdfW;
-}
-
-void DisneyMaterial::DiffusePdf(const bool fromLight,
+void DisneyMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
+	Params p;
+	GetParams(hitPoint, p);
 
-	const Vector &localFixedDir = fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = fromLight ? localEyeDir : localLightDir;	if (directPdfW)
-		*directPdfW = fabsf(CosTheta(localSampledDir)) * INV_PI;
-	if (reversePdfW)
-		*reversePdfW = fabsf(CosTheta(localFixedDir)) * INV_PI;
-}
-
-void DisneyMaterial::MetallicPdf(const bool fromLight,
-		const float anisotropic, const float roughness,
-		const Vector &localLightDir, const Vector &localEyeDir,
-		float *directPdfW, float *reversePdfW) const {
-	const Vector wh = Normalize(localEyeDir + localLightDir);
-
-	float ax, ay;
-	Anisotropic_Params(anisotropic, roughness, ax, ay);
-
-	const float ax2 = ax * ax;
-	const float ay2 = ay * ay;
-
-	const float HdotX = wh.x;
-	const float HdotY = wh.y;
-	const float NdotH = fabsf(CosTheta(wh));
-
-	const float denom = HdotX * HdotX / ax2 + HdotY * HdotY / ay2 + NdotH * NdotH;
-	if (denom == 0.0f) {
-		if (directPdfW)
-			*directPdfW = 0.f;
-		if (reversePdfW)
-			*reversePdfW = 0.f;
-
-		return;
-	}
-
-	const float pdfDistribution = NdotH / (M_PI * ax * ay * denom * denom);
-
-	const Vector &localFixedDir = fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = fromLight ? localEyeDir : localLightDir;
+	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 	if (directPdfW)
-		*directPdfW = pdfDistribution / (4.0f * Dot(localFixedDir, wh));
+		*directPdfW = PdfLobes(p, hitPoint.fromLight, localFixedDir, localSampledDir);
 	if (reversePdfW)
-		*reversePdfW = pdfDistribution / (4.0f * Dot(localSampledDir, wh));
-}
-
-void DisneyMaterial::ClearcoatPdf(const bool fromLight, const float clearcoatGloss,
-		const Vector &localLightDir, const Vector &localEyeDir,
-		float *directPdfW, float *reversePdfW) const {
-	const Vector wh = Normalize(localLightDir + localEyeDir);
-
-	const float NdotH = fabsf(CosTheta(wh));
-	const float Dr = GTR1(NdotH, Lerp(clearcoatGloss, 0.1f, 0.001f));
-
-	const Vector &localFixedDir = fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = fromLight ? localEyeDir : localLightDir;
-	if (directPdfW)
-		*directPdfW = Dr * NdotH / (4.0f * Dot(localFixedDir, wh));
-	if (reversePdfW)
-		*reversePdfW = Dr * NdotH / (4.0f * Dot(localSampledDir, wh));
+		*reversePdfW = PdfLobes(p, !hitPoint.fromLight, localSampledDir, localFixedDir);
 }
 
 Spectrum DisneyMaterial::CalculateTint(const Spectrum &color) const {
-	// The weights are for Rec.709 colours
+	// The luminance with Disney's weights 0.3/0.6/0.1 (it was 0.3/0.6/1, which
+	// dimmed the tint of blue colors); the weights are for Rec.709 colours
 	const Spectrum color709 = workingColorSpace.ToRec709(color);
-	const float luminance = color709.c[0] * 0.3f + color709.c[1] * 0.6f + color709.c[2] * 1.0f;
+	const float luminance = color709.c[0] * .3f + color709.c[1] * .6f + color709.c[2] * .1f;
 
-	return (luminance > 0.0f) ? color * (1.0f / luminance) : Spectrum(1.0f);
-}
-
-float DisneyMaterial::GTR1(const float NdotH, const float a) const  {
-	if (a >= 1.0f)
-		return INV_PI;
-
-	const float a2 = a * a;
-	const float t = 1.0f + (a2 - 1.0f) * (NdotH * NdotH);
-
-	return (a2 - 1.0f) / (M_PI * log(a2) * t);
-}
-
-float DisneyMaterial::GTR2_Aniso(const float NdotH, const float HdotX, const float HdotY,
-		const float ax, const float ay) const {
-	return 1.0f / (M_PI * ax * ay * Sqr(Sqr(HdotX / ax) + Sqr(HdotY / ay) + NdotH * NdotH));
-}
-
-float DisneyMaterial::SmithG_GGX_Aniso(const float NdotV, const float VdotX, const float VdotY,
-		const float ax, const float ay) const {
-	return 1.0f / (NdotV + sqrtf(Sqr(VdotX * ax) + Sqr(VdotY * ay) + Sqr(NdotV)));
-}
-
-float DisneyMaterial::SmithG_GGX(const float NdotV, const float alphaG) const {
-	const float a = alphaG * alphaG;
-	const float b = NdotV * NdotV;
-
-	return 1.0f / (fabsf(NdotV) + Max(sqrtf(a + b - a * b), 0.0001f));
-}
-
-float DisneyMaterial::Schlick_Weight(const float cosi) const {
-	return powf(1.f - cosi, 5.f);
-}
-
-void DisneyMaterial::Anisotropic_Params(const float anisotropic, const float roughness,
-		float &ax, float &ay) const {
-	const float aspect = sqrtf(1.0f - 0.9f * anisotropic);
-	ax = Max(0.001f, Sqr(roughness) / aspect);
-	ay = Max(0.001f, Sqr(roughness) * aspect);
-}
-
-void DisneyMaterial::ComputeRatio(const float metallic, const float clearcoat,
-		float &ratioGlossy, float &ratioDiffuse, float &ratioClearcoat) const {
-	const float metallicBRDF = metallic;
-	const float dielectricBRDF = (1.0f - metallic);
-
-	const float specularWeight = metallicBRDF + dielectricBRDF;
-	const float diffuseWeight = dielectricBRDF;
-	const float clearcoatWeight = clearcoat;
-
-	const float norm = 1.0f / (specularWeight + diffuseWeight + clearcoatWeight);
-
-	ratioGlossy = specularWeight * norm;
-	ratioDiffuse = diffuseWeight * norm;
-	ratioClearcoat = clearcoatWeight * norm;
+	return (luminance > 0.f) ? color * (1.f / luminance) : Spectrum(1.f);
 }
 
 PropertiesUPtr DisneyMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

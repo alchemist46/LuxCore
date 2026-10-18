@@ -646,7 +646,9 @@ float slg::SchlickBSDF_CoatingPdf(const float u, const float v,
 static const float EON_CONST1 = .5f - 2.f / (3.f * M_PI);
 static const float EON_CONST2 = 2.f / 3.f - 28.f / (15.f * M_PI);
 
-float slg::EON_E(const float mu, const float r) {
+float slg::EON_E(const float muIn, const float r) {
+	// A direction rounded to z slightly above 1 made acosf() NaN (times Si = 0)
+	const float mu = Clamp(muIn, 1e-4f, 1.f);
 	const float AF = 1.f / (1.f + EON_CONST1 * r);
 	const float Si = sqrtf(Max(0.f, 1.f - mu * mu));
 	const float G = Si * (acosf(mu) - Si * mu) +
