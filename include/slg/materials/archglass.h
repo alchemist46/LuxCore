@@ -85,6 +85,12 @@ public:
 			const luxrays::Vector &localFixedDir, const luxrays::Spectrum &kt,
 			 const float nc, const float nt, luxrays::Vector *localSampledDir);
 
+	// The reflectance of a thin non-absorbing slab with the single interface
+	// reflectance F, the light bouncing between its two interfaces summed up:
+	// F + (1 - F)^2 F / (1 - F^2) = 2 F / (1 + F); its transmittance is
+	// 1 minus that, (1 - F) / (1 + F)
+	static float SlabReflectance(const float F) { return 2.f * F / (1.f + F); }
+
 private:
 	TexRef Kr;
 	TexRef Kt;

@@ -50,6 +50,11 @@ OPENCL_FORCE_INLINE float ExtractInteriorIors(__global const HitPoint *hitPoint,
 // ArchGlass material
 //------------------------------------------------------------------------------
 
+// The reflectance of a thin non-absorbing slab (see archglass.h)
+OPENCL_FORCE_INLINE float ArchGlassMaterial_SlabReflectance(const float F) {
+	return 2.f * F / (1.f + F);
+}
+
 OPENCL_FORCE_INLINE float3 ArchGlassMaterial_EvalSpecularReflection(__global const HitPoint *hitPoint,
 		const float3 localFixedDir, const float3 kr,
 		const float nc, const float nt,
@@ -64,7 +69,7 @@ OPENCL_FORCE_INLINE float3 ArchGlassMaterial_EvalSpecularReflection(__global con
 	*sampledDir = MAKE_FLOAT3(-localFixedDir.x, -localFixedDir.y, localFixedDir.z);
 
 	const float ntc = nt / nc;
-	const float3 result = kr * FresnelCauchy_Evaluate(ntc, costheta);
+	const float3 result = kr * ArchGlassMaterial_SlabReflectance(FresnelCauchy_Evaluate(ntc, costheta));
 	
 	if (localFilmThickness > 0.f) {
 		const float3 filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
@@ -79,29 +84,18 @@ OPENCL_FORCE_INLINE float3 ArchGlassMaterial_EvalSpecularTransmission(__global c
 	if (Spectrum_IsBlack(kt))
 		return BLACK;
 
-	// Note: there can not be total internal reflection for 
-	
+	// Note: there can not be total internal reflection for a thin slab
+
 	*sampledDir = -localFixedDir;
 
-	const float ntc = nt / nc;
+	// The whole slab on the front face, the back face fully transparent (see
+	// archglass.cpp)
 	const float costheta = CosTheta(localFixedDir);
-	const bool entering = (costheta > 0.f);
-	float ce;
-//	if (!hitPoint.fromLight) {
-		if (entering)
-			ce = 0.f;
-		else
-			ce = FresnelCauchy_Evaluate(ntc, -costheta);
-//	} else {
-//		if (entering)
-//			ce = FresnelTexture::CauchyEvaluate(ntc, costheta);
-//		else
-//			ce = 0.f;
-//	}
-	const float factor = 1.f - ce;
-	const float result = (1.f + factor * factor) * ce;
+	if (costheta <= 0.f)
+		return kt;
 
-	return (1.f - result) * kt;
+	const float ntc = nt / nc;
+	return kt * (1.f - ArchGlassMaterial_SlabReflectance(FresnelCauchy_Evaluate(ntc, costheta)));
 }
 
 OPENCL_FORCE_INLINE void ArchGlassMaterial_Albedo(__global const Material* restrict material,
