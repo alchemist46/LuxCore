@@ -498,15 +498,17 @@ MaterialUPtr Scene::CreateMaterial(
 			kr, kt, exteriorIor, interiorIor, nu, nv, filmThickness, filmIor
 		);
 	} else if (matType == "velvet") {
+		// The microfiber sheen since 2026-10-18 (see velvet.cpp): the
+		// parameters of the old model are ignored
 		auto kd = parseTex("kd", {.5f, .5f, .5f});
-		auto p1 = parseTex("p1", {-2.0f});
-		auto p2 = parseTex("p2", {20.0f});
-		auto p3 = parseTex("p3", {2.0f});
-		auto thickness = parseTex("thickness", {0.1f});
+		auto roughness = parseTex("roughness", {.5f});
+		if (isDefined("p1") || isDefined("p2") || isDefined("p3") || isDefined("thickness"))
+			SLG_LOG("WARNING: velvet material " << matName << ": p1, p2, p3 and thickness are ignored "
+					"(velvet is the microfiber sheen, set its roughness instead)");
 
 		mat = std::make_unique<VelvetMaterial>(
 			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
-			kd, p1, p2, p3, thickness
+			kd, roughness
 		);
 	} else if (matType == "cloth") {
 		slg::ocl::ClothPreset preset = slg::ocl::DENIM;

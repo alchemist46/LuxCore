@@ -52,6 +52,8 @@ extern std::string KernelSource_imagemap_types;
 extern std::string KernelSource_imagemap_funcs;
 extern std::string KernelSource_material_types;
 extern std::string KernelSource_microfacet_energy_tables;
+extern std::string KernelSource_sheen_ltc_tables;
+extern std::string KernelSource_sheen_funcs;
 extern std::string KernelSource_materialdefs_funcs_generic;
 extern std::string KernelSource_materialdefs_funcs_default;
 extern std::string KernelSource_materialdefs_funcs_thinfilmcoating;

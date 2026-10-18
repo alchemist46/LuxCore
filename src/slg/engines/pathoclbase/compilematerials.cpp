@@ -852,10 +852,7 @@ void CompiledScene::CompileMaterials() {
 
 				mat->type = slg::ocl::VELVET;
 				mat->velvet.kdTexIndex = scene.GetTextures().GetTextureIndex(vm.GetKd());
-				mat->velvet.p1TexIndex = scene.GetTextures().GetTextureIndex(vm.GetP1());
-				mat->velvet.p2TexIndex = scene.GetTextures().GetTextureIndex(vm.GetP2());
-				mat->velvet.p3TexIndex = scene.GetTextures().GetTextureIndex(vm.GetP3());
-				mat->velvet.thicknessTexIndex = scene.GetTextures().GetTextureIndex(vm.GetThickness());
+				mat->velvet.roughnessTexIndex = scene.GetTextures().GetTextureIndex(vm.GetRoughness());
 				break;
 			}
 			case CLOTH: {

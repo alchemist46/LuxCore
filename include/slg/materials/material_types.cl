@@ -157,12 +157,18 @@ typedef struct {
 } RoughGlassParam;
 
 typedef struct {
-    unsigned int kdTexIndex;
-	unsigned int p1TexIndex;
-	unsigned int p2TexIndex;
-	unsigned int p3TexIndex;
-	unsigned int thicknessTexIndex;
+	unsigned int kdTexIndex;
+	unsigned int roughnessTexIndex;
 } VelvetParam;
+
+typedef struct {
+	unsigned int colorTexIndex;
+	unsigned int radiusTexIndex;
+	unsigned int scaleTexIndex;
+	unsigned int anisotropyTexIndex;
+	unsigned int iorTexIndex;
+	unsigned int roughnessTexIndex;
+} SubsurfaceParam;
 
 typedef enum {
 	DENIM, SILKSHANTUNG, SILKCHARMEUSE, COTTONTWILL, WOOLGABARDINE, POLYESTER
