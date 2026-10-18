@@ -482,6 +482,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global HitPoint *tasksIntersectHitPoint \
 		, __global GPUTaskDirectLight *tasksDirectLight \
 		, __global GPUTaskDirectLightVertex *tasksDirectLightVertex \
+		, __global GPUTaskSSSWalk *tasksSSSWalk \
 		, __global GPUTaskState *tasksState \
 		, __global BSDF *tasksBSDF \
 		, __global PathState *pathStates \

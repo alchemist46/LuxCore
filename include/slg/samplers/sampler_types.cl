@@ -132,6 +132,10 @@ typedef struct {
 	// uints after the end of SobolSamplerSharedData.
 	unsigned int todoPixelCount, todoBucketCount, todoPixelsOffset;
 
+	// Set by PATHOCL at the halt spp: the tasks finish the paths in flight
+	// and start no new sample
+	unsigned int drain;
+
 	// Plus the a pass field for each pixel
 	// Plus Sobol directions array
 	// Plus the list of the pixels to converge (with the per-pixel halt test)

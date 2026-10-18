@@ -18,6 +18,17 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// The values of HitPoint::subsurface:
+//  HITPOINT_SSS_SURFACE: the subsurface material is a plain surface (light
+//                        paths, inside a Mix, ...), with a Lambertian base
+//  HITPOINT_SSS_ENTRY:   an eye path vertex: the base lobe enters the object and
+//                        the path tracer runs the walk
+//  HITPOINT_SSS_EXIT:    the exit point of a walk: a Lambertian transmission
+//                        out of the object
+#define HITPOINT_SSS_SURFACE 0
+#define HITPOINT_SSS_ENTRY 1
+#define HITPOINT_SSS_EXIT 2
+
 typedef struct {
 	// The incoming direction. It is the eyeDir when fromLight = false and
 	// lightDir when fromLight = true
@@ -58,5 +69,8 @@ typedef struct {
 	// Path regularization (see PathTracer): the floor of the GGX alphas of
 	// the materials at this vertex, 0 when the vertex is not regularized
 	float regularization;
+	// Random-walk subsurface scattering (see SubsurfaceMaterial): the role of
+	// the vertex, HITPOINT_SSS_SURFACE unless the eye path tracer sets it
+	int subsurface;
 } HitPoint;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

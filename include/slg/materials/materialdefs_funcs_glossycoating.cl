@@ -77,6 +77,12 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_GetEmittedRadiance(__global const
 // Material evaluate
 //------------------------------------------------------------------------------
 
+// The layering of the coating over its base (see glossycoating.cpp): the
+// probability of sampling the coating from a direction with the coating albedo Ec
+OPENCL_FORCE_INLINE float GlossyCoatingMaterial_CoatProbability(const float3 ks, const float3 Ec) {
+	return Spectrum_IsBlack(ks) ? 0.f : clamp(Spectrum_Filter(Ec), .1f, .9f);
+}
+
 OPENCL_FORCE_INLINE void GlossyCoatingMaterial_EvaluateSetUp(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -193,7 +199,9 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
 		const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
 
-		const float wCoating = SchlickBSDF_CoatingWeight(ks, fixedDir);
+		const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(eyeDir.z), ks);
+
+		const float wCoating = GlossyCoatingMaterial_CoatProbability(ks, EcEye);
 		const float wBase = 1.f - wCoating;
 
 		directPdfW = wBase * directPdfW +
@@ -207,17 +215,10 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float d = Texture_GetFloatValue(material->glossycoating.depthTexIndex, hitPoint TEXTURES_PARAM);
 		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		// Coating fresnel factor
-		const float3 H = normalize(fixedDir + sampledDir);
-		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v,
-				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
-
-		// Blend in base layer Schlick style
-		// assumes coating bxdf takes fresnel factor S into account
-
-		const float3 result = coatingF + absorption * (WHITE - S) * baseF;
+		// Albedo scaling by the eye direction (see glossycoating.cpp)
+		const float3 result = coatingF + absorption * (WHITE - EcEye) * baseF;
 		
 		EvalStack_PushFloat3(result);
 		EvalStack_PushBSDFEvent(event);
@@ -248,7 +249,13 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		ks = Spectrum_Clamp(ks);
 
 		const float3 fixedDir = eyeDir;
-		const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, fixedDir) : 0.f;
+		const float nuVal = Texture_GetFloatValue(material->glossycoating.nuTexIndex, hitPoint TEXTURES_PARAM);
+		const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
+		const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
+		const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+
+		const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+			GlossyCoatingMaterial_CoatProbability(ks, GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks)) : 0.f;
 		const float wBase = 1.f - wCoating;
 
 		directPdfW *= wBase;
@@ -261,15 +268,9 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float d = Texture_GetFloatValue(material->glossycoating.depthTexIndex, hitPoint TEXTURES_PARAM);
 		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		// Coating fresnel factor
-		const float3 H = normalize(MAKE_FLOAT3 (sampledDir.x + fixedDir.x, sampledDir.y + fixedDir.y,
-				sampledDir.z - fixedDir.z));
-		const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(fixedDir, H)));
-
-		// Filter base layer, the square root is just a heuristic
-		// so that a sheet coated on both faces gets a filtering factor
-		// of 1-S like a reflection
-		const float3 result = absorption * Spectrum_Sqrt(WHITE - S) * baseF;
+		// One crossing of the coating, by the direction on the coated side
+		const float muCoated = (lightDir.z > 0.f) ? lightDir.z : eyeDir.z;
+		const float3 result = absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) * baseF;
 		
 		EvalStack_PushFloat3(result);
 		EvalStack_PushBSDFEvent(event);
@@ -323,7 +324,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 	EvalStack_PushFloat(v);
 
 	// Coating is used only on the front face
-	const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, fixedDir) : 0.f;
+	const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+		GlossyCoatingMaterial_CoatProbability(ks, GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks)) : 0.f;
 	const float wBase = 1.f - wCoating;
 
 	// Save wCoating
@@ -369,8 +371,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 		// Sample coating BSDF (Schlick BSDF)
 		float3 sampledDir;
 		float coatingPdf;
-		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, u, v,
-				material->glossycoating.multibounce, material->multiscattering, fixedDir, &sampledDir, u0, u1, &coatingPdf);
+		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, u, v, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 
 		// Save coatingF, coatingPdf and sampledDir
 		EvalStack_PushFloat3(coatingF);
@@ -402,7 +403,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Sample(__global const Material* r
 		const float3 baseF, const float basePdf,
 		const float3 coatingF, const float coatingPdf,
 		const float3 fixedDir, const float3 sampledDir,
-		const BSDFEvent event,	const float3 ks
+		const BSDFEvent event,	const float3 ks, const float u, const float v
 		MATERIALS_PARAM_DECL) {
 	// Absorption
 	const float cosi = fabs(sampledDir.z);
@@ -424,38 +425,16 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Sample(__global const Material* r
 			// Back face reflection: no coating
 			result = baseF;
 		} else {
-			// Front face reflection: coating+base
-
-			// Coating fresnel factor
-			const float3 H = normalize(fixedDir + sampledDir);
-			const float3 S = FresnelSchlick_Evaluate(ks, fabs(dot(sampledDir, H)));
-
-			// blend in base layer Schlick style
-			// coatingF already takes fresnel factor S into account
-			result = (coatingF + absorption * (WHITE - S) * baseF);
+			// Front face reflection: coating + base, albedo-scaled by the eye
+			// direction (the fixed one on the GPU, see glossycoating.cpp)
+			const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks);
+			result = coatingF + absorption * (WHITE - EcEye) * baseF;
 		}
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
-		// Transmission
-		// Coating fresnel factor
-		float3 H = MAKE_FLOAT3((sampledDir).x + fixedDir.x, (sampledDir).y + fixedDir.y,
-			(sampledDir).z - fixedDir.z);
-		const float HLength = dot(H, H);
-		
-		float3 S;
-		// I have to handle the case when HLength is 0.0 (or nearly 0.f) in
-		// order to avoid NaN
-		if (HLength < DEFAULT_EPSILON_STATIC)
-			S = ZERO;
-		else {
-			// Normalize
-			H *= 1.f / HLength;
-			S = FresnelSchlick_Evaluate(ks, fabs(dot(fixedDir, H)));
-		}
-
-		// Filter base layer, the square root is just a heuristic
-		// so that a sheet coated on both faces gets a filtering factor
-		// of 1-S like a reflection
-		result = absorption * Spectrum_Sqrt(WHITE - S) * baseF;
+		// Transmission: one crossing of the coating, by the direction on the
+		// coated side
+		const float muCoated = (fixedDir.z > 0.f) ? fixedDir.z : sampledDir.z;
+		result = absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) * baseF;
 	} else {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
@@ -487,6 +466,18 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	EvalStack_PopFloat3(originalDpdv);
 	EvalStack_PopFloat3(originalDpdu);
 	EvalStack_PopFloat3(originalShadeN);
+
+	// The base material sampled its direction in its own (bumped) frame, the
+	// one still in the hitPoint: bring it back to the original frame (as the
+	// CPU does)
+	Frame frameBase;
+	Frame_Set_Private(&frameBase, VLOAD3F(&hitPoint->dpdu.x), VLOAD3F(&hitPoint->dpdv.x),
+			VLOAD3F(&hitPoint->shadeN.x));
+	Frame frameOriginal;
+	Frame_Set_Private(&frameOriginal, originalDpdu, originalDpdv, originalShadeN);
+	const float3 sampledDir = Frame_ToLocal_Private(&frameOriginal,
+			Frame_ToWorld_Private(&frameBase, sampledDirMatBase));
+
 	// Restore original hitPoint
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
 	VSTORE3F(originalShadeN, &hitPointTmp->shadeN.x);
@@ -516,23 +507,23 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	EvalStack_PopFloat3(fixedDir);
 
 	//--------------------------------------------------------------------------
-	
+
 	if (Spectrum_IsBlack(resultMatBase)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
 	const float3 baseF = resultMatBase * pdfWMatBase;
 	const float basePdf = pdfWMatBase;
-	const float3 sampledDir = sampledDirMatBase;
-	const BSDFEvent event = pdfWMatBase;
+	// The base material's event (this was the base pdf converted to an
+	// integer, so the sampled event was mostly NONE)
+	const BSDFEvent event = eventMatBase;
 
 	// Don't add the coating scattering if the base sampled
 	// component is specular
 	float3 coatingF;
 	float coatingPdf;
 	if (!(event & SPECULAR)) {
-		coatingF = SchlickBSDF_CoatingF(ks, u, v,
-				material->glossycoating.multibounce, material->multiscattering, fixedDir, sampledDir);
+		coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 		coatingPdf = SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 	} else {
 		coatingF = BLACK;
@@ -546,7 +537,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 		baseF, basePdf,
 		coatingF, coatingPdf,
 		fixedDir, sampledDir,
-		event, ks
+		event, ks, u, v
 		MATERIALS_PARAM);
 }
 
@@ -629,7 +620,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 		baseF, basePdf,
 		coatingF, coatingPdf,
 		fixedDir, sampledDir,
-		event, ks
+		event, ks, u, v
 		MATERIALS_PARAM);
 }
 

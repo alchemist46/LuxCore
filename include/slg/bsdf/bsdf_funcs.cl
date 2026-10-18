@@ -102,6 +102,7 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 	bsdf->hitPoint.throughShadowTransparency = throughShadowTransparency;
 	bsdf->hitPoint.passThroughEvent = passThroughEvent;
 	bsdf->hitPoint.regularization = 0.f;
+	bsdf->hitPoint.subsurface = HITPOINT_SSS_SURFACE;
 
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);

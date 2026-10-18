@@ -43,25 +43,52 @@ Spectrum CarPaintMaterial::Albedo(const HitPoint &hitPoint) const {
 	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 }
 
+namespace {
+
+// The glossy lobes of the car paint as a table of the active ones (ks > 0 and
+// m > 0), in the order of the properties
+struct CarPaintLobes {
+	Spectrum ks[3];
+	float m[3], r[3];
+	u_int count;
+};
+
+CarPaintLobes GetCarPaintLobes(const CarPaintMaterial &mat, const HitPoint &hitPoint) {
+	CarPaintLobes lobes;
+	lobes.count = 0;
+
+	const TextureConstPtr ksTex[3] = { mat.Ks1, mat.Ks2, mat.Ks3 };
+	const TextureConstPtr mTex[3] = { mat.M1, mat.M2, mat.M3 };
+	const TextureConstPtr rTex[3] = { mat.R1, mat.R2, mat.R3 };
+	for (u_int i = 0; i < 3; ++i) {
+		const Spectrum ks = ksTex[i]->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+		const float m = Microfacet_Regularize(mTex[i]->GetFloatValue(hitPoint), hitPoint.regularization);
+		if ((ks.Filter() > 0.f) && (m > 0.f)) {
+			lobes.ks[lobes.count] = ks;
+			lobes.m[lobes.count] = m;
+			lobes.r[lobes.count] = rTex[i]->GetFloatValue(hitPoint);
+			++lobes.count;
+		}
+	}
+
+	return lobes;
+}
+
+}
+
+// The diffuse layer plus the glossy lobes, all of them evaluated (their sum is
+// the BSDF) and sampled with the same probability each (the mixture pdf).
+//
+// The glossy lobes exist only on the front face: they reflect about the
+// shading normal, so Sample() can not generate them on the back face, and
+// Evaluate() must not count them there either.
 Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
-	Vector H = Normalize(localLightDir + localEyeDir);
-	if (H == Vector(0.f))
-	{
-		if (directPdfW)
-			*directPdfW = 0.f;
-		if (reversePdfW)
-			*reversePdfW = 0.f;
-		return Spectrum();
-	}
-	if (H.z < 0.f)
-		H = -H;
-
-	float pdf = 0.f, pdfR = 0.f;
-	int n = 1; // already counts the diffuse layer
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+
+	*event = GLOSSY | REFLECT;
 
 	// Absorption
 	const float cosi = fabsf(localLightDir.z);
@@ -71,54 +98,31 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
 	// Diffuse layer
-	Spectrum result = absorption * Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(localLightDir.z);
+	Spectrum result = absorption * Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * cosi;
+	float pdf = fabsf(localSampledDir.z) * INV_PI;
+	float pdfR = fabsf(localFixedDir.z) * INV_PI;
+	u_int n = 1;
 
-	// 1st glossy layer
-	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks1.Filter() > 0.f && m1 > 0.f)
-	{
-		const float r1 = R1->GetFloatValue(hitPoint);
-		result += (Microfacet_D(m1, m1, H) * Microfacet_G(m1, m1, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks1 * FresnelTexture::SchlickEvaluate(r1, Dot(localEyeDir, H))) *
-				Microfacet_MSScale(IsMultiscattering(), m1, m1, coso, Spectrum(SchlickFresnel_Average(r1)));
-		pdf += Microfacet_PdfReflect(m1, m1, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m1, m1, localSampledDir, localFixedDir);
-		++n;
-	}
-	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks2.Filter() > 0.f && m2 > 0.f)
-	{
-		const float r2 = R2->GetFloatValue(hitPoint);
-		result += (Microfacet_D(m2, m2, H) * Microfacet_G(m2, m2, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks2 * FresnelTexture::SchlickEvaluate(r2, Dot(localEyeDir, H))) *
-				Microfacet_MSScale(IsMultiscattering(), m2, m2, coso, Spectrum(SchlickFresnel_Average(r2)));
-		pdf += Microfacet_PdfReflect(m2, m2, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m2, m2, localSampledDir, localFixedDir);
-		++n;
-	}
-	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks3.Filter() > 0.f && m3 > 0.f)
-	{
-		const float r3 = R3->GetFloatValue(hitPoint);
-		result += (Microfacet_D(m3, m3, H) * Microfacet_G(m3, m3, localLightDir, localEyeDir) / (4.f * coso)) *
-				(ks3 * FresnelTexture::SchlickEvaluate(r3, Dot(localEyeDir, H))) *
-				Microfacet_MSScale(IsMultiscattering(), m3, m3, coso, Spectrum(SchlickFresnel_Average(r3)));
-		pdf += Microfacet_PdfReflect(m3, m3, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m3, m3, localSampledDir, localFixedDir);
-		++n;
+	// Glossy layers
+	if ((localLightDir.z > 0.f) && (localEyeDir.z > 0.f)) {
+		const Vector H = Normalize(localLightDir + localEyeDir);
+		const CarPaintLobes lobes = GetCarPaintLobes(*this, hitPoint);
+		for (u_int i = 0; i < lobes.count; ++i) {
+			const float m = lobes.m[i];
+			const float r = lobes.r[i];
+			result += (Microfacet_D(m, m, H) * Microfacet_G(m, m, localLightDir, localEyeDir) / (4.f * coso)) *
+					(lobes.ks[i] * FresnelTexture::SchlickEvaluate(r, AbsDot(localEyeDir, H))) *
+					Microfacet_MSScale(m, m, coso, Spectrum(SchlickFresnel_Average(r)));
+			pdf += Microfacet_PdfReflect(m, m, localFixedDir, localSampledDir);
+			pdfR += Microfacet_PdfReflect(m, m, localSampledDir, localFixedDir);
+		}
+		n += lobes.count;
 	}
 
-	// Front face: coating+base
-	*event = GLOSSY | REFLECT;
-
-	// Finish pdf computation
 	if (directPdfW)
-		*directPdfW = (pdf + fabsf(localSampledDir.z) * INV_PI) / n;
+		*directPdfW = pdf / n;
 	if (reversePdfW)
-		*reversePdfW = (pdfR + fabsf(localFixedDir.z) * INV_PI) / n;
+		*reversePdfW = pdfR / n;
 
 	return result;
 }
@@ -130,268 +134,44 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	// Test presence of components
-	int n = 1; // already count the diffuse layer
-	int sampled = 0; // sampled layer
-	Spectrum result(0.f);
-	float pdf = 0.f;
-	bool l1 = false, l2 = false, l3 = false;
-	// 1st glossy layer
-	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks1.Filter() > 0.f && m1 > 0.f)
-	{
-		l1 = true;
-		++n;
-	}
-	// 2nd glossy layer
-	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks2.Filter() > 0.f && m2 > 0.f)
-	{
-		l2 = true;
-		++n;
-	}
-	// 3rd glossy layer
-	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks3.Filter() > 0.f && m3 > 0.f) {
-		l3 = true;
-		++n;
-	}
+	// One layer, each with the same probability (as the pdf of Evaluate())
+	CarPaintLobes lobes;
+	if (localFixedDir.z > 0.f)
+		lobes = GetCarPaintLobes(*this, hitPoint);
+	else
+		lobes.count = 0;
+	const u_int n = 1 + lobes.count;
+	const u_int layer = Min(static_cast<u_int>(passThroughEvent * n), n - 1);
 
-	Vector wh;
-	float cosWH, cosEye;
-	if (passThroughEvent < 1.f / n) {
-		// Sample diffuse layer
+	if (layer == 0) {
+		// Diffuse layer
+		float pdf;
 		*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, &pdf);
-		if (fabsf(CosTheta(*localSampledDir)) < DEFAULT_COS_EPSILON_STATIC)
-			return Spectrum();
-
-		// Absorption
-		const float cosi = fabsf(localFixedDir.z);
-		const float coso = fabsf(localSampledDir->z);
-		const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-		const float d = depth->GetFloatValue(hitPoint);
-		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
-
-		// Evaluate base BSDF
-		result = absorption * Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * pdf;
-
-		wh = Normalize(*localSampledDir + localFixedDir);
-		if (wh.z < 0.f)
-			wh = -wh;
-		cosWH = AbsDot(localFixedDir, wh);
-		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
-	} else if (passThroughEvent < 2.f / n && l1) {
-		// Sample 1st glossy layer
-		sampled = 1;
-		pdf = Microfacet_SampleReflect(m1, m1, localFixedDir, u0, u1, localSampledDir);
-
-		if ((localSampledDir->z < DEFAULT_COS_EPSILON_STATIC) ||
-			(localFixedDir.z * localSampledDir->z < 0.f))
-			return Spectrum();
-
-		if (pdf <= 0.f)
-			return Spectrum();
-
-		wh = Normalize(*localSampledDir + localFixedDir);
-		if (wh.z < 0.f)
-			wh = -wh;
-		cosWH = AbsDot(localFixedDir, wh);
-		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
-
-		const float r1 = R1->GetFloatValue(hitPoint);
-		result = ks1 * FresnelTexture::SchlickEvaluate(r1, cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m1, m1, cosEye, Spectrum(SchlickFresnel_Average(r1)));
-
-		const float d = Microfacet_D(m1, m1, wh);
-		const float G = Microfacet_G(m1, m1, localFixedDir, *localSampledDir);
-		if (!hitPoint.fromLight)
-			//CoatingF(sw, *wi, wo, f_);
-			result *= d * G / (4.f * fabsf(localFixedDir.z));
-		else
-			//CoatingF(sw, wo, *wi, f_);
-			result *= d * G / (4.f * fabsf(localSampledDir->z));
-	} else if ((passThroughEvent < 2.f / n  ||
-		(!l1 && passThroughEvent < 3.f / n)) && l2) {
-		// Sample 2nd glossy layer
-		sampled = 2;
-		pdf = Microfacet_SampleReflect(m2, m2, localFixedDir, u0, u1, localSampledDir);
-
-		if ((localSampledDir->z < DEFAULT_COS_EPSILON_STATIC) ||
-			(localFixedDir.z * localSampledDir->z < 0.f))
-			return Spectrum();
-
-		if (pdf <= 0.f)
-			return Spectrum();
-
-		wh = Normalize(*localSampledDir + localFixedDir);
-		if (wh.z < 0.f)
-			wh = -wh;
-		cosWH = AbsDot(localFixedDir, wh);
-		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
-
-		const float r2 = R2->GetFloatValue(hitPoint);
-		result = ks2 * FresnelTexture::SchlickEvaluate(r2, cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m2, m2, cosEye, Spectrum(SchlickFresnel_Average(r2)));
-
-		const float d = Microfacet_D(m2, m2, wh);
-		const float G = Microfacet_G(m2, m2, localFixedDir, *localSampledDir);
-		if (!hitPoint.fromLight)
-			//CoatingF(sw, *wi, wo, f_);
-			result *= d * G / (4.f * fabsf(localFixedDir.z));
-		else
-			//CoatingF(sw, wo, *wi, f_);
-			result *= d * G / (4.f * fabsf(localSampledDir->z));
-	} else if (l3) {
-		// Sample 3rd glossy layer
-		sampled = 3;
-		pdf = Microfacet_SampleReflect(m3, m3, localFixedDir, u0, u1, localSampledDir);
-
-		if ((localSampledDir->z < DEFAULT_COS_EPSILON_STATIC) ||
-			(localFixedDir.z * localSampledDir->z < 0.f))
-			return Spectrum();
-
-		if (pdf <= 0.f)
-			return Spectrum();
-
-		wh = Normalize(*localSampledDir + localFixedDir);
-		if (wh.z < 0.f)
-			wh = -wh;
-		cosWH = AbsDot(localFixedDir, wh);
-		cosEye = fabsf((hitPoint.fromLight ? *localSampledDir : localFixedDir).z);
-
-		const float r3 = R3->GetFloatValue(hitPoint);
-		result = ks3 * FresnelTexture::SchlickEvaluate(r3, cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m3, m3, cosEye, Spectrum(SchlickFresnel_Average(r3)));
-
-		const float d = Microfacet_D(m3, m3, wh);
-		const float G = Microfacet_G(m3, m3, localFixedDir, *localSampledDir);
-		if (!hitPoint.fromLight)
-			//CoatingF(sw, *wi, wo, f_);
-			result *= d * G / (4.f * fabsf(localFixedDir.z));
-		else
-			//CoatingF(sw, wo, *wi, f_);
-			result *= d * G / (4.f * fabsf(localSampledDir->z));
 	} else {
-		// Sampling issue
+		// Glossy layer
+		const float m = lobes.m[layer - 1];
+		const float pdf = Microfacet_SampleReflect(m, m, localFixedDir, u0, u1, localSampledDir);
+		if ((pdf <= 0.f) || (localSampledDir->z < DEFAULT_COS_EPSILON_STATIC))
+			return Spectrum();
+	}
+	if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
-	}
-	*event = GLOSSY | REFLECT;
-	// Add other components
-	// Diffuse
-	if (sampled != 0) {
-		// Absorption
-		const float cosi = fabsf(localFixedDir.z);
-		const float coso = fabsf(localSampledDir->z);
-		const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-		const float d = depth->GetFloatValue(hitPoint);
-		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		const float pdf0 = fabsf((hitPoint.fromLight ? localFixedDir.z : localSampledDir->z) * INV_PI);
-		pdf += pdf0;
-		result += absorption * Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * pdf0;
-	}
-	// 1st glossy
-	if (l1 && sampled != 1) {
-		const float d1 = Microfacet_D(m1, m1, wh);
-		const float pdf1 = Microfacet_PdfReflect(m1, m1, localFixedDir, *localSampledDir);
-		if (pdf1 > 0.f) {
-			result += ks1 * (d1 *
-				Microfacet_G(m1, m1, localFixedDir, *localSampledDir) /
-				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R1->GetFloatValue(hitPoint), cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m1, m1, cosEye, Spectrum(SchlickFresnel_Average(R1->GetFloatValue(hitPoint))));
-			pdf += pdf1;
-		}
-	}
-	// 2nd glossy
-	if (l2 && sampled != 2) {
-		const float d2 = Microfacet_D(m2, m2, wh);
-		const float pdf2 = Microfacet_PdfReflect(m2, m2, localFixedDir, *localSampledDir);
-		if (pdf2 > 0.f) {
-			result += ks2 * (d2 *
-				Microfacet_G(m2, m2, localFixedDir, *localSampledDir) /
-				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R2->GetFloatValue(hitPoint), cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m2, m2, cosEye, Spectrum(SchlickFresnel_Average(R2->GetFloatValue(hitPoint))));
-			pdf += pdf2;
-		}
-	}
-	// 3rd glossy
-	if (l3 && sampled != 3) {
-		const float d3 = Microfacet_D(m3, m3, wh);
-		const float pdf3 = Microfacet_PdfReflect(m3, m3, localFixedDir, *localSampledDir);
-		if (pdf3 > 0.f) {
-			result += ks3 * (d3 *
-				Microfacet_G(m3, m3, localFixedDir, *localSampledDir) /
-				(4.f * (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z)))) *
-				FresnelTexture::SchlickEvaluate(R3->GetFloatValue(hitPoint), cosWH) *
-				Microfacet_MSScale(IsMultiscattering(), m3, m3, cosEye, Spectrum(SchlickFresnel_Average(R3->GetFloatValue(hitPoint))));
-			pdf += pdf3;
-		}
-	}
-	// Adjust pdf and result
-	*pdfW = pdf / n;
-	return result / *pdfW;
+	// The value and the pdf of the whole mixture
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = Evaluate(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr);
+	if (f.Black() || (*pdfW <= 0.f))
+		return Spectrum();
+
+	return f / *pdfW;
 }
 
 void CarPaintMaterial::Pdf(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir,
 	float *directPdfW, float *reversePdfW) const {
-	Vector H = Normalize(localLightDir + localEyeDir);
-	if (H == Vector(0.f))
-	{
-		if (directPdfW)
-			*directPdfW = 0.f;
-		if (reversePdfW)
-			*reversePdfW = 0.f;
-		return;
-	}
-	if (H.z < 0.f)
-		H = -H;
-
-	float pdf = 0.f, pdfR = 0.f;
-	int n = 1; // already counts the diffuse layer
-	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
-
-	// First specular lobe
-	const Spectrum ks1 = Ks1->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m1 = Microfacet_Regularize(M1->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks1.Filter() > 0.f && m1 > 0.f)
-	{
-		pdf += Microfacet_PdfReflect(m1, m1, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m1, m1, localSampledDir, localFixedDir);
-		++n;
-	}
-
-	// Second specular lobe
-	const Spectrum ks2 = Ks2->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m2 = Microfacet_Regularize(M2->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks2.Filter() > 0.f && m2 > 0.f)
-	{
-		pdf += Microfacet_PdfReflect(m2, m2, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m2, m2, localSampledDir, localFixedDir);
-		++n;
-	}
-
-	// Third specular lobe
-	const Spectrum ks3 = Ks3->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float m3 = Microfacet_Regularize(M3->GetFloatValue(hitPoint), hitPoint.regularization);
-	if (ks3.Filter() > 0.f && m3 > 0.f)
-	{
-		pdf += Microfacet_PdfReflect(m3, m3, localFixedDir, localSampledDir);
-		pdfR += Microfacet_PdfReflect(m3, m3, localSampledDir, localFixedDir);
-		++n;
-	}
-
-	// Finish pdf computation
-	if (directPdfW)
-		*directPdfW = (pdf + fabsf(localSampledDir.z) * INV_PI) / n;
-	if (reversePdfW)
-		*reversePdfW = (pdfR + fabsf(localFixedDir.z) * INV_PI) / n;
+	BSDFEvent event;
+	Evaluate(hitPoint, localLightDir, localEyeDir, &event, directPdfW, reversePdfW);
 }
 
 void CarPaintMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {
@@ -469,7 +249,6 @@ PropertiesUPtr CarPaintMaterial::ToProperties(const ImageMapCache &imgMapCache, 
 	props->Set(Property("scene.materials." + name + ".r3")(R3->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

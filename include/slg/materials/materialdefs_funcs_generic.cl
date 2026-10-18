@@ -309,8 +309,8 @@ OPENCL_FORCE_INLINE float Microfacet_PdfReflect(const float u, const float v,
 }
 
 //------------------------------------------------------------------------------
-// Multiple-scattering energy compensation of the GGX lobes (property
-// "multiscattering"), see microfacet_energy_tables.cl
+// Multiple-scattering energy compensation of the GGX lobes (always on since
+// 2026-10-18), see microfacet_energy_tables.cl
 //------------------------------------------------------------------------------
 
 // The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
@@ -328,19 +328,41 @@ OPENCL_FORCE_INLINE float3 GGXEnergy_ReflectScale3(const float u, const float v,
 			GGXEnergy_ReflectScale(E, Eavg, Fss.z));
 }
 
-// The scale of a Microfacet_* reflection lobe seen with the cosine mu: 1 unless
-// multiscattering is enabled
-OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const int multiscattering,
-		const float u, const float v, const float mu, const float3 Fss) {
-	if (multiscattering)
-		return GGXEnergy_ReflectScale3(u, v, mu, Fss, false);
-	else
-		return WHITE;
+// The energy compensation scale of a Microfacet_* reflection lobe seen with
+// the cosine mu
+OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const float u, const float v, const float mu, const float3 Fss) {
+	return GGXEnergy_ReflectScale3(u, v, mu, Fss, false);
 }
 
 //------------------------------------------------------------------------------
 // Schlick BSDF (the coating lobe)
 //------------------------------------------------------------------------------
+
+// The layering of the coatings over their base (glossy2, glossycoating,
+// glossytranslucent; see glossy2.cpp): the coating albedo per channel, its
+// average, the base scale (1 - Ec(mu_light)) (1 - Ec(mu_eye)) / (1 - Ec_avg)
+// and the probability of sampling the coating
+OPENCL_FORCE_INLINE float3 GGXEnergy_CoatE3(const float u, const float v, const float mu, const float3 F0) {
+	return MAKE_FLOAT3(GGXEnergy_CoatE(u, v, mu, F0.x), GGXEnergy_CoatE(u, v, mu, F0.y),
+			GGXEnergy_CoatE(u, v, mu, F0.z));
+}
+
+OPENCL_FORCE_INLINE float3 GGXEnergy_CoatEavg3(const float u, const float v, const float3 F0) {
+	return MAKE_FLOAT3(GGXEnergy_CoatEavg(u, v, F0.x), GGXEnergy_CoatEavg(u, v, F0.y),
+			GGXEnergy_CoatEavg(u, v, F0.z));
+}
+
+OPENCL_FORCE_INLINE float3 Coating_LayerScale(const float3 EcLight, const float3 EcEye, const float3 EcAvg) {
+	return (WHITE - EcLight) * (WHITE - EcEye) /
+			MAKE_FLOAT3(fmax(1.f - EcAvg.x, 1e-4f), fmax(1.f - EcAvg.y, 1e-4f), fmax(1.f - EcAvg.z, 1e-4f));
+}
+
+OPENCL_FORCE_INLINE float Coating_Probability(const float3 Ec, const float3 baseAlbedo) {
+	const float coat = Spectrum_Filter(Ec);
+	const float base = Spectrum_Filter((WHITE - Ec) * baseAlbedo);
+
+	return ((coat + base) > 0.f) ? coat / (coat + base) : 1.f;
+}
 
 OPENCL_FORCE_INLINE float SchlickBSDF_CoatingWeight(const float3 ks, const float3 fixedDir) {
 	// Approximate H by using reflection direction for wi
@@ -353,33 +375,23 @@ OPENCL_FORCE_INLINE float SchlickBSDF_CoatingWeight(const float3 ks, const float
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingF(const float3 ks,
 		const float u, const float v,
-		const int multibounce, const int multiscattering, const float3 fixedDir,
-		const float3 sampledDir) {
+		const float3 fixedDir, const float3 sampledDir) {
 	const float coso = fabs(fixedDir.z);
-	const float cosi = fabs(sampledDir.z);
 
 	const float3 wh = normalize(fixedDir + sampledDir);
 	const float cosi_Schlick = clamp(fabs(dot(sampledDir, wh)), 0.f, 1.f);
 	const float3 S = FresnelSchlick_Evaluate(ks, cosi_Schlick);
 
 	const float G = Microfacet_G(u, v, fixedDir, sampledDir);
-
-	// Multibounce - alternative with interreflection in the coating creases
-	float factor = Microfacet_D(u, v, wh) * G;
-	//if (!fromLight)
-		factor = factor / (4.f * coso) +
-				(multibounce ? cosi * clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) : 0.f);
-	//else
-	//	factor = factor / (4.f * cosi) + 
-	//			(multibounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) : 0.f);
+	const float factor = Microfacet_D(u, v, wh) * G / (4.f * coso);
 
 	// Multiple-scattering energy compensation (fixedDir is the eye direction)
-	return factor * S * Microfacet_MSScale(multiscattering, u, v, coso, SchlickFresnel_Average(ks));
+	return factor * S * Microfacet_MSScale(u, v, coso, SchlickFresnel_Average(ks));
 }
 
 OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 		const float u, const float v,
-		const int multibounce, const int multiscattering, const float3 fixedDir, float3 *sampledDir,
+		const float3 fixedDir, float3 *sampledDir,
 		float u0, float u1, float *pdf) {
 	*pdf = Microfacet_SampleReflect(u, v, fixedDir, u0, u1, sampledDir);
 
@@ -390,7 +402,6 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 		return BLACK;
 
 	const float coso = fabs(fixedDir.z);
-	const float cosi = fabs((*sampledDir).z);
 
 	const float3 wh = normalize(fixedDir + *sampledDir);
 	const float cosWH = fabs(dot(fixedDir, wh));
@@ -400,12 +411,10 @@ OPENCL_FORCE_INLINE float3 SchlickBSDF_CoatingSampleF(const float3 ks,
 	const float d = Microfacet_D(u, v, wh);
 	const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
 
-	//CoatingF(sw, *wi, wo, f_);
-	S *= (d / *pdf) * G / (4.f * coso) + 
-			(multibounce ? cosi * clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) / *pdf : 0.f);
+	S *= (d / *pdf) * G / (4.f * coso);
 
 	// Multiple-scattering energy compensation (fixedDir is the eye direction)
-	return S * Microfacet_MSScale(multiscattering, u, v, coso, SchlickFresnel_Average(ks));
+	return S * Microfacet_MSScale(u, v, coso, SchlickFresnel_Average(ks));
 }
 
 OPENCL_FORCE_INLINE float SchlickBSDF_CoatingPdf(const float u, const float v,
@@ -467,3 +476,48 @@ OPENCL_FORCE_INLINE float FresnelCauchy_Evaluate(const float eta, const float co
 			entering ? eta : 1.f / eta);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
+
+//------------------------------------------------------------------------------
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025):
+// Fujii's single-scattering lobe with its exact albedo and a Lambertian-like
+// multiple-scattering term. The roughness r is sigma clamped to [0, 1]. Same
+// code as EON_E()/EON_Evaluate() in material.cpp.
+//------------------------------------------------------------------------------
+
+#define EON_CONST1 (.5f - 2.f / (3.f * M_PI_F))
+#define EON_CONST2 (2.f / 3.f - 28.f / (15.f * M_PI_F))
+
+OPENCL_FORCE_INLINE float EON_E(const float muIn, const float r) {
+	// A direction rounded to z slightly above 1 made acos() NaN (times Si = 0)
+	const float mu = clamp(muIn, 1e-4f, 1.f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+	const float Si = sqrt(fmax(0.f, 1.f - mu * mu));
+	const float G = Si * (acos(mu) - Si * mu) +
+			(2.f / 3.f) * ((Si / mu) * (1.f - Si * Si * Si) - Si);
+
+	return AF * (1.f + (r * M_1_PI_F) * G);
+}
+
+// f_ss + f_ms without the cosine term, for two directions in the same hemisphere
+OPENCL_FORCE_INLINE float3 EON_Evaluate(const float3 rho, const float r, const float3 wi, const float3 wo) {
+	const float mui = fmax(fabs(wi.z), 1e-4f);
+	const float muo = fmax(fabs(wo.z), 1e-4f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+
+	// dot(wi, wo) - mui * muo
+	const float s = wi.x * wo.x + wi.y * wo.y;
+	const float stinv = (s > 0.f) ? s / fmax(mui, muo) : s;
+	const float3 fss = rho * (M_1_PI_F * AF * (1.f + r * stinv));
+
+	const float Eo = EON_E(muo, r);
+	const float Ei = EON_E(mui, r);
+	const float Eavg = AF * (1.f + EON_CONST2 * r);
+	// Only the denominators are guarded (see material.cpp)
+	const float eps = 1e-6f;
+	const float3 denom = WHITE - rho * (1.f - Eavg);
+	const float3 rhoMS = (rho * rho) * Eavg / MAKE_FLOAT3(fmax(denom.x, eps), fmax(denom.y, eps), fmax(denom.z, eps));
+	const float3 fms = rhoMS * (M_1_PI_F * fmax(0.f, 1.f - Eo) * fmax(0.f, 1.f - Ei) / fmax(eps, 1.f - Eavg));
+
+	return fss + fms;
+}
+

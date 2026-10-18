@@ -69,7 +69,7 @@ typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
 	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING, DISNEY,
-	TWOSIDED,
+	TWOSIDED, SUBSURFACEMAT,
 			
 	// Volumes
 	HOMOGENEOUS_VOL, CLEAR_VOL, HETEROGENEOUS_VOL
@@ -157,12 +157,18 @@ typedef struct {
 } RoughGlassParam;
 
 typedef struct {
-    unsigned int kdTexIndex;
-	unsigned int p1TexIndex;
-	unsigned int p2TexIndex;
-	unsigned int p3TexIndex;
-	unsigned int thicknessTexIndex;
+	unsigned int kdTexIndex;
+	unsigned int roughnessTexIndex;
 } VelvetParam;
+
+typedef struct {
+	unsigned int colorTexIndex;
+	unsigned int radiusTexIndex;
+	unsigned int scaleTexIndex;
+	unsigned int anisotropyTexIndex;
+	unsigned int iorTexIndex;
+	unsigned int roughnessTexIndex;
+} SubsurfaceParam;
 
 typedef enum {
 	DENIM, SILKSHANTUNG, SILKCHARMEUSE, COTTONTWILL, WOOLGABARDINE, POLYESTER
@@ -367,9 +373,6 @@ typedef struct {
 	int isRefractive;
 	unsigned int refractionExteriorIorTexIndex, refractionInteriorIorTexIndex;
 
-	// Multiple-scattering energy compensation (EON for RoughMatte)
-	int multiscattering;
-
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;
 	unsigned int evalGetInteriorVolumeOpStartIndex, evalGetInteriorVolumeOpLength;
@@ -400,6 +403,7 @@ typedef struct {
 		GlossyCoatingParam glossycoating;
 		DisneyParam disney;
 		TwoSidedParam twosided;
+		SubsurfaceParam subsurface;
 		VolumeParam volume;
 	};
 } Material;

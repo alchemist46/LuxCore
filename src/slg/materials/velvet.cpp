@@ -17,6 +17,7 @@
  ***************************************************************************/
 
 #include "slg/materials/velvet.h"
+#include "slg/materials/sheen.h"
 
 using namespace std;
 using namespace luxrays;
@@ -24,14 +25,24 @@ using namespace slg;
 
 //------------------------------------------------------------------------------
 // Velvet material
+//
+// Since 2026-10-18 the microfiber sheen of Zeltner, Burley & Chiang 2022 (the
+// model of Cycles' Sheen BSDF and of the OpenPBR fuzz lobe, see sheen.h): a
+// layer of fibers with the color kd and the roughness r. Its directional
+// albedo is the one of the fiber layer alone (0.3-0.75 for a white kd), as
+// for Cycles' node. The old model (LuxRender's thin-layer polynomial with
+// the p1, p2, p3 and thickness parameters) was not normalized.
+//
+// Eye paths sample the LTC exactly. Light paths have the light direction
+// fixed, where the LTC (oriented by the eye direction) can't be sampled, and
+// sample the cosine distribution: Evaluate() returns the pdf of the sampler
+// of each path type.
 //------------------------------------------------------------------------------
 
 VelvetMaterial::VelvetMaterial(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 		TextureConstPtr emitted, TextureConstPtr bump,
-		TextureConstPtr kd, TextureConstPtr p1, TextureConstPtr p2, TextureConstPtr p3,
-		TextureConstPtr thickness) :
-			Material(frontTransp, backTransp, emitted, bump), Kd(kd),
-			P1(p1), P2(p2), P3(p3), Thickness(thickness) {
+		TextureConstPtr kd, TextureConstPtr roughness) :
+			Material(frontTransp, backTransp, emitted, bump), Kd(kd), Roughness(roughness) {
 	glossiness = 1.f;
 }
 
@@ -42,39 +53,40 @@ Spectrum VelvetMaterial::Albedo(const HitPoint &hitPoint) const {
 Spectrum VelvetMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
-
-
 	if (directPdfW)
-		*directPdfW = fabsf((hitPoint.fromLight ? localEyeDir.z : localLightDir.z) * INV_PI);
-
+		*directPdfW = 0.f;
 	if (reversePdfW)
-		*reversePdfW = fabsf((hitPoint.fromLight ? localLightDir.z : localEyeDir.z) * INV_PI);
-
+		*reversePdfW = 0.f;
 	*event = DIFFUSE | REFLECT;
-	
-	const float A1 = P1->GetFloatValue(hitPoint);
-	const float A2 = P2->GetFloatValue(hitPoint);
-	const float A3 = P3->GetFloatValue(hitPoint);
-	const float delta = Thickness->GetFloatValue(hitPoint);
-	
-	const float cosv = -Dot(localLightDir, localEyeDir);
 
-	// Compute phase function
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
 
-	const float B = 3.0f * cosv;
+	// Both faces: the back face is the mirror image of the front one
+	const float flip = (localEyeDir.z < 0.f) ? -1.f : 1.f;
+	const Vector eyeDir(localEyeDir.x, localEyeDir.y, flip * localEyeDir.z);
+	const Vector lightDir(localLightDir.x, localLightDir.y, flip * localLightDir.z);
 
-	float p = 1.0f + A1 * cosv + A2 * 0.5f * (B * cosv - 1.0f) + A3 * 0.5 * (5.0f * cosv * cosv * cosv - B);
-	p = p / (4.0f * M_PI);
- 
-	p = (p * delta) / fabsf(localEyeDir.z);
+	float a, b, albedo;
+	Sheen_Lookup(eyeDir.z, Roughness->GetFloatValue(hitPoint), &a, &b, &albedo);
+	// An invalid LTC (grazing angles at small roughness): no lobe, as Cycles
+	if ((fabsf(a) < 1e-5f) || (albedo < 1e-5f))
+		return Spectrum();
 
-	// Clamp the BRDF (page 7)
-	if (p > 1.0f)
-		p = 1.0f;
-	else if (p < 0.0f)
-		p = 0.0f;
+	const float ltc = Sheen_LTC(a, b, eyeDir, lightDir);
+	if (!(ltc > 0.f))
+		return Spectrum();
 
-	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * p;
+	// The pdf of sampling the light direction from the eye one (the LTC, eye
+	// paths) and the eye direction from the light one (cosine, light paths)
+	const float pdfLightGivenEye = ltc;
+	const float pdfEyeGivenLight = eyeDir.z * INV_PI;
+	if (directPdfW)
+		*directPdfW = hitPoint.fromLight ? pdfEyeGivenLight : pdfLightGivenEye;
+	if (reversePdfW)
+		*reversePdfW = hitPoint.fromLight ? pdfLightGivenEye : pdfEyeGivenLight;
+
+	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (albedo * ltc);
 }
 
 Spectrum VelvetMaterial::Sample(const HitPoint &hitPoint,
@@ -84,55 +96,51 @@ Spectrum VelvetMaterial::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, pdfW);
-	if (fabsf(CosTheta(*localSampledDir)) < DEFAULT_COS_EPSILON_STATIC)
+	const float flip = (localFixedDir.z < 0.f) ? -1.f : 1.f;
+	if (!hitPoint.fromLight) {
+		// Eye path: the LTC oriented by the eye direction
+		const Vector eyeDir(localFixedDir.x, localFixedDir.y, flip * localFixedDir.z);
+
+		float a, b, albedo;
+		Sheen_Lookup(eyeDir.z, Roughness->GetFloatValue(hitPoint), &a, &b, &albedo);
+		if ((fabsf(a) < 1e-5f) || (albedo < 1e-5f))
+			return Spectrum();
+
+		const Vector lightDir = Sheen_SampleLTC(a, b, eyeDir, u0, u1);
+		if (lightDir.z < DEFAULT_COS_EPSILON_STATIC)
+			return Spectrum();
+		*localSampledDir = Vector(lightDir.x, lightDir.y, flip * lightDir.z);
+	} else {
+		// Light path: the cosine distribution on the side of the light
+		float pdf;
+		*localSampledDir = CosineSampleHemisphere(u0, u1, &pdf);
+		localSampledDir->z *= flip;
+		if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+			return Spectrum();
+	}
+
+	// The value and the pdf from the evaluation
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = Evaluate(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr);
+	if (f.Black() || !(*pdfW > 0.f))
 		return Spectrum();
 
-	*event = DIFFUSE | REFLECT;
-	
-	float A1 = P1->GetFloatValue(hitPoint);
-	float A2 = P2->GetFloatValue(hitPoint);
-	float A3 = P3->GetFloatValue(hitPoint);
-	float delta = Thickness->GetFloatValue(hitPoint);
-	
-	const float cosv = -Dot(localFixedDir, *localSampledDir);
-
-	// Compute phase function
-
-	const float B = 3.0f * cosv;
-
-	float p = 1.0f + A1 * cosv + A2 * 0.5f * (B * cosv - 1.0f) + A3 * 0.5 * (5.0f * cosv * cosv * cosv - B);
-	p = p / (4.0f * M_PI);
- 
-	p = (p * delta) / (hitPoint.fromLight ? fabsf(localSampledDir->z) : fabsf(localFixedDir.z));
-	
-	// Clamp the BRDF (page 7)
-	if (p > 1.0f)
-		p = 1.0f;
-	else if (p < 0.0f)
-		p = 0.0f;
-	
-	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (p / *pdfW);
+	return f / *pdfW;
 }
 
 void VelvetMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
-	if (directPdfW)
-		*directPdfW = fabsf((hitPoint.fromLight ? localEyeDir.z : localLightDir.z) * INV_PI);
-
-	if (reversePdfW)
-		*reversePdfW = fabsf((hitPoint.fromLight ? localLightDir.z : localEyeDir.z) * INV_PI);
+	BSDFEvent event;
+	Evaluate(hitPoint, localLightDir, localEyeDir, &event, directPdfW, reversePdfW);
 }
 
 void VelvetMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {
 	Material::AddReferencedTextures(referencedTexs);
 
 	Kd->AddReferencedTextures(referencedTexs);
-	P1->AddReferencedTextures(referencedTexs);
-	P2->AddReferencedTextures(referencedTexs);
-	P3->AddReferencedTextures(referencedTexs);
-	Thickness->AddReferencedTextures(referencedTexs);
+	Roughness->AddReferencedTextures(referencedTexs);
 }
 
 void VelvetMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
@@ -140,14 +148,8 @@ void VelvetMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef 
 
 	if (Kd == &oldTex)
 		Kd = &newTex;
-	if (P1 == &oldTex)
-		P1 = &newTex;
-	if (P2 == &oldTex)
-		P2 = &newTex;
-	if (P3 == &oldTex)
-		P3 = &newTex;
-	if (Thickness == &oldTex)
-		Thickness = &newTex;
+	if (Roughness == &oldTex)
+		Roughness = &newTex;
 }
 
 PropertiesUPtr VelvetMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const  {
@@ -156,10 +158,7 @@ PropertiesUPtr VelvetMaterial::ToProperties(const ImageMapCache &imgMapCache, co
 	const std::string name = GetName();
 	props->Set(Property("scene.materials." + name + ".type")("velvet"));
 	props->Set(Property("scene.materials." + name + ".kd")(Kd->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".p1")(P1->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".p2")(P2->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".p3")(P3->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".thickness")(Thickness->GetSDLValue()));
+	props->Set(Property("scene.materials." + name + ".roughness")(Roughness->GetSDLValue()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

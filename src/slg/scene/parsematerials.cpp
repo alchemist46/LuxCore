@@ -52,6 +52,7 @@
 #include "slg/materials/velvet.h"
 #include "slg/materials/disney.h"
 #include "slg/materials/twosided.h"
+#include "slg/materials/subsurface.h"
 
 #include "slg/textures/texture.h"
 #include "slg/usings.h"
@@ -498,15 +499,17 @@ MaterialUPtr Scene::CreateMaterial(
 			kr, kt, exteriorIor, interiorIor, nu, nv, filmThickness, filmIor
 		);
 	} else if (matType == "velvet") {
+		// The microfiber sheen since 2026-10-18 (see velvet.cpp): the
+		// parameters of the old model are ignored
 		auto kd = parseTex("kd", {.5f, .5f, .5f});
-		auto p1 = parseTex("p1", {-2.0f});
-		auto p2 = parseTex("p2", {20.0f});
-		auto p3 = parseTex("p3", {2.0f});
-		auto thickness = parseTex("thickness", {0.1f});
+		auto roughness = parseTex("roughness", {.5f});
+		if (isDefined("p1") || isDefined("p2") || isDefined("p3") || isDefined("thickness"))
+			SLG_LOG("WARNING: velvet material " << matName << ": p1, p2, p3 and thickness are ignored "
+					"(velvet is the microfiber sheen, set its roughness instead)");
 
 		mat = std::make_unique<VelvetMaterial>(
 			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
-			kd, p1, p2, p3, thickness
+			kd, roughness
 		);
 	} else if (matType == "cloth") {
 		slg::ocl::ClothPreset preset = slg::ocl::DENIM;
@@ -710,6 +713,20 @@ MaterialUPtr Scene::CreateMaterial(
 			throw runtime_error("There is a loop in Two-sided material definition: " + matName);
 
 		mat = std::move(twoSided);
+	} else if (matType == "subsurface") {
+		// Random-walk subsurface scattering (see subsurface.cpp), the
+		// parameters of Cycles' Subsurface Scattering node
+		auto color = parseTex("color", {.8f, .8f, .8f});
+		auto radius = parseTex("radius", {1.f, .2f, .1f});
+		auto scale = parseTex("scale", {.05f});
+		auto anisotropy = parseTex("anisotropy", {0.f});
+		auto ior = parseTex("ior", {1.4f});
+		auto roughness = parseTex("roughness", {.3f});
+
+		mat = std::make_unique<SubsurfaceMaterial>(
+			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
+			color, radius, scale, anisotropy, ior, roughness
+		);
 	} else
 		throw runtime_error("Unknown material type: " + matType);
 
@@ -718,7 +735,8 @@ MaterialUPtr Scene::CreateMaterial(
 
 	mat->SetID(props.Get(Property(propName + ".id")(defaultMatID)).Get<u_int>());
 	mat->SetBumpSampleDistance(bumpSampleDistance);
-	mat->SetMultiscattering(parseBool("multiscattering", false));
+	// "multiscattering" is ignored: the energy compensation is always on
+	// (since 2026-10-18, see microfacet_energy_tables.cl)
 
 	// Gain is not really a color so I avoid to use GetColor()
 	mat->SetEmittedGain(props.Get(Property(propName + ".emission.gain")(Spectrum(1.f))).Get<Spectrum>());

@@ -45,7 +45,8 @@ RoughGlassMaterial::RoughGlassMaterial(TextureConstPtr frontTransp, TextureConst
 
 // The multiple-scattering scale of the whole interface seen from localEyeDir:
 // 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
-// other side over the eye side as relative IOR), as in Cycles
+// other side over the eye side as relative IOR), as in Cycles. Rough glass
+// always has it; the regularized glass (glass.cpp) turns it off.
 static float RoughGlass_MSScale(const bool multiscattering,
 		const float u, const float v, const Vector &localEyeDir, const float ntc) {
 	if (!multiscattering)
@@ -63,6 +64,11 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 	const float u, const float v, const bool multiscattering,
 	const float localFilmThickness, const float localFilmIor,
 	const WorkingColorSpace &workingColorSpace) {
+	if (directPdfW)
+		*directPdfW = 0.f;
+	if (reversePdfW)
+		*reversePdfW = 0.f;
+
 	const bool isKtBlack = kt.Black();
 	const bool isKrBlack = kr.Black();
 	if (isKtBlack && isKrBlack)
@@ -75,6 +81,8 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 	if (localLightDir.z * localEyeDir.z < 0.f) {
 		// Transmit
 
+		// eta = eta_light / eta_eye (the IOR of the light side over the one
+		// of the eye side)
 		const bool entering = (CosTheta(localLightDir) > 0.f);
 		const float eta = entering ? (nc / nt) : ntc;
 
@@ -86,6 +94,14 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 		if (!(lengthSquared > 0.f))
 			return Spectrum();
 		wh /= sqrtf(lengthSquared);
+
+		// Discard the back-facing microfacets (as pbrt-v4's DielectricBxDF):
+		// the pair can not refract through wh, and Sample() never generates
+		// it. Without this, light sampling added energy that BSDF sampling
+		// could not produce (white furnace above 1 at high roughness).
+		if ((Dot(localEyeDir, wh) * localEyeDir.z <= 0.f) ||
+				(Dot(localLightDir, wh) * localLightDir.z <= 0.f))
+			return Spectrum();
 		const float cosThetaI = fabsf(CosTheta(localEyeDir));
 		const float cosThetaIH = AbsDot(localEyeDir, wh);
 		const float cosThetaOH = Dot(localLightDir, wh);
@@ -102,9 +118,14 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 		if (reversePdfW)
 			*reversePdfW = threshold * Microfacet_PdfH(u, v, localSampledDir, wh) * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
 
-		const Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
+		// The radiance form f_rad |cos light| on eye paths. Light paths need
+		// the adjoint (importance) BTDF, f_imp = f_rad (eta_light / eta_eye)^2,
+		// i.e. f_rad eta^2.
+		Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
 			kt * (1.f - F) * msScale;
+		if (hitPoint.fromLight)
+			result *= eta * eta;
 
 		*event = GLOSSY | TRANSMIT;
 
@@ -169,6 +190,8 @@ Spectrum RoughGlassMaterial::SampleRough(const HitPoint &hitPoint,
 	if (isKtBlack && isKrBlack)
 		return Spectrum();
 
+	// A visible microfacet normal (only the direction is used here, the pdf
+	// comes from EvaluateRough() below)
 	Vector wh;
 	float d, specPdf;
 	Microfacet_SampleH(u, v, localFixedDir, u0, u1, &wh, &d, &specPdf);
@@ -178,23 +201,9 @@ Spectrum RoughGlassMaterial::SampleRough(const HitPoint &hitPoint,
 
 	const float ntc = nt / nc;
 
-	const float coso = fabsf(localFixedDir.z);
+	// Decide to transmit or reflect (the same probabilities as EvaluateRough())
+	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 0.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 1.f;
-		else
-			return Spectrum();
-	}
-
-	Spectrum result;
 	if (passThroughEvent < threshold) {
 		// Transmit
 
@@ -210,57 +219,33 @@ Spectrum RoughGlassMaterial::SampleRough(const HitPoint &hitPoint,
 		const float length = eta * cosThetaOH + cosThetaIH;
 		*localSampledDir = length * wh - eta * localFixedDir;
 
-		const float lengthSquared = length * length;
-		*pdfW = specPdf * fabsf(cosThetaIH) / lengthSquared;
-		if (*pdfW <= 0.f)
+		// A refraction through a steep microfacet can point back into the
+		// side it came from: that is not a transmission (and Evaluate()
+		// would see a reflection), so it is rejected (as pbrt-v4 does)
+		if (localFixedDir.z * localSampledDir->z >= 0.f)
 			return Spectrum();
-
-		const float cosi = fabsf(localSampledDir->z);
-
-		const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
-		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / threshold;
-
-		if (!hitPoint.fromLight) {
-			// The radiance form, like Evaluate() and GlassMaterial: eta2 is
-			// (eta_eye / eta_light)^2
-			const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaIH);
-			result = (factor / coso) * kt * (1.f - F) * eta2;
-		} else {
-			const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
-			result = (factor / cosi) * kt * (1.f - F);
-		}
-
-		*pdfW *= threshold;
-		*event = GLOSSY | TRANSMIT;
 	} else {
 		// Reflect
-		*pdfW = specPdf / (4.f * fabsf(cosThetaOH));
-		if (*pdfW <= 0.f)
-			return Spectrum();
-
 		*localSampledDir = 2.f * cosThetaOH * wh - localFixedDir;
 
-		const float cosi = fabsf(localSampledDir->z);
-		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
+		if (localFixedDir.z * localSampledDir->z <= 0.f)
 			return Spectrum();
-
-		const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
-		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / (1.f - threshold);
-
-		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
-		factor /= (!hitPoint.fromLight) ? coso : cosi;
-		result = factor * F * kr;
-		
-		if (localFilmThickness > 0.f) {
-			result *= CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
-		}
-
-		*pdfW *= (1.f - threshold);
-		*event = GLOSSY | REFLECT;
 	}
+	if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
 
-	return result * RoughGlass_MSScale(multiscattering, u, v,
-			hitPoint.fromLight ? *localSampledDir : localFixedDir, ntc);
+	// The value and the pdf from the evaluation: the pdf of the lobe choice
+	// times the VNDF and the Jacobian of the reflection or the refraction is
+	// what EvaluateRough() returns as directPdfW, and the value is then
+	// consistent on eye and light paths by construction
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = EvaluateRough(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr,
+			kt, kr, nc, nt, u, v, multiscattering, localFilmThickness, localFilmIor, workingColorSpace);
+	if (f.Black() || !(*pdfW > 0.f))
+		return Spectrum();
+
+	return f / *pdfW;
 }
 
 void RoughGlassMaterial::PdfRough(const HitPoint &hitPoint,
@@ -280,6 +265,12 @@ void RoughGlassMaterial::PdfRough(const HitPoint &hitPoint,
 
 	const float ntc = nt / nc;
 
+	// The same pdfs as EvaluateRough(): the direct one is the pdf of
+	// generating the sampled direction from the fixed one (the fixed direction
+	// is the light one on light paths)
+	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+
 	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 	if (localLightDir.z * localEyeDir.z < 0.f) {
 		// Transmit
@@ -296,14 +287,22 @@ void RoughGlassMaterial::PdfRough(const HitPoint &hitPoint,
 			return;
 
 		wh /= sqrtf(lengthSquared);
+
+		// Back-facing microfacets (see EvaluateRough())
+		if ((Dot(localEyeDir, wh) * localEyeDir.z <= 0.f) ||
+				(Dot(localLightDir, wh) * localLightDir.z <= 0.f))
+			return;
+
 		const float cosThetaIH = AbsDot(localEyeDir, wh);
 		const float cosThetaOH = AbsDot(localLightDir, wh);
 
 		if (directPdfW)
-			*directPdfW = threshold * Microfacet_PdfH(u, v, localLightDir, wh) * cosThetaIH / lengthSquared;
+			*directPdfW = threshold * Microfacet_PdfH(u, v, localFixedDir, wh) *
+					(hitPoint.fromLight ? cosThetaIH : (cosThetaOH * eta * eta)) / lengthSquared;
 
 		if (reversePdfW)
-			*reversePdfW = threshold * Microfacet_PdfH(u, v, localEyeDir, wh) * cosThetaOH * eta * eta / lengthSquared;
+			*reversePdfW = threshold * Microfacet_PdfH(u, v, localSampledDir, wh) *
+					(hitPoint.fromLight ? (cosThetaOH * eta * eta) : cosThetaIH) / lengthSquared;
 	} else {
 		// Reflect
 		const float cosThetaO = fabsf(CosTheta(localLightDir));
@@ -319,10 +318,10 @@ void RoughGlassMaterial::PdfRough(const HitPoint &hitPoint,
 			wh = -wh;
 
 		if (directPdfW)
-			*directPdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localLightDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*directPdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localFixedDir, wh) / (4.f * AbsDot(localLightDir, wh));
 
 		if (reversePdfW)
-			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localEyeDir, wh) / (4.f * AbsDot(localLightDir, wh));
+			*reversePdfW = (1.f - threshold) * Microfacet_PdfH(u, v, localSampledDir, wh) / (4.f * AbsDot(localLightDir, wh));
 	}
 }
 
@@ -343,7 +342,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
 	return EvaluateRough(hitPoint, localLightDir, localEyeDir, event, directPdfW, reversePdfW,
-			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor, workingColorSpace);
 }
 
 Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
@@ -360,7 +359,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
 	return SampleRough(hitPoint, localFixedDir, localSampledDir, u0, u1, passThroughEvent, pdfW, event,
-			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor, workingColorSpace);
 }
 
 void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
@@ -435,7 +434,6 @@ PropertiesUPtr RoughGlassMaterial::ToProperties(const ImageMapCache &imgMapCache
 		props->Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	if (filmThickness)
 		props->Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));
 	if (filmIor)

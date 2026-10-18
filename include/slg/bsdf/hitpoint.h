@@ -78,6 +78,9 @@ typedef struct HitPoint_t {
 	// Path regularization (see PathTracer): the floor of the GGX alphas of
 	// the materials at this vertex, 0 when the vertex is not regularized
 	float regularization;
+	// Random-walk subsurface scattering (see SubsurfaceMaterial): the role of
+	// the vertex, HITPOINT_SSS_SURFACE unless the eye path tracer sets it
+	int subsurface;
 
 	// Used when hitting a surface
 	//

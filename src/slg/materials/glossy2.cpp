@@ -42,28 +42,67 @@ Spectrum Glossy2Material::Albedo(const HitPoint &hitPoint) const {
 	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 }
 
+//------------------------------------------------------------------------------
+// Since 2026-10-18 the coating is layered over the Lambertian base by
+// reciprocal albedo scaling: f = f_coat + kd / pi * (1 - Ec(mu_light))
+// (1 - Ec(mu_eye)) / (1 - Ec_avg) times the absorption of the coating, with
+// Ec the albedo of the energy-compensated coating lobe (GGX with the Schlick
+// Fresnel of ks, per channel) and Ec_avg its cosine-weighted average. A white
+// base under any non-absorbing coating has the albedo 1 at every angle. The
+// old Schlick blend, coat + (1 - S(cos h)) base, lost or gained up to 20% at
+// grazing angles. The multibounce option is ignored (the layering includes
+// the energy it approximated).
+//------------------------------------------------------------------------------
+
+namespace {
+
+// The probability of sampling the coating from the direction with the
+// coating albedo Ec: the coating against the part of the base that comes out
+float Glossy2_CoatProbability(const Spectrum &Ec, const Spectrum &kd) {
+	const Spectrum baseOut = (Spectrum(1.f) - Ec) * kd;
+	const float coat = Ec.Filter();
+	const float base = baseOut.Filter();
+
+	return ((coat + base) > 0.f) ? coat / (coat + base) : 1.f;
+}
+
+// The base scale of the albedo layering
+Spectrum Glossy2_LayerScale(const Spectrum &EcLight, const Spectrum &EcEye, const Spectrum &EcAvg) {
+	Spectrum result;
+	for (u_int i = 0; i < 3; ++i)
+		result.c[i] = (1.f - EcLight.c[i]) * (1.f - EcEye.c[i]) / Max(1.f - EcAvg.c[i], 1e-4f);
+
+	return result;
+}
+
+}
+
 Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 
-	const Spectrum baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(localLightDir.z);
+	if (directPdfW)
+		*directPdfW = 0.f;
+	if (reversePdfW)
+		*reversePdfW = 0.f;
 
-	if ((!doublesided) && (localEyeDir.z <= 0.f)) {
+	const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum baseF = kd * INV_PI * fabsf(localLightDir.z);
+
+	if ((!doublesided) && (localFixedDir.z <= 0.f)) {
 		// Back face: no coating
-
 		if (directPdfW)
-			*directPdfW = fabsf (localSampledDir.z * INV_PI);
-
+			*directPdfW = fabsf(localSampledDir.z * INV_PI);
 		if (reversePdfW)
-			*reversePdfW = fabsf (localFixedDir.z * INV_PI);
+			*reversePdfW = fabsf(localFixedDir.z * INV_PI);
 
 		*event = DIFFUSE | REFLECT;
 		return baseF;
 	}
 
-	// Front face: coating+base
+	// Front face: coating + base
 	*event = GLOSSY | REFLECT;
 
 	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
@@ -77,39 +116,20 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
+	const Spectrum EcFixed = GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks);
+	const Spectrum EcSampled = GGXEnergy_CoatE(u, v, fabsf(localSampledDir.z), ks);
+	const Spectrum EcAvg = GGXEnergy_CoatEavg(u, v, ks);
+
 	if (directPdfW) {
-		if ((!doublesided) && (localFixedDir.z < 0.f)) {
-			// Backface
-			*directPdfW = fabsf (localSampledDir.z * INV_PI);
-		}
-		else {
-			const float wCoating = SchlickBSDF_CoatingWeight (ks, localFixedDir);
-			const float wBase = 1.f - wCoating;
-
-			*directPdfW = wBase * fabsf (localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf (u, v, localFixedDir, localSampledDir);
-
-		}
+		const float wCoating = Glossy2_CoatProbability(EcFixed, kd);
+		*directPdfW = (1.f - wCoating) * fabsf(localSampledDir.z * INV_PI) +
+				wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir);
 	}
-
 	if (reversePdfW) {
-		if ((!doublesided) && (localSampledDir.z < 0.f)) {
-			// Backface
-			*reversePdfW = fabsf (localFixedDir.z * INV_PI);
-		}
-		else {
-			const float wCoatingR = SchlickBSDF_CoatingWeight (ks, localSampledDir);
-			const float wBaseR = 1.f - wCoatingR;
-
-			*reversePdfW = wBaseR * fabsf (localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf (u, v, localSampledDir, localFixedDir);
-		}
+		const float wCoatingR = Glossy2_CoatProbability(EcSampled, kd);
+		*reversePdfW = (1.f - wCoatingR) * fabsf(localFixedDir.z * INV_PI) +
+				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir);
 	}
-	if ((!doublesided) && (localFixedDir.z < 0.f)) {
-		// Backface, no coating
-		return baseF;
-	}
-
 
 	// Absorption
 	const float cosi = fabsf(localSampledDir.z);
@@ -118,16 +138,13 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const float d = depth->GetFloatValue(hitPoint);
 	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-	// Coating fresnel factor
-	const Vector H(Normalize(localFixedDir + localSampledDir));
-	const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localSampledDir, H));
+	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v,
+			localFixedDir, localSampledDir);
 
-	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(), localFixedDir, localSampledDir);
+	const Spectrum &EcLight = hitPoint.fromLight ? EcFixed : EcSampled;
+	const Spectrum &EcEye = hitPoint.fromLight ? EcSampled : EcFixed;
 
-	// Blend in base layer Schlick style
-	// assumes coating bxdf takes fresnel factor S into account
-
-	return coatingF + absorption * (Spectrum(1.f) - S) * baseF;
+	return coatingF + absorption * Glossy2_LayerScale(EcLight, EcEye, EcAvg) * baseF;
 }
 
 Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
@@ -137,135 +154,52 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	if ((!doublesided) && (localFixedDir.z <= 0.f)) {
-		// Back face
-		*localSampledDir = -CosineSampleHemisphere (u0, u1, pdfW);
+	bool sampleCoating = false;
+	float u = 0.f, v = 0.f;
+	if (doublesided || (localFixedDir.z > 0.f)) {
+		// The same lobe probability as Evaluate()
+		Spectrum ks = Ks->GetSpectrumValue(hitPoint);
+		const float i = index->GetFloatValue(hitPoint);
+		if (i > 0.f) {
+			const float ti = (i - 1.f) / (i + 1.f);
+			ks *= ti * ti;
+		}
+		ks = ks.Clamp(0.f, 1.f);
 
-		const float absCosSampledDir = fabsf (localSampledDir->z);
-		if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-			return Spectrum ();
-		*event = DIFFUSE | REFLECT;
-		if (hitPoint.fromLight)
-			return Kd->GetSpectrumValue (hitPoint) * fabsf (localFixedDir.z / absCosSampledDir);
-		else
-			return Kd->GetSpectrumValue (hitPoint);
+		u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+		v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+
+		const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+		const float wCoating = Glossy2_CoatProbability(GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks), kd);
+		sampleCoating = (passThroughEvent < wCoating);
 	}
 
-	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
-	const float i = index->GetFloatValue(hitPoint);
-	if (i > 0.f) {
-		const float ti = (i - 1.f) / (i + 1.f);
-		ks *= ti * ti;
-	}
-	ks = ks.Clamp(0.f, 1.f);
-
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-
-	// Coating is used only on the front face
-	const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
-	const float wBase = 1.f - wCoating;
-
-	float basePdf, coatingPdf;
-	Spectrum baseF, coatingF;
-
-	if (passThroughEvent < wBase) {
-		// Sample base BSDF (Matte BSDF)
-		*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, &basePdf);
-
-		const float absCosSampledDir = fabsf(localSampledDir->z);
-		if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
+	if (sampleCoating) {
+		const float pdf = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
+		if ((pdf <= 0.f) || (localFixedDir.z * localSampledDir->z <= 0.f))
 			return Spectrum();
-
-		baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
-
-		// Evaluate coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(), localFixedDir, *localSampledDir);
-		coatingPdf = SchlickBSDF_CoatingPdf(u, v, localFixedDir, *localSampledDir);
 	} else {
-		// Sample coating BSDF (Schlick BSDF)
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
-				localFixedDir, localSampledDir, u0, u1, &coatingPdf);
-		if (coatingF.Black())
-			return Spectrum();
-
-		const float absCosSampledDir = fabsf(localSampledDir->z);
-		if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-			return Spectrum();
-
-		coatingF *= coatingPdf;
-
-		// Evaluate base BSDF (Matte BSDF)
-		basePdf = absCosSampledDir * INV_PI;
-		baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
+		float pdf;
+		*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, &pdf);
 	}
+	if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
 
-	*event = GLOSSY | REFLECT;
+	// The value and the pdf of the mixture from the evaluation
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = Evaluate(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr);
+	if (f.Black() || !(*pdfW > 0.f))
+		return Spectrum();
 
-	*pdfW = coatingPdf * wCoating + basePdf * wBase;
-
-	// Absorption
-	const float cosi = fabsf(localSampledDir->z);
-	const float coso = fabsf(localFixedDir.z);
-	const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const float d = depth->GetFloatValue(hitPoint);
-	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
-
-	// Coating fresnel factor
-	const Vector H(Normalize(localFixedDir + *localSampledDir));
-	const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(*localSampledDir, H));
-
-	// Blend in base layer Schlick style
-	// coatingF already takes fresnel factor S into account
-
-	return (coatingF + absorption * (Spectrum(1.f) - S) * baseF) / *pdfW;
+	return f / *pdfW;
 }
 
 void Glossy2Material::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
-	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
-
-	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
-	const float i = index->GetFloatValue(hitPoint);
-	if (i > 0.f) {
-		const float ti = (i - 1.f) / (i + 1.f);
-		ks *= ti * ti;
-	}
-	ks = ks.Clamp(0.f, 1.f);
-
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-
-	if (directPdfW) {
-		if ((!doublesided) && (localFixedDir.z < 0.f)) {
-			// Backface
-			*directPdfW = fabsf (localSampledDir.z * INV_PI);
-		}
-		else {
-			const float wCoating = SchlickBSDF_CoatingWeight (ks, localFixedDir);
-			const float wBase = 1.f - wCoating;
-
-			*directPdfW = wBase * fabsf (localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf (u, v, localFixedDir, localSampledDir);
-		}
-	}
-
-	if (reversePdfW) {
-		if ((!doublesided) && (localSampledDir.z < 0.f)) {
-			// Backface
-
-			*reversePdfW = fabsf (localFixedDir.z * INV_PI);
-		}
-		else {
-			const float wCoatingR = SchlickBSDF_CoatingWeight (ks, localSampledDir);
-			const float wBaseR = 1.f - wCoatingR;
-
-			*reversePdfW = wBaseR * fabsf (localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf (u, v, localSampledDir, localFixedDir);
-		}
-	}
+	BSDFEvent event;
+	Evaluate(hitPoint, localLightDir, localEyeDir, &event, directPdfW, reversePdfW);
 }
 
 void Glossy2Material::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {
@@ -316,7 +250,6 @@ PropertiesUPtr Glossy2Material::ToProperties(const ImageMapCache &imgMapCache, c
 	props->Set(Property("scene.materials." + name + ".ks")(Ks->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".index")(index->GetSDLValue()));

@@ -87,9 +87,6 @@ Spectrum Metal2Material::EvaluateFresnel(const HitPoint &hitPoint, const float c
 // quadrature on [0, 1]
 Spectrum Metal2Material::MSScale(const HitPoint &hitPoint, const float u, const float v,
 		const Vector &localEyeDir) const {
-	if (!IsMultiscattering())
-		return Spectrum(1.f);
-
 	static const float nodes[4] = { .069431844f, .330009478f, .669990522f, .930568156f };
 	static const float weights[4] = { .173927423f, .326072577f, .326072577f, .173927423f };
 	Spectrum Fss;
@@ -264,7 +261,6 @@ PropertiesUPtr Metal2Material::ToProperties(const ImageMapCache &imgMapCache, co
 		props->Set(Property("scene.materials." + name + ".k")(k->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

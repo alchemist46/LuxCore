@@ -246,6 +246,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/glossytranslucent.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/material.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/microfacet_energy.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/materials/sheen.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/materialdefs.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/matte.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/mattetranslucent.cpp
@@ -259,6 +260,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/thinfilmcoating.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/twosided.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/velvet.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/materials/subsurface.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/sampler.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/rtpathcpusampler.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/samplers/tilepathsampler.cpp

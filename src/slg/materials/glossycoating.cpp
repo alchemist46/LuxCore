@@ -24,6 +24,33 @@ using namespace luxrays;
 using namespace slg;
 
 //------------------------------------------------------------------------------
+// Since 2026-10-18 the coating is layered over its base by albedo scaling: a
+// reflection of the base is scaled by 1 - Ec(mu_eye), with Ec the albedo of
+// the energy-compensated coating (as Cycles and the OpenPBR specification do),
+// so a base of albedo 1 under a non-absorbing coat has the albedo 1 whatever
+// the base is. The reciprocal form of glossy2, (1 - Ec(mu_light))
+// (1 - Ec(mu_eye)) / (1 - Ec_avg), is exact only for a Lambertian base (a
+// metal base was off by up to 0.7%, a sharper one by several percent). The
+// engines evaluate f with the light and eye roles fixed on every path, so the
+// non-reciprocal form is consistent (the stochastic layering of P4 is the
+// exact form of the physical layer). A transmission through the base crosses
+// the coating once, (1 - Ec(mu)) of the direction on the coated side. The old
+// Schlick blend lost or gained up to 25% at grazing angles. The multibounce
+// option is ignored.
+//------------------------------------------------------------------------------
+
+namespace {
+
+// The probability of sampling the coating from the direction with the
+// coating albedo Ec (the base albedo is not known here: the GPU evaluates the
+// base through its own ops)
+float GlossyCoating_CoatProbability(const Spectrum &ks, const Spectrum &Ec) {
+	return ks.Black() ? 0.f : Clamp(Ec.Filter(), .1f, .9f);
+}
+
+}
+
+//------------------------------------------------------------------------------
 // GlossyCoating material
 //------------------------------------------------------------------------------
 
@@ -132,20 +159,31 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
+		// The coating pdf is the one of sampling the generated direction from
+		// the fixed one (SchlickBSDF_CoatingPdf(fixed, sampled), as Sample()
+		// and the GPU use it): the bounded VNDF pdf is not symmetric
+		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+
+		const Spectrum EcLight = GGXEnergy_CoatE(u, v, fabsf(localLightDir.z), ks);
+		const Spectrum EcEye = GGXEnergy_CoatE(u, v, fabsf(localEyeDir.z), ks);
+		const Spectrum &EcFixed = hitPoint.fromLight ? EcLight : EcEye;
+		const Spectrum &EcSampled = hitPoint.fromLight ? EcEye : EcLight;
+
 		if (directPdfW) {
-			const float wCoating = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localLightDir : localEyeDir);
+			const float wCoating = GlossyCoating_CoatProbability(ks, EcFixed);
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = wBase * *directPdfW +
-				wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
+				wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir);
 		}
 
 		if (reversePdfW) {
-			const float wCoatingR = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localEyeDir : localLightDir);
+			const float wCoatingR = GlossyCoating_CoatProbability(ks, EcSampled);
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = wBaseR * *reversePdfW +
-				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
+				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir);
 		}
 
 		// Absorption
@@ -153,17 +191,10 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float d = depth->GetFloatValue(hitPoint);
 		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		// Coating fresnel factor
-		const Vector H(Normalize(localLightDir + localEyeDir));
-		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localEyeDir, H));
-
-		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v, multibounce, IsMultiscattering(),
+		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v,
 			localLightDir, localEyeDir);
 
-		// Blend in base layer Schlick style
-		// assumes coating bxdf takes fresnel factor S into account
-
-		return coatingF + absorption * (Spectrum(1.f) - S) * baseF;
+		return coatingF + absorption * (Spectrum(1.f) - EcEye) * baseF;
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
 		// Transmission
 
@@ -194,9 +225,13 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
+		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+
 		if (directPdfW) {
 			const Vector localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
-			const float wCoating = (localFixedDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, localFixedDir) : 0.f;
+			const float wCoating = (localFixedDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+				GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks)) : 0.f;
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW *= wBase;
@@ -204,7 +239,8 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 
 		if (reversePdfW) {
 			const Vector localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
-			const float wCoatingR = (localSampledDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, localSampledDir) : 0.f;
+			const float wCoatingR = (localSampledDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+				GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localSampledDir.z), ks)) : 0.f;
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW *= wBaseR;
@@ -215,15 +251,9 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float d = depth->GetFloatValue(hitPoint);
 		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		// Coating fresnel factor
-		const Vector H(Normalize(Vector(localLightDir.x + localEyeDir.x, localLightDir.y + localEyeDir.y,
-			localLightDir.z - localEyeDir.z)));
-		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localEyeDir, H));
-
-		// Filter base layer, the square root is just a heuristic
-		// so that a sheet coated on both faces gets a filtering factor
-		// of 1-S like a reflection
-		return absorption * Sqrt(Spectrum(1.f) - S) * baseF;
+		// One crossing of the coating, by the direction on the coated side
+		const float muCoated = (localLightDir.z > 0.f) ? localLightDir.z : localEyeDir.z;
+		return absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) * baseF;
 	} else
 		return Spectrum();
 }
@@ -244,11 +274,14 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float wCoating = (localFixedDir.z > DEFAULT_COS_EPSILON_STATIC) ? SchlickBSDF_CoatingWeight(ks, localFixedDir) : 0.f;
-	const float wBase = 1.f - wCoating;
-
 	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+
+	// The coating only on the front face
+	const Spectrum EcFixed = GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks);
+	const float wCoating = (localFixedDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+		GlossyCoating_CoatProbability(ks, EcFixed) : 0.f;
+	const float wBase = 1.f - wCoating;
 
 	float basePdf, coatingPdf;
 	Spectrum baseF, coatingF;
@@ -272,7 +305,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 		// Don't add the coating scattering if the base sampled
 		// component is specular	
 		if (!(*event & SPECULAR)) {
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
+			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v,
 				localFixedDir, *localSampledDir);
 			assert (coatingF.IsValid());
 
@@ -282,7 +315,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			coatingPdf = 0.f;
 	} else {
 		// Sample coating BxDF
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, multibounce, IsMultiscattering(),
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v,
 			localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		assert (coatingF.IsValid());
 
@@ -327,39 +360,19 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			result = baseF;
 			assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
 		} else {
-			// Front face reflection: coating+base
+			// Front face reflection: coating + base, albedo-scaled by the eye
+			// direction
+			const Spectrum EcEye = hitPoint.fromLight ?
+				GGXEnergy_CoatE(u, v, fabsf(localSampledDir->z), ks) : EcFixed;
 
-			// Coating fresnel factor
-			const Vector H(Normalize(localFixedDir + *localSampledDir));
-			const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localFixedDir, H));
-
-			// blend in base layer Schlick style
-			// coatingF already takes fresnel factor S into account
-			result = coatingF + absorption * (Spectrum(1.f) - S) * baseF;
+			result = coatingF + absorption * (Spectrum(1.f) - EcEye) * baseF;
 			assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
 		}
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
-		// Transmission
-		// Coating fresnel factor
-		Vector H(localFixedDir.x + localSampledDir->x, localFixedDir.y + localSampledDir->y,
-				localFixedDir.z - localSampledDir->z);
-		const float HLength = H.Length();
-
-		Spectrum S;
-		// I have to handle the case when HLength is 0.0 (or nearly 0.f) in
-		// order to avoid NaN
-		if (HLength < DEFAULT_EPSILON_STATIC)
-			S = 0.f;
-		else {
-			// Normalize
-			H /= HLength;
-			S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localFixedDir, H));
-		}
-
-		// Filter base layer, the square root is just a heuristic
-		// so that a sheet coated on both faces gets a filtering factor
-		// of 1-S like a reflection
-		result = absorption * Sqrt(Spectrum(1.f) - S) * baseF;
+		// Transmission: one crossing of the coating, by the direction on the
+		// coated side
+		const float muCoated = (localFixedDir.z > 0.f) ? localFixedDir.z : localSampledDir->z;
+		result = absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) * baseF;
 		assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
 	} else
 		return Spectrum();
@@ -397,20 +410,21 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
-	if (directPdfW) {
-		const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
-		const float wBase = 1.f - wCoating;
+	// The same pdfs as Evaluate() (the coating pdf is not symmetric)
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+	const bool reflection = (localFixedDir.z * localSampledDir.z > 0.f);
 
-		*directPdfW = wBase * *directPdfW +
-			wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
+	if (directPdfW) {
+		const float wCoating = GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks));
+		*directPdfW = (1.f - wCoating) * *directPdfW +
+			(reflection ? wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir) : 0.f);
 	}
 
 	if (reversePdfW) {
-		const float wCoatingR = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localEyeDir : localLightDir);
-		const float wBaseR = 1.f - wCoatingR;
-
-		*reversePdfW = wBaseR * *reversePdfW +
-			wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
+		const float wCoatingR = (localSampledDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+			GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localSampledDir.z), ks)) : 0.f;
+		*reversePdfW = (1.f - wCoatingR) * *reversePdfW +
+			(reflection ? wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir) : 0.f);
 	}
 }
 
@@ -482,7 +496,6 @@ PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCa
 	props->Set(Property("scene.materials." + name + ".ks")(Ks->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".index")(index->GetSDLValue()));

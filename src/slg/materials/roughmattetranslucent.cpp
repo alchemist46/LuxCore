@@ -42,38 +42,44 @@ Spectrum RoughMatteTranslucentMaterial::Albedo(const HitPoint &hitPoint) const {
 	return r + t;
 }
 
+// The reflection lobe r and the transmission lobe t = kt (1 - kr) have the
+// shape of EON with albedo 1 (Portsmouth et al. 2025, see EON_Evaluate()),
+// so the directional albedo of the material is r + t at every roughness; the
+// transmission lobe is EON evaluated with the light direction mirrored
+// through the surface (diffuse transmission keeps the azimuth). Each lobe is
+// sampled with the cosine distribution of its hemisphere, chosen in
+// proportion to its weight.
+
+namespace {
+
+// The probability of sampling the reflection lobe, 0 or less if there is no lobe
+float RoughMatteTranslucent_ReflectProbability(const Spectrum &r, const Spectrum &t) {
+	const float rf = r.Filter();
+	const float tf = t.Filter();
+	return ((rf + tf) > 0.f) ? rf / (rf + tf) : -1.f;
+}
+
+}
+
 Spectrum RoughMatteTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
+	if (directPdfW)
+		*directPdfW = 0.f;
+	if (reversePdfW)
+		*reversePdfW = 0.f;
+
 	const Spectrum r = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const Spectrum t = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * 
 		// Energy conservation
 		(Spectrum(1.f) - r);
 
-	const bool isKrBlack = r.Black();
-	const bool isKtBlack = t.Black();
+	const float pReflect = RoughMatteTranslucent_ReflectProbability(r, t);
+	if (pReflect < 0.f)
+		return Spectrum();
 
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 1.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 0.f;
-		else {
-			if (directPdfW)
-				*directPdfW = 0.f;
-			if (reversePdfW)
-				*reversePdfW = 0.f;
-			return Spectrum();
-		}
-	}
-	
 	const bool reflected = (CosTheta(localLightDir) * CosTheta(localEyeDir) > 0.f);
-	const float weight = reflected ? threshold : (1.f - threshold);
+	const float weight = reflected ? pReflect : (1.f - pReflect);
 
 	if (directPdfW)
 		*directPdfW = fabsf((hitPoint.fromLight ? CosTheta(localEyeDir) : CosTheta(localLightDir)) * (weight * INV_PI));
@@ -81,28 +87,14 @@ Spectrum RoughMatteTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 	if (reversePdfW)
 		*reversePdfW = fabsf((hitPoint.fromLight ? CosTheta(localLightDir) : CosTheta(localEyeDir)) * (weight * INV_PI));
 
-	const float s = sigma->GetFloatValue(hitPoint);
-	const float sigma2 = s * s;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(localEyeDir);
-	const float sinthetao = SinTheta(localLightDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(localLightDir) * CosPhi(localEyeDir) +
-			SinPhi(localLightDir) * SinPhi(localEyeDir);
-		maxcos = max(0.f, dcos);
-	}
-
-	const Spectrum result = (INV_PI * fabsf(localLightDir.z) *
-		(A + B * maxcos * sinthetai * sinthetao / max(fabsf(CosTheta(localLightDir)), fabsf(CosTheta(localEyeDir)))));
-
-	if (localLightDir.z * localEyeDir.z > 0.f) {
+	const float roughness = Clamp(sigma->GetFloatValue(hitPoint), 0.f, 1.f);
+	if (reflected) {
 		*event = DIFFUSE | REFLECT;
-		return r * result;
+		return r * EON_Evaluate(Spectrum(1.f), roughness, localLightDir, localEyeDir) * fabsf(localLightDir.z);
 	} else {
 		*event = DIFFUSE | TRANSMIT;
-		return t * result;
+		const Vector mirroredLightDir(localLightDir.x, localLightDir.y, -localLightDir.z);
+		return t * EON_Evaluate(Spectrum(1.f), roughness, mirroredLightDir, localEyeDir) * fabsf(localLightDir.z);
 	}
 }
 
@@ -113,105 +105,40 @@ Spectrum RoughMatteTranslucentMaterial::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	*localSampledDir = CosineSampleHemisphere(u0, u1, pdfW);
-	const float absCosSampledDir = fabsf(localSampledDir->z);
-	if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
+	const Spectrum r = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum t = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * 
+		// Energy conservation
+		(Spectrum(1.f) - r);
+	const float pReflect = RoughMatteTranslucent_ReflectProbability(r, t);
+	if (pReflect < 0.f)
 		return Spectrum();
 
-	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * 
-		// Energy conservation
-		(Spectrum(1.f) - kr);
+	float cosPdf;
+	*localSampledDir = CosineSampleHemisphere(u0, u1, &cosPdf);
+	if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
 
-	const bool isKrBlack = kr.Black();
-	const bool isKtBlack = kt.Black();
+	// Only the z flips: a diffuse transmission keeps the azimuth
+	if (passThroughEvent < pReflect)
+		localSampledDir->z *= Sgn(localFixedDir.z);
+	else
+		localSampledDir->z *= -Sgn(localFixedDir.z);
 
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 1.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 0.f;
-		else
-			return Spectrum();
-	}
+	// The value and the pdf of the mixture from the evaluation
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = Evaluate(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr);
+	if (f.Black() || !(*pdfW > 0.f))
+		return Spectrum();
 
-	const float s = sigma->GetFloatValue(hitPoint);
-	const float sigma2 = s * s;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(localFixedDir);
-	const float sinthetao = SinTheta(*localSampledDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(*localSampledDir) * CosPhi(localFixedDir) +
-			SinPhi(*localSampledDir) * SinPhi(localFixedDir);
-		maxcos = max(0.f, dcos);
-	}
-	const float coef = (A + B * maxcos * sinthetai * sinthetao / max(fabsf(CosTheta(*localSampledDir)), fabsf(CosTheta(localFixedDir))));
-
-	if (passThroughEvent < threshold) {
-		*localSampledDir *= Sgn(localFixedDir.z);
-		*event = DIFFUSE | REFLECT;
-		*pdfW *= threshold;
-		if (hitPoint.fromLight)
-			return kr * (coef * fabsf(localFixedDir.z / (absCosSampledDir * threshold)));
-		else
-			return kr * (coef / threshold);
-	} else {
-		*localSampledDir *= -Sgn(localFixedDir.z);
-		*event = DIFFUSE | TRANSMIT;
-		*pdfW *= (1.f - threshold);
-		if (hitPoint.fromLight)
-			return kt * (coef * fabsf(localFixedDir.z / (absCosSampledDir * (1.f - threshold))));
-		else
-			return kt * (coef / (1.f - threshold));
-	}
+	return f / *pdfW;
 }
 
 void RoughMatteTranslucentMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
-	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * 
-		// Energy conservation
-		(Spectrum(1.f) - kr);
-
-	const bool isKrBlack = kr.Black();
-	const bool isKtBlack = kt.Black();
-
-	// Calculate the weight of reflecting/transmitting
-	float weight;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			weight = .5f;
-		else
-			weight = 1.f;
-	} else {
-		if (!isKtBlack)
-			weight = 0.f;
-		else {
-			if (directPdfW)
-				*directPdfW = 0.f;
-
-			if (reversePdfW)
-				*reversePdfW = 0.f;
-			return;
-		}
-	}
-
-	const bool reflected = (Sgn(CosTheta(localLightDir)) == Sgn(CosTheta(localEyeDir)));
-	weight = reflected ? weight : (1.f - weight);
-
-	if (directPdfW)
-		*directPdfW = fabsf((hitPoint.fromLight ? localEyeDir.z : localLightDir.z) * (weight * INV_PI));
-
-	if (reversePdfW)
-		*reversePdfW = fabsf((hitPoint.fromLight ? localLightDir.z : localEyeDir.z) * (weight * INV_PI));
+	BSDFEvent event;
+	Evaluate(hitPoint, localLightDir, localEyeDir, &event, directPdfW, reversePdfW);
 }
 
 void RoughMatteTranslucentMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {

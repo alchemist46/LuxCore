@@ -141,6 +141,12 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		}
 	}
 
+	// The random walk of the subsurface materials is compiled only for the
+	// scenes that have one: it costs the other scenes up to a few percent
+	// (the code changes how the big kernel is compiled, not what it runs)
+	if (renderEngine->compiledScene->hasSubsurface)
+		kernelsParameters.push_back("-D PARAM_ENABLE_SUBSURFACE");
+
 	// The working colour space matrix (no parameter in Rec.709)
 	renderEngine->renderConfig.GetScene().GetWorkingColorSpace().AddKernelParameters(kernelsParameters);
 
@@ -324,6 +330,7 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksIntersectHitPointBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksDirectLightBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksDirectLightVertexBuff);
+	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksSSSWalkBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksStateBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksBSDFBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, pathStatesBuff);

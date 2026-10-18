@@ -47,7 +47,7 @@ Material::Material(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 		glossiness(0.f),
 		isVisibleIndirectDiffuse(true), isVisibleIndirectGlossy(true), isVisibleIndirectSpecular(true),
 		isShadowCatcher(false), isShadowCatcherOnlyInfiniteLights(false), isPhotonGIEnabled(true),
-		isHoldout(false), multiscattering(false) {
+		isHoldout(false) {
 	SetEmittedTheta(90.f);
 	UpdateEmittedFactor();
 	UpdateAvgPassThroughTransparency();
@@ -346,6 +346,7 @@ string Material::MaterialType2String(const MaterialType type) {
 		case GLOSSYCOATING: return "GLOSSYCOATING";
 		case DISNEY: return "DISNEY";
 		case TWOSIDED: return "TWOSIDED";
+		case SUBSURFACEMAT: return "SUBSURFACE";
 
 		// Volumes
 		case HOMOGENEOUS_VOL: return "HOMOGENEOUS_VOL";
@@ -560,8 +561,7 @@ float slg::SchlickBSDF_CoatingWeight(const Spectrum &ks, const Vector &localFixe
 }
 
 Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
-		const float u, const float v, const bool mbounce,
-		const bool multiscattering,
+		const float u, const float v,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir.z);
@@ -573,27 +573,19 @@ Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
 
 	const float G = Microfacet_G(u, v, localFixedDir, localSampledDir);
 
-	// Multibounce - alternative with interreflection in the coating creases
-	float factor = Microfacet_D(u, v, wh) * G;
-	if (!fromLight)
-		factor = factor / (4.f * coso) +
-				(mbounce ? cosi * Clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) : 0.f);
-	else
-		factor = factor / (4.f * cosi) + 
-				(mbounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) : 0.f);
+	const float factor = Microfacet_D(u, v, wh) * G / (4.f * (fromLight ? cosi : coso));
 	assert (IsValid(factor));
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? localSampledDir : localFixedDir;
-	const Spectrum msScale = Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
+	const Spectrum msScale = Microfacet_MSScale(u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return factor * S * msScale;
 }
 
 Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks,
-		const float u, const float v, const bool mbounce,
-		const bool multiscattering,
+		const float u, const float v,
 		const Vector &localFixedDir, Vector *localSampledDir, float u0, float u1, float *pdf) {
 	*pdf = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
 
@@ -613,18 +605,11 @@ Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks
 
 	const float d = Microfacet_D(u, v, wh);
 	const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
-	if (!fromLight)
-		//CoatingF(sw, *wi, wo, f_);
-		S *= (d / *pdf) * G / (4.f * coso) + 
-				(mbounce ? cosi * Clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) / *pdf : 0.f);
-	else
-		//CoatingF(sw, wo, *wi, f_);
-		S *= (d / *pdf) * G / (4.f * cosi) + 
-				(mbounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) / *pdf : 0.f);
+	S *= (d / *pdf) * G / (4.f * (fromLight ? cosi : coso));
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? *localSampledDir : localFixedDir;
-	S *= Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
+	S *= Microfacet_MSScale(u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return S;
@@ -634,4 +619,55 @@ float slg::SchlickBSDF_CoatingPdf(const float u, const float v,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
 	return Microfacet_PdfReflect(u, v, localFixedDir, localSampledDir);
 }
+
+//------------------------------------------------------------------------------
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025,
+// "EON: A practical energy-preserving rough diffuse BRDF", JCGT), the lobe of
+// roughmatte and roughmattetranslucent: Fujii's single-scattering lobe with
+// its exact albedo and a Lambertian-like multiple-scattering term. The
+// roughness r is sigma clamped to [0, 1].
+//------------------------------------------------------------------------------
+
+static const float EON_CONST1 = .5f - 2.f / (3.f * M_PI);
+static const float EON_CONST2 = 2.f / 3.f - 28.f / (15.f * M_PI);
+
+float slg::EON_E(const float muIn, const float r) {
+	// A direction rounded to z slightly above 1 made acosf() NaN (times Si = 0)
+	const float mu = Clamp(muIn, 1e-4f, 1.f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+	const float Si = sqrtf(Max(0.f, 1.f - mu * mu));
+	const float G = Si * (acosf(mu) - Si * mu) +
+			(2.f / 3.f) * ((Si / mu) * (1.f - Si * Si * Si) - Si);
+
+	return AF * (1.f + (r * INV_PI) * G);
+}
+
+// f_ss + f_ms without the cosine term, for two directions in the same hemisphere
+Spectrum slg::EON_Evaluate(const Spectrum &rho, const float r, const Vector &wi, const Vector &wo) {
+	const float mui = Max(fabsf(wi.z), 1e-4f);
+	const float muo = Max(fabsf(wo.z), 1e-4f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+
+	// dot(wi, wo) - mui * muo
+	const float s = wi.x * wo.x + wi.y * wo.y;
+	const float stinv = (s > 0.f) ? s / Max(mui, muo) : s;
+	const Spectrum fss = rho * (INV_PI * AF * (1.f + r * stinv));
+
+	const float Eo = EON_E(muo, r);
+	const float Ei = EON_E(mui, r);
+	const float Eavg = AF * (1.f + EON_CONST2 * r);
+	// Only the denominators are guarded: a floor on 1 - E (it was .01) added
+	// a multiple-scattering term of about 1% at r = 0, where E = 1 and the
+	// lobe must be exactly Lambertian. (1 - Eo) (1 - Ei) / (1 - Eavg) goes to
+	// 0 with r.
+	const float eps = 1e-6f;
+	Spectrum fms;
+	for (u_int i = 0; i < 3; ++i) {
+		const float rhoMS = rho.c[i] * rho.c[i] * Eavg / Max(1.f - rho.c[i] * (1.f - Eavg), eps);
+		fms.c[i] = rhoMS * INV_PI * Max(0.f, 1.f - Eo) * Max(0.f, 1.f - Ei) / Max(eps, 1.f - Eavg);
+	}
+
+	return fss + fms;
+}
+
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

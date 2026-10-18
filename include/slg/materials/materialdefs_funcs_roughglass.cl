@@ -105,6 +105,11 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_EvaluateRough(__global const HitPo
 			return BLACK;
 		}
 		wh /= sqrt(lengthSquared);
+
+		// Discard the back-facing microfacets (see roughglass.cpp)
+		if ((dot(eyeDir, wh) * eyeDir.z <= 0.f) || (dot(lightDir, wh) * lightDir.z <= 0.f))
+			return BLACK;
+
 		const float cosThetaI = fabs(CosTheta(eyeDir));
 		const float cosThetaIH = fabs(dot(eyeDir, wh));
 		const float cosThetaOH = dot(lightDir, wh);
@@ -185,7 +190,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 	BSDFEvent event;
 	float directPdfW;
 	const float3 result = RoughGlassMaterial_EvaluateRough(hitPoint, lightDir, eyeDir,
-			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor,
 			&event, &directPdfW);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
@@ -211,6 +216,8 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_SampleRough(__global const HitPoin
 	if (isKtBlack && isKrBlack)
 		return BLACK;
 
+	// A visible microfacet normal (only the direction is used here, the pdf
+	// comes from RoughGlassMaterial_EvaluateRough() below)
 	float3 wh;
 	float d, specPdf;
 	Microfacet_SampleH(u, v, fixedDir, u0, u1, &wh, &d, &specPdf);
@@ -220,95 +227,46 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_SampleRough(__global const HitPoin
 
 	const float ntc = nt / nc;
 
-	const float coso = fabs(fixedDir.z);
+	// Decide to transmit or reflect (the same probabilities as the evaluation)
+	const float threshold = isKrBlack ? 1.f : (isKtBlack ? 0.f : .5f);
 
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 0.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 1.f;
-		else {
-			return BLACK;
-		}
-	}
-
-	float3 result;
 	if (passThroughEvent < threshold) {
 		// Transmit
-
 		const bool entering = (CosTheta(fixedDir) > 0.f);
 		const float eta = entering ? (nc / nt) : ntc;
 		const float eta2 = eta * eta;
 		const float sinThetaIH2 = eta2 * fmax(0.f, 1.f - cosThetaOH * cosThetaOH);
-		if (sinThetaIH2 >= 1.f) {
+		if (sinThetaIH2 >= 1.f)
 			return BLACK;
-		}
 		float cosThetaIH = sqrt(1.f - sinThetaIH2);
 		if (entering)
 			cosThetaIH = -cosThetaIH;
 		const float length = eta * cosThetaOH + cosThetaIH;
 		*sampledDir = length * wh - eta * fixedDir;
 
-		const float lengthSquared = length * length;
-		*pdfW = specPdf * fabs(cosThetaIH) / lengthSquared;
-		if (*pdfW <= 0.f) {
+		// A refraction that points back into the side it came from is not a
+		// transmission (see roughglass.cpp)
+		if (fixedDir.z * sampledDir->z >= 0.f)
 			return BLACK;
-		}
-
-		const float cosi = fabs(sampledDir->z);
-
-		const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
-		float factor = (d / specPdf) * G * fabs(cosThetaOH) / threshold;
-
-		//if (!hitPoint.fromLight) {
-			// The radiance form, like the evaluation and the glass: eta2 is
-			// (eta_eye / eta_light)^2
-			const float F = FresnelCauchy_Evaluate(ntc, cosThetaIH);
-			result = (factor / coso) * kt * (1.f - F) * eta2;
-		//} else {
-		//	const Spectrum F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
-		//	result = (factor / cosi) * kt * (Spectrum(1.f) - F);
-		//}
-
-		*pdfW *= threshold;
-		*event = GLOSSY | TRANSMIT;
 	} else {
 		// Reflect
-		*pdfW = specPdf / (4.f * fabs(cosThetaOH));
-		if (*pdfW <= 0.f) {
-			return BLACK;
-		}
-
 		*sampledDir = 2.f * cosThetaOH * wh - fixedDir;
 
-		const float cosi = fabs(sampledDir->z);
-		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (fixedDir.z * sampledDir->z < 0.f)) {
+		if (fixedDir.z * sampledDir->z <= 0.f)
 			return BLACK;
-		}
-
-		const float G = Microfacet_G(u, v, fixedDir, *sampledDir);
-		float factor = (d / specPdf) * G * fabs(cosThetaOH) / (1.f - threshold);
-
-		const float F = FresnelCauchy_Evaluate(ntc, cosThetaOH);
-		//factor /= (!hitPoint.fromLight) ? coso : cosi;
-		factor /= coso;
-		result = factor * F * kr;
-		
-		if (localFilmThickness > 0.f)
-			result *= CalcFilmColor(fixedDir, localFilmThickness, localFilmIor);
-
-		*pdfW *= (1.f - threshold);
-		*event = GLOSSY | REFLECT;
 	}
+	if (fabs(sampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+		return BLACK;
 
-	result *= RoughGlassMaterial_MSScale(multiscattering, u, v, fixedDir, ntc);
+	// The value and the pdf from the evaluation (eye path: the light
+	// direction is the sampled one), consistent by construction
+	const float3 f = RoughGlassMaterial_EvaluateRough(hitPoint, *sampledDir, fixedDir,
+			kt, kr, nc, nt, u, v, multiscattering, localFilmThickness, localFilmIor,
+			event, pdfW);
+	if (Spectrum_IsBlack(f) || !(*pdfW > 0.f))
+		return BLACK;
 
-	return result;
+	return f / *pdfW;
 }
 
 OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* restrict material,
@@ -339,7 +297,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 	float pdfW;
 	BSDFEvent event;
 	const float3 result = RoughGlassMaterial_SampleRough(hitPoint, fixedDir, u0, u1, passThroughEvent,
-			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor,
 			&sampledDir, &pdfW, &event);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;

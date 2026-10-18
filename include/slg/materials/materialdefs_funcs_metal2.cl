@@ -54,9 +54,6 @@ __constant float Metal2Material_GLWeights[4] = { .173927423f, .326072577f, .3260
 OPENCL_FORCE_INLINE float3 Metal2Material_MSScale(__global const Material* restrict material, __global const HitPoint *hitPoint,
 		const float u, const float v, const float cosEye
 		MATERIALS_PARAM_DECL) {
-	if (!material->multiscattering)
-		return WHITE;
-
 	float3 n, k;
 	Metal2Material_GetNK(material, hitPoint,
 			&n, &k

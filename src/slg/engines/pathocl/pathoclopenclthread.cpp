@@ -79,6 +79,55 @@ static void PGICUpdateCallBack(CompiledScene *compiledScene) {
 	compiledScene->RecompilePhotonGI();
 }
 
+// At the halt, the paths in flight finish instead of being dropped: the ones
+// still running are the long paths (deep bounces, subsurface walks), so the
+// finished samples alone would be biased. The tasks start no new sample
+// (SobolSamplerSharedData::drain) and the kernels run until all are done.
+void PathOCLOpenCLRenderThread::DrainPaths() {
+	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
+	const u_int taskCount = engine->taskCount;
+
+	const u_int drain = 1;
+	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+			offsetof(slg::ocl::SobolSamplerSharedData, drain), sizeof(u_int), &drain);
+
+	// The longest path: 2 iterations per vertex, plus the steps of its
+	// subsurface walks
+	const u_int maxPathDepth = engine->pathTracer.maxPathDepth.depth;
+	const u_int maxIterations = 2 * maxPathDepth + 2 +
+			(engine->compiledScene->hasSubsurface ? maxPathDepth * 256 : 0);
+	const u_int checkIterations = 8;
+	vector<slg::ocl::pathoclbase::PathState> pathStates(taskCount);
+	for (u_int iterations = 0; iterations < maxIterations; iterations += checkIterations) {
+		for (u_int i = 0; i < checkIterations; ++i) {
+			EnqueueTraceRays();
+			EnqueueAdvancePathsKernel();
+		}
+
+		intersectionDevice.EnqueueReadBuffer(pathStatesBuff, CL_TRUE,
+				sizeof(slg::ocl::pathoclbase::PathState) * taskCount, &pathStates[0]);
+
+		bool done = true;
+		for (const auto state : pathStates) {
+			if (state != slg::ocl::pathoclbase::MK_DONE) {
+				done = false;
+				break;
+			}
+		}
+		if (done)
+			break;
+	}
+
+	// The sample count of the finished paths
+	intersectionDevice.EnqueueReadBuffer(taskStatsBuff, CL_TRUE,
+			sizeof(slg::ocl::pathoclbase::GPUTaskStats) * taskCount,
+			gpuTaskStats.get());
+	double totalCount = 0.0;
+	for (size_t i = 0; i < taskCount; ++i)
+		totalCount += gpuTaskStats[i].sampleCount;
+	threadFilms[0]->GetFilm().SetSampleCount(totalCount, totalCount, 0.0);
+}
+
 void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	//SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] Rendering thread started");
 
@@ -122,6 +171,15 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	// The halt spp: the transfers predict when the next batch of kernels
 	// reaches it, from the spp done per kernel iteration (see below)
 	const u_int haltSPP = engine->GetEyeHaltSPP();
+	// With the Sobol sampler, the paths in flight finish at the halt
+	// (DrainPaths()): one sample per task of every device is still to come,
+	// so the halt is reached that many samples earlier
+	const bool drainAtHalt = (engine->oclSampler->type == slg::ocl::SOBOL);
+	bool drain = false;
+	const u_int *subRegion = engine->GetFilm().GetSubRegion();
+	const double regionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+	const double haltTargetSPP = drainAtHalt ?
+		(haltSPP - double(taskCount) * engine->renderOCLThreads.size() / regionPixelCount) : haltSPP;
 	double haltCheckSPP = 0.0, sppPerIteration = 0.0;
 	u_int iterationsSinceHaltCheck = 0;
 	// The first transfer with samples: the spp per iteration is averaged from
@@ -170,7 +228,7 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		// while the first paths finish) doesn't overshoot it.
 		if (haltSPP > 0) {
 			if (sppPerIteration > 0.0) {
-				const double halfIterationsLeft = .5 * (haltSPP - haltCheckSPP) / sppPerIteration;
+				const double halfIterationsLeft = .5 * (haltTargetSPP - haltCheckSPP) / sppPerIteration;
 				transfer = transfer || (iterationsSinceHaltCheck + iterations >= halfIterationsLeft);
 			} else
 				transfer = true;
@@ -223,8 +281,10 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 				haltCheckSPP = spp;
 				iterationsSinceHaltCheck = 0;
 
-				if (spp > haltSPP)
+				if (drainAtHalt ? (spp >= haltTargetSPP) : (spp > haltSPP)) {
+					drain = drainAtHalt;
 					break;
+				}
 			}
 		}
 
@@ -232,8 +292,8 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		// samples still missing)
 		u_int batchIterations = iterations;
 		if ((haltSPP > 0) && (sppPerIteration > 0.0)) {
-			const double halfIterationsLeft = .5 * (haltSPP - haltCheckSPP) / sppPerIteration;
-			batchIterations = (u_int)Clamp(ceil(halfIterationsLeft - iterationsSinceHaltCheck), 1.0, (double)iterations);
+			const double halfIterationsLeft = .5 * (haltTargetSPP - haltCheckSPP) / sppPerIteration;
+			batchIterations =(u_int)Clamp(ceil(halfIterationsLeft - iterationsSinceHaltCheck), 1.0, (double)iterations);
 		}
 
 		//------------------------------------------------------------------
@@ -272,8 +332,10 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 			iterations = Min<u_int>(iterations + 1, 128);
 
 		// Check halt conditions (the halt spp is checked after the transfers)
-		if (engine->GetFilm().GetConvergence() == 1.f)
+		if (engine->GetFilm().GetConvergence() == 1.f) {
+			drain = drainAtHalt;
 			break;
+		}
 
 		if (engine->photonGICache) {
                     if (engine->photonGICache->Update(threadIndex, engine->GetTotalEyeSPP(), pgicUpdateCallBack)) {
@@ -282,6 +344,9 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                     }
 		}
 	} // ~while
+
+	if (drain)
+		DrainPaths();
 
 		//SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] Rendering thread halted");
         if (stop_token.stop_requested())

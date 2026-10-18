@@ -71,7 +71,7 @@ Spectrum ArchGlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 	*localSampledDir = Vector(-localFixedDir.x, -localFixedDir.y, localFixedDir.z);
 
 	const float ntc = nt / nc;
-	const Spectrum result = kr * FresnelTexture::CauchyEvaluate(ntc, costheta);
+	const Spectrum result = kr * ArchGlassMaterial::SlabReflectance(FresnelTexture::CauchyEvaluate(ntc, costheta));
 	
 	if (localFilmThickness > 0.f) {
 		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
@@ -86,29 +86,22 @@ Spectrum ArchGlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 	if (kt.Black())
 		return Spectrum();
 
-	// Note: there can not be total internal reflection for 
-	
+	// Note: there can not be total internal reflection for a thin slab
+
 	*localSampledDir = -localFixedDir;
 
-	const float ntc = nt / nc;
+	// The whole slab (both interfaces and the light bouncing between them)
+	// is applied when the fixed direction is on the front face: there it
+	// reflects SlabReflectance() and transmits the rest. The back face is
+	// fully transparent, so a closed pane (entered through a front face, left
+	// through a back face) gets the slab once, and a path traced from the
+	// light gets the same factor as the same path traced from the eye.
 	const float costheta = CosTheta(localFixedDir);
-	const bool entering = (costheta > 0.f);
-	float ce;
-	if (!hitPoint.fromLight) {
-		if (entering)
-			ce = 0.f;
-		else
-			ce = FresnelTexture::CauchyEvaluate(ntc, -costheta);
-	} else {
-		if (entering)
-			ce = FresnelTexture::CauchyEvaluate(ntc, costheta);
-		else
-			ce = 0.f;
-	}
-	const float factor = 1.f - ce;
-	const float result = (1.f + factor * factor) * ce;
+	if (costheta <= 0.f)
+		return kt;
 
-	return (1.f - result) * kt;
+	const float ntc = nt / nc;
+	return kt * (1.f - ArchGlassMaterial::SlabReflectance(FresnelTexture::CauchyEvaluate(ntc, costheta)));
 }
 
 Spectrum ArchGlassMaterial::Sample(const HitPoint &hitPoint,

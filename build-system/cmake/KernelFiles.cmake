@@ -113,6 +113,8 @@ set(SLG_KERNELS
     include/slg/bsdf/hitpoint_funcs.cl
     include/slg/materials/material_types.cl
     include/slg/materials/microfacet_energy_tables.cl
+    include/slg/materials/sheen_ltc_tables.cl
+    include/slg/materials/sheen_funcs.cl
     include/slg/materials/materialdefs_funcs_generic.cl
     include/slg/materials/materialdefs_funcs_default.cl
     include/slg/materials/materialdefs_funcs_archglass.cl
@@ -135,6 +137,8 @@ set(SLG_KERNELS
     include/slg/materials/materialdefs_funcs_roughmatte_translucent.cl
     include/slg/materials/materialdefs_funcs_thinfilmcoating.cl
     include/slg/materials/materialdefs_funcs_velvet.cl
+    include/slg/materials/materialdefs_funcs_subsurface.cl
+    include/slg/materials/subsurface_funcs.cl
     include/slg/materials/materialdefs_funcs_disney.cl
     include/slg/materials/materialdefs_funcs_twosided.cl
     include/slg/materials/material_funcs_evalops.cl

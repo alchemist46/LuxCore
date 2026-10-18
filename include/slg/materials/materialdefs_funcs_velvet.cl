@@ -60,6 +60,36 @@ OPENCL_FORCE_INLINE void VelvetMaterial_GetEmittedRadiance(__global const Materi
 	DefaultMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 }
 
+// The microfiber sheen (see velvet.cpp, sheen_funcs.cl). The GPU traces eye
+// paths only: the eye direction is the fixed one and the LTC is sampled.
+OPENCL_FORCE_INLINE float3 VelvetMaterial_EvaluateSheen(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, const float3 localLightDir, const float3 localEyeDir,
+		float *directPdfW
+		MATERIALS_PARAM_DECL) {
+	*directPdfW = 0.f;
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return BLACK;
+
+	// Both faces: the back face is the mirror image of the front one
+	const float flip = (localEyeDir.z < 0.f) ? -1.f : 1.f;
+	const float3 eyeDir = MAKE_FLOAT3(localEyeDir.x, localEyeDir.y, flip * localEyeDir.z);
+	const float3 lightDir = MAKE_FLOAT3(localLightDir.x, localLightDir.y, flip * localLightDir.z);
+
+	float a, b, albedo;
+	SheenLTC_Lookup(eyeDir.z, Texture_GetFloatValue(material->velvet.roughnessTexIndex, hitPoint TEXTURES_PARAM),
+			&a, &b, &albedo);
+	if ((fabs(a) < 1e-5f) || (albedo < 1e-5f))
+		return BLACK;
+
+	const float ltc = Sheen_LTC(a, b, eyeDir, lightDir);
+	if (!(ltc > 0.f))
+		return BLACK;
+
+	*directPdfW = ltc;
+	const float3 kdVal = Texture_GetSpectrumValue(material->velvet.kdTexIndex, hitPoint TEXTURES_PARAM);
+	return Spectrum_Clamp(kdVal) * (albedo * ltc);
+}
+
 OPENCL_FORCE_INLINE void VelvetMaterial_Evaluate(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -68,35 +98,13 @@ OPENCL_FORCE_INLINE void VelvetMaterial_Evaluate(__global const Material* restri
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
-	const float directPdfW = fabs(lightDir.z * M_1_PI_F);
-
+	float directPdfW;
+	const float3 result = VelvetMaterial_EvaluateSheen(material, hitPoint, lightDir, eyeDir,
+			&directPdfW MATERIALS_PARAM);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
 	const BSDFEvent event = DIFFUSE | REFLECT;
-
-	const float3 kdVal = Texture_GetSpectrumValue(material->velvet.kdTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 kd = Spectrum_Clamp(kdVal);
-	const float cosv = -dot(lightDir, eyeDir);
-
-	// Compute phase function
-
-	const float B = 3.0f * cosv;
-
-	const float A1 = Texture_GetFloatValue(material->velvet.p1TexIndex, hitPoint TEXTURES_PARAM);
-	const float A2 = Texture_GetFloatValue(material->velvet.p2TexIndex, hitPoint TEXTURES_PARAM);
-	const float A3 = Texture_GetFloatValue(material->velvet.p3TexIndex, hitPoint TEXTURES_PARAM);
-
-	float p = 1.0f + A1 * cosv + A2 * 0.5f * (B * cosv - 1.0f) + A3 * 0.5 * (5.0f * cosv * cosv * cosv - B);
-	p = p / (4.0f * M_PI_F);
- 
-	const float delta = Texture_GetFloatValue(material->velvet.thicknessTexIndex, hitPoint TEXTURES_PARAM);
-	p = (p * delta) / fabs(eyeDir.z);
-
-	// Clamp the BRDF (page 7)
-	if (p > 1.0f)
-		p = 1.0f;
-	else if (p < 0.0f)
-		p = 0.0f;
-
-	const float3 result = p * kd;
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushBSDFEvent(event);
@@ -118,39 +126,31 @@ OPENCL_FORCE_INLINE void VelvetMaterial_Sample(__global const Material* restrict
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	float pdfW;
-	const float3 sampledDir = (signbit(fixedDir.z) ? -1.f : 1.f) * CosineSampleHemisphereWithPdf(u0, u1, &pdfW);
-	if (fabs(CosTheta(sampledDir)) < DEFAULT_COS_EPSILON_STATIC) {
+	const float flip = (fixedDir.z < 0.f) ? -1.f : 1.f;
+	const float3 eyeDir = MAKE_FLOAT3(fixedDir.x, fixedDir.y, flip * fixedDir.z);
+
+	float a, b, albedo;
+	SheenLTC_Lookup(eyeDir.z, Texture_GetFloatValue(material->velvet.roughnessTexIndex, hitPoint TEXTURES_PARAM),
+			&a, &b, &albedo);
+	if ((fabs(a) < 1e-5f) || (albedo < 1e-5f)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
+	const float3 lightDir = Sheen_SampleLTC(a, b, eyeDir, u0, u1);
+	if (lightDir.z < DEFAULT_COS_EPSILON_STATIC) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
+	const float3 sampledDir = MAKE_FLOAT3(lightDir.x, lightDir.y, flip * lightDir.z);
+
+	float pdfW;
+	const float3 f = VelvetMaterial_EvaluateSheen(material, hitPoint, sampledDir, fixedDir,
+			&pdfW MATERIALS_PARAM);
+	if (Spectrum_IsBlack(f) || !(pdfW > 0.f)) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
+
+	const float3 result = f / pdfW;
 	const BSDFEvent event = DIFFUSE | REFLECT;
-
-	const float3 kdVal = Texture_GetSpectrumValue(material->velvet.kdTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 kd = Spectrum_Clamp(kdVal);
-	const float cosv = dot(-fixedDir, sampledDir);
-
-	// Compute phase function
-
-	const float B = 3.0f * cosv;
-
-	const float A1 = Texture_GetFloatValue(material->velvet.p1TexIndex, hitPoint TEXTURES_PARAM);
-	const float A2 = Texture_GetFloatValue(material->velvet.p2TexIndex, hitPoint TEXTURES_PARAM);
-	const float A3 = Texture_GetFloatValue(material->velvet.p3TexIndex, hitPoint TEXTURES_PARAM);
-
-	float p = 1.0f + A1 * cosv + A2 * 0.5f * (B * cosv - 1.0f) + A3 * 0.5 * (5.0f * cosv * cosv * cosv - B);
-	p = p / (4.0f * M_PI_F);
- 
-	const float delta = Texture_GetFloatValue(material->velvet.thicknessTexIndex, hitPoint TEXTURES_PARAM);
-	p = (p * delta) / fabs(fixedDir.z);
-
-	// Clamp the BRDF (page 7)
-	if (p > 1.0f)
-		p = 1.0f;
-	else if (p < 0.0f)
-		p = 0.0f;
-
-	const float3 result = kd * (p / pdfW);
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

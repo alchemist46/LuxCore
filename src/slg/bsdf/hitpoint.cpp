@@ -39,6 +39,7 @@ void HitPoint::Init(const bool fixedFromLight, const bool throughShadowTransp,
 	throughShadowTransparency = throughShadowTransp;
 	passThroughEvent = passThroughEvnt;
 	regularization = 0.f;
+	subsurface = HITPOINT_SSS_SURFACE;
 
 	p = pnt;
 	fixedDir = dir;
@@ -85,5 +86,6 @@ void HitPoint::Init() {
 	intoObject = true;
 	throughShadowTransparency = false;
 	regularization = 0.f;
+	subsurface = HITPOINT_SSS_SURFACE;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

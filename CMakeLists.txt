@@ -444,6 +444,7 @@ add_subdirectory(samples/luxcoreui)
 
 if(LUXCORE_TESTS)
   add_subdirectory(pyunittests)
+  add_subdirectory(tests/bsdf)
 endif()
 
 ################################################################################

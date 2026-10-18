@@ -124,6 +124,35 @@ void TilePathOCLRenderThread::RenderTileWork(const TileWork &tileWork,
 		EnqueueAdvancePathsKernel();
 	}
 
+	// A step of a subsurface random walk takes an iteration too, and a walk can
+	// take up to SSS_MAX_BOUNCES of them: the kernels run until every task is
+	// done, checked from the path states every few iterations
+	if (engine->compiledScene->hasSubsurface) {
+		vector<slg::ocl::pathoclbase::PathState> pathStates(engine->taskCount);
+		// The walk steps of the deepest path that can still be in flight
+		const u_int maxExtraIterations = engine->pathTracer.maxPathDepth.depth * 256;
+		const u_int checkIterations = 16;
+		for (u_int extraIterations = 0; extraIterations < maxExtraIterations; extraIterations += checkIterations) {
+			intersectionDevice.EnqueueReadBuffer(pathStatesBuff, CL_TRUE,
+					sizeof(slg::ocl::pathoclbase::PathState) * engine->taskCount, &pathStates[0]);
+
+			bool done = true;
+			for (const auto state : pathStates) {
+				if (state != slg::ocl::pathoclbase::MK_DONE) {
+					done = false;
+					break;
+				}
+			}
+			if (done)
+				break;
+
+			for (u_int i = 0; i < checkIterations; ++i) {
+				EnqueueTraceRays();
+				EnqueueAdvancePathsKernel();
+			}
+		}
+	}
+
 	// Async. transfer of the Film buffers
 	threadFilms[filmIndex]->RecvFilm(intersectionDevice);
 	threadFilms[filmIndex]->GetFilm().AddSampleCount(0,

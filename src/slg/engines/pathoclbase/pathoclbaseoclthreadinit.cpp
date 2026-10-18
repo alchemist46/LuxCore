@@ -163,6 +163,11 @@ void PathOCLBaseOCLRenderThread::InitMaterials() {
 			nullptr, sizeof(float) * renderEngine->compiledScene->maxMaterialEvalStackSize *
 			taskCount, "Material evaluation stacks");
 
+	// The random walks of the subsurface materials (one element when there is
+	// none, only to keep the same kernel arguments)
+	intersectionDevice.AllocBufferRW(&tasksSSSWalkBuff, nullptr,
+			GPUTASK_SSSWALK_SIZE * (renderEngine->compiledScene->hasSubsurface ? taskCount : 1),
+			"GPUTaskSSSWalk");
 }
 
 void PathOCLBaseOCLRenderThread::InitSceneObjects() {
@@ -503,6 +508,7 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 		sssd->todoPixelCount = 0;
 		sssd->todoBucketCount = 0;
 		sssd->todoPixelsOffset = filmRegionPixelCount + renderEngine->pathTracer.eyeSampleSize * SOBOL_BITS;
+		sssd->drain = 0;
 		uploadedTodoPixels.reset();
 
 		// Initialize all pass values. The pass buffer is attached at the
