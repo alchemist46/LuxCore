@@ -647,10 +647,9 @@ OPENCL_FORCE_INLINE void ClothMaterial_Sample(__global const Material* restrict 
 	__constant Yarn *yarn = GetYarn(Preset, Weave, Repeat_U, Repeat_V,
             hitPoint->defaultUV.u, hitPoint->defaultUV.v, &uv, &umax, &scale);
 
-//	if (!hitPoint.fromLight)
-	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, fixedDir, sampledDir);
-//	else
-//	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, sampledDir, fixedDir);
+	// Eye path (the GPU traces no light paths): the light direction is the
+	// sampled one; the same argument order as Evaluate, EvalSpecular(light, eye)
+	scale = scale * EvalSpecular(Weave, yarn, uv, umax, sampledDir, fixedDir);
 
 	const float3 ks = (yarn->yarn_type == WARP) ?
 		Texture_GetSpectrumValue(material->cloth.Warp_KsIndex, hitPoint TEXTURES_PARAM) :

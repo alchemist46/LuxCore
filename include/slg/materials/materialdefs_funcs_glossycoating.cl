@@ -439,8 +439,9 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Sample(__global const Material* r
 		// Coating fresnel factor
 		float3 H = MAKE_FLOAT3((sampledDir).x + fixedDir.x, (sampledDir).y + fixedDir.y,
 			(sampledDir).z - fixedDir.z);
-		const float HLength = dot(H, H);
-		
+		// The length, not its square (as the CPU)
+		const float HLength = length(H);
+
 		float3 S;
 		// I have to handle the case when HLength is 0.0 (or nearly 0.f) in
 		// order to avoid NaN
@@ -487,6 +488,18 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	EvalStack_PopFloat3(originalDpdv);
 	EvalStack_PopFloat3(originalDpdu);
 	EvalStack_PopFloat3(originalShadeN);
+
+	// The base material sampled its direction in its own (bumped) frame, the
+	// one still in the hitPoint: bring it back to the original frame (as the
+	// CPU does)
+	Frame frameBase;
+	Frame_Set_Private(&frameBase, VLOAD3F(&hitPoint->dpdu.x), VLOAD3F(&hitPoint->dpdv.x),
+			VLOAD3F(&hitPoint->shadeN.x));
+	Frame frameOriginal;
+	Frame_Set_Private(&frameOriginal, originalDpdu, originalDpdv, originalShadeN);
+	const float3 sampledDir = Frame_ToLocal_Private(&frameOriginal,
+			Frame_ToWorld_Private(&frameBase, sampledDirMatBase));
+
 	// Restore original hitPoint
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
 	VSTORE3F(originalShadeN, &hitPointTmp->shadeN.x);
@@ -516,15 +529,16 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	EvalStack_PopFloat3(fixedDir);
 
 	//--------------------------------------------------------------------------
-	
+
 	if (Spectrum_IsBlack(resultMatBase)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
 	const float3 baseF = resultMatBase * pdfWMatBase;
 	const float basePdf = pdfWMatBase;
-	const float3 sampledDir = sampledDirMatBase;
-	const BSDFEvent event = pdfWMatBase;
+	// The base material's event (this was the base pdf converted to an
+	// integer, so the sampled event was mostly NONE)
+	const BSDFEvent event = eventMatBase;
 
 	// Don't add the coating scattering if the base sampled
 	// component is specular

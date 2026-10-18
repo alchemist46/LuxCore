@@ -132,20 +132,26 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
+		// The coating pdf is the one of sampling the generated direction from
+		// the fixed one (SchlickBSDF_CoatingPdf(fixed, sampled), as Sample()
+		// and the GPU use it): the bounded VNDF pdf is not symmetric
+		const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
+		const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+
 		if (directPdfW) {
-			const float wCoating = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localLightDir : localEyeDir);
+			const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 			const float wBase = 1.f - wCoating;
 
 			*directPdfW = wBase * *directPdfW +
-				wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
+				wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir);
 		}
 
 		if (reversePdfW) {
-			const float wCoatingR = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localEyeDir : localLightDir);
+			const float wCoatingR = SchlickBSDF_CoatingWeight(ks, localSampledDir);
 			const float wBaseR = 1.f - wCoatingR;
 
 			*reversePdfW = wBaseR * *reversePdfW +
-				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
+				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir);
 		}
 
 		// Absorption
@@ -397,20 +403,23 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
 
+	// See Evaluate(): the coating pdf is not symmetric
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+
 	if (directPdfW) {
 		const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
 		const float wBase = 1.f - wCoating;
 
 		*directPdfW = wBase * *directPdfW +
-			wCoating * SchlickBSDF_CoatingPdf(u, v, localLightDir, localEyeDir);
+			wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir);
 	}
 
 	if (reversePdfW) {
-		const float wCoatingR = SchlickBSDF_CoatingWeight(ks, hitPoint.fromLight ? localEyeDir : localLightDir);
+		const float wCoatingR = SchlickBSDF_CoatingWeight(ks, localSampledDir);
 		const float wBaseR = 1.f - wCoatingR;
 
 		*reversePdfW = wBaseR * *reversePdfW +
-			wCoatingR * SchlickBSDF_CoatingPdf(u, v, localEyeDir, localLightDir);
+			wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir);
 	}
 }
 

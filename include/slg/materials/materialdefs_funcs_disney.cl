@@ -482,7 +482,10 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Sample(__global const Material* restrict
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	const float pdfW = DisneyMaterial_DisneyPdf(roughnessVal, metallicVal, clearcoatVal, clearcoatGlossVal, anisotropicGlossVal,
+	// The pdf of the clamped and regularized parameters the direction was
+	// sampled with (as the CPU; DisneyMaterial_EvaluateImpl() clamps and
+	// regularizes the raw values itself)
+	const float pdfW = DisneyMaterial_DisneyPdf(roughness, metallic, clearcoat, clearcoatGloss, anisotropicGloss,
 			localLightDir, localEyeDir);
 	if (pdfW < 0.0001f) {
 		MATERIAL_SAMPLE_RETURN_BLACK;

@@ -587,15 +587,18 @@ Spectrum ClothMaterial::Sample(const HitPoint &hitPoint,
 	const UV hitPountUV = hitPoint.GetUV(0);
 	const slg::ocl::Yarn *yarn = GetYarn(hitPountUV.u, hitPountUV.v, &uv, &umax, &scale);
 	
-	if (!hitPoint.fromLight)
-	    scale = scale * EvalSpecular(yarn, uv, umax, localFixedDir, *localSampledDir);
-	else
-	    scale = scale * EvalSpecular(yarn, uv, umax, *localSampledDir, localFixedDir);
+	// The same argument order as Evaluate(): EvalSpecular(light, eye)
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	scale = scale * EvalSpecular(yarn, uv, umax, localLightDir, localEyeDir);
 
 	TextureConstPtr ks = (yarn->yarn_type == slg::ocl::WARP ? Warp_Ks :  Weft_Ks);
 	TextureConstPtr kd = (yarn->yarn_type == slg::ocl::WARP ? Warp_Kd :  Weft_Kd);
-	
-	return kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) + ks->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * scale;
+
+	// f |cos light| / pdf with the cosine pdf: on eye paths the light
+	// direction is the sampled one and the cosines cancel
+	const Spectrum f = kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) + ks->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * scale;
+	return f * (fabsf(localLightDir.z) / fabsf(localSampledDir->z));
 }
 
 void ClothMaterial::Pdf(const HitPoint &hitPoint,

@@ -483,6 +483,28 @@ ConfigResult RunConfig(const Material &mat, const Config &cfg, const u_int sampl
 			chi2Stat = 1e30;
 		}
 		res.chi2P = (bins > 1) ? ChiSquareQ(chi2Stat, bins - 1) : 1.0;
+
+		// --dump also prints the worst bins of a failed chi-square test
+		if ((dumpMax > 0) && (res.chi2P < 1e-4)) {
+			vector<size_t> order(histogram.size());
+			for (size_t i = 0; i < order.size(); ++i)
+				order[i] = i;
+			auto contribution = [&](const size_t i) {
+				return (expected[i] >= 5.0) ? (histogram[i] - expected[i]) * (histogram[i] - expected[i]) / expected[i] : 0.0;
+			};
+			sort(order.begin(), order.end(), [&](const size_t a, const size_t b) {
+				return contribution(a) > contribution(b);
+			});
+			printf("  chi2 dump: pooled obs %.0f exp %.1f\n", pooledObs, pooledExp);
+			for (u_int k = 0; k < min<u_int>(dumpMax, order.size()); ++k) {
+				const size_t i = order[k];
+				const u_int cb = i / CHI2_PHI_BINS, pb = i % CHI2_PHI_BINS;
+				printf("  chi2 dump: cos [%.2f %.2f] phi [%.2f %.2f] obs %.0f exp %.1f\n",
+						-1.0 + cb * 2.0 / CHI2_COS_BINS, -1.0 + (cb + 1) * 2.0 / CHI2_COS_BINS,
+						pb * 2.0 * M_PI / CHI2_PHI_BINS, (pb + 1) * 2.0 * M_PI / CHI2_PHI_BINS,
+						histogram[i], expected[i]);
+			}
+		}
 	}
 
 	return res;

@@ -164,6 +164,20 @@ The survey found these specific gaps:
       - **glossycoating renders at about half its brightness** (0.494-0.663 against about 0.98). Its base-sampled branch returned the base pdf converted to an integer as the BSDF event, the transmission half vector was normalized by its squared length, and the base's sampled direction was not brought back from the bumped frame.
       - The Disney GPU Sample() computed its pdf from the unclamped, unregularized parameters.
       - Everything else agrees within the noise.
+  - *Step 2 done 2026-10-18: the consistency fixes* (no model change).
+    - **glossycoating**:
+      - CPU: the coating pdf is that of sampling the generated direction from the fixed one, in Evaluate() and Pdf().
+      - GPU: the base-sampled branch returns the base's event, the half vector is normalized by its length, and the base's sampled direction is brought back from the bumped frame.
+    - **carpaint** (both devices): Evaluate() and Sample() are built around one table of the active lobes. Each layer is chosen with the probability its pdf assumes, the light-path diffuse value and pdf follow the convention, the glossy lobes exist only on the front face in both functions, and Sample() takes its value and pdf from the evaluation.
+    - **cloth**: the light-path value of Sample() gets the cosine ratio; both devices pass the specular term's arguments in the same order.
+    - **Disney** (GPU): the sample pdf uses the clamped, regularized parameters.
+    - **Results**:
+      - glossycoating over white matte on PATHOCL: 0.494/0.560/0.571/0.541 -> 1.007/1.003/0.990/0.975, the same as PATHCPU;
+      - PATHCPU's MIS estimator now equals the BSDF-only one (0.978 -> 1.002 at alpha 0.2, BSDF-only 1.002);
+      - carpaint with three white lobes: 0.963 -> 1.000 on all four estimators;
+      - the carpaint preset's furnace: 0.0138 -> 0.0102 on all four estimators (the old lobe sampling biased MIS and BSDF sampling alike, so they agreed and were both wrong);
+      - bsdftest: every consistency check of glossycoating, carpaint, cloth and Disney passes;
+      - the 185 material tests of the suite pass on the CPU and HIP without reference changes.
 - **Ray-cone texture LOD and stochastic filtering.** One cone width per path (Akenine-Möller et al. 2021, "Improved shader and texture level of detail using ray cones") selects the mip level per lookup; the level is sampled stochastically with one texel fetch (Pharr et al. 2024, "Filtering after shading with stochastic texture filtering") and the pixel filter does the rest. One float of path state, identical CPU and GPU code, fixes the load-time single-level choice in `imagemap.cpp`, and cuts GPU texture bandwidth. UDIM (`<UDIM>` tokens in the loader) goes on top of it. *Measure:* equal-spp RMSE and samples/sec on a scene with large `.tx` textures.
 - **Material/shader sorting in the wavefront.** Sort or compact paths by material before the shading `MK_` kernels in `pathoclbase_kernels_micro.cl`. *Re-prioritized: it is the last rung of the ladder in Phase 1b (G6); the compact state array (G2) and the shadow any-hit (G1) come first. Expect a moderate gain: Cycles' shader sorting (a partitioned bucket sort) is worth 2-3% in its tracker and is turned off above ~300 shaders, and a 2026 Vulkan study (Padilla et al.) found the wavefront ~16% faster than a megakernel with both latency-bound.*
 - **Fused trace on hardware-RT backends.** Call OptiX/HIPRT trace inline from the state kernels to avoid the ray-buffer round trip. This is partly enabled by the HIPRT work on this branch. *Deferred: the benchmark shows rays/sec flat across scenes, so the trace launch is not what limits throughput today (see Phase 1b). Shader Execution Reordering (OptiX 8 `optixReorder`, Ada and later; Karma XPU uses it) only exists inside OptiX programs and its gain shrinks with local memory use, so it is a late option for the OptiX path only, after the per-task state has been shrunk.*
