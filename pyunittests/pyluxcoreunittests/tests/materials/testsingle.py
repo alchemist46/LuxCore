@@ -194,6 +194,18 @@ class VelvetMaterial(ImageTest):
 VelvetMaterial = AddTests(VelvetMaterial, TestVelvetMaterial, GetTestCases())
 
 ################################################################################
+# Subsurface material test
+################################################################################
+
+def TestSubsurfaceMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-subsurface-area.cfg", "SubsurfaceMaterial")
+
+class SubsurfaceMaterial(ImageTest):
+    pass
+
+SubsurfaceMaterial = AddTests(SubsurfaceMaterial, TestSubsurfaceMaterial, GetTestCases())
+
+################################################################################
 # MatteTranslucent material test
 ################################################################################
 

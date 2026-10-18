@@ -163,6 +163,11 @@ void PathOCLBaseOCLRenderThread::InitMaterials() {
 			nullptr, sizeof(float) * renderEngine->compiledScene->maxMaterialEvalStackSize *
 			taskCount, "Material evaluation stacks");
 
+	// The random walks of the subsurface materials (one element when there is
+	// none, only to keep the same kernel arguments)
+	intersectionDevice.AllocBufferRW(&tasksSSSWalkBuff, nullptr,
+			GPUTASK_SSSWALK_SIZE * (renderEngine->compiledScene->hasSubsurface ? taskCount : 1),
+			"GPUTaskSSSWalk");
 }
 
 void PathOCLBaseOCLRenderThread::InitSceneObjects() {

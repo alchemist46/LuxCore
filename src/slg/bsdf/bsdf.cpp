@@ -19,6 +19,7 @@
 #include "slg/bsdf/bsdf.h"
 #include "slg/scene/scene.h"
 #include "slg/materials/glass.h"
+#include "slg/materials/subsurface.h"
 #include <memory>
 
 using namespace luxrays;
@@ -214,6 +215,13 @@ const string &BSDF::GetMaterialName() const {
 		return material->GetName();
 	else
 		return MaterialNULLptrName;
+}
+
+void BSDF::GetSubsurfaceWalkParams(Spectrum *color, Spectrum *radius, float *anisotropy) const {
+	assert (material->GetType() == SUBSURFACEMAT);
+
+	static_cast<const SubsurfaceMaterial *>(material.get())->GetWalkParams(hitPoint,
+			color, radius, anisotropy);
 }
 
 Spectrum BSDF::Albedo() const {

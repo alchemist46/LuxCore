@@ -142,6 +142,26 @@ def cases():
     for r in (0.2, 0.5, 1.0):
         c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.roughness = {r}\n", None))
+    # Random-walk subsurface, white: the walk returns all the energy that
+    # enters (the sphere radius is 1, the radius is the mean free path)
+    for rad in (0.01, 0.1, 1.0):
+        c.append((f"subsurface-rad{rad}", "scene.materials.m.type = subsurface\n"
+                  "scene.materials.m.color = 1 1 1\n"
+                  f"scene.materials.m.radius = {rad} {rad} {rad}\nscene.materials.m.scale = 1\n"
+                  "scene.materials.m.ior = 1.4\nscene.materials.m.roughness = 0.5\n", 1.0))
+    for col in (0.5, 0.8, 0.95):
+        c.append((f"subsurface-color{col}", "scene.materials.m.type = subsurface\n"
+                  f"scene.materials.m.color = {col} {col} {col}\n"
+                  "scene.materials.m.radius = 0.01 0.01 0.01\nscene.materials.m.scale = 1\n"
+                  "scene.materials.m.ior = 1\n", None))
+    for rad in (0.1, 1.0, 10.0):
+        c.append((f"subsurface-c05-rad{rad}", "scene.materials.m.type = subsurface\n"
+                  "scene.materials.m.color = 0.5 0.5 0.5\n"
+                  f"scene.materials.m.radius = {rad} {rad} {rad}\nscene.materials.m.scale = 1\n"
+                  "scene.materials.m.ior = 1\n", None))
+    c.append(("subsurface-aniso", "scene.materials.m.type = subsurface\n"
+              "scene.materials.m.color = 1 1 1\nscene.materials.m.radius = 0.1 0.1 0.1\nscene.materials.m.scale = 1\n"
+              "scene.materials.m.anisotropy = 0.7\nscene.materials.m.ior = 1\n", 1.0))
     c.append(("mattetranslucent", "scene.materials.m.type = mattetranslucent\n"
               "scene.materials.m.kr = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n", 1.0))
     for s in (0.0, 0.5, 1.0):

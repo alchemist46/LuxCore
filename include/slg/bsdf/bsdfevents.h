@@ -28,6 +28,9 @@ typedef enum {
 	SPECULAR = 4,
 	REFLECT = 8,
 	TRANSMIT = 16,
+	// The entry into a random-walk subsurface material (with DIFFUSE |
+	// TRANSMIT): the path continues with the walk, not with a ray
+	SUBSURFACE = 32,
 
 	ALL_TYPES = DIFFUSE | GLOSSY | SPECULAR,
 	ALL_REFLECT = REFLECT | ALL_TYPES,

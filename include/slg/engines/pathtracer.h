@@ -209,6 +209,16 @@ private:
 
 	// RenderEyeSample methods
 
+	// Random-walk subsurface scattering (see SubsurfaceMaterial and
+	// subsurface_funcs.cl): walks from the entry vertex bsdf into the
+	// object along sampledDir. On an exit bsdf becomes the exit vertex and
+	// pathThroughput is multiplied by the weight of the walk; false when the
+	// walk ends inside.
+	bool SubsurfaceRandomWalk(luxrays::IntersectionDeviceRef device,
+			SceneConstRef scene, const float u, const luxrays::Vector &sampledDir,
+			const float time, const float passThrough, const PathVolumeInfo &volInfo,
+			BSDF &bsdf, luxrays::Spectrum &pathThroughput) const;
+
 	void DirectHitFiniteLight(SceneConstRef scene, const EyePathInfo &pathInfo,
 			const luxrays::Spectrum &pathThrouput, const luxrays::Ray &ray,
 			const float distance, const BSDF &bsdf,

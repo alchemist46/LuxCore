@@ -26,6 +26,7 @@
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
 #include <boost/algorithm/string.hpp>
+#include <cstring>
 
 #include "slg/cameras/camera.h"
 
@@ -34,6 +35,7 @@
 namespace slg { namespace ocl { namespace {
 #include "luxrays/devices/cpudevice_oclemul.h"
 #include "slg/engines/pathtracer_funcs.cl"
+#include "slg/materials/subsurface_funcs.cl"
 
 float3 ToFloat3(const luxrays::Spectrum &s) {
 	return MAKE_FLOAT3(s.c[0], s.c[1], s.c[2]);
@@ -415,6 +417,84 @@ void PathTracer::GenerateEyeRay(CameraConstRef camera, FilmConstRef film, Ray &e
 }
 
 //------------------------------------------------------------------------------
+// Random-walk subsurface scattering
+//------------------------------------------------------------------------------
+
+bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
+		SceneConstRef scene, const float u, const Vector &sampledDir,
+		const float time, const float passThrough, const PathVolumeInfo &volInfo,
+		BSDF &bsdf, Spectrum &pathThroughput) const {
+	Spectrum color, radius;
+	float anisotropy;
+	bsdf.GetSubsurfaceWalkParams(&color, &radius, &anisotropy);
+
+	// The outward normals at the entry: the side of the eye
+	const Normal geometryN = (Dot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.geometryN) > 0.f) ?
+		bsdf.hitPoint.geometryN : -bsdf.hitPoint.geometryN;
+	if (Dot(sampledDir, geometryN) >= 0.f)
+		return false;
+	const Normal shadeN = (Dot(bsdf.hitPoint.shadeN, geometryN) > 0.f) ?
+		bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
+
+	const Point entryP = bsdf.GetRayOrigin(sampledDir);
+	ocl::SSSWalk walk;
+	if (!ocl::SSSWalk_Init(&walk, ocl::make_float3(entryP.x, entryP.y, entryP.z),
+			ocl::make_float3(shadeN.x, shadeN.y, shadeN.z),
+			ocl::make_float3(sampledDir.x, sampledDir.y, sampledDir.z),
+			ocl::ToFloat3(color), ocl::ToFloat3(radius), anisotropy))
+		return false;
+
+	// Decorrelated from the other users of the same sample
+	uint32_t seed;
+	memcpy(&seed, &u, sizeof(seed));
+	TauswortheRandomGenerator rng(seed ^ 0xdeadbeefu);
+
+	const SceneObject *object = &bsdf.GetSceneObject();
+	for (;;) {
+		const float u0 = rng.floatValue();
+		const float u1 = rng.floatValue();
+		const float u2 = rng.floatValue();
+		const float u3 = rng.floatValue();
+		const float u4 = rng.floatValue();
+		const float u5 = rng.floatValue();
+		ocl::SSSWalk_PrepareStep(&walk, u0, u1, u2, u3, u4, u5);
+
+		// The first hit on the walked object up to tmax: the walk continues
+		// through the other objects
+		const Point o(walk.P.x, walk.P.y, walk.P.z);
+		Ray ray(o, Vector(walk.D.x, walk.D.y, walk.D.z), 0.f, walk.tmax, time);
+		ray.mint = (walk.bounce == 0) ? MachineEpsilon::E(o) : 0.f;
+		RayHit rayHit;
+		bool hitObject = false;
+		while (device.TraceRay(&ray, &rayHit)) {
+			if (&scene.GetObjects().GetSceneObject(rayHit.meshIndex) == object) {
+				hitObject = true;
+				break;
+			}
+			ray.mint = rayHit.t + MachineEpsilon::E(ray(rayHit.t));
+			if (ray.mint >= ray.maxt)
+				break;
+		}
+
+		const int result = ocl::SSSWalk_FinishStep(&walk, hitObject, rayHit.t);
+		if (result == SSSWALK_END)
+			return false;
+		if (result == SSSWALK_EXIT) {
+			const Spectrum weight(walk.throughput.x, walk.throughput.y, walk.throughput.z);
+			if (weight.Black() || weight.IsNaN() || weight.IsInf())
+				return false;
+			pathThroughput *= weight;
+
+			// The exit vertex
+			bsdf.Init(false, false, scene, ray, rayHit, passThrough, &volInfo);
+			bsdf.hitPoint.subsurface = HITPOINT_SSS_EXIT;
+
+			return true;
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
 // RenderEyePath methods
 //------------------------------------------------------------------------------
 
@@ -437,21 +517,30 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 	sampleResult.shadingNormal = Normal();
 	Spectrum pathThroughput(eyeTroughput);
 	BSDF bsdf;
+	// The vertex is the exit point of a subsurface random walk: bsdf is
+	// already initialized and there is no ray to trace
+	bool subsurfaceExit = false;
 	for (;;) {
 		sampleResult.firstPathVertex = (pathInfo.depth.depth == 0);
 		const u_int sampleOffset = eyeSampleBootSize + pathInfo.depth.depth * eyeSampleStepSize;
 
 		RayHit eyeRayHit;
-		Spectrum connectionThroughput;
 		const float passThrough = sampler.GetSample(sampleOffset + IDX_PASSTHROUGH);
-		const bool hit = scene.Intersect(
-				IntersectionDevicePtr(&device),
-				EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
-				&pathInfo.volume, passThrough,
-				&eyeRay, &eyeRayHit, &bsdf, &connectionThroughput,
-				&pathThroughput, &sampleResult);
-		pathThroughput *= connectionThroughput;
-		// Note: pass-through check is done inside Scene::Intersect()
+		bool hit;
+		if (subsurfaceExit) {
+			hit = true;
+			eyeRayHit.t = 0.f;
+		} else {
+			Spectrum connectionThroughput;
+			hit = scene.Intersect(
+					IntersectionDevicePtr(&device),
+					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
+					&pathInfo.volume, passThrough,
+					&eyeRay, &eyeRayHit, &bsdf, &connectionThroughput,
+					&pathThroughput, &sampleResult);
+			pathThroughput *= connectionThroughput;
+			// Note: pass-through check is done inside Scene::Intersect()
+		}
 
 		const bool checkDirectLightHit =
 				// Avoid to render caustic path if hybridBackForwardEnable
@@ -513,6 +602,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// rough (see HitPoint::regularization)
 		bsdf.hitPoint.regularization = (regularizationEnable && pathInfo.anyNonSpecularBounce) ?
 			regularizationRoughness : 0.f;
+		// The base lobe of a subsurface material enters the object for the walk
+		if (!subsurfaceExit && (bsdf.GetMaterialType() == SUBSURFACEMAT))
+			bsdf.hitPoint.subsurface = HITPOINT_SSS_ENTRY;
 
 		sampleResult.lastPathVertex = pathInfo.depth.IsLastPathVertex(maxPathDepth, bsdf.GetEventTypes());
 
@@ -532,7 +624,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// Check if it is a light source and I have to add light emission
 		//----------------------------------------------------------------------
 
-		if (bsdf.IsLightSource() && checkDirectLightHit) {
+		if (!subsurfaceExit && bsdf.IsLightSource() && checkDirectLightHit) {
 			DirectHitFiniteLight(scene, pathInfo, pathThroughput,
 					eyeRay, eyeRayHit.t, bsdf, &sampleResult);
 		}
@@ -541,8 +633,10 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// Check if I can use the photon cache
 		//----------------------------------------------------------------------
 
-		if (photonGICache) {
-			const bool isPhotonGIEnabled = photonGICache->IsPhotonGIEnabled(bsdf);
+		if (photonGICache && !subsurfaceExit) {
+			// The cache doesn't have the random walk of the subsurface materials
+			const bool isPhotonGIEnabled = photonGICache->IsPhotonGIEnabled(bsdf) &&
+					(bsdf.hitPoint.subsurface != HITPOINT_SSS_ENTRY);
 
 			// Check if one of the debug modes is enabled
 			if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWINDIRECT) {
@@ -699,6 +793,22 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				sampleResult.irradiancePathThroughput = Spectrum();
 		} else
 			sampleResult.irradiancePathThroughput *= bsdfSample;
+
+		if (bsdfEvent & SUBSURFACE) {
+			// The random walk to the exit point, the next vertex. Its random
+			// numbers come from the pass-through sample of that vertex, which
+			// has no ray to trace.
+			const u_int exitSampleOffset = eyeSampleBootSize + pathInfo.depth.depth * eyeSampleStepSize;
+			if (!SubsurfaceRandomWalk(device, scene,
+					sampler.GetSample(exitSampleOffset + IDX_PASSTHROUGH), sampledDir,
+					eyeRay.time, sampler.GetSample(exitSampleOffset + IDX_PASSTHROUGH),
+					pathInfo.volume, bsdf, pathThroughput))
+				break;
+
+			subsurfaceExit = true;
+			continue;
+		}
+		subsurfaceExit = false;
 
 		eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
 	}

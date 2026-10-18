@@ -45,7 +45,7 @@ typedef enum {
 	// runs, a task waits for the trace of its vertex ray and/or of its shadow
 	// ray (see AdvancePaths_MK_RT for their slots) in one of the MK_RT_* states
 	// (MK_GENERATE_CAMERA_RAY after Init() and MK_DONE are the exceptions).
-	// 3 and 4 were MK_DL_ILLUMINATE and MK_DL_SAMPLE_BSDF.
+	// 4 was MK_DL_SAMPLE_BSDF.
 
 	// The vertex ray
 	MK_RT_NEXT_VERTEX = 0,
@@ -56,6 +56,10 @@ typedef enum {
 	// The shadow ray of the last vertex of the path: the sample is splat
 	// after it
 	MK_RT_DL_SPLAT = 2,
+	// A step of the random walk of a subsurface material (GPUTaskSSSWalk):
+	// the ray goes from a point in the object to the next scattering point,
+	// or to the exit point, the next path vertex
+	MK_RT_SSS_WALK = 3,
 	// The shadow ray, then the next vertex ray is sampled (shadow catchers,
 	// and the scenes where the shadow rays can cross a surface)
 	MK_RT_DL = 5,
@@ -65,6 +69,10 @@ typedef enum {
 	MK_GENERATE_CAMERA_RAY = 9,
 	MK_DONE = 10
 } PathState;
+
+// The size in bytes of the random walk of a task (GPUTaskSSSWalk, see
+// subsurface_funcs.cl, which checks it)
+#define GPUTASK_SSSWALK_SIZE 256
 
 typedef struct {
 	union {

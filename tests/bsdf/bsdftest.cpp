@@ -79,7 +79,12 @@ struct TestCase {
 	// Run the chi-square test (off for very peaked lobes, where the bin
 	// quadrature is not accurate enough)
 	bool chi2;
+	// The role of the vertex for the subsurface material (HitPoint::subsurface)
+	int subsurface = HITPOINT_SSS_SURFACE;
 };
+
+// The HitPoint::subsurface of the current case
+int caseSubsurface = HITPOINT_SSS_SURFACE;
 
 const float NO_EXPECT = -1.f;
 
@@ -193,6 +198,19 @@ vector<TestCase> BuildTestCases() {
 		cases.push_back({ "velvet-r" + to_string(r).substr(0, 3), "scene.materials.m.type = velvet\n"
 			"scene.materials.m.kd = 1 1 1\nscene.materials.m.roughness = " + to_string(r) + "\n",
 			NO_EXPECT, true });
+
+	// Random-walk subsurface: the surface form (light paths, Mix) is the
+	// layered Lambertian base of albedo color, the exit of a walk a Lambertian
+	// transmission. The entry of an eye path has no value to evaluate (the
+	// walk is checked by the furnace).
+	for (const float r : { 0.2f, 0.5f, 1.f })
+		cases.push_back({ "subsurface-r" + to_string(r).substr(0, 3), "scene.materials.m.type = subsurface\n"
+			"scene.materials.m.color = 1 1 1\nscene.materials.m.ior = 1.4\n"
+			"scene.materials.m.roughness = " + to_string(r) + "\n", 1.f, r > .3f });
+	cases.push_back({ "subsurface-noreflection", "scene.materials.m.type = subsurface\n"
+		"scene.materials.m.color = 1 1 1\nscene.materials.m.ior = 1\n", 1.f, true });
+	cases.push_back({ "subsurface-exit", "scene.materials.m.type = subsurface\n"
+		"scene.materials.m.color = 0.5 0.5 0.5\n", 1.f, true, HITPOINT_SSS_EXIT });
 
 	cases.push_back({ "mattetranslucent", "scene.materials.m.type = mattetranslucent\n"
 		"scene.materials.m.kr = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n", 1.f, true });
@@ -308,6 +326,7 @@ void SetupHitPoint(HitPoint &hp, const Vector &fixedDir, const bool fromLight) {
 	hp.localToWorld = Transform();
 	hp.fromLight = fromLight;
 	hp.intoObject = (fixedDir.z > 0.f);
+	hp.subsurface = caseSubsurface;
 }
 
 // The side test of BSDF::Evaluate() (bsdf.cpp): a material without TRANSMIT
@@ -601,6 +620,7 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 		const Material &mat = scene->GetMaterials().GetMaterial("m");
+		caseSubsurface = tc.subsurface;
 
 		mt19937 rng(12345);
 		bool caseFailed = false;

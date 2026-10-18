@@ -44,8 +44,131 @@ OPENCL_FORCE_INLINE void AdvancePaths_SaveVertexBSDF(__global BSDF *dst, const B
 }
 #endif
 
+//------------------------------------------------------------------------------
+// Random-walk subsurface scattering (see SubsurfaceMaterial and
+// subsurface_funcs.cl; PathTracer::SubsurfaceRandomWalk() is the CPU version):
+// a step of the walk per iteration, in the state MK_RT_SSS_WALK. Compiled only
+// for the scenes with a subsurface material (PARAM_ENABLE_SUBSURFACE).
+//------------------------------------------------------------------------------
+
+#if defined(PARAM_ENABLE_SUBSURFACE)
+
+// Prepares the next step of the walk and its ray
+OPENCL_FORCE_INLINE void AdvancePaths_SubsurfaceWalkRay(__global GPUTaskSSSWalk *taskWalk,
+		SSSWalk *walk, __global Ray *ray) {
+	Seed seed = taskWalk->seed;
+	const float u0 = Rnd_FloatValue(&seed);
+	const float u1 = Rnd_FloatValue(&seed);
+	const float u2 = Rnd_FloatValue(&seed);
+	const float u3 = Rnd_FloatValue(&seed);
+	const float u4 = Rnd_FloatValue(&seed);
+	const float u5 = Rnd_FloatValue(&seed);
+	taskWalk->seed = seed;
+
+	SSSWalk_PrepareStep(walk, u0, u1, u2, u3, u4, u5);
+	taskWalk->walk = *walk;
+
+	VSTORE3F(walk->P, &ray->o.x);
+	VSTORE3F(walk->D, &ray->d.x);
+	ray->mint = (walk->bounce == 0) ? MachineEpsilon_E_Float3(walk->P) : 0.f;
+	ray->maxt = walk->tmax;
+	ray->flags = RAY_FLAGS_NONE;
+}
+
+// Starts the walk from the entry vertex bsdf into sampledDir, with the random
+// numbers seeded by u. False when the walk can't start.
+OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *bsdf,
+		const float3 sampledDir, const float u,
+		__global GPUTaskSSSWalk *taskWalk, __global Ray *ray
+		MATERIALS_PARAM_DECL) {
+	__global const Material* restrict material = &mats[bsdf->materialIndex];
+	__global const HitPoint *hitPoint = &bsdf->hitPoint;
+
+	const float3 color = Spectrum_Clamp(Texture_GetSpectrumValue(material->subsurface.colorTexIndex,
+			hitPoint TEXTURES_PARAM));
+	const float3 radius = Texture_GetSpectrumValue(material->subsurface.radiusTexIndex, hitPoint TEXTURES_PARAM) *
+			Texture_GetFloatValue(material->subsurface.scaleTexIndex, hitPoint TEXTURES_PARAM);
+	const float anisotropy = clamp(Texture_GetFloatValue(material->subsurface.anisotropyTexIndex,
+			hitPoint TEXTURES_PARAM), -.9f, .9f);
+
+	// The outward normals at the entry: the side of the eye
+	const float3 fixedDir = VLOAD3F(&hitPoint->fixedDir.x);
+	float3 geometryN = VLOAD3F(&hitPoint->geometryN.x);
+	if (dot(fixedDir, geometryN) <= 0.f)
+		geometryN = -geometryN;
+	if (dot(sampledDir, geometryN) >= 0.f)
+		return false;
+	float3 shadeN = VLOAD3F(&hitPoint->shadeN.x);
+	if (dot(shadeN, geometryN) <= 0.f)
+		shadeN = -shadeN;
+
+	SSSWalk walk;
+	if (!SSSWalk_Init(&walk, BSDF_GetRayOrigin(bsdf, sampledDir), shadeN, sampledDir,
+			color, MAKE_FLOAT3(fmax(radius.x, 0.f), fmax(radius.y, 0.f), fmax(radius.z, 0.f)),
+			anisotropy))
+		return false;
+
+	// Decorrelated from the other users of the same sample
+	union {
+		float f;
+		uint i;
+	} bits;
+	bits.f = u;
+	Seed seed;
+	Rnd_Init(bits.i ^ 0xdeadbeefu, &seed);
+	taskWalk->seed = seed;
+	taskWalk->meshIndex = bsdf->sceneObjectIndex;
+
+	AdvancePaths_SubsurfaceWalkRay(taskWalk, &walk, ray);
+
+	return true;
+}
+
+// The trace result of a step of the walk: the next state is MK_RT_SSS_WALK
+// (the next step), MK_RT_NEXT_VERTEX with *exitHit (the exit point is the next
+// vertex) or MK_SPLAT_SAMPLE (the walk ended inside)
+OPENCL_FORCE_INLINE PathState AdvancePaths_SubsurfaceWalkStep(__global GPUTaskSSSWalk *taskWalk,
+		__global GPUTaskState *taskState, __global Ray *ray, __global const RayHit *rayHit,
+		bool *exitHit) {
+	*exitHit = false;
+
+	const uint meshIndex = rayHit->meshIndex;
+	bool hitObject = false;
+	if (meshIndex != NULL_INDEX) {
+		if (meshIndex == taskWalk->meshIndex)
+			hitObject = true;
+		else {
+			// Another object: the walk goes through it
+			const float3 p = VLOAD3F(&ray->o.x) + rayHit->t * VLOAD3F(&ray->d.x);
+			const float mint = rayHit->t + MachineEpsilon_E_Float3(p);
+			if (mint < ray->maxt) {
+				ray->mint = mint;
+				return MK_RT_SSS_WALK;
+			}
+		}
+	}
+
+	SSSWalk walk = taskWalk->walk;
+	const int result = SSSWalk_FinishStep(&walk, hitObject, rayHit->t);
+	if (result == SSSWALK_CONTINUE) {
+		AdvancePaths_SubsurfaceWalkRay(taskWalk, &walk, ray);
+		return MK_RT_SSS_WALK;
+	} else if (result == SSSWALK_EXIT) {
+		const float3 weight = walk.throughput;
+		const float weightSum = weight.x + weight.y + weight.z;
+		if (!(weightSum > 0.f) || !(weightSum < INFINITY))
+			return MK_SPLAT_SAMPLE;
+
+		VSTORE3F(weight * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+		*exitHit = true;
+		return MK_RT_NEXT_VERTEX;
+	} else
+		return MK_SPLAT_SAMPLE;
+}
+#endif
+
 // The next vertex ray: sample the BSDF, Russian roulette (the next state is
-// MK_RT_NEXT_VERTEX or MK_SPLAT_SAMPLE)
+// MK_RT_NEXT_VERTEX, MK_RT_SSS_WALK or MK_SPLAT_SAMPLE)
 OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
 		__global GPUTaskState *taskState,
@@ -53,7 +176,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		__global EyePathInfo *pathInfo,
 		__global Ray *ray,
 		__global SampleResult *sampleResult,
-		const DirectLightResult directLightResult
+		const DirectLightResult directLightResult,
+		__global GPUTaskSSSWalk *taskSSSWalk
 		SAMPLER_PARAM_DECL
 		MATERIALS_PARAM_DECL) {
 	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
@@ -159,6 +283,15 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 
 		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 		taskState->throughShadowTransparency = false;
+
+#if defined(PARAM_ENABLE_SUBSURFACE)
+		if (bsdfEvent & SUBSURFACE) {
+			// The random walk to the exit point, the next vertex. Its random
+			// numbers come from the pass-through sample of that vertex.
+			return AdvancePaths_StartSubsurfaceWalk(bsdf, sampledDir, passThroughEvent,
+					taskSSSWalk, ray MATERIALS_PARAM) ? MK_RT_SSS_WALK : MK_SPLAT_SAMPLE;
+		}
+#endif
 
 		return MK_RT_NEXT_VERTEX;
 	} else
@@ -406,6 +539,9 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
 
 	// Check if it is a light source (note: I can hit only triangle area light sources)
+#if defined(PARAM_ENABLE_SUBSURFACE)
+	checkDirectLightHit = checkDirectLightHit && (bsdf->hitPoint.subsurface != HITPOINT_SSS_EXIT);
+#endif
 	if (BSDF_IsLightSource(bsdf) && checkDirectLightHit) {
 		DirectHitFiniteLight(
 				&taskConfig->film,
@@ -422,10 +558,20 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 	// Check if I can use the photon cache
 	//----------------------------------------------------------------------
 
+#if defined(PARAM_ENABLE_SUBSURFACE)
+	// The cache doesn't have the random walk of the subsurface materials
+	if ((taskConfig->pathTracer.pgic.indirectEnabled || taskConfig->pathTracer.pgic.causticEnabled) &&
+			(bsdf->hitPoint.subsurface != HITPOINT_SSS_EXIT)) {
+		const bool isPhotonGIEnabled = (bsdf->hitPoint.subsurface != HITPOINT_SSS_ENTRY) &&
+				PhotonGICache_IsPhotonGIEnabled(bsdf,
+					taskConfig->pathTracer.pgic.glossinessUsageThreshold
+					MATERIALS_PARAM);
+#else
 	if (taskConfig->pathTracer.pgic.indirectEnabled || taskConfig->pathTracer.pgic.causticEnabled) {
 		const bool isPhotonGIEnabled = PhotonGICache_IsPhotonGIEnabled(bsdf,
 				taskConfig->pathTracer.pgic.glossinessUsageThreshold
 				MATERIALS_PARAM);
+#endif
 
 		switch (taskConfig->pathTracer.pgic.debugType) {
 			case PGIC_DEBUG_SHOWINDIRECT: {
@@ -749,6 +895,24 @@ __kernel void AdvancePaths_MK_RT(
 	}
 
 	//--------------------------------------------------------------------------
+	// A step of the random walk of a subsurface material
+	//--------------------------------------------------------------------------
+
+#if defined(PARAM_ENABLE_SUBSURFACE)
+	// The vertex is the exit point of the walk: there is no ray to trace
+	bool subsurfaceExit = false;
+	if (pathState == MK_RT_SSS_WALK) {
+		if (taskConfig->film.hasChannelRayCount)
+			sampleResult->rayCount += 1;
+
+		pathState = AdvancePaths_SubsurfaceWalkStep(&tasksSSSWalk[gid], taskState,
+				&rays[gid], &rayHits[gid], &subsurfaceExit);
+	}
+#else
+	const bool subsurfaceExit = false;
+#endif
+
+	//--------------------------------------------------------------------------
 	// The vertex ray
 	//--------------------------------------------------------------------------
 
@@ -756,37 +920,49 @@ __kernel void AdvancePaths_MK_RT(
 	if (pathState == MK_RT_NEXT_VERTEX) {
 		// Count the ray traced by the RT kernel (the shadow rays are counted
 		// by AdvancePaths_ShadowRayHit())
-		if (taskConfig->film.hasChannelRayCount)
+		if (taskConfig->film.hasChannelRayCount && !subsurfaceExit)
 			sampleResult->rayCount += 1;
-
-		float3 connectionThroughput;
 
 		Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
 		const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
 		taskState->seedPassThroughEvent = seedPassThroughEvent;
 
+		bool continueToTrace;
+#if defined(PARAM_ENABLE_SUBSURFACE)
+		if (subsurfaceExit) {
+			// The exit point of the walk, a Lambertian transmission (the
+			// throughput has the weight of the walk)
+			BSDF_Init(initBsdf, false, &rays[gid], &rayHits[gid], passThroughEvent,
+					&pathInfo->volume MATERIALS_PARAM);
+			initBsdf->hitPoint.subsurface = HITPOINT_SSS_EXIT;
+			continueToTrace = false;
+		} else
+#endif
+		{
 #if defined(LUXRAYS_CUDA_DEVICE)
-		// On a miss, Scene_Intersect() reads the light ID of the previous
-		// vertex for the emission of a volume
-		if (rayHits[gid].meshIndex == NULL_INDEX)
-			bsdf->materialIndex = prevBsdf->materialIndex;
+			// On a miss, Scene_Intersect() reads the light ID of the previous
+			// vertex for the emission of a volume
+			if (rayHits[gid].meshIndex == NULL_INDEX)
+				bsdf->materialIndex = prevBsdf->materialIndex;
 #endif
 
-		int throughShadowTransparency = taskState->throughShadowTransparency;
-		const bool continueToTrace = Scene_Intersect(taskConfig,
-				EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
-				&throughShadowTransparency,
-				&pathInfo->volume,
-				intersectHitPoint,
-				passThroughEvent,
-				&rays[gid], &rayHits[gid], initBsdf,
-				&connectionThroughput, VLOAD3F(taskState->throughput.c),
-				sampleResult,
-				false
-				MATERIALS_PARAM
-				);
-		taskState->throughShadowTransparency = throughShadowTransparency;
-		VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+			float3 connectionThroughput;
+			int throughShadowTransparency = taskState->throughShadowTransparency;
+			continueToTrace = Scene_Intersect(taskConfig,
+					EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
+					&throughShadowTransparency,
+					&pathInfo->volume,
+					intersectHitPoint,
+					passThroughEvent,
+					&rays[gid], &rayHits[gid], initBsdf,
+					&connectionThroughput, VLOAD3F(taskState->throughput.c),
+					sampleResult,
+					false
+					MATERIALS_PARAM
+					);
+			taskState->throughShadowTransparency = throughShadowTransparency;
+			VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+		}
 
 		// If continueToTrace, there is nothing to do, just keep the same state
 		if (!continueToTrace) {
@@ -801,6 +977,12 @@ __kernel void AdvancePaths_MK_RT(
 				// lobes become rough (see HitPoint::regularization)
 				bsdf->hitPoint.regularization = ((taskConfig->pathTracer.regularization > 0.f) && pathInfo->anyNonSpecularBounce) ?
 					taskConfig->pathTracer.regularization : 0.f;
+#if defined(PARAM_ENABLE_SUBSURFACE)
+				// The base lobe of a subsurface material enters the object
+				// for the walk
+				if (!subsurfaceExit && (mats[bsdf->materialIndex].type == SUBSURFACEMAT))
+					bsdf->hitPoint.subsurface = HITPOINT_SSS_ENTRY;
+#endif
 
 				const BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM);
@@ -811,10 +993,16 @@ __kernel void AdvancePaths_MK_RT(
 				// The next vertex ray can be sampled without waiting for the
 				// shadow ray if the shadow ray is final after one trace and
 				// the BSDF sampling doesn't depend on it (shadow catchers).
-				// The last vertex has no next vertex ray.
+				// The last vertex has no next vertex ray, and the entry
+				// into a subsurface material may need the ray slot for its
+				// walk.
 				const bool sampleNextVertexRayNow = scene->shadowRayAnyHit &&
 						!sampleResult->lastPathVertex &&
-						!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM);
+						!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)
+#if defined(PARAM_ENABLE_SUBSURFACE)
+						&& (bsdf->hitPoint.subsurface != HITPOINT_SSS_ENTRY)
+#endif
+						;
 
 				pathState = AdvancePaths_HitObject(taskConfig,
 						task, taskTmp, &tasksDirectLight[gid], taskState, bsdf, pathInfo,
@@ -862,7 +1050,8 @@ __kernel void AdvancePaths_MK_RT(
 		Seed *seed = &seedValue;
 
 		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, bsdf, pathInfo,
-				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult
+				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult,
+				&tasksSSSWalk[gid]
 				SAMPLER_PARAM
 				MATERIALS_PARAM);
 

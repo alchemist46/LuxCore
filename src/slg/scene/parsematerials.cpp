@@ -52,6 +52,7 @@
 #include "slg/materials/velvet.h"
 #include "slg/materials/disney.h"
 #include "slg/materials/twosided.h"
+#include "slg/materials/subsurface.h"
 
 #include "slg/textures/texture.h"
 #include "slg/usings.h"
@@ -712,6 +713,20 @@ MaterialUPtr Scene::CreateMaterial(
 			throw runtime_error("There is a loop in Two-sided material definition: " + matName);
 
 		mat = std::move(twoSided);
+	} else if (matType == "subsurface") {
+		// Random-walk subsurface scattering (see subsurface.cpp), the
+		// parameters of Cycles' Subsurface Scattering node
+		auto color = parseTex("color", {.8f, .8f, .8f});
+		auto radius = parseTex("radius", {1.f, .2f, .1f});
+		auto scale = parseTex("scale", {.05f});
+		auto anisotropy = parseTex("anisotropy", {0.f});
+		auto ior = parseTex("ior", {1.4f});
+		auto roughness = parseTex("roughness", {.3f});
+
+		mat = std::make_unique<SubsurfaceMaterial>(
+			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
+			color, radius, scale, anisotropy, ior, roughness
+		);
 	} else
 		throw runtime_error("Unknown material type: " + matType);
 

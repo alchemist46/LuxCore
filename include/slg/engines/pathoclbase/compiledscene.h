@@ -125,6 +125,9 @@ public:
 	// True if a shadow ray can be let through by a material or a volume, so
 	// Scene_Intersect() needs the closest hit and its BSDF
 	bool shadowRaysNeedBSDF;
+	// True if a material is a random-walk subsurface one (PathOCL then needs
+	// the buffer of the walks)
+	bool hasSubsurface;
 
 	// Compiled Textures
 	std::vector<slg::ocl::Texture> texs;

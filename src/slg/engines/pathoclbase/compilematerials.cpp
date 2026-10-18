@@ -48,6 +48,7 @@
 #include "slg/materials/roughmattetranslucent.h"
 #include "slg/materials/twosided.h"
 #include "slg/materials/velvet.h"
+#include "slg/materials/subsurface.h"
 
 #include "slg/volumes/clear.h"
 #include "slg/volumes/heterogenous.h"
@@ -139,6 +140,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case ROUGHMATTETRANSLUCENT:
 		case GLOSSYTRANSLUCENT:
 		case DISNEY:
+		case SUBSURFACEMAT:
 		case HOMOGENEOUS_VOL:
 		case CLEAR_VOL:
 		case HETEROGENEOUS_VOL:
@@ -968,6 +970,18 @@ void CompiledScene::CompileMaterials() {
 					mat->disney.filmIorTexIndex = NULL_INDEX;
 				break;
 			}
+			case SUBSURFACEMAT: {
+				auto& ssm = dynamic_cast<const SubsurfaceMaterial &>(m);
+
+				mat->type = slg::ocl::SUBSURFACEMAT;
+				mat->subsurface.colorTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetColor());
+				mat->subsurface.radiusTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetRadius());
+				mat->subsurface.scaleTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetScale());
+				mat->subsurface.anisotropyTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetAnisotropy());
+				mat->subsurface.iorTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetIOR());
+				mat->subsurface.roughnessTexIndex = scene.GetTextures().GetTextureIndex(ssm.GetRoughness());
+				break;
+			}
 			case TWOSIDED: {
 				auto& tsm = dynamic_cast<const TwoSidedMaterial &>(m);
 
@@ -1062,6 +1076,14 @@ void CompiledScene::CompileMaterials() {
 		}
 	}
 	SLG_LOG("Shadow rays any-hit: " << (shadowRaysNeedBSDF ? "no (transparency or volumes)" : "yes"));
+
+	hasSubsurface = false;
+	for (const slg::ocl::Material &mat : mats) {
+		if (mat.type == slg::ocl::SUBSURFACEMAT) {
+			hasSubsurface = true;
+			break;
+		}
+	}
 
 	const double tEnd = WallClockTime();
 	SLG_LOG("Material compilation time: " << int((tEnd - tStart) * 1000.0) << "ms");

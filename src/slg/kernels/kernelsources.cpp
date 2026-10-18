@@ -151,6 +151,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_roughmatte_translucent <<
 			slg::ocl::KernelSource_materialdefs_funcs_twosided <<
 			slg::ocl::KernelSource_materialdefs_funcs_velvet <<
+			slg::ocl::KernelSource_materialdefs_funcs_subsurface <<
 			slg::ocl::KernelSource_material_funcs_evalops <<
 			slg::ocl::KernelSource_material_funcs;
 
@@ -169,6 +170,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_pathvolumeinfo_funcs <<
 			slg::ocl::KernelSource_pathinfo_funcs <<
 			slg::ocl::KernelSource_pathtracer_funcs <<
+			slg::ocl::KernelSource_subsurface_funcs <<
 			slg::ocl::KernelSource_camera_funcs <<
 			slg::ocl::KernelSource_dlsc_funcs <<
 			slg::ocl::KernelSource_elvc_funcs <<
