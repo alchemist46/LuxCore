@@ -508,6 +508,7 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 		sssd->todoPixelCount = 0;
 		sssd->todoBucketCount = 0;
 		sssd->todoPixelsOffset = filmRegionPixelCount + renderEngine->pathTracer.eyeSampleSize * SOBOL_BITS;
+		sssd->drain = 0;
 		uploadedTodoPixels.reset();
 
 		// Initialize all pass values. The pass buffer is attached at the

@@ -345,6 +345,29 @@ void PathOCLBaseRenderEngine::StartLockLess() {
 
 	oclSampler = Sampler::FromPropertiesOCL(cfg);
 
+	// A GPU task takes a bucket of pixels and renders one sample of each
+	// before it asks for the next one, while the bucket counter moves on with
+	// the other tasks: the samples a task still has to start are a backlog of
+	// half a bucket per task. Where the paths cost more (subsurface walks,
+	// deep glass), the tasks fall behind and their pixels end with fewer
+	// samples than the cheap ones: a 320x240 film at 64 spp with 512K tasks
+	// gave 24-30 spp to the subsurface objects and 84 to the walls. The bucket
+	// is shrunk so that the backlog stays within about one sample per pixel
+	// (1 on small films, 4 at 1920x1080 and 16 at 4K with 512K tasks; a
+	// bucket of 1 costs up to 10% of the rays/sec on the kitchen scene)
+	if (oclSampler->type == slg::ocl::SOBOL) {
+		const u_int *subRegion = GetFilm().GetSubRegion();
+		const double regionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+		const double totalTaskCount = double(taskCount) * Max<u_int>(oclRenderThreadCount, 1u);
+		u_int bucketSize = oclSampler->sobol.bucketSize;
+		while ((bucketSize > 1) && (bucketSize * totalTaskCount > 2.0 * regionPixelCount))
+			bucketSize /= 2;
+		if (bucketSize != oclSampler->sobol.bucketSize) {
+			SLG_LOG("[PathOCLBaseRenderEngine] Sobol bucket size of the GPU tasks: " << bucketSize);
+			oclSampler->sobol.bucketSize = bucketSize;
+		}
+	}
+
 	//--------------------------------------------------------------------------
 	// Filter
 	//--------------------------------------------------------------------------

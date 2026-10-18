@@ -1141,6 +1141,19 @@ __kernel void AdvancePaths_MK_RT(
 			pathState = MK_NEXT_SAMPLE;
 		}
 
+#if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
+		// At the halt spp, the host lets the paths in flight finish (with the
+		// Sobol sampler): no new sample is started. Dropping them instead
+		// would leave out the long paths.
+		if (((pathState == MK_NEXT_SAMPLE) || (pathState == MK_GENERATE_CAMERA_RAY)) &&
+				(taskConfig->sampler.type == SOBOL) &&
+				((__global SobolSamplerSharedData *)samplerSharedDataBuff)->drain) {
+			pathState = MK_DONE;
+			// Mark the ray like like one to NOT trace
+			rays[gid].flags = RAY_FLAGS_MASKED;
+		}
+#endif
+
 		if (pathState == MK_NEXT_SAMPLE) {
 			Sampler_NextSample(taskConfig,
 					filmNoise,
