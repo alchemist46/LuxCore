@@ -70,7 +70,10 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 	volume.Update(event, bsdf);
 
 	const float glossiness = bsdf.GetGlossiness();
-	const bool isNewVertexNearlySpecular = IsNearlySpecular(event, glossiness, glossinessThreshold);
+	// The path classification ignores the path regularization (see
+	// BSDF::GetUnregularizedGlossiness())
+	const bool isNewVertexNearlySpecular = IsNearlySpecular(event,
+			bsdf.GetUnregularizedGlossiness(), glossinessThreshold);
 
 	// Update isNearlySDS (must be done before isNearlySD)
 	isNearlySDS = (isNearlySD || isNearlySDS) && isNewVertexNearlySpecular;

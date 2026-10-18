@@ -77,8 +77,10 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	PathVolumeInfo_Update(&pathInfo->volume, event, bsdf MATERIALS_PARAM);
 
 	const float glossiness = BSDF_GetGlossiness(bsdf MATERIALS_PARAM);
+	// The path classification ignores the path regularization (see
+	// BSDF::GetUnregularizedGlossiness())
 	const bool isNewVertexNearlySpecular = EyePathInfo_IsNearlySpecular(pathInfo,
-			event, glossiness, glossinessThreshold);
+			event, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM), glossinessThreshold);
 
 	// Update isNearlySDS (must be done before isNearlySD)
 	pathInfo->isNearlySDS = (pathInfo->isNearlySD || pathInfo->isNearlySDS) && isNewVertexNearlySpecular;

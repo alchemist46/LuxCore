@@ -94,6 +94,14 @@ OPENCL_FORCE_INLINE float BSDF_GetGlossiness(__global const BSDF *bsdf
 	return (bsdf->hitPoint.regularization > 0.f) ? fmax(glossiness, bsdf->hitPoint.regularization) : glossiness;
 }
 
+// The glossiness without the path regularization, for the caustic path
+// classification of the eye path (see BSDF::GetUnregularizedGlossiness())
+OPENCL_FORCE_INLINE float BSDF_GetUnregularizedGlossiness(__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	return Material_GetGlossiness(bsdf->materialIndex
+			MATERIALS_PARAM);
+}
+
 OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughShadowTransparency(__global const BSDF *bsdf
 		MATERIALS_PARAM_DECL) {
 	return VLOAD3F(&mats[bsdf->materialIndex].passThroughShadowTransparency.c[0]);
