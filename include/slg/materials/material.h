@@ -126,12 +126,6 @@ public:
 	void SetHoldout(const bool enabled) { isHoldout = enabled; }
 	bool IsHoldout() const { return isHoldout; }
 
-	// The energy compensation of the microfacet lobes (Kulla-Conty tables) and
-	// EON for the rough diffuse ones is always on since 2026-10-18 (it was the
-	// "multiscattering" option): the materials keep asking, for the code
-	// paths that take it as a parameter
-	bool IsMultiscattering() const { return true; }
-
     void SetBumpSampleDistance(const float dist) { bumpSampleDistance = dist; }
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
 
@@ -382,8 +376,9 @@ extern float Microfacet_PdfReflect(const float u, const float v,
 	const luxrays::Vector &wo, const luxrays::Vector &wi);
 
 //------------------------------------------------------------------------------
-// Multiple-scattering energy compensation of the GGX lobes (property
-// "multiscattering"): the directional albedo tables of
+// Multiple-scattering energy compensation of the GGX lobes (always on since
+// 2026-10-18, it was the "multiscattering" option): the directional albedo
+// tables of
 // microfacet_energy_tables.cl (shared with the GPU) and the scale of a
 // reflection lobe, 1 + Fms * (1 - E(mu)) / E(mu) with the average Fresnel
 // reflectance Fss of the lobe (Kulla & Conty 2017, Turquin 2019). mu is the
@@ -406,9 +401,8 @@ extern luxrays::Spectrum GGXEnergy_CoatEavg(const float u, const float v, const 
 // The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
 extern float SchlickFresnel_Average(const float F0);
 extern luxrays::Spectrum SchlickFresnel_Average(const luxrays::Spectrum &F0);
-// The scale of a Microfacet_* reflection lobe: 1 unless multiscattering is
-// enabled
-extern luxrays::Spectrum Microfacet_MSScale(const bool multiscattering,
+// The energy compensation scale of a Microfacet_* reflection lobe
+extern luxrays::Spectrum Microfacet_MSScale(
 	const float u, const float v, const float mu, const luxrays::Spectrum &Fss);
 
 //------------------------------------------------------------------------------
@@ -453,12 +447,10 @@ inline float Disney_RegularizeClearcoatGloss(const float clearcoatGloss, const f
 //------------------------------------------------------------------------------
 extern float SchlickBSDF_CoatingWeight(const luxrays::Spectrum &ks, const luxrays::Vector &localFixedDir);
 extern luxrays::Spectrum SchlickBSDF_CoatingF(const bool fromLight, const luxrays::Spectrum &ks,
-	const float u, const float v, const bool mbounce,
-	const bool multiscattering,
+	const float u, const float v,
 	const luxrays::Vector &localFixedDir,	const luxrays::Vector &localSampledDir);
 extern luxrays::Spectrum SchlickBSDF_CoatingSampleF(const bool fromLight, const luxrays::Spectrum ks,
-	const float u, const float v, const bool mbounce,
-	const bool multiscattering,
+	const float u, const float v,
 	const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 	float u0, float u1, float *pdf);
 extern float SchlickBSDF_CoatingPdf(const float u, const float v,

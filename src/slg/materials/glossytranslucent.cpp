@@ -173,8 +173,7 @@ Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 		*event = GLOSSY | REFLECT;
 
 		const Spectrum absorption = CoatingAbsorption(cosLight, cosEye, eyeSide.alpha, eyeSide.d);
-		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, eyeSide.ks, eyeSide.u, eyeSide.v,
-				false, true, localFixedDir, localSampledDir);
+		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, eyeSide.ks, eyeSide.u, eyeSide.v, localFixedDir, localSampledDir);
 
 		return coatingF + absorption * layer * kd * (INV_PI * cosLight);
 	}

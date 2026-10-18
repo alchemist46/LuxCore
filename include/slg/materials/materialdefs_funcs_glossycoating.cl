@@ -215,7 +215,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float d = Texture_GetFloatValue(material->glossycoating.depthTexIndex, hitPoint TEXTURES_PARAM);
 		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, false, true, fixedDir, sampledDir);
+		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 
 		// Albedo scaling by the eye direction (see glossycoating.cpp)
 		const float3 result = coatingF + absorption * (WHITE - EcEye) * baseF;
@@ -371,7 +371,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 		// Sample coating BSDF (Schlick BSDF)
 		float3 sampledDir;
 		float coatingPdf;
-		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, u, v, false, true, fixedDir, &sampledDir, u0, u1, &coatingPdf);
+		const float3 coatingF = SchlickBSDF_CoatingSampleF(ks, u, v, fixedDir, &sampledDir, u0, u1, &coatingPdf);
 
 		// Save coatingF, coatingPdf and sampledDir
 		EvalStack_PushFloat3(coatingF);
@@ -523,7 +523,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 	float3 coatingF;
 	float coatingPdf;
 	if (!(event & SPECULAR)) {
-		coatingF = SchlickBSDF_CoatingF(ks, u, v, false, true, fixedDir, sampledDir);
+		coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 		coatingPdf = SchlickBSDF_CoatingPdf(u, v, fixedDir, sampledDir);
 	} else {
 		coatingF = BLACK;

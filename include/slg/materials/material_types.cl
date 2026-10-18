@@ -373,9 +373,6 @@ typedef struct {
 	int isRefractive;
 	unsigned int refractionExteriorIorTexIndex, refractionInteriorIorTexIndex;
 
-	// Multiple-scattering energy compensation (EON for RoughMatte)
-	int multiscattering;
-
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;
 	unsigned int evalGetInteriorVolumeOpStartIndex, evalGetInteriorVolumeOpLength;

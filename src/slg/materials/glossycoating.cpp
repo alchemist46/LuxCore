@@ -191,7 +191,7 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float d = depth->GetFloatValue(hitPoint);
 		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v, false, true,
+		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v,
 			localLightDir, localEyeDir);
 
 		return coatingF + absorption * (Spectrum(1.f) - EcEye) * baseF;
@@ -305,7 +305,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 		// Don't add the coating scattering if the base sampled
 		// component is specular	
 		if (!(*event & SPECULAR)) {
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, false, true,
+			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v,
 				localFixedDir, *localSampledDir);
 			assert (coatingF.IsValid());
 
@@ -315,7 +315,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			coatingPdf = 0.f;
 	} else {
 		// Sample coating BxDF
-		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, false, true,
+		coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v,
 			localFixedDir, localSampledDir, u0, u1, &coatingPdf);
 		assert (coatingF.IsValid());
 

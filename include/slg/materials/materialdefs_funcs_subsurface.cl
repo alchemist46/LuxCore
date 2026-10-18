@@ -118,7 +118,7 @@ OPENCL_FORCE_INLINE float3 SubsurfaceMaterial_EvaluateLayers(__global const Mate
 
 	const float3 ks = TO_FLOAT3(F0);
 	const float3 EcEye = GGXEnergy_CoatE3(alpha, alpha, fabs(eyeDir.z), ks);
-	const float3 coatingF = SchlickBSDF_CoatingF(ks, alpha, alpha, false, true, fixedDir, sampledDir);
+	const float3 coatingF = SchlickBSDF_CoatingF(ks, alpha, alpha, fixedDir, sampledDir);
 	const float wCoating = Coating_Probability(EcEye, kd);
 	const float coatingPdf = SchlickBSDF_CoatingPdf(alpha, alpha, fixedDir, sampledDir);
 

@@ -561,8 +561,7 @@ float slg::SchlickBSDF_CoatingWeight(const Spectrum &ks, const Vector &localFixe
 }
 
 Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
-		const float u, const float v, const bool mbounce,
-		const bool multiscattering,
+		const float u, const float v,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir.z);
@@ -574,27 +573,19 @@ Spectrum slg::SchlickBSDF_CoatingF(const bool fromLight, const Spectrum &ks,
 
 	const float G = Microfacet_G(u, v, localFixedDir, localSampledDir);
 
-	// Multibounce - alternative with interreflection in the coating creases
-	float factor = Microfacet_D(u, v, wh) * G;
-	if (!fromLight)
-		factor = factor / (4.f * coso) +
-				(mbounce ? cosi * Clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) : 0.f);
-	else
-		factor = factor / (4.f * cosi) + 
-				(mbounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) : 0.f);
+	const float factor = Microfacet_D(u, v, wh) * G / (4.f * (fromLight ? cosi : coso));
 	assert (IsValid(factor));
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? localSampledDir : localFixedDir;
-	const Spectrum msScale = Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
+	const Spectrum msScale = Microfacet_MSScale(u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return factor * S * msScale;
 }
 
 Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks,
-		const float u, const float v, const bool mbounce,
-		const bool multiscattering,
+		const float u, const float v,
 		const Vector &localFixedDir, Vector *localSampledDir, float u0, float u1, float *pdf) {
 	*pdf = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
 
@@ -614,18 +605,11 @@ Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks
 
 	const float d = Microfacet_D(u, v, wh);
 	const float G = Microfacet_G(u, v, localFixedDir, *localSampledDir);
-	if (!fromLight)
-		//CoatingF(sw, *wi, wo, f_);
-		S *= (d / *pdf) * G / (4.f * coso) + 
-				(mbounce ? cosi * Clamp((1.f - G) / (4.f * coso * cosi), 0.f, 1.f) / *pdf : 0.f);
-	else
-		//CoatingF(sw, wo, *wi, f_);
-		S *= (d / *pdf) * G / (4.f * cosi) + 
-				(mbounce ? coso * Clamp((1.f - G) / (4.f * cosi * coso), 0.f, 1.f) / *pdf : 0.f);
+	S *= (d / *pdf) * G / (4.f * (fromLight ? cosi : coso));
 
 	// Multiple-scattering energy compensation
 	const Vector &localEyeDir = fromLight ? *localSampledDir : localFixedDir;
-	S *= Microfacet_MSScale(multiscattering, u, v, fabsf(localEyeDir.z),
+	S *= Microfacet_MSScale(u, v, fabsf(localEyeDir.z),
 			SchlickFresnel_Average(ks));
 
 	return S;

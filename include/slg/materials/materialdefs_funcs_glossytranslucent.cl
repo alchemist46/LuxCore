@@ -151,7 +151,7 @@ OPENCL_FORCE_INLINE float3 GlossyTranslucentMaterial_EvaluateLayers(__global con
 		*directPdfW = pReflect * cosLight * M_1_PI_F + pCoat * SchlickBSDF_CoatingPdf(uE, vE, eyeDir, lightDir);
 
 		const float3 absorption = CoatingAbsorption(cosLight, cosEye, alphaE, dE);
-		const float3 coatingF = SchlickBSDF_CoatingF(ksE, uE, vE, false, true, eyeDir, lightDir);
+		const float3 coatingF = SchlickBSDF_CoatingF(ksE, uE, vE, eyeDir, lightDir);
 
 		return coatingF + absorption * layer * kd * (M_1_PI_F * cosLight);
 	}

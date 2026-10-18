@@ -112,7 +112,7 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 			const float r = lobes.r[i];
 			result += (Microfacet_D(m, m, H) * Microfacet_G(m, m, localLightDir, localEyeDir) / (4.f * coso)) *
 					(lobes.ks[i] * FresnelTexture::SchlickEvaluate(r, AbsDot(localEyeDir, H))) *
-					Microfacet_MSScale(IsMultiscattering(), m, m, coso, Spectrum(SchlickFresnel_Average(r)));
+					Microfacet_MSScale(m, m, coso, Spectrum(SchlickFresnel_Average(r)));
 			pdf += Microfacet_PdfReflect(m, m, localFixedDir, localSampledDir);
 			pdfR += Microfacet_PdfReflect(m, m, localSampledDir, localFixedDir);
 		}

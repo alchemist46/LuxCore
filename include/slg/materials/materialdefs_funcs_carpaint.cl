@@ -64,12 +64,12 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_GetEmittedRadiance(__global const Mate
 // One glossy layer: adds its f |cos light| and its pdf. The GPU traces eye
 // paths only, so the fixed direction is always eyeDir.
 OPENCL_FORCE_INLINE void CarPaintMaterial_AddLobe(const float3 ks, const float m, const float r,
-		const int multiscattering, const float3 lightDir, const float3 eyeDir, const float3 H,
+		const float3 lightDir, const float3 eyeDir, const float3 H,
 		float3 *result, float *pdf) {
 	const float coso = fabs(eyeDir.z);
 	*result += (Microfacet_D(m, m, H) * Microfacet_G(m, m, lightDir, eyeDir) / (4.f * coso)) *
 			(ks * FresnelSchlick_Evaluate(TO_FLOAT3(r), fabs(dot(eyeDir, H)))) *
-			Microfacet_MSScale(multiscattering, m, m, coso, SchlickFresnel_Average(TO_FLOAT3(r)));
+			Microfacet_MSScale(m, m, coso, SchlickFresnel_Average(TO_FLOAT3(r)));
 	*pdf += Microfacet_PdfReflect(m, m, eyeDir, lightDir);
 }
 
@@ -97,13 +97,12 @@ OPENCL_FORCE_INLINE float3 CarPaintMaterial_EvaluateMixture(__global const Mater
 	// Glossy layers
 	if ((lightDir.z > 0.f) && (eyeDir.z > 0.f)) {
 		const float3 H = normalize(lightDir + eyeDir);
-		const int ms = material->multiscattering;
 
 		const float3 ks1 = Spectrum_Clamp(Texture_GetSpectrumValue(material->carpaint.Ks1TexIndex, hitPoint TEXTURES_PARAM));
 		const float m1 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 		if ((Spectrum_Filter(ks1) > 0.f) && (m1 > 0.f)) {
 			const float r1 = Texture_GetFloatValue(material->carpaint.R1TexIndex, hitPoint TEXTURES_PARAM);
-			CarPaintMaterial_AddLobe(ks1, m1, r1, ms, lightDir, eyeDir, H, &result, &pdf);
+			CarPaintMaterial_AddLobe(ks1, m1, r1, lightDir, eyeDir, H, &result, &pdf);
 			++n;
 		}
 
@@ -111,7 +110,7 @@ OPENCL_FORCE_INLINE float3 CarPaintMaterial_EvaluateMixture(__global const Mater
 		const float m2 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 		if ((Spectrum_Filter(ks2) > 0.f) && (m2 > 0.f)) {
 			const float r2 = Texture_GetFloatValue(material->carpaint.R2TexIndex, hitPoint TEXTURES_PARAM);
-			CarPaintMaterial_AddLobe(ks2, m2, r2, ms, lightDir, eyeDir, H, &result, &pdf);
+			CarPaintMaterial_AddLobe(ks2, m2, r2, lightDir, eyeDir, H, &result, &pdf);
 			++n;
 		}
 
@@ -119,7 +118,7 @@ OPENCL_FORCE_INLINE float3 CarPaintMaterial_EvaluateMixture(__global const Mater
 		const float m3 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
 		if ((Spectrum_Filter(ks3) > 0.f) && (m3 > 0.f)) {
 			const float r3 = Texture_GetFloatValue(material->carpaint.R3TexIndex, hitPoint TEXTURES_PARAM);
-			CarPaintMaterial_AddLobe(ks3, m3, r3, ms, lightDir, eyeDir, H, &result, &pdf);
+			CarPaintMaterial_AddLobe(ks3, m3, r3, lightDir, eyeDir, H, &result, &pdf);
 			++n;
 		}
 	}

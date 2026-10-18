@@ -118,7 +118,7 @@ OPENCL_FORCE_INLINE float3 Glossy2Material_EvaluateLayers(__global const Materia
 	const float d = Texture_GetFloatValue(material->glossy2.depthTexIndex, hitPoint TEXTURES_PARAM);
 	const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-	const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, false, true, fixedDir, sampledDir);
+	const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 
 	return coatingF + absorption * Coating_LayerScale(EcLight, EcEye, EcAvg) * baseF;
 }

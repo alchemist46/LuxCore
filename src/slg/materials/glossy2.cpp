@@ -138,7 +138,7 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	const float d = depth->GetFloatValue(hitPoint);
 	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, false, true,
+	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v,
 			localFixedDir, localSampledDir);
 
 	const Spectrum &EcLight = hitPoint.fromLight ? EcFixed : EcSampled;

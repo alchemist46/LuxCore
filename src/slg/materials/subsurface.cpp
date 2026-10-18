@@ -144,7 +144,7 @@ Spectrum SubsurfaceMaterial::Evaluate(const HitPoint &hitPoint,
 	const Spectrum EcFixed = GGXEnergy_CoatE(alpha, alpha, fabsf(localFixedDir.z), ks);
 	const Spectrum EcSampled = GGXEnergy_CoatE(alpha, alpha, fabsf(localSampledDir.z), ks);
 
-	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, alpha, alpha, false, true,
+	const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, alpha, alpha,
 			localFixedDir, localSampledDir);
 	const float wCoating = Subsurface_CoatProbability(EcFixed, kd);
 	const float wCoatingR = Subsurface_CoatProbability(EcSampled, kd);

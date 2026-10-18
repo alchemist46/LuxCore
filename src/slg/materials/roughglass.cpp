@@ -45,7 +45,8 @@ RoughGlassMaterial::RoughGlassMaterial(TextureConstPtr frontTransp, TextureConst
 
 // The multiple-scattering scale of the whole interface seen from localEyeDir:
 // 1 / E(mu, alpha, eta) with the albedo of the rough dielectric interface (the
-// other side over the eye side as relative IOR), as in Cycles
+// other side over the eye side as relative IOR), as in Cycles. Rough glass
+// always has it; the regularized glass (glass.cpp) turns it off.
 static float RoughGlass_MSScale(const bool multiscattering,
 		const float u, const float v, const Vector &localEyeDir, const float ntc) {
 	if (!multiscattering)
@@ -341,7 +342,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
 	return EvaluateRough(hitPoint, localLightDir, localEyeDir, event, directPdfW, reversePdfW,
-			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor, workingColorSpace);
 }
 
 Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
@@ -358,7 +359,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
 	return SampleRough(hitPoint, localFixedDir, localSampledDir, u0, u1, passThroughEvent, pdfW, event,
-			kt, kr, nc, nt, u, v, IsMultiscattering(), localFilmThickness, localFilmIor, workingColorSpace);
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor, workingColorSpace);
 }
 
 void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,

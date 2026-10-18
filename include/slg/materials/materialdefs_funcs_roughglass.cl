@@ -190,7 +190,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 	BSDFEvent event;
 	float directPdfW;
 	const float3 result = RoughGlassMaterial_EvaluateRough(hitPoint, lightDir, eyeDir,
-			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor,
 			&event, &directPdfW);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
@@ -297,7 +297,7 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 	float pdfW;
 	BSDFEvent event;
 	const float3 result = RoughGlassMaterial_SampleRough(hitPoint, fixedDir, u0, u1, passThroughEvent,
-			kt, kr, nc, nt, u, v, material->multiscattering, localFilmThickness, localFilmIor,
+			kt, kr, nc, nt, u, v, true, localFilmThickness, localFilmIor,
 			&sampledDir, &pdfW, &event);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;

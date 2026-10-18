@@ -168,8 +168,8 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateLayers(const DisneyLobes *p,
 		return BLACK;
 
 	// The specular lobes with the thin film (eye path: fixed = eye)
-	float3 specM = SchlickBSDF_CoatingF(p->color, p->ax, p->ay, false, true, eyeDir, lightDir);
-	float3 specD = SchlickBSDF_CoatingF(p->F0d, p->ax, p->ay, false, true, eyeDir, lightDir);
+	float3 specM = SchlickBSDF_CoatingF(p->color, p->ax, p->ay, eyeDir, lightDir);
+	float3 specD = SchlickBSDF_CoatingF(p->F0d, p->ax, p->ay, eyeDir, lightDir);
 	if (p->filmThickness > 0.f) {
 		const float3 filmColor = CalcFilmColor(eyeDir, p->filmThickness, p->filmIor);
 		specM = mix(specM, specM * filmColor, p->filmAmount);
@@ -209,7 +209,7 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateLayers(const DisneyLobes *p,
 	// The clearcoat above everything
 	if (p->clearcoat > 0.f) {
 		const float3 F0cc = TO_FLOAT3(DISNEY_CLEARCOAT_F0);
-		const float3 ccF = p->clearcoat * SchlickBSDF_CoatingF(F0cc, p->alphaCC, p->alphaCC, false, true, eyeDir, lightDir);
+		const float3 ccF = p->clearcoat * SchlickBSDF_CoatingF(F0cc, p->alphaCC, p->alphaCC, eyeDir, lightDir);
 		// Albedo scaling by the eye direction (see disney.cpp)
 		const float EccEye = p->clearcoat * GGXEnergy_CoatE(p->alphaCC, p->alphaCC, muE, DISNEY_CLEARCOAT_F0);
 

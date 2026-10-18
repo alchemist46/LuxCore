@@ -240,8 +240,8 @@ Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
 	const Vector &sampledDir = fromLight ? eyeDir : lightDir;
 
 	// The specular lobes (f |cos light|, energy compensated), with the thin film
-	Spectrum specM = SchlickBSDF_CoatingF(fromLight, p.color, p.ax, p.ay, false, true, fixedDir, sampledDir);
-	Spectrum specD = SchlickBSDF_CoatingF(fromLight, p.F0d, p.ax, p.ay, false, true, fixedDir, sampledDir);
+	Spectrum specM = SchlickBSDF_CoatingF(fromLight, p.color, p.ax, p.ay, fixedDir, sampledDir);
+	Spectrum specD = SchlickBSDF_CoatingF(fromLight, p.F0d, p.ax, p.ay, fixedDir, sampledDir);
 	if (p.filmThickness > 0.f) {
 		const Spectrum filmColor = CalcFilmColor(eyeDir, p.filmThickness, p.filmIor, workingColorSpace);
 		const Spectrum specMFilm = specM * filmColor;
@@ -282,8 +282,7 @@ Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
 	// The clearcoat above everything
 	if (p.clearcoat > 0.f) {
 		const Spectrum F0cc(DISNEY_CLEARCOAT_F0);
-		const Spectrum ccF = p.clearcoat * SchlickBSDF_CoatingF(fromLight, F0cc, p.alphaCC, p.alphaCC,
-				false, true, fixedDir, sampledDir);
+		const Spectrum ccF = p.clearcoat * SchlickBSDF_CoatingF(fromLight, F0cc, p.alphaCC, p.alphaCC, fixedDir, sampledDir);
 		// Albedo scaling by the eye direction, exact for any base (see
 		// glossycoating.cpp): the base is not Lambertian here
 		const float EccEye = p.clearcoat * GGXEnergy_CoatE(p.alphaCC, p.alphaCC, muE, F0cc).c[0];

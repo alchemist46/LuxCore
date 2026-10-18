@@ -666,8 +666,6 @@ void CompiledScene::CompileMaterials() {
 				mat->refractionInteriorIorTexIndex = scene.GetTextures().GetTextureIndex(intIor);
 		}
 
-		mat->multiscattering = m.IsMultiscattering() ? 1 : 0;
-
 		// Material specific parameters
 		switch (m.GetType()) {
 			case MATTE: {
