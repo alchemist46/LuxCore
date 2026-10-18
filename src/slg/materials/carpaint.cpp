@@ -249,7 +249,6 @@ PropertiesUPtr CarPaintMaterial::ToProperties(const ImageMapCache &imgMapCache, 
 	props->Set(Property("scene.materials." + name + ".r3")(R3->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".ka")(Ka->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

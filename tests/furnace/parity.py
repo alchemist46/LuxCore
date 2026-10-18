@@ -27,11 +27,13 @@ mat-*-area scene when none is given) at the size of the suite (150x100), SOBOL
 without adaptivity, a fixed seed and a NOP pipeline, and saves the RGB image of
 each scene in <out.npz>. Compare two runs with paritycmp.py.
 
-PATHOCL runs with opencl.task.count = 4096: with the default 512K tasks the
+TILEPATHCPU (with its own sampler) and native.threads.count = 1 is deterministic:
+two builds can be compared bit for bit. PATHOCL runs with opencl.task.count = 4096: with the default 512K tasks the
 small film stops with most paths in flight and is biased dark (see "Known open
 issues" in MODERNIZATION_PLAN.md).
 
-Run it from the repository root (the scenes use paths relative to it).
+The scenes use paths relative to pyunittests/, so the script changes into it
+(the output path is taken relative to the directory it is started from).
 """
 
 import glob
@@ -42,14 +44,15 @@ import time
 import numpy as np
 import pyluxcore
 
-SCENE_DIR = "pyunittests/resources/scenes/simple"
+PYUNITTESTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyunittests")
+SCENE_DIR = "resources/scenes/simple"
 
 
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
-    engine, out = sys.argv[1], sys.argv[2]
+    engine, out = sys.argv[1], os.path.abspath(sys.argv[2])
     spp, devices, scenes, kv = 512, "01", [], []
     for a in sys.argv[3:]:
         if a.startswith("spp="):
@@ -61,6 +64,7 @@ def main():
             kv.append((k.strip(), v.strip()))
         else:
             scenes.append(a)
+    os.chdir(PYUNITTESTS_DIR)
     if not scenes:
         scenes = sorted(os.path.basename(p)[4:-9] for p in glob.glob(f"{SCENE_DIR}/mat-*-area.cfg"))
 
@@ -72,7 +76,7 @@ def main():
         props.Set(pyluxcore.Properties().SetFromString(f"""
 renderengine.type = {engine}
 renderengine.seed = 5
-sampler.type = SOBOL
+sampler.type = {"TILEPATHSAMPLER" if engine.startswith("TILEPATH") else "SOBOL"}
 sampler.sobol.adaptive.strength = 0
 film.width = 150
 film.height = 100

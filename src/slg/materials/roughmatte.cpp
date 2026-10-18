@@ -48,24 +48,11 @@ Spectrum RoughMatteMaterial::Evaluate(const HitPoint &hitPoint,
 		*reversePdfW = fabsf((hitPoint.fromLight ? localLightDir.z : localEyeDir.z) * INV_PI);
 
 	*event = DIFFUSE | REFLECT;
+	// EON (the Oren-Nayar lobe of before 2026-10-18 lost up to 30% of the
+	// energy at sigma 1)
 	const float s = sigma->GetFloatValue(hitPoint);
-	if (IsMultiscattering())
-		return EON_Evaluate(Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f), Clamp(s, 0.f, 1.f),
-				localLightDir, localEyeDir) * fabsf(localLightDir.z);
-
-	const float sigma2 = s * s;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(localEyeDir);
-	const float sinthetao = SinTheta(localLightDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(localLightDir) * CosPhi(localEyeDir) +
-			SinPhi(localLightDir) * SinPhi(localEyeDir);
-		maxcos = max(0.f, dcos);
-	}
-	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (INV_PI * fabsf(localLightDir.z) *
-		(A + B * maxcos * sinthetai * sinthetao / max(fabsf(CosTheta(localLightDir)), fabsf(CosTheta(localEyeDir)))));
+	return EON_Evaluate(Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f), Clamp(s, 0.f, 1.f),
+			localLightDir, localEyeDir) * fabsf(localLightDir.z);
 }
 
 Spectrum RoughMatteMaterial::Sample(const HitPoint &hitPoint,
@@ -81,30 +68,11 @@ Spectrum RoughMatteMaterial::Sample(const HitPoint &hitPoint,
 
 	*event = DIFFUSE | REFLECT;
 	const float s = sigma->GetFloatValue(hitPoint);
-	if (IsMultiscattering()) {
-		const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
-		const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
 
-		return EON_Evaluate(Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f), Clamp(s, 0.f, 1.f),
-				localLightDir, localEyeDir) * (fabsf(localLightDir.z) / *pdfW);
-	}
-
-	const float sigma2 = s * s;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(localFixedDir);
-	const float sinthetao = SinTheta(*localSampledDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(*localSampledDir) * CosPhi(localFixedDir) +
-			SinPhi(*localSampledDir) * SinPhi(localFixedDir);
-		maxcos = max(0.f, dcos);
-	}
-	const float coef = (A + B * maxcos * sinthetai * sinthetao / max(fabsf(CosTheta(*localSampledDir)), fabsf(CosTheta(localFixedDir))));
-	if (hitPoint.fromLight)
-		return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (coef * fabsf(localFixedDir.z / localSampledDir->z));
-	else
-		return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * coef;
+	return EON_Evaluate(Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f), Clamp(s, 0.f, 1.f),
+			localLightDir, localEyeDir) * (fabsf(localLightDir.z) / *pdfW);
 }
 
 void RoughMatteMaterial::Pdf(const HitPoint &hitPoint,
@@ -140,7 +108,6 @@ PropertiesUPtr RoughMatteMaterial::ToProperties(const ImageMapCache &imgMapCache
 	props->Set(Property("scene.materials." + name + ".type")("roughmatte"));
 	props->Set(Property("scene.materials." + name + ".kd")(Kd->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".sigma")(sigma->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

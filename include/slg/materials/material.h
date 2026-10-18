@@ -126,8 +126,11 @@ public:
 	void SetHoldout(const bool enabled) { isHoldout = enabled; }
 	bool IsHoldout() const { return isHoldout; }
 
-	void SetMultiscattering(const bool enabled) { multiscattering = enabled; }
-	bool IsMultiscattering() const { return multiscattering; }
+	// The energy compensation of the microfacet lobes (Kulla-Conty tables) and
+	// EON for the rough diffuse ones is always on since 2026-10-18 (it was the
+	// "multiscattering" option): the materials keep asking, for the code
+	// paths that take it as a parameter
+	bool IsMultiscattering() const { return true; }
 
     void SetBumpSampleDistance(const float dist) { bumpSampleDistance = dist; }
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
@@ -312,7 +315,6 @@ protected:
 		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled,
 		isHoldout;
 
-	bool multiscattering;
 
 	WorkingColorSpace workingColorSpace;
 };

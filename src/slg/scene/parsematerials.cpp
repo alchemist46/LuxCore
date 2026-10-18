@@ -718,7 +718,8 @@ MaterialUPtr Scene::CreateMaterial(
 
 	mat->SetID(props.Get(Property(propName + ".id")(defaultMatID)).Get<u_int>());
 	mat->SetBumpSampleDistance(bumpSampleDistance);
-	mat->SetMultiscattering(parseBool("multiscattering", false));
+	// "multiscattering" is ignored: the energy compensation is always on
+	// (since 2026-10-18, see Material::IsMultiscattering())
 
 	// Gain is not really a color so I avoid to use GetColor()
 	mat->SetEmittedGain(props.Get(Property(propName + ".emission.gain")(Spectrum(1.f))).Get<Spectrum>());

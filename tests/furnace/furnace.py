@@ -78,11 +78,10 @@ def cases():
     construction (velvet, the default presets) and only the number is logged.
     """
     c = []
-    ms = "scene.materials.m.multiscattering = 1\n"
     c.append(("matte", "scene.materials.m.type = matte\nscene.materials.m.kd = 1 1 1\n", 1.0))
     for s in (0.0, 0.3, 0.7, 1.0):
         c.append((f"roughmatte-s{s}", "scene.materials.m.type = roughmatte\nscene.materials.m.kd = 1 1 1\n"
-                  f"scene.materials.m.sigma = {s}\n" + ms, 1.0))
+                  f"scene.materials.m.sigma = {s}\n", 1.0))
     c.append(("mirror", "scene.materials.m.type = mirror\nscene.materials.m.kr = 1 1 1\n", 1.0))
     c.append(("glass", "scene.materials.m.type = glass\nscene.materials.m.kr = 1 1 1\n"
               "scene.materials.m.kt = 1 1 1\nscene.materials.m.interiorior = 1.5\n", 1.0))
@@ -94,55 +93,55 @@ def cases():
     for a in ROUGHS:
         c.append((f"roughglass-a{a}", "scene.materials.m.type = roughglass\n"
                   "scene.materials.m.kr = 1 1 1\nscene.materials.m.kt = 1 1 1\n"
-                  "scene.materials.m.interiorior = 1.5\n" + ms + rough(a), 1.0))
+                  "scene.materials.m.interiorior = 1.5\n" + rough(a), 1.0))
         c.append((f"metal2-a{a}", WHITE_FRESNEL + "scene.materials.m.type = metal2\n"
-                  "scene.materials.m.fresnel = fr\n" + ms + rough(a), 1.0))
+                  "scene.materials.m.fresnel = fr\n" + rough(a), 1.0))
         c.append((f"glossy2-coat-a{a}", "scene.materials.m.type = glossy2\n"
                   "scene.materials.m.kd = 0 0 0\nscene.materials.m.ks = 1 1 1\n"
-                  "scene.materials.m.index = 0 0 0\n" + ms + rough(a), 1.0))
+                  "scene.materials.m.index = 0 0 0\n" + rough(a), 1.0))
         c.append((f"glossy2-white-a{a}", "scene.materials.m.type = glossy2\n"
                   "scene.materials.m.kd = 1 1 1\nscene.materials.m.ks = 0.04 0.04 0.04\n"
-                  "scene.materials.m.index = 0 0 0\n" + ms + rough(a), 1.0))
+                  "scene.materials.m.index = 0 0 0\n" + rough(a), 1.0))
         c.append((f"glossycoating-white-a{a}",
                   "scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
                   "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
                   "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
-                  + ms + rough(a), 1.0))
+                  + rough(a), 1.0))
         c.append((f"glossycoating-metal-a{a}", WHITE_FRESNEL +
                   "scene.materials.b.type = metal2\nscene.materials.b.fresnel = fr\n"
                   "scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
-                  "scene.materials.b.multiscattering = 1\n"
                   "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
                   "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
-                  + ms + rough(a), None))
+                  + rough(a), None))
         c.append((f"glossytranslucent-a{a}", "scene.materials.m.type = glossytranslucent\n"
                   "scene.materials.m.kd = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n"
                   "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.ks_bf = 0.04 0.04 0.04\n"
-                  + ms + rough(a) + rough(a, "_bf"), 1.0))
+                  + rough(a) + rough(a, "_bf"), 1.0))
         dr = f"scene.materials.m.roughness = {math.sqrt(a):.4f}\n"
         c.append((f"disney-metal-a{a}", "scene.materials.m.type = disney\n"
                   "scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 1\n"
-                  "scene.materials.m.specular = 1\n" + ms + dr, 1.0))
+                  "scene.materials.m.specular = 1\n" + dr, 1.0))
         c.append((f"disney-dielectric-a{a}", "scene.materials.m.type = disney\n"
                   "scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 0\n"
-                  "scene.materials.m.specular = 0.5\n" + ms + dr, 1.0))
+                  "scene.materials.m.specular = 0.5\n" + dr, 1.0))
         c.append((f"disney-clearcoat-a{a}", "scene.materials.m.type = disney\n"
                   "scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 1\n"
                   "scene.materials.m.specular = 1\nscene.materials.m.clearcoat = 1\n"
-                  "scene.materials.m.clearcoatgloss = 0.5\n" + ms + dr, 1.0))
+                  "scene.materials.m.clearcoatgloss = 0.5\n" + dr, 1.0))
     c.append(("carpaint-3lobes", "scene.materials.m.type = carpaint\nscene.materials.m.kd = 0 0 0\n"
               "scene.materials.m.ks1 = 0.333 0.333 0.333\nscene.materials.m.ks2 = 0.333 0.333 0.333\n"
               "scene.materials.m.ks3 = 0.334 0.334 0.334\n"
               "scene.materials.m.r1 = 1\nscene.materials.m.r2 = 1\nscene.materials.m.r3 = 1\n"
-              "scene.materials.m.m1 = 0.25\nscene.materials.m.m2 = 0.45\nscene.materials.m.m3 = 0.7\n"
-              + ms, 1.0))
+              "scene.materials.m.m1 = 0.25\nscene.materials.m.m2 = 0.45\nscene.materials.m.m3 = 0.7\n", 1.0))
     c.append(("carpaint-preset", "scene.materials.m.type = carpaint\n"
               "scene.materials.m.preset = \"ford f8\"\n", None))
     c.append(("cloth-diffuse", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n"
               "scene.materials.m.weft_kd = 1 1 1\nscene.materials.m.warp_kd = 1 1 1\n"
               "scene.materials.m.weft_ks = 0 0 0\nscene.materials.m.warp_ks = 0 0 0\n", 1.0))
     c.append(("cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n", None))
-    c.append(("velvet", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n", None))
+    for r in (0.2, 0.5, 1.0):
+        c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
+                  f"scene.materials.m.roughness = {r}\n", None))
     c.append(("mattetranslucent", "scene.materials.m.type = mattetranslucent\n"
               "scene.materials.m.kr = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n", 1.0))
     for s in (0.0, 0.5, 1.0):
@@ -153,7 +152,6 @@ def cases():
               "scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
               "scene.materials.b.type = metal2\nscene.materials.b.fresnel = fr\n"
               "scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
-              "scene.materials.b.multiscattering = 1\n"
               "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
               "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.0))
     c.append(("twosided", "scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"

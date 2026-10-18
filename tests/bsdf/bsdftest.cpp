@@ -29,7 +29,8 @@
 //  2. pdf: the pdf of Sample() must equal the directPdfW of Evaluate();
 //  3. reverse pdf: the reversePdfW of Evaluate() and of Pdf() must equal the
 //     directPdfW of Evaluate() with the fixed and the sampled direction
-//     exchanged, and Pdf()'s directPdfW must equal Evaluate()'s;
+//     exchanged in the opposite mode (the other path type generating the
+//     fixed direction), and Pdf()'s directPdfW must equal Evaluate()'s;
 //  4. chi-square: the histogram of the sampled directions must match the
 //     integral of Evaluate()'s directPdfW over each bin (only where the BSDF
 //     is not zero; Mitsuba/pbrt style);
@@ -108,7 +109,7 @@ vector<TestCase> BuildTestCases() {
 	for (const float s : { 0.f, 0.3f, 0.7f, 1.f })
 		cases.push_back({ "roughmatte-s" + to_string(s).substr(0, 3),
 			"scene.materials.m.type = roughmatte\nscene.materials.m.kd = 1 1 1\n"
-			"scene.materials.m.sigma = " + to_string(s) + "\nscene.materials.m.multiscattering = 1\n", 1.f, true });
+			"scene.materials.m.sigma = " + to_string(s) + "\n", 1.f, true });
 
 	// Delta and thin dielectrics
 	cases.push_back({ "mirror", "scene.materials.m.type = mirror\nscene.materials.m.kr = 1 1 1\n", 1.f, false });
@@ -122,33 +123,33 @@ vector<TestCase> BuildTestCases() {
 	for (const float a : roughs) {
 		cases.push_back({ "roughglass-" + Tag(a), "scene.materials.m.type = roughglass\n"
 			"scene.materials.m.kr = 1 1 1\nscene.materials.m.kt = 1 1 1\n"
-			"scene.materials.m.interiorior = 1.5\nscene.materials.m.multiscattering = 1\n" + Rough(a),
+			"scene.materials.m.interiorior = 1.5\n" + Rough(a),
 			NO_EXPECT, a >= 0.2f });
 
 		cases.push_back({ "metal2-" + Tag(a), WHITE_FRESNEL + "scene.materials.m.type = metal2\n"
-			"scene.materials.m.fresnel = fr\nscene.materials.m.multiscattering = 1\n" + Rough(a),
+			"scene.materials.m.fresnel = fr\n" + Rough(a),
 			1.f, a >= 0.2f });
 
 		// The bare coating lobe with F = 1
 		cases.push_back({ "glossy2-coat-" + Tag(a), "scene.materials.m.type = glossy2\n"
 			"scene.materials.m.kd = 0 0 0\nscene.materials.m.ks = 1 1 1\nscene.materials.m.index = 0 0 0\n"
-			"scene.materials.m.multiscattering = 1\n" + Rough(a), 1.f, a >= 0.2f });
+			+ Rough(a), 1.f, a >= 0.2f });
 		// A white base under a clear (4%) coating
 		cases.push_back({ "glossy2-white-" + Tag(a), "scene.materials.m.type = glossy2\n"
 			"scene.materials.m.kd = 1 1 1\nscene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
-			"scene.materials.m.multiscattering = 1\n" + Rough(a), 1.f, a >= 0.2f });
+			+ Rough(a), 1.f, a >= 0.2f });
 
 		cases.push_back({ "glossycoating-white-" + Tag(a),
 			"scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
 			"scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
 			"scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
-			"scene.materials.m.multiscattering = 1\n" + Rough(a), 1.f, a >= 0.2f });
+			+ Rough(a), 1.f, a >= 0.2f });
 
 		// Reflection kd plus transmission kt (1 - kd): lossless in total
 		cases.push_back({ "glossytranslucent-" + Tag(a), "scene.materials.m.type = glossytranslucent\n"
 			"scene.materials.m.kd = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n"
 			"scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.ks_bf = 0.04 0.04 0.04\n"
-			"scene.materials.m.multiscattering = 1\n" + Rough(a) +
+			+ Rough(a) +
 			"scene.materials.m.uroughness_bf = " + to_string(a) + "\n"
 			"scene.materials.m.vroughness_bf = " + to_string(a) + "\n", 1.f, a >= 0.2f });
 
@@ -156,16 +157,16 @@ vector<TestCase> BuildTestCases() {
 		const string disneyRough = "scene.materials.m.roughness = " + to_string(sqrtf(a)) + "\n";
 		cases.push_back({ "disney-metal-" + Tag(a), "scene.materials.m.type = disney\n"
 			"scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 1\n"
-			"scene.materials.m.specular = 1\nscene.materials.m.multiscattering = 1\n" + disneyRough,
+			"scene.materials.m.specular = 1\n" + disneyRough,
 			1.f, a >= 0.2f });
 		cases.push_back({ "disney-dielectric-" + Tag(a), "scene.materials.m.type = disney\n"
 			"scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 0\n"
-			"scene.materials.m.specular = 0.5\nscene.materials.m.multiscattering = 1\n" + disneyRough,
+			"scene.materials.m.specular = 0.5\n" + disneyRough,
 			1.f, a >= 0.2f });
 		cases.push_back({ "disney-clearcoat-" + Tag(a), "scene.materials.m.type = disney\n"
 			"scene.materials.m.basecolor = 1 1 1\nscene.materials.m.metallic = 1\n"
 			"scene.materials.m.specular = 1\nscene.materials.m.clearcoat = 1\n"
-			"scene.materials.m.clearcoatgloss = 0.5\nscene.materials.m.multiscattering = 1\n" + disneyRough,
+			"scene.materials.m.clearcoatgloss = 0.5\n" + disneyRough,
 			1.f, a >= 0.2f });
 	}
 
@@ -175,8 +176,7 @@ vector<TestCase> BuildTestCases() {
 		"scene.materials.m.ks1 = 0.333 0.333 0.333\nscene.materials.m.ks2 = 0.333 0.333 0.333\n"
 		"scene.materials.m.ks3 = 0.334 0.334 0.334\n"
 		"scene.materials.m.r1 = 1\nscene.materials.m.r2 = 1\nscene.materials.m.r3 = 1\n"
-		"scene.materials.m.m1 = 0.25\nscene.materials.m.m2 = 0.45\nscene.materials.m.m3 = 0.7\n"
-		"scene.materials.m.multiscattering = 1\n", 1.f, true });
+		"scene.materials.m.m1 = 0.25\nscene.materials.m.m2 = 0.45\nscene.materials.m.m3 = 0.7\n", 1.f, true });
 	cases.push_back({ "carpaint-preset", "scene.materials.m.type = carpaint\n"
 		// No chi-square: the preset's sharp first lobe is beyond the bin quadrature
 		"scene.materials.m.preset = \"ford f8\"\n", NO_EXPECT, false });
@@ -188,8 +188,11 @@ vector<TestCase> BuildTestCases() {
 	cases.push_back({ "cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n",
 		NO_EXPECT, true });
 
-	cases.push_back({ "velvet", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n",
-		NO_EXPECT, true });
+	// The microfiber sheen alone: its albedo is the fiber layer's (< 1)
+	for (const float r : { 0.2f, 0.5f, 1.f })
+		cases.push_back({ "velvet-r" + to_string(r).substr(0, 3), "scene.materials.m.type = velvet\n"
+			"scene.materials.m.kd = 1 1 1\nscene.materials.m.roughness = " + to_string(r) + "\n",
+			NO_EXPECT, true });
 
 	cases.push_back({ "mattetranslucent", "scene.materials.m.type = mattetranslucent\n"
 		"scene.materials.m.kr = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n", 1.f, true });
@@ -204,7 +207,6 @@ vector<TestCase> BuildTestCases() {
 		"scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
 		"scene.materials.b.type = metal2\nscene.materials.b.fresnel = fr\n"
 		"scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
-		"scene.materials.b.multiscattering = 1\n"
 		"scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
 		"scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.f, true });
 	cases.push_back({ "twosided",
@@ -403,9 +405,14 @@ ConfigResult RunConfig(const Material &mat, const Config &cfg, const u_int sampl
 					static_cast<int>(evalEvent));
 		}
 
-		// 3: reverse pdf against the swapped evaluation and against Pdf()
+		// 3: reverse pdf against the swapped evaluation and against Pdf().
+		// The reverse pdf is the one of the other path type generating the
+		// fixed direction from the sampled one (BiDir's MIS), so the swapped
+		// evaluation runs in the opposite mode: the light and the eye
+		// directions keep their roles, and a material whose sampling depends
+		// on the path type (velvet) is checked right
 		HitPoint hpSwapped;
-		SetupHitPoint(hpSwapped, sampledDir, cfg.fromLight);
+		SetupHitPoint(hpSwapped, sampledDir, !cfg.fromLight);
 		hpSwapped.passThroughEvent = passThrough;
 		BSDFEvent swappedEvent;
 		float swappedDirectPdfW, swappedReversePdfW;

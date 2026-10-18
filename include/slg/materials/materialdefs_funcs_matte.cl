@@ -194,10 +194,10 @@ OPENCL_FORCE_INLINE void RoughMatteMaterial_GetEmittedRadiance(__global const Ma
 }
 
 //------------------------------------------------------------------------------
-// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025),
-// used when the multiscattering property is enabled: Fujii's single-scattering
-// lobe with its exact albedo and a Lambertian-like multiple-scattering term.
-// The roughness r is sigma clamped to [0, 1]. Same code as roughmatte.cpp.
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025):
+// Fujii's single-scattering lobe with its exact albedo and a Lambertian-like
+// multiple-scattering term. The roughness r is sigma clamped to [0, 1]. Same
+// code as EON_E()/EON_Evaluate() in material.cpp.
 //------------------------------------------------------------------------------
 
 #define EON_CONST1 (.5f - 2.f / (3.f * M_PI_F))
@@ -247,34 +247,12 @@ OPENCL_FORCE_INLINE void RoughMatteMaterial_Evaluate(__global const Material* re
 
 	const BSDFEvent event = DIFFUSE | REFLECT;
 
+	// EON (see roughmatte.cpp)
 	const float sigma = Texture_GetFloatValue(material->roughmatte.sigmaTexIndex, hitPoint TEXTURES_PARAM);
-	if (material->multiscattering) {
-		const float3 kdVal = Texture_GetSpectrumValue(material->roughmatte.kdTexIndex, hitPoint TEXTURES_PARAM);
-		const float3 result = EON_Evaluate(Spectrum_Clamp(kdVal), clamp(sigma, 0.f, 1.f), lightDir, eyeDir) *
-				fabs(lightDir.z);
-
-		EvalStack_PushFloat3(result);
-		EvalStack_PushBSDFEvent(event);
-		EvalStack_PushFloat(directPdfW);
-		return;
-	}
-
-	const float sigma2 = sigma * sigma;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(eyeDir);
-	const float sinthetao = SinTheta(lightDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-			const float dcos = CosPhi(lightDir) * CosPhi(eyeDir) +
-					SinPhi(lightDir) * SinPhi(eyeDir);
-			maxcos = fmax(0.f, dcos);
-	}
-	
 	const float3 kdVal = Texture_GetSpectrumValue(material->roughmatte.kdTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 result = Spectrum_Clamp(kdVal) * fabs(lightDir.z * M_1_PI_F) *
-		(A + B * maxcos * sinthetai * sinthetao / fmax(fabs(CosTheta(lightDir)), fabs(CosTheta(eyeDir))));
-	
+	const float3 result = EON_Evaluate(Spectrum_Clamp(kdVal), clamp(sigma, 0.f, 1.f), lightDir, eyeDir) *
+			fabs(lightDir.z);
+
 	EvalStack_PushFloat3(result);
 	EvalStack_PushBSDFEvent(event);
 	EvalStack_PushFloat(directPdfW);
@@ -305,40 +283,17 @@ OPENCL_FORCE_INLINE void RoughMatteMaterial_Sample(__global const Material* rest
 	const BSDFEvent event = DIFFUSE | REFLECT;
 
 	const float sigma = Texture_GetFloatValue(material->roughmatte.sigmaTexIndex, hitPoint TEXTURES_PARAM);
-	if (material->multiscattering) {
-		const float3 kdVal = Texture_GetSpectrumValue(material->roughmatte.kdTexIndex, hitPoint TEXTURES_PARAM);
-		// f * |cos(sampled)| / pdf
-		const float3 result = EON_Evaluate(Spectrum_Clamp(kdVal), clamp(sigma, 0.f, 1.f), sampledDir, fixedDir) *
-				(fabs(sampledDir.z) / pdfW);
-
-		EvalStack_PushFloat3(result);
-		EvalStack_PushFloat3(sampledDir);
-		EvalStack_PushFloat(pdfW);
-		EvalStack_PushBSDFEvent(event);
-		return;
-	}
-
-	const float sigma2 = sigma * sigma;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(fixedDir);
-	const float sinthetao = SinTheta(sampledDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-			const float dcos = CosPhi(sampledDir) * CosPhi(fixedDir) +
-					SinPhi(sampledDir) * SinPhi(fixedDir);
-			maxcos = fmax(0.f, dcos);
-	}
-
 	const float3 kdVal = Texture_GetSpectrumValue(material->roughmatte.kdTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 result = Spectrum_Clamp(kdVal) *
-		(A + B * maxcos * sinthetai * sinthetao / fmax(fabs(CosTheta(sampledDir)), fabs(CosTheta(fixedDir))));
+	// f * |cos(sampled)| / pdf
+	const float3 result = EON_Evaluate(Spectrum_Clamp(kdVal), clamp(sigma, 0.f, 1.f), sampledDir, fixedDir) *
+			(fabs(sampledDir.z) / pdfW);
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);
 	EvalStack_PushFloat(pdfW);
 	EvalStack_PushBSDFEvent(event);
 }
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

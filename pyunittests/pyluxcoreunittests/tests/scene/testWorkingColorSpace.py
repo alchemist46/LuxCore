@@ -212,7 +212,7 @@ class TestWorkingColorSpace(unittest.TestCase):
 		with self.assertRaises(RuntimeError):
 			scene.Parse(props)
 
-	def CheckLinear(self, sceneText, directOnly):
+	def CheckLinear(self, sceneText, directOnly, tolerance=1e-4):
 		ref = RenderRGB("rec709", sceneText, directOnly)
 		scale = max(abs(v) for v in ref)
 		self.assertGreater(scale, 0.0)
@@ -229,7 +229,7 @@ class TestWorkingColorSpace(unittest.TestCase):
 					maxRaw = max(maxRaw, abs(img[i + c] - ref[i + c]) / scale)
 
 			# The same image, up to the float rounding of the conversions
-			self.assertLess(maxConverted, 1e-4, space)
+			self.assertLess(maxConverted, tolerance, space)
 			# ...but not the same pixel values
 			self.assertGreater(maxRaw, 1e-2, space)
 
@@ -237,7 +237,12 @@ class TestWorkingColorSpace(unittest.TestCase):
 		self.CheckLinear(EMITTERS_SCENE, False)
 
 	def test_WorkingColorSpace_DisneyTint(self):
-		self.CheckLinear(DISNEY_SCENE, True)
+		# The energy compensation of the specular lobe (always on since
+		# 2026-10-18) is not linear in the colour: its scale
+		# 1 + Fms (1 - E) / E depends on the average Fresnel of each channel,
+		# as any multiple scattering does, so the working space changes the
+		# image slightly (0.18% of the maximum in Rec.2020)
+		self.CheckLinear(DISNEY_SCENE, True, 3e-3)
 
 	def CheckImagePipeline(self, imagePipeline):
 		# The image pipeline converts to Rec.709 before the gamma, so its output

@@ -554,7 +554,6 @@ PropertiesUPtr DisneyMaterial::ToProperties(const ImageMapCache &imgMapCache, co
 	props->Set(Property("scene.materials." + name + ".basecolor")(BaseColor->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".subsurface")(Subsurface->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".roughness")(Roughness->GetSDLValue()));
-	props->Set(Property("scene.materials." + name + ".multiscattering")(IsMultiscattering()));
 	props->Set(Property("scene.materials." + name + ".metallic")(Metallic->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".specular")(Specular->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".speculartint")(SpecularTint->GetSDLValue()));
