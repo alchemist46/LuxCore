@@ -203,7 +203,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 
 				if (!bsdfEval.Black() &&
 						(!hybridBackForwardEnable ||
-						!pathInfo.IsCausticPath(event, bsdf.GetGlossiness(), hybridBackForwardGlossinessThreshold))) {
+						!pathInfo.IsCausticPath(event, bsdf.GetUnregularizedGlossiness(), hybridBackForwardGlossinessThreshold))) {
 					verify (!isnan(bsdfPdfW) && !isinf(bsdfPdfW));
 					
 					// Create a new PathDepthInfo for the path to the light source
@@ -1121,14 +1121,12 @@ void PathTracer::ParseOptions(
 		hybridBackForwardGlossinessThreshold = Clamp(cfg.Get(defaultProps.Get("path.hybridbackforward.glossinessthreshold")).Get<double>(), 0.0, 1.0);
 	}
 
-	// Path regularization settings. Not with the light tracing: the eye paths
-	// drop their caustics there, and the light paths carry them unblurred.
+	// Path regularization settings. Only the eye paths are regularized: with
+	// the light tracing on, the light paths render the caustics seen through a
+	// diffuse vertex unblurred, and the eye paths, which drop them (classified
+	// without the regularization), regularize the rest.
 	regularizationEnable = cfg.Get(defaultProps.Get("path.regularization.enable")).Get<bool>();
 	regularizationRoughness = Clamp(cfg.Get(defaultProps.Get("path.regularization.roughness")).Get<float>(), 0.f, 1.f);
-	if (regularizationEnable && hybridBackForwardEnable) {
-		SLG_LOG("WARNING: path.regularization.enable is ignored when path.hybridbackforward.enable is set");
-		regularizationEnable = false;
-	}
 	if (!(regularizationRoughness > 0.f))
 		regularizationEnable = false;
 

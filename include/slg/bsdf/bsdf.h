@@ -144,6 +144,12 @@ public:
 		return (hitPoint.regularization > 0.f) ?
 			luxrays::Max(material->GetGlossiness(), hitPoint.regularization) : material->GetGlossiness();
 	}
+	// The glossiness without the path regularization. The eye path classifies
+	// its caustic paths with it (the light tracing of the hybrid back/forward
+	// rendering and the PhotonGI caustic cache render them, on paths that
+	// are never regularized): a regularized delta lobe is a GLOSSY event of
+	// glossiness 0, so it stays nearly specular.
+	float GetUnregularizedGlossiness() const { return material->GetGlossiness(); }
 	// The factor undoing the eta^2 radiance scaling of a transmission through
 	// this surface (1 for the materials without refraction), see
 	// EyePathInfo::etaScale

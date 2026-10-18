@@ -482,7 +482,9 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Sample(__global const Material* restrict
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	const float pdfW = DisneyMaterial_DisneyPdf(roughnessVal, metallicVal, clearcoatVal, clearcoatGlossVal, anisotropicGlossVal,
+	// The pdf of the lobes the direction was sampled from (regularized, as in
+	// DisneyMaterial_EvaluateImpl())
+	const float pdfW = DisneyMaterial_DisneyPdf(roughness, metallic, clearcoat, clearcoatGloss, anisotropicGloss,
 			localLightDir, localEyeDir);
 	if (pdfW < 0.0001f) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
