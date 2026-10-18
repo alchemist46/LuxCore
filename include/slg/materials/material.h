@@ -404,6 +404,20 @@ extern luxrays::Spectrum Microfacet_MSScale(const bool multiscattering,
 	const float u, const float v, const float mu, const luxrays::Spectrum &Fss);
 
 //------------------------------------------------------------------------------
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025,
+// "EON: A practical energy-preserving rough diffuse BRDF", JCGT): Fujii's
+// single-scattering lobe with its exact albedo and a Lambertian-like
+// multiple-scattering term, for the roughness r in [0, 1]. EON_E() is the
+// directional albedo of the single-scattering lobe, EON_Evaluate() the BRDF
+// without the cosine term for two directions in the same hemisphere; with
+// rho = 1 its directional albedo is 1 at every angle.
+//------------------------------------------------------------------------------
+
+extern float EON_E(const float mu, const float r);
+extern luxrays::Spectrum EON_Evaluate(const luxrays::Spectrum &rho, const float r,
+	const luxrays::Vector &wi, const luxrays::Vector &wo);
+
+//------------------------------------------------------------------------------
 // Path regularization (Kaplanyan & Dachsbacher 2013, pbrt-v4's rule): after
 // the first non-specular vertex of an eye path the GGX alphas become
 // max(alpha, clamp(2 alpha, f, 3 f)), f = HitPoint::regularization (0 = off),

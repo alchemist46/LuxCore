@@ -178,6 +178,31 @@ The survey found these specific gaps:
       - the carpaint preset's furnace: 0.0138 -> 0.0102 on all four estimators (the old lobe sampling biased MIS and BSDF sampling alike, so they agreed and were both wrong);
       - bsdftest: every consistency check of glossycoating, carpaint, cloth and Disney passes;
       - the 185 material tests of the suite pass on the CPU and HIP without reference changes.
+  - *Step 4 done 2026-10-18: the dielectrics* (done before Step 3; both devices).
+    - **Rough glass**, three fixes:
+      - The evaluation discards back-facing microfacets, as pbrt-v4's `DielectricBxDF` does. A transmission pair whose half vector faces away from either direction can't refract through it, and Sample() never generates it, but Evaluate() gave it a value and a pdf. That is the light-sampled energy above 1 of the earlier furnace, and the cause of the chi-square failure (no samples just below the horizon, where Evaluate() expected hundreds).
+      - Sample() rejects a refraction that points back into the side it came from, and takes its value and pdf from EvaluateRough(), so the two agree on every path.
+      - The light-path value carries the adjoint factor: f_imp = f_rad (eta_light / eta_eye)^2, Evaluate()'s eta squared. `PdfRough()` honours `fromLight` and discards the same microfacets.
+    - **archglass**: the front face carries the whole non-absorbing thin slab, reflectance 2F / (1 + F) and transmittance (1 - F) / (1 + F), and the back face is fully transparent. A closed pane gets the slab once, and a path traced from the light gets the same factor as the same path traced from the eye. It reflected F on the front face, transmitted with no loss there and transmitted 1 - F - (1 - F)^2 F on the back face, which lost the second surface's reflection. A single plane seen from its back is now fully transparent.
+    - **Results** (furnace on PATHCPU / BIDIRCPU / PATHOCL / BSDF-only):
+      - archglass: 0.952 -> 1.000 / 0.999 / 1.000 / 1.000;
+      - rough glass at alpha 0.05/0.2/0.5/1:
+        - PATHCPU 0.992/1.053/1.102/1.161 -> 0.991/0.991/0.987/0.976;
+        - BIDIRCPU 1.012/1.091/1.351/1.650 -> 0.994/0.970/0.970/0.944;
+        - PATHOCL 0.988/1.017/1.110/1.172 -> 0.988/0.993/0.981/0.978;
+        - BSDF-only 1.007/1.044/1.044/1.022 -> 1.007/1.003/0.986/0.977;
+      - bsdftest: every rough glass check passes on eye and light paths and both faces, chi-square included.
+    - **Still open**:
+      - rough glass loses 1-2.5% at alpha 0.5-1 (the energy compensation of the interface);
+      - BiDir reads 2-3% lower than the path engines there (that compensation is per eye direction, not reciprocal);
+      - glass with dispersion loses 1.3% (0.89 at grazing): the wavelength-to-RGB weights average to white, so it is in how the per-interface wavelength choice correlates with the Fresnel term; not looked into yet.
+  - *Step 5 done 2026-10-18: rough diffuse transmission.*
+    - **roughmattetranslucent** reflects with r = kr and transmits with t = kt (1 - kr), each lobe with the shape of EON at albedo 1, so the albedo is r + t at every roughness. The transmission lobe is EON with the light direction mirrored through the surface; a diffuse transmission keeps the azimuth, which the old Sample() flipped, so its values disagreed with Evaluate(). Each lobe is sampled in proportion to its weight, and Sample() takes its value from the evaluation. EON's colour saturation is not used, so that kr + kt (1 - kr) keeps its meaning. The EON helpers moved to `material.cpp` (`EON_E()`, `EON_Evaluate()`), shared with roughmatte.
+    - **EON at small roughness**: the multiple-scattering term floored 1 - E at 0.01, which added about 1% at r = 0 where the lobe must be Lambertian. Now only the denominators are guarded.
+    - **Results**:
+      - furnace with kt = 1: 0.736 -> 1.000 at sigma 0.5 and 0.541 -> 1.001 at sigma 1, on all four estimators;
+      - roughmatte unchanged at sigma 0.3/0.7/1, and 1.000 at sigma 0;
+      - the suite's roughmattetranslucent references are regenerated (the material is 35-85% brighter at sigma 0.5-1, the energy the old lobes lost); the glass, archglass, rough glass and roughmatte tests pass unchanged.
 - **Ray-cone texture LOD and stochastic filtering.** One cone width per path (Akenine-Möller et al. 2021, "Improved shader and texture level of detail using ray cones") selects the mip level per lookup; the level is sampled stochastically with one texel fetch (Pharr et al. 2024, "Filtering after shading with stochastic texture filtering") and the pixel filter does the rest. One float of path state, identical CPU and GPU code, fixes the load-time single-level choice in `imagemap.cpp`, and cuts GPU texture bandwidth. UDIM (`<UDIM>` tokens in the loader) goes on top of it. *Measure:* equal-spp RMSE and samples/sec on a scene with large `.tx` textures.
 - **Material/shader sorting in the wavefront.** Sort or compact paths by material before the shading `MK_` kernels in `pathoclbase_kernels_micro.cl`. *Re-prioritized: it is the last rung of the ladder in Phase 1b (G6); the compact state array (G2) and the shadow any-hit (G1) come first. Expect a moderate gain: Cycles' shader sorting (a partitioned bucket sort) is worth 2-3% in its tracker and is turned off above ~300 shaders, and a 2026 Vulkan study (Padilla et al.) found the wavefront ~16% faster than a megakernel with both latency-bound.*
 - **Fused trace on hardware-RT backends.** Call OptiX/HIPRT trace inline from the state kernels to avoid the ray-buffer round trip. This is partly enabled by the HIPRT work on this branch. *Deferred: the benchmark shows rays/sec flat across scenes, so the trace launch is not what limits throughput today (see Phase 1b). Shader Execution Reordering (OptiX 8 `optixReorder`, Ada and later; Karma XPU uses it) only exists inside OptiX programs and its gain shrinks with local memory use, so it is a late option for the OptiX path only, after the per-task state has been shrunk.*

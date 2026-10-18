@@ -634,4 +634,53 @@ float slg::SchlickBSDF_CoatingPdf(const float u, const float v,
 		const Vector &localFixedDir, const Vector &localSampledDir) {
 	return Microfacet_PdfReflect(u, v, localFixedDir, localSampledDir);
 }
+
+//------------------------------------------------------------------------------
+// EON, the energy-preserving Oren-Nayar lobe (Portsmouth, Kutz & Hill 2025,
+// "EON: A practical energy-preserving rough diffuse BRDF", JCGT), the lobe of
+// roughmatte and roughmattetranslucent: Fujii's single-scattering lobe with
+// its exact albedo and a Lambertian-like multiple-scattering term. The
+// roughness r is sigma clamped to [0, 1].
+//------------------------------------------------------------------------------
+
+static const float EON_CONST1 = .5f - 2.f / (3.f * M_PI);
+static const float EON_CONST2 = 2.f / 3.f - 28.f / (15.f * M_PI);
+
+float slg::EON_E(const float mu, const float r) {
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+	const float Si = sqrtf(Max(0.f, 1.f - mu * mu));
+	const float G = Si * (acosf(mu) - Si * mu) +
+			(2.f / 3.f) * ((Si / mu) * (1.f - Si * Si * Si) - Si);
+
+	return AF * (1.f + (r * INV_PI) * G);
+}
+
+// f_ss + f_ms without the cosine term, for two directions in the same hemisphere
+Spectrum slg::EON_Evaluate(const Spectrum &rho, const float r, const Vector &wi, const Vector &wo) {
+	const float mui = Max(fabsf(wi.z), 1e-4f);
+	const float muo = Max(fabsf(wo.z), 1e-4f);
+	const float AF = 1.f / (1.f + EON_CONST1 * r);
+
+	// dot(wi, wo) - mui * muo
+	const float s = wi.x * wo.x + wi.y * wo.y;
+	const float stinv = (s > 0.f) ? s / Max(mui, muo) : s;
+	const Spectrum fss = rho * (INV_PI * AF * (1.f + r * stinv));
+
+	const float Eo = EON_E(muo, r);
+	const float Ei = EON_E(mui, r);
+	const float Eavg = AF * (1.f + EON_CONST2 * r);
+	// Only the denominators are guarded: a floor on 1 - E (it was .01) added
+	// a multiple-scattering term of about 1% at r = 0, where E = 1 and the
+	// lobe must be exactly Lambertian. (1 - Eo) (1 - Ei) / (1 - Eavg) goes to
+	// 0 with r.
+	const float eps = 1e-6f;
+	Spectrum fms;
+	for (u_int i = 0; i < 3; ++i) {
+		const float rhoMS = rho.c[i] * rho.c[i] * Eavg / Max(1.f - rho.c[i] * (1.f - Eavg), eps);
+		fms.c[i] = rhoMS * INV_PI * Max(0.f, 1.f - Eo) * Max(0.f, 1.f - Ei) / Max(eps, 1.f - Eavg);
+	}
+
+	return fss + fms;
+}
+
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

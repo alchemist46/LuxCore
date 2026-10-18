@@ -64,6 +64,41 @@ OPENCL_FORCE_INLINE void RoughMatteTranslucentMaterial_GetEmittedRadiance(__glob
 	DefaultMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 }
 
+// EON lobes of albedo 1 scaled by r and t = kt (1 - kr), the transmission one
+// evaluated with the light direction mirrored through the surface (see
+// roughmattetranslucent.cpp). The GPU traces eye paths only: the sampled
+// direction is lightDir.
+OPENCL_FORCE_INLINE float3 RoughMatteTranslucentMaterial_EvaluateMixture(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, const float3 lightDir, const float3 eyeDir,
+		BSDFEvent *event, float *directPdfW
+		MATERIALS_PARAM_DECL) {
+	*directPdfW = 0.f;
+
+	const float3 r = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughmatteTranslucent.krTexIndex, hitPoint TEXTURES_PARAM));
+	const float3 t = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughmatteTranslucent.ktTexIndex, hitPoint TEXTURES_PARAM)) * 
+		// Energy conservation
+		(1.f - r);
+
+	const float rf = Spectrum_Filter(r);
+	const float tf = Spectrum_Filter(t);
+	if (!(rf + tf > 0.f))
+		return BLACK;
+	const float pReflect = rf / (rf + tf);
+
+	const bool reflected = (CosTheta(lightDir) * CosTheta(eyeDir) > 0.f);
+	*directPdfW = (reflected ? pReflect : (1.f - pReflect)) * fabs(lightDir.z * M_1_PI_F);
+
+	const float roughness = clamp(Texture_GetFloatValue(material->roughmatteTranslucent.sigmaTexIndex, hitPoint TEXTURES_PARAM), 0.f, 1.f);
+	if (reflected) {
+		*event = DIFFUSE | REFLECT;
+		return r * EON_Evaluate(WHITE, roughness, lightDir, eyeDir) * fabs(lightDir.z);
+	} else {
+		*event = DIFFUSE | TRANSMIT;
+		const float3 mirroredLightDir = MAKE_FLOAT3(lightDir.x, lightDir.y, -lightDir.z);
+		return t * EON_Evaluate(WHITE, roughness, mirroredLightDir, eyeDir) * fabs(lightDir.z);
+	}
+}
+
 OPENCL_FORCE_INLINE void RoughMatteTranslucentMaterial_Evaluate(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -72,59 +107,12 @@ OPENCL_FORCE_INLINE void RoughMatteTranslucentMaterial_Evaluate(__global const M
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
-	const float3 krVal = Texture_GetSpectrumValue(material->roughmatteTranslucent.krTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 ktVal = Texture_GetSpectrumValue(material->roughmatteTranslucent.ktTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 r = Spectrum_Clamp(krVal);
-	const float3 t = Spectrum_Clamp(ktVal) * 
-		// Energy conservation
-		(1.f - r);
-
-	const bool isKtBlack = Spectrum_IsBlack(t);
-	const bool isKrBlack = Spectrum_IsBlack(r);
-
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 1.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 0.f;
-		else {
-			MATERIAL_EVALUATE_RETURN_BLACK;
-		}
-	}
-
-	const bool reflected = (CosTheta(lightDir) * CosTheta(eyeDir) > 0.f);
-	const float weight = (lightDir.z * eyeDir.z > 0.f) ? threshold : (1.f - threshold);
-
-	const float directPdfW = weight * fabs(lightDir.z * M_1_PI_F);
-
-	const float sigma = Texture_GetFloatValue(material->roughmatteTranslucent.sigmaTexIndex, hitPoint TEXTURES_PARAM);
-	const float sigma2 = sigma * sigma;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(eyeDir);
-	const float sinthetao = SinTheta(lightDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(lightDir) * CosPhi(eyeDir) +
-			SinPhi(lightDir) * SinPhi(eyeDir);
-		maxcos = fmax(0.f, dcos);
-	}
-
-	float3 result = TO_FLOAT3(M_1_PI_F * fabs(lightDir.z) *
-		(A + B * maxcos * sinthetai * sinthetao / fmax(fabs(CosTheta(lightDir)), fabs(CosTheta(eyeDir)))));
-
 	BSDFEvent event;
-	if (lightDir.z * eyeDir.z > 0.f) {
-		event = DIFFUSE | REFLECT;
-		result *= r;
-	} else {
-		event = DIFFUSE | TRANSMIT;
-		result *= t;
+	float directPdfW;
+	const float3 result = RoughMatteTranslucentMaterial_EvaluateMixture(material, hitPoint,
+			lightDir, eyeDir, &event, &directPdfW MATERIALS_PARAM);
+	if (Spectrum_IsBlack(result)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
 	}
 
 	EvalStack_PushFloat3(result);
@@ -147,69 +135,35 @@ OPENCL_FORCE_INLINE void RoughMatteTranslucentMaterial_Sample(__global const Mat
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	float pdfW;
-	float3 sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdfW);
+	const float3 r = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughmatteTranslucent.krTexIndex, hitPoint TEXTURES_PARAM));
+	const float3 t = Spectrum_Clamp(Texture_GetSpectrumValue(material->roughmatteTranslucent.ktTexIndex, hitPoint TEXTURES_PARAM)) * 
+		(1.f - r);
+	const float rf = Spectrum_Filter(r);
+	const float tf = Spectrum_Filter(t);
+	if (!(rf + tf > 0.f)) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
+	const float pReflect = rf / (rf + tf);
+
+	float cosPdf;
+	float3 sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &cosPdf);
 	if (fabs(CosTheta(sampledDir)) < DEFAULT_COS_EPSILON_STATIC) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	const float3 krVal = Texture_GetSpectrumValue(material->roughmatteTranslucent.krTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 ktVal = Texture_GetSpectrumValue(material->roughmatteTranslucent.ktTexIndex, hitPoint TEXTURES_PARAM);
-	const float3 kr = Spectrum_Clamp(krVal);
-	const float3 kt = Spectrum_Clamp(ktVal) * 
-		// Energy conservation
-		(1.f - kr);
+	// Only the z flips: a diffuse transmission keeps the azimuth
+	const float fixedSign = signbit(fixedDir.z) ? -1.f : 1.f;
+	sampledDir.z *= (passThroughEvent < pReflect) ? fixedSign : -fixedSign;
 
-	const bool isKtBlack = Spectrum_IsBlack(kt);
-	const bool isKrBlack = Spectrum_IsBlack(kr);
-	if (isKtBlack && isKrBlack) {
+	BSDFEvent event;
+	float pdfW;
+	const float3 f = RoughMatteTranslucentMaterial_EvaluateMixture(material, hitPoint,
+			sampledDir, fixedDir, &event, &pdfW MATERIALS_PARAM);
+	if (Spectrum_IsBlack(f) || !(pdfW > 0.f)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
-	// Decide to transmit or reflect
-	float threshold;
-	if (!isKrBlack) {
-		if (!isKtBlack)
-			threshold = .5f;
-		else
-			threshold = 1.f;
-	} else {
-		if (!isKtBlack)
-			threshold = 0.f;
-		else {
-			MATERIAL_SAMPLE_RETURN_BLACK;
-		}
-	}
-
-	const float sigma = Texture_GetFloatValue(material->roughmatteTranslucent.sigmaTexIndex, hitPoint TEXTURES_PARAM);
-	const float sigma2 = sigma * sigma;
-	const float A = 1.f - (sigma2 / (2.f * (sigma2 + 0.33f)));
-	const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
-	const float sinthetai = SinTheta(fixedDir);
-	const float sinthetao = SinTheta(sampledDir);
-	float maxcos = 0.f;
-	if (sinthetai > 1e-4f && sinthetao > 1e-4f) {
-		const float dcos = CosPhi(sampledDir) * CosPhi(fixedDir) +
-			SinPhi(sampledDir) * SinPhi(fixedDir);
-		maxcos = max(0.f, dcos);
-	}
-	const float coef = (A + B * maxcos * sinthetai * sinthetao / max(fabs(CosTheta(sampledDir)), fabs(CosTheta(fixedDir))));
-
-	BSDFEvent event;
-	float3 result;
-	if (passThroughEvent < threshold) {
-		sampledDir *= (signbit(fixedDir.z) ? -1.f : 1.f);
-		event = DIFFUSE | REFLECT;
-		pdfW *= threshold;
-
-		result = kr * (coef / threshold);
-	} else {
-		sampledDir *= -(signbit(fixedDir.z) ? -1.f : 1.f);
-		event = DIFFUSE | TRANSMIT;
-		pdfW *= (1.f - threshold);
-
-		result = kt * (coef / (1.f - threshold));
-	}
+	const float3 result = f / pdfW;
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushFloat3(sampledDir);

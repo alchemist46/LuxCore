@@ -105,7 +105,7 @@ vector<TestCase> BuildTestCases() {
 
 	// Lambert and EON
 	cases.push_back({ "matte", "scene.materials.m.type = matte\nscene.materials.m.kd = 1 1 1\n", 1.f, true });
-	for (const float s : { 0.3f, 0.7f, 1.f })
+	for (const float s : { 0.f, 0.3f, 0.7f, 1.f })
 		cases.push_back({ "roughmatte-s" + to_string(s).substr(0, 3),
 			"scene.materials.m.type = roughmatte\nscene.materials.m.kd = 1 1 1\n"
 			"scene.materials.m.sigma = " + to_string(s) + "\nscene.materials.m.multiscattering = 1\n", 1.f, true });

@@ -226,10 +226,11 @@ OPENCL_FORCE_INLINE float3 EON_Evaluate(const float3 rho, const float r, const f
 	const float Eo = EON_E(muo, r);
 	const float Ei = EON_E(mui, r);
 	const float Eavg = AF * (1.f + EON_CONST2 * r);
-	const float eps = .01f;
+	// Only the denominators are guarded (see material.cpp)
+	const float eps = 1e-6f;
 	const float3 denom = WHITE - rho * (1.f - Eavg);
 	const float3 rhoMS = (rho * rho) * Eavg / MAKE_FLOAT3(fmax(denom.x, eps), fmax(denom.y, eps), fmax(denom.z, eps));
-	const float3 fms = rhoMS * (M_1_PI_F * fmax(eps, 1.f - Eo) * fmax(eps, 1.f - Ei) / fmax(eps, 1.f - Eavg));
+	const float3 fms = rhoMS * (M_1_PI_F * fmax(0.f, 1.f - Eo) * fmax(0.f, 1.f - Ei) / fmax(eps, 1.f - Eavg));
 
 	return fss + fms;
 }

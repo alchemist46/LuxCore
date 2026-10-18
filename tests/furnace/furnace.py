@@ -80,7 +80,7 @@ def cases():
     c = []
     ms = "scene.materials.m.multiscattering = 1\n"
     c.append(("matte", "scene.materials.m.type = matte\nscene.materials.m.kd = 1 1 1\n", 1.0))
-    for s in (0.3, 0.7, 1.0):
+    for s in (0.0, 0.3, 0.7, 1.0):
         c.append((f"roughmatte-s{s}", "scene.materials.m.type = roughmatte\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.sigma = {s}\n" + ms, 1.0))
     c.append(("mirror", "scene.materials.m.type = mirror\nscene.materials.m.kr = 1 1 1\n", 1.0))
