@@ -133,6 +133,37 @@ The survey found these specific gaps:
      - BiDir, the light paths and PhotonGI photons get a diffuse approximation.
 
   The detailed plan is kept outside the repository (Claude plans directory, `the-next-item-on-jaunty-pelican.md`).
+  - *Step 1 done 2026-10-18: test kit and baseline* (branch `material-standards`).
+    - **`tests/bsdf/bsdftest`** (a CMake target, no rendering, about a minute for all 61 cases). It checks the value of Sample() against Evaluate(), the pdf against Evaluate()'s `directPdfW`, the reverse pdf and `Pdf()`, a chi-square test of the sampled directions and the directional albedo. It runs on eye and light paths, front and back faces, at view cosines 0.95/0.6/0.25/0.08, and applies the side test of `BSDF::Evaluate()` the way the path tracers do. `--dump <n>` prints failing samples.
+    - **`tests/furnace/`**: the white furnace (orthographic UV sphere under a constant environment, all four depths 48, `env=inf|box|boxnodls`, the disk mean and five view-cosine bands), the analytic GGX reference, and the CPU/GPU parity scripts.
+    - **New suite scenes**: `mat-velvet`, `mat-mattetranslucent`, `mat-roughmattetranslucent` and `mat-mirror`, with references from the unmodified build.
+  - *Baseline* (lossless parameters, energy compensation on where the material reads it, 256 spp, disk mean, then the grazing band mu < 0.2 in brackets).
+    - **Pass** (1.000 ± 0.005 on PATHCPU, PATHOCL and the BSDF-only estimator; every bsdftest check): matte, roughmatte (EON), mirror, glass, metal2, the glossy2 coating lobe (kd 0, ks 1), Disney metallic, Lambertian cloth, mattetranslucent, roughmattetranslucent at sigma 0, mix, twosided, null. BIDIRCPU reads 0.997-0.999 on the disk, and its grazing band is about 0.65 even for matte, so its silhouette pixels are a measurement artifact of the light tracing, not a material result.
+    - **Energy:**
+      - glass with dispersion: 0.987 (0.89);
+      - archglass: 0.952 (0.89);
+      - glossy2 with a white base under a 4% coat: 1.005 (1.22) / 1.002 (1.09) / 0.989 / 0.975 at alpha 0.05/0.2/0.5/1;
+      - glossycoating over white matte: 1.000 (1.24) / 0.978 (1.17) / 0.961 / 0.975;
+      - glossytranslucent: 1.058 / 1.020 / 0.983 / 0.953;
+      - Disney dielectric (base 1, specular 0.5): 1.023-1.055;
+      - Disney clear coat on the metal: 1.040;
+      - roughmattetranslucent: 0.736 at sigma 0.5 and 0.541 at sigma 1;
+      - velvet: 0.336, by construction;
+      - cloth denim: 0.942.
+    - **Consistency failures** (bsdftest):
+      - glossycoating CPU: the coating pdf takes its two directions swapped;
+      - carpaint: the second lobe is never sampled when the first is active (three white lobes: 0.963), and the light-path diffuse value and pdf are wrong;
+      - cloth: the light-path value lacks the cosine ratio;
+      - roughmattetranslucent: the values of Sample() and Evaluate() disagree;
+      - rough glass:
+        - from inside, the transmission branch of Sample() returns about 1% of its directions on the same side, a reflection labelled as a refraction;
+        - from outside, the sampled directions fail the chi-square test on both paths, although each reported pdf equals Evaluate()'s;
+        - `Pdf()` ignores `fromLight`;
+        - the furnace disagrees between estimators: PATHCPU 0.992/1.053/1.102/1.161, BIDIRCPU 1.012/1.091/1.351/1.650, BSDF-only 1.007/1.044/1.044/1.022.
+    - **GPU** (PATHOCL against PATHCPU):
+      - **glossycoating renders at about half its brightness** (0.494-0.663 against about 0.98). Its base-sampled branch returned the base pdf converted to an integer as the BSDF event, the transmission half vector was normalized by its squared length, and the base's sampled direction was not brought back from the bumped frame.
+      - The Disney GPU Sample() computed its pdf from the unclamped, unregularized parameters.
+      - Everything else agrees within the noise.
 - **Ray-cone texture LOD and stochastic filtering.** One cone width per path (Akenine-Möller et al. 2021, "Improved shader and texture level of detail using ray cones") selects the mip level per lookup; the level is sampled stochastically with one texel fetch (Pharr et al. 2024, "Filtering after shading with stochastic texture filtering") and the pixel filter does the rest. One float of path state, identical CPU and GPU code, fixes the load-time single-level choice in `imagemap.cpp`, and cuts GPU texture bandwidth. UDIM (`<UDIM>` tokens in the loader) goes on top of it. *Measure:* equal-spp RMSE and samples/sec on a scene with large `.tx` textures.
 - **Material/shader sorting in the wavefront.** Sort or compact paths by material before the shading `MK_` kernels in `pathoclbase_kernels_micro.cl`. *Re-prioritized: it is the last rung of the ladder in Phase 1b (G6); the compact state array (G2) and the shadow any-hit (G1) come first. Expect a moderate gain: Cycles' shader sorting (a partitioned bucket sort) is worth 2-3% in its tracker and is turned off above ~300 shaders, and a 2026 Vulkan study (Padilla et al.) found the wavefront ~16% faster than a megakernel with both latency-bound.*
 - **Fused trace on hardware-RT backends.** Call OptiX/HIPRT trace inline from the state kernels to avoid the ray-buffer round trip. This is partly enabled by the HIPRT work on this branch. *Deferred: the benchmark shows rays/sec flat across scenes, so the trace launch is not what limits throughput today (see Phase 1b). Shader Execution Reordering (OptiX 8 `optixReorder`, Ada and later; Karma XPU uses it) only exists inside OptiX programs and its gain shrinks with local memory use, so it is a late option for the OptiX path only, after the per-task state has been shrunk.*

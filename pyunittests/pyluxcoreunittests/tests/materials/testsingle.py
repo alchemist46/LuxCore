@@ -252,3 +252,51 @@ class RoughMatteMSMaterial(ImageTest):
     pass
 
 RoughMatteMSMaterial = AddTests(RoughMatteMSMaterial, TestRoughMatteMSMaterial, GetTestCases())
+
+################################################################################
+# Velvet material test
+################################################################################
+
+def TestVelvetMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-velvet-area.cfg", "VelvetMaterial")
+
+class VelvetMaterial(ImageTest):
+    pass
+
+VelvetMaterial = AddTests(VelvetMaterial, TestVelvetMaterial, GetTestCases())
+
+################################################################################
+# MatteTranslucent material test
+################################################################################
+
+def TestMatteTranslucentMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-mattetranslucent-area.cfg", "MatteTranslucentMaterial")
+
+class MatteTranslucentMaterial(ImageTest):
+    pass
+
+MatteTranslucentMaterial = AddTests(MatteTranslucentMaterial, TestMatteTranslucentMaterial, GetTestCases())
+
+################################################################################
+# RoughMatteTranslucent material test
+################################################################################
+
+def TestRoughMatteTranslucentMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-roughmattetranslucent-area.cfg", "RoughMatteTranslucentMaterial")
+
+class RoughMatteTranslucentMaterial(ImageTest):
+    pass
+
+RoughMatteTranslucentMaterial = AddTests(RoughMatteTranslucentMaterial, TestRoughMatteTranslucentMaterial, GetTestCases())
+
+################################################################################
+# Mirror material test
+################################################################################
+
+def TestMirrorMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-mirror-area.cfg", "MirrorMaterial")
+
+class MirrorMaterial(ImageTest):
+    pass
+
+MirrorMaterial = AddTests(MirrorMaterial, TestMirrorMaterial, GetTestCases())
