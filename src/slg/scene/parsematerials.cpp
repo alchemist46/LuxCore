@@ -54,6 +54,10 @@
 #include "slg/materials/openpbr.h"
 #include "slg/materials/twosided.h"
 #include "slg/materials/subsurface.h"
+#include "slg/textures/colordepth.h"
+#include "slg/textures/constfloat.h"
+#include "slg/textures/math/scale.h"
+#include "slg/volumes/homogenous.h"
 
 #include "slg/textures/texture.h"
 #include "slg/usings.h"
@@ -740,8 +744,8 @@ MaterialUPtr Scene::CreateMaterial(
 		}
 
 		// The parts of the specification that are not implemented yet
-		for (const string inputName : { "transmission.weight", "subsurface.weight",
-				"transmission.dispersionscale", "transmission.abbenumber", "coat.bumptex" }) {
+		for (const string inputName : { "transmission.dispersionscale", "transmission.abbenumber",
+				"coat.bumptex" }) {
 			if (isDefined(inputName))
 				SLG_LOG("WARNING: openpbr material " << matName << ": " << inputName << " is not supported yet and is ignored");
 		}
@@ -845,6 +849,79 @@ MaterialUPtr Scene::CreateMaterial(
 		}
 	}
 
+	if (mat->GetType() == OPENPBR) {
+		auto &opm = static_cast<OpenPBRMaterial &>(*mat);
+		if (opm.IsThinWalled()) {
+			// A thin wall has no inside
+			if (props.IsDefined(propName + ".volume.interior")) {
+				SLG_LOG("WARNING: openpbr material " << matName << " is thin-walled, its volume.interior is ignored");
+				mat->SetInteriorVolume(VolumeConstPtr(nullptr));
+			}
+		} else if (!props.IsDefined(propName + ".volume.interior")) {
+			// The interior volume of the transmission at depth, unless the
+			// user sets one
+			VolumeConstPtr vol = DefineOpenPBRInterior(opm);
+			if (vol)
+				mat->SetInteriorVolume(vol);
+		}
+	}
+
 	return mat;
+}
+
+VolumeConstPtr Scene::DefineOpenPBRInterior(const OpenPBRMaterial &mat) {
+	if (!mat.HasTransmissionDepth() || !mat.GetRefractiveMaterial())
+		return nullptr;
+
+	const string volName = OpenPBRMaterial::GetInteriorVolumeName(mat.GetName());
+	auto defineTexture = [&](TextureUPtr tex, const string &name) -> TextureRef {
+		tex->SetName(name);
+		auto [newTexRef, oldTexPtr] = texDefs.DefineTexture(std::move(tex));
+		moveToTrash(std::move(oldTexPtr));
+		return newTexRef;
+	};
+	// The volume shares the textures of the material inputs
+	auto input = [&](const slg::ocl::OpenPBRInput i) -> TextureRef {
+		TextureConstPtr tex = mat.GetInput(i);
+		if (tex)
+			return const_cast<Texture &>(*tex);
+
+		const Spectrum v = OpenPBRMaterial::GetInputDefault(i);
+		return GetTexture(Property(volName + ".default")(v.c[0], v.c[1], v.c[2]));
+	};
+
+	// The depth where the colour is transmission.color (the volume needs a
+	// constant)
+	TextureConstPtr depthTex = mat.GetInput(slg::ocl::OPENPBR_TRANSMISSION_DEPTH);
+	float depth;
+	if (depthTex->GetType() == CONST_FLOAT)
+		depth = static_cast<const ConstFloatTexture *>(depthTex.get())->GetValue();
+	else {
+		depth = depthTex->Filter();
+		SLG_LOG("WARNING: openpbr material " << mat.GetName() << ": transmission.depth is not a constant, its average " << depth << " is used");
+	}
+	depth = Max(depth, 1e-3f);
+
+	// sigma_a = -ln(transmission.color) / depth, sigma_s =
+	// transmission.scatter / depth
+	TextureRef absorption = defineTexture(std::make_unique<ColorDepthTexture>(depth,
+			input(slg::ocl::OPENPBR_TRANSMISSION_COLOR)), volName + "-absorption");
+	TextureRef scattering = mat.GetInput(slg::ocl::OPENPBR_TRANSMISSION_SCATTER) ?
+		defineTexture(std::make_unique<ScaleTexture>(input(slg::ocl::OPENPBR_TRANSMISSION_SCATTER),
+				GetTexture(Property(volName + ".invdepth")(1.f / depth))), volName + "-scattering") :
+		GetTexture(Property(volName + ".scattering")(0.f, 0.f, 0.f));
+
+	auto vol = std::make_unique<HomogeneousVolume>(input(slg::ocl::OPENPBR_SPECULAR_IOR), nullptr,
+			absorption, scattering, input(slg::ocl::OPENPBR_TRANSMISSION_SCATTERANISOTROPY), true);
+	vol->SetName(volName);
+	const u_int index = defaultMaterialIDIndex++;
+	vol->SetID(((u_int)(RadicalInverse(index + 1, 2) * 255.f + .5f)) |
+			(((u_int)(RadicalInverse(index + 1, 3) * 255.f + .5f)) << 8) |
+			(((u_int)(RadicalInverse(index + 1, 5) * 255.f + .5f)) << 16));
+
+	auto [newVolRef, oldVolPtr] = matDefs.DefineMaterial(std::move(vol));
+	moveToTrash(std::move(oldVolPtr));
+
+	return VolumeConstPtr(&static_cast<const Volume &>(newVolRef));
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

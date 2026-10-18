@@ -69,7 +69,7 @@ void SubsurfaceMaterial::GetReflection(const HitPoint &hitPoint, float *alpha, f
 	*alpha = Microfacet_Regularize(Clamp(r * r, 1e-9f, 1.f), hitPoint.regularization);
 }
 
-void SubsurfaceMaterial::GetWalkParams(const HitPoint &hitPoint, Spectrum *col,
+void SubsurfaceMaterial::GetSubsurfaceWalkParams(const HitPoint &hitPoint, Spectrum *col,
 		Spectrum *rad, float *g) const {
 	*col = color->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	*rad = (radius->GetSpectrumValue(hitPoint) * scale->GetFloatValue(hitPoint)).Clamp(0.f, INFINITY);

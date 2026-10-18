@@ -48,6 +48,7 @@ namespace slg {
 // Forward declarations
 class PathVolumeInfo;
 class BSDF;
+class OpenPBRMaterial;
 class ImageMapConfig;
 
 	// OpenCL data types
@@ -362,6 +363,9 @@ private:
 	TextureUPtr CreateTexture(const std::string &texName, const luxrays::Properties &props);
 	VolumeUPtr CreateVolume(const u_int defaultVolID, const std::string &volName, const luxrays::Properties &props);
 	MaterialUPtr CreateMaterial(const u_int defaultMatID, const std::string &matName, const luxrays::Properties &props);
+	// The interior volume of the openpbr transmission at depth (nullptr when
+	// there is none), see OpenPBRMaterial::GetInteriorVolumeName()
+	VolumeConstPtr DefineOpenPBRInterior(const OpenPBRMaterial &mat);
 
 	luxrays::ExtTriangleMeshUPtr CreateShape(const std::string &shapeName, const luxrays::Properties &props);
 	SceneObjectUPtr CreateObject(const u_int defaultObjID, const std::string &objName, const luxrays::Properties &props);

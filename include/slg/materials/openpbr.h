@@ -44,7 +44,7 @@ public:
 			const Inputs &inputs, const bool thinWalled);
 
 	virtual MaterialType GetType() const { return OPENPBR; }
-	virtual BSDFEvent GetEventTypes() const { return DIFFUSE | GLOSSY | REFLECT; };
+	virtual BSDFEvent GetEventTypes() const { return eventTypes; };
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
@@ -59,6 +59,14 @@ public:
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const;
 
+	// The transmission of a closed (not thin-walled) object refracts
+	virtual const Material *GetRefractiveMaterial() const { return refractive ? this : nullptr; }
+	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const;
+
+	virtual bool HasSubsurfaceWalk() const { return subsurfaceWalk; }
+	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
+		luxrays::Spectrum *radius, float *anisotropy) const;
+
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *> &referencedTexs) const;
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex);
 
@@ -67,6 +75,18 @@ public:
 	// nullptr when the input is not set
 	TextureConstPtr GetInput(const ocl::OpenPBRInput input) const { return inputs[input]; }
 	bool IsThinWalled() const { return thinWalled; }
+	// The transmission colour is the one of the interior volume
+	bool HasTransmissionDepth() const;
+
+	// The interior volume created for the transmission at depth (see
+	// Scene::DefineOpenPBRInterior()) and its textures are named after the
+	// material. The scene doesn't save them: the material re-creates them.
+	static std::string GetInteriorVolumeName(const std::string &matName) {
+		return matName + "__openpbr_interior";
+	}
+	static bool IsInteriorVolumeObjectName(const std::string &name) {
+		return name.find("__openpbr_interior") != std::string::npos;
+	}
 
 	// The property name of an input ("base.color") and its default
 	static const char *GetInputName(const ocl::OpenPBRInput input);
@@ -76,10 +96,17 @@ public:
 	luxrays::Spectrum GetSpectrum(const ocl::OpenPBRInput input, const HitPoint &hitPoint) const;
 
 private:
+	// The glossiness and the flags that depend on the inputs
+	void Update();
 	void UpdateGlossiness();
+	// The input is not set or a constant 0
+	bool IsZero(const ocl::OpenPBRInput input) const;
 
 	Inputs inputs;
 	bool thinWalled;
+
+	BSDFEvent eventTypes;
+	bool refractive, subsurfaceWalk;
 };
 
 }

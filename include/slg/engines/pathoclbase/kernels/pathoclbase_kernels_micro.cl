@@ -84,12 +84,18 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 	__global const Material* restrict material = &mats[bsdf->materialIndex];
 	__global const HitPoint *hitPoint = &bsdf->hitPoint;
 
-	const float3 color = Spectrum_Clamp(Texture_GetSpectrumValue(material->subsurface.colorTexIndex,
-			hitPoint TEXTURES_PARAM));
-	const float3 radius = Texture_GetSpectrumValue(material->subsurface.radiusTexIndex, hitPoint TEXTURES_PARAM) *
-			Texture_GetFloatValue(material->subsurface.scaleTexIndex, hitPoint TEXTURES_PARAM);
-	const float anisotropy = clamp(Texture_GetFloatValue(material->subsurface.anisotropyTexIndex,
-			hitPoint TEXTURES_PARAM), -.9f, .9f);
+	float3 color, radius;
+	float anisotropy;
+	if (material->type == OPENPBR)
+		OpenPBRMaterial_GetWalkParams(material, hitPoint, &color, &radius, &anisotropy TEXTURES_PARAM);
+	else {
+		color = Spectrum_Clamp(Texture_GetSpectrumValue(material->subsurface.colorTexIndex,
+				hitPoint TEXTURES_PARAM));
+		radius = Texture_GetSpectrumValue(material->subsurface.radiusTexIndex, hitPoint TEXTURES_PARAM) *
+				Texture_GetFloatValue(material->subsurface.scaleTexIndex, hitPoint TEXTURES_PARAM);
+		anisotropy = clamp(Texture_GetFloatValue(material->subsurface.anisotropyTexIndex,
+				hitPoint TEXTURES_PARAM), -.9f, .9f);
+	}
 
 	// The outward normals at the entry: the side of the eye
 	const float3 fixedDir = VLOAD3F(&hitPoint->fixedDir.x);
@@ -745,8 +751,17 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		// Make a copy of current PathVolumeInfo for tracing the
 		// shadow ray (an any-hit shadow ray doesn't use it, see
 		// AdvancePaths_ShadowRayHit())
-		if (!taskConfig->scene.shadowRayAnyHit)
+		if (!taskConfig->scene.shadowRayAnyHit) {
 			*directLightVolInfo = pathInfo->volume;
+
+			// A light on the other side of the surface is seen through its
+			// interior volume, or from inside it (as the path would be after
+			// sampling the same direction)
+			const float3 geometryN = VLOAD3F(&bsdf->hitPoint.geometryN.x);
+			if (!bsdf->isVolume && dot(VLOAD3F(&shadowRay->d.x), geometryN) * dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), geometryN) < 0.f)
+				PathVolumeInfo_Update(directLightVolInfo, TRANSMIT, bsdf
+						MATERIALS_PARAM);
+		}
 
 		// The shadow ray was initialized by Light_Illuminate(): flag it for
 		// an any-hit trace if the scene allows it
@@ -980,7 +995,7 @@ __kernel void AdvancePaths_MK_RT(
 #if defined(PARAM_ENABLE_SUBSURFACE)
 				// The base lobe of a subsurface material enters the object
 				// for the walk
-				if (!subsurfaceExit && (mats[bsdf->materialIndex].type == SUBSURFACEMAT))
+				if (!subsurfaceExit && Material_HasSubsurfaceWalk(&mats[bsdf->materialIndex]))
 					bsdf->hitPoint.subsurface = HITPOINT_SSS_ENTRY;
 #endif
 

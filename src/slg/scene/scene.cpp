@@ -51,6 +51,7 @@
 #include "slg/usings.h"
 #include "slg/utils/pathinfo.h"
 #include "slg/cameras/camera.h"
+#include "slg/materials/openpbr.h"
 
 using namespace std;
 using namespace luxrays;
@@ -133,6 +134,10 @@ PropertiesUPtr Scene::ToProperties(const bool useRealFileName) const {
 		// because they are expanded inline
 		if (texName.starts_with("Implicit-ConstFloatTexture"))
 			continue;
+		// The ones of the interior volumes of the openpbr materials are
+		// re-created by the materials
+		if (OpenPBRMaterial::IsInteriorVolumeObjectName(texName))
+			continue;
 
 		TextureConstRef tex = texDefs.GetTexture(texName);
 		props->Set(tex.ToProperties(imgMapCache, useRealFileName));
@@ -148,6 +153,8 @@ PropertiesUPtr Scene::ToProperties(const bool useRealFileName) const {
 		// Check if it is a volume
 		try {
 			VolumeConstRef vol = dynamic_cast<const Volume &>(mat);
+			if (OpenPBRMaterial::IsInteriorVolumeObjectName(matName))
+				continue;
 			props->Set(*vol.ToProperties());
 		}
 		catch (std::bad_cast&) {}

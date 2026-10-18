@@ -146,6 +146,32 @@ def cases():
         c.append((f"openpbr-coatmetal-a{a}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n"
                   "scene.materials.m.specular.roughness = 0.5\n" + coat, 1.0))
+        # The OpenPBR transmission: the closed glass sphere, the thin wall,
+        # half glass over the white base
+        c.append((f"openpbr-glass-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.transmission.weight = 1\n" + orr, 1.0))
+        c.append((f"openpbr-thinwalled-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.transmission.weight = 1\n"
+                  "scene.materials.m.geometry.thinwalled = 1\n" + orr, 1.0))
+        c.append((f"openpbr-halfglass-a{a}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.base.color = 1 1 1\n"
+                  "scene.materials.m.transmission.weight = 0.5\n" + orr, 1.0))
+    # The OpenPBR glass with its interior volume: clear, and white scattering
+    for scatter in (0, 1):
+        c.append((f"openpbr-glass-depth-s{scatter}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.transmission.weight = 1\nscene.materials.m.transmission.depth = 1\n"
+                  f"scene.materials.m.transmission.scatter = {scatter} {scatter} {scatter}\n"
+                  "scene.materials.m.specular.roughness = 0.3\n", 1.0))
+    # The OpenPBR subsurface, white: the random walk returns all the energy
+    # that enters; thin-walled, the Lambertian half reflected half transmitted
+    for rad in (0.01, 0.1, 1.0):
+        c.append((f"openpbr-sss-rad{rad}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.subsurface.weight = 1\nscene.materials.m.subsurface.color = 1 1 1\n"
+                  f"scene.materials.m.subsurface.radius = {rad}\n"
+                  "scene.materials.m.subsurface.radiusscale = 1 1 1\n", 1.0))
+    c.append(("openpbr-sss-thinwalled", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.subsurface.weight = 1\nscene.materials.m.subsurface.color = 1 1 1\n"
+              "scene.materials.m.geometry.thinwalled = 1\n", 1.0))
     for r in (0.2, 0.5, 1.0):
         c.append((f"openpbr-fuzz-r{r}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.base.color = 1 1 1\nscene.materials.m.fuzz.weight = 1\n"

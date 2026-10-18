@@ -217,7 +217,38 @@ vector<TestCase> BuildTestCases() {
 			"scene.materials.m.coat.color = 0.9 0.7 0.5\nscene.materials.m.coat.anisotropy = 0.5\n"
 			"scene.materials.m.coat.ior = 1.8\n" + coatRough,
 			NO_EXPECT, a >= 0.2f });
+
+		// OpenPBR transmission: the white rough dielectric interface (eye
+		// paths see the radiance form, (1 - F) / eta^2 transmitted: no albedo
+		// target, the furnace checks it), the thin wall (lossless), half glass
+		// over the white base, a tinted glass under a coat
+		cases.push_back({ "openpbr-glass-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.transmission.weight = 1\n" + openpbrRough,
+			NO_EXPECT, a >= 0.2f });
+		cases.push_back({ "openpbr-thinwalled-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.transmission.weight = 1\nscene.materials.m.geometry.thinwalled = 1\n" + openpbrRough,
+			1.f, a >= 0.2f });
+		cases.push_back({ "openpbr-halfglass-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.transmission.weight = 0.5\n" + openpbrRough,
+			NO_EXPECT, a >= 0.2f });
+		cases.push_back({ "openpbr-glasscoat-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.transmission.weight = 1\nscene.materials.m.transmission.color = 0.9 0.6 0.3\n"
+			"scene.materials.m.specular.color = 0.8 0.9 1\nscene.materials.m.specular.ior = 1.33\n"
+			"scene.materials.m.coat.weight = 0.7\nscene.materials.m.coat.roughness = 0.2\n" + openpbrRough,
+			NO_EXPECT, a >= 0.2f });
 	}
+
+	// OpenPBR subsurface: the surface form (light paths, Mix) of the white
+	// medium is a Lambertian base, thin-walled half reflected and half
+	// transmitted; the exit of a walk a Lambertian transmission
+	cases.push_back({ "openpbr-sss-surface", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.subsurface.weight = 1\nscene.materials.m.subsurface.color = 1 1 1\n", 1.f, true });
+	cases.push_back({ "openpbr-sss-thinwalled", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.subsurface.weight = 1\nscene.materials.m.subsurface.color = 1 1 1\n"
+		"scene.materials.m.geometry.thinwalled = 1\n", 1.f, true });
+	cases.push_back({ "openpbr-sss-exit", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.subsurface.weight = 1\nscene.materials.m.subsurface.color = 0.5 0.5 0.5\n",
+		1.f, true, HITPOINT_SSS_EXIT });
 
 	// OpenPBR: white fuzz over the white dielectric (lossless up to the LTC
 	// fit), and the thin film (consistency only)
@@ -366,6 +397,8 @@ u_int dumpCount = 0;
 const u_int CHI2_COS_BINS = 20;
 const u_int CHI2_PHI_BINS = 40;
 const u_int CHI2_QUAD = 12;
+// The quadrature of the bins with a support edge inside
+const u_int CHI2_QUAD_EDGE = 96;
 
 Vector SphericalDir(const float cosTheta, const float phi) {
 	const float sinTheta = sqrtf(max(0.f, 1.f - cosTheta * cosTheta));
@@ -532,24 +565,42 @@ ConfigResult RunConfig(const Material &mat, const Config &cfg, const u_int sampl
 		vector<double> expected(histogram.size(), 0.0);
 		const double dCos = 2.0 / CHI2_COS_BINS;
 		const double dPhi = 2.0 * M_PI / CHI2_PHI_BINS;
+		// The midpoint rule over q x q points of a bin, and whether the bin
+		// has points where the BSDF is zero and points where it isn't
+		auto integrateBin = [&](const u_int cb, const u_int pb, const u_int q, bool *edge) {
+			double sum = 0.0;
+			u_int zeros = 0, nonZeros = 0;
+			for (u_int qi = 0; qi < q; ++qi) {
+				const double cosTheta = -1.0 + (cb + (qi + .5) / q) * dCos;
+				for (u_int qj = 0; qj < q; ++qj) {
+					const double phi = (pb + (qj + .5) / q) * dPhi;
+					const Vector dir = SphericalDir(static_cast<float>(cosTheta), static_cast<float>(phi));
+					if (fabsf(dir.z) < 1e-3f)
+						continue;
+					BSDFEvent e;
+					float directPdfW, reversePdfW;
+					const Spectrum f = EvaluateFixedGenerated(mat, hp, fixedDir, dir, &e, &directPdfW, &reversePdfW);
+					if (!f.Black()) {
+						sum += directPdfW;
+						++nonZeros;
+					} else
+						++zeros;
+				}
+			}
+			*edge = (zeros > 0) && (nonZeros > 0);
+
+			return sum * (dCos / q) * (dPhi / q) * samples;
+		};
 		for (u_int cb = 0; cb < CHI2_COS_BINS; ++cb) {
 			for (u_int pb = 0; pb < CHI2_PHI_BINS; ++pb) {
-				double sum = 0.0;
-				for (u_int qi = 0; qi < CHI2_QUAD; ++qi) {
-					const double cosTheta = -1.0 + (cb + (qi + .5) / CHI2_QUAD) * dCos;
-					for (u_int qj = 0; qj < CHI2_QUAD; ++qj) {
-						const double phi = (pb + (qj + .5) / CHI2_QUAD) * dPhi;
-						const Vector dir = SphericalDir(static_cast<float>(cosTheta), static_cast<float>(phi));
-						if (fabsf(dir.z) < 1e-3f)
-							continue;
-						BSDFEvent e;
-						float directPdfW, reversePdfW;
-						const Spectrum f = EvaluateFixedGenerated(mat, hp, fixedDir, dir, &e, &directPdfW, &reversePdfW);
-						if (!f.Black())
-							sum += directPdfW;
-					}
-				}
-				expected[cb * CHI2_PHI_BINS + pb] = sum * (dCos / CHI2_QUAD) * (dPhi / CHI2_QUAD) * samples;
+				bool edge;
+				double e = integrateBin(cb, pb, CHI2_QUAD, &edge);
+				// The edge of the support of a lobe inside the bin (the rough
+				// refraction ends where the microfacets turn horizontal, with
+				// a large pdf): a finer rule
+				if (edge)
+					e = integrateBin(cb, pb, CHI2_QUAD_EDGE, &edge);
+				expected[cb * CHI2_PHI_BINS + pb] = e;
 			}
 		}
 

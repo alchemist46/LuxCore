@@ -23,6 +23,8 @@
 #include <cmath>
 
 #include "slg/materials/openpbr.h"
+#include "slg/textures/constfloat.h"
+#include "slg/volumes/volume.h"
 
 namespace slg { namespace ocl { namespace {
 #include "luxrays/devices/cpudevice_oclemul.h"
@@ -99,6 +101,15 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.specularRoughness = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS, hitPoint);
 	b.specularIor = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
 	b.specularAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, hitPoint);
+	b.thinWalled = mat.IsThinWalled();
+	b.transmissionWeight = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, hitPoint);
+	// At depth, the interior volume does the colour
+	b.transmissionColor = ((b.transmissionWeight > 0.f) && !(!b.thinWalled &&
+			(mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, hitPoint) > 0.f))) ?
+		slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_TRANSMISSION_COLOR, hitPoint)) :
+		slg::ocl::make_float3(1.f, 1.f, 1.f);
+	b.subsurfaceWeight = mat.GetFloat(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, hitPoint);
+	b.subsurfaceColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint));
 	b.coatWeight = mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint);
 	b.coatColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_COAT_COLOR, hitPoint));
 	b.coatRoughness = mat.GetFloat(slg::ocl::OPENPBR_COAT_ROUGHNESS, hitPoint);
@@ -112,6 +123,8 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.thinFilmThickness = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_THICKNESS, hitPoint);
 	b.thinFilmIor = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_IOR, hitPoint);
 	b.tangentRotation = mat.GetFloat(slg::ocl::OPENPBR_TANGENT_ROTATION, hitPoint);
+	b.exteriorIor = ExtractExteriorIors(hitPoint, nullptr);
+	b.subsurfaceMode = hitPoint.subsurface;
 	b.regularization = hitPoint.regularization;
 	b.lumWeights = slg::ocl::ToFloat3(workingColorSpace.GetLuminanceWeights());
 	const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
@@ -128,7 +141,7 @@ OpenPBRMaterial::OpenPBRMaterial(TextureConstPtr frontTransp, TextureConstPtr ba
 		const Inputs &ins, const bool thin) :
 		Material(frontTransp, backTransp, emitted, bump),
 		inputs(ins), thinWalled(thin) {
-	UpdateGlossiness();
+	Update();
 }
 
 const char *OpenPBRMaterial::GetInputName(const slg::ocl::OpenPBRInput input) {
@@ -146,6 +159,34 @@ float OpenPBRMaterial::GetFloat(const slg::ocl::OpenPBRInput input, const HitPoi
 
 Spectrum OpenPBRMaterial::GetSpectrum(const slg::ocl::OpenPBRInput input, const HitPoint &hitPoint) const {
 	return inputs[input] ? inputs[input]->GetSpectrumValue(hitPoint) : GetInputDefault(input);
+}
+
+bool OpenPBRMaterial::IsZero(const slg::ocl::OpenPBRInput input) const {
+	const Texture *tex = inputs[input];
+	if (!tex)
+		return slg::ocl::OpenPBR_Defaults[3 * input] == 0.f;
+
+	return (tex->GetType() == CONST_FLOAT) && (static_cast<const ConstFloatTexture *>(tex)->GetValue() == 0.f);
+}
+
+bool OpenPBRMaterial::HasTransmissionDepth() const {
+	return !thinWalled && !IsZero(slg::ocl::OPENPBR_TRANSMISSION_DEPTH);
+}
+
+void OpenPBRMaterial::Update() {
+	const Texture *metalness = inputs[slg::ocl::OPENPBR_BASE_METALNESS];
+	const bool dielectric = !metalness || (metalness->GetType() != CONST_FLOAT) ||
+			(static_cast<const ConstFloatTexture *>(metalness)->GetValue() < 1.f);
+	const bool transmission = dielectric && !IsZero(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT);
+	const bool subsurface = dielectric && !IsZero(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT);
+
+	eventTypes = DIFFUSE | GLOSSY | REFLECT;
+	if (transmission || subsurface)
+		eventTypes |= TRANSMIT;
+	refractive = transmission && !thinWalled;
+	subsurfaceWalk = subsurface && !thinWalled;
+
+	UpdateGlossiness();
 }
 
 void OpenPBRMaterial::UpdateGlossiness() {
@@ -215,6 +256,21 @@ void OpenPBRMaterial::Pdf(const HitPoint &hitPoint,
 	}
 }
 
+bool OpenPBRMaterial::GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const {
+	*nc = ExtractExteriorIors(hitPoint, nullptr);
+	*nt = GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
+
+	return true;
+}
+
+void OpenPBRMaterial::GetSubsurfaceWalkParams(const HitPoint &hitPoint, Spectrum *color,
+		Spectrum *radius, float *anisotropy) const {
+	*color = GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint).Clamp(0.f, 1.f);
+	*radius = (GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint) *
+			GetFloat(slg::ocl::OPENPBR_SUBSURFACE_RADIUS, hitPoint)).Clamp(0.f, INFINITY);
+	*anisotropy = Clamp(GetFloat(slg::ocl::OPENPBR_SUBSURFACE_ANISOTROPY, hitPoint), -.9f, .9f);
+}
+
 void OpenPBRMaterial::AddReferencedTextures(std::unordered_set<const Texture *> &referencedTexs) const {
 	Material::AddReferencedTextures(referencedTexs);
 
@@ -232,7 +288,7 @@ void OpenPBRMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef
 			tex = &newTex;
 	}
 
-	UpdateGlossiness();
+	Update();
 }
 
 PropertiesUPtr OpenPBRMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {
@@ -248,6 +304,9 @@ PropertiesUPtr OpenPBRMaterial::ToProperties(const ImageMapCache &imgMapCache, c
 	if (thinWalled)
 		props->Set(Property("scene.materials." + name + ".geometry.thinwalled")(true));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
+	// The interior volume of the transmission at depth is re-created
+	if (interiorVolume && (interiorVolume->GetName() == GetInteriorVolumeName(name)))
+		props->Delete("scene.materials." + name + ".volume.interior");
 
 	return props;
 }

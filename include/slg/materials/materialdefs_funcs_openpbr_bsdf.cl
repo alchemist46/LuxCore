@@ -49,16 +49,34 @@
 //    dielectric
 //      specular  GGX with the exact Fresnel of specular.ior, F0 modulated by
 //                specular.weight, tinted by specular.color
-//      diffuse   EON of the albedo base.weight base.color and the roughness
-//                base.diffuseroughness
+//      mix(opaque, translucent, transmission.weight)
+//      opaque    the specular over mix(diffuse, subsurface, subsurface.weight)
+//        specular  GGX with the exact Fresnel of specular.ior, F0 modulated by
+//                  specular.weight, tinted by specular.color
+//        diffuse   EON of the albedo base.weight base.color and the roughness
+//                  base.diffuseroughness
+//        subsurface  on eye paths (HITPOINT_SSS_ENTRY) a cosine-weighted
+//                  entry into the object for the random walk of
+//                  subsurface_funcs.cl (subsurface.color the albedo of the
+//                  medium, subsurface.radius x subsurface.radiusscale its mean
+//                  free path), a Lambertian base of subsurface.color elsewhere
+//                  (as the subsurface material); thin-walled, a Lambertian
+//                  half reflected and half transmitted
+//      translucent  the rough dielectric interface of the same GGX lobe: the
+//                specular reflection and the refraction tinted by
+//                transmission.color (white when transmission.depth > 0: the
+//                interior volume does the colour); thin-walled, the
+//                transmission is the reflection lobe mirrored through the
+//                surface, without refraction
 //  The thin film (thinfilm.weight, thickness in micrometres, ior) tints the
 //  base specular and the metal with CalcFilmColor().
 //
 // Every GGX lobe is energy compensated (microfacet_energy_tables.cl), the
 // specular alphas are alpha = specular.roughness^2 split by
 // specular.anisotropy as the specification does, in the tangent frame rotated
-// by tangent.rotation (in turns), shared by the coat. Both faces of the
-// surface are the same: the back face is the mirror image of the front one.
+// by tangent.rotation (in turns), shared by the coat. The back face is the
+// mirror image of the front one, except for the IOR of the translucent
+// interface, inverted inside a (not thin-walled) object.
 //------------------------------------------------------------------------------
 
 // The defaults of the specification, 3 values per input in OpenPBRInput
@@ -107,12 +125,24 @@ typedef struct {
 	float3 baseColor;
 	float specularWeight, specularRoughness, specularIor, specularAnisotropy;
 	float3 specularColor;
+	// transmissionColor is the tint of the surface transmission: white when
+	// transmission.depth > 0 (the interior volume does the colour)
+	float transmissionWeight;
+	float3 transmissionColor;
+	float subsurfaceWeight;
+	float3 subsurfaceColor;
 	float coatWeight, coatRoughness, coatAnisotropy, coatIor, coatDarkening;
 	float3 coatColor;
 	float fuzzWeight, fuzzRoughness;
 	float3 fuzzColor;
 	float thinFilmWeight, thinFilmThickness, thinFilmIor;
 	float tangentRotation;
+	// The IOR of the exterior volume (1 without one)
+	float exteriorIor;
+	int thinWalled;
+	// The role of the vertex for the subsurface random walk
+	// (HitPoint::subsurface, HITPOINT_SSS_*)
+	int subsurfaceMode;
 	// The path regularization of the hit point (HitPoint::regularization)
 	float regularization;
 
@@ -127,6 +157,10 @@ typedef struct {
 	// coat applied) and of the coat, with their hemispherical average
 	// reflectances
 	float eta, etaFavg, coatEta, coatEtaFavg;
+	// The relative IOR of the translucent interface, the interior over the
+	// exterior (specular.weight applied, >= 1 when thin-walled), and the
+	// luminances of its reflection and transmission tints
+	float etaT, transYR, transYT;
 	// The hemispherical average reflectance of the coat seen from inside
 	float coatK;
 	// The F82-tint Fresnel of the metal: F(mu) = F0 + (1 - F0) (1 - mu)^5 -
@@ -190,6 +224,10 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->specularRoughness = clamp(b->specularRoughness, 0.f, 1.f);
 	b->specularIor = fmax(b->specularIor, 1e-3f);
 	b->specularAnisotropy = clamp(b->specularAnisotropy, 0.f, 1.f);
+	b->transmissionWeight = clamp(b->transmissionWeight, 0.f, 1.f);
+	b->transmissionColor = Spectrum_Clamp(b->transmissionColor);
+	b->subsurfaceWeight = clamp(b->subsurfaceWeight, 0.f, 1.f);
+	b->subsurfaceColor = Spectrum_Clamp(b->subsurfaceColor);
 	b->coatWeight = clamp(b->coatWeight, 0.f, 1.f);
 	b->coatColor = Spectrum_Clamp(b->coatColor);
 	b->coatRoughness = clamp(b->coatRoughness, 0.f, 1.f);
@@ -202,6 +240,7 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->thinFilmWeight = clamp(b->thinFilmWeight, 0.f, 1.f);
 	b->thinFilmThickness = fmax(b->thinFilmThickness, 0.f);
 	b->thinFilmIor = fmax(b->thinFilmIor, 1e-3f);
+	b->exteriorIor = fmax(b->exteriorIor, 1e-3f);
 
 	b->albedo = b->baseWeight * b->baseColor;
 
@@ -220,16 +259,30 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->cosRot = cos(angle);
 	b->sinRot = sin(angle);
 
-	// The base IOR is relative to the coat where coated. specular.weight
-	// multiplies its F0, mapped back to an IOR (the specification's
-	// modulation). The opaque base reflects the same from both sides: an IOR
-	// below 1 is inverted.
-	const float ior = b->specularIor * (1.f + b->coatWeight * (1.f / b->coatIor - 1.f));
+	// The base IOR is relative to the exterior, or to the coat where coated.
+	// specular.weight multiplies its F0, mapped back to an IOR (the
+	// specification's modulation). The opaque base reflects the same from
+	// both sides: an IOR below 1 is inverted.
+	const float invExteriorIor = 1.f / b->exteriorIor;
+	const float ior = b->specularIor * (invExteriorIor + b->coatWeight * (1.f / b->coatIor - invExteriorIor));
 	const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
 	const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
 	const float sqrtF0 = sqrt(clamp(b->specularWeight * r0 * r0, 0.f, .99f));
 	b->eta = (1.f + sqrtF0) / (1.f - sqrtF0);
 	b->etaFavg = OpenPBR_DielectricFavg(b->eta);
+
+	// The translucent interface refracts with the IOR relative to the exterior
+	// (the coat, a parallel layer, doesn't change the refracted direction),
+	// modulated by specular.weight in the same way, kept away from 1 (where
+	// the refraction is a delta)
+	const float iorT = b->specularIor * invExteriorIor;
+	const float etaTIn = (iorT < 1.f) ? (1.f / iorT) : iorT;
+	const float rT = (etaTIn - 1.f) / (etaTIn + 1.f);
+	const float sqrtF0T = sqrt(clamp(b->specularWeight * rT * rT, 0.f, .99f));
+	const float etaT = fmax((1.f + sqrtF0T) / (1.f - sqrtF0T), 1.001f);
+	b->etaT = ((iorT < 1.f) && !b->thinWalled) ? (1.f / etaT) : etaT;
+	b->transYR = OpenPBR_Y(b, b->specularColor);
+	b->transYT = OpenPBR_Y(b, b->transmissionColor);
 
 	b->coatEta = b->coatIor;
 	b->coatEtaFavg = OpenPBR_DielectricFavg(b->coatEta);
@@ -324,70 +377,213 @@ OPENCL_FORCE_INLINE float3 OpenPBR_CoatTint(const OpenPBRBSDF *b, const float3 e
 	return WHITE + b->coatWeight * (T * darkening - WHITE);
 }
 
-// f |cos light| of the base for two directions above the surface (front
-// face, rotated frame, wh their half vector), and the albedo of the base seen
-// from the eye direction (for the coat darkening)
+// The probability of the reflection of the translucent interface at a
+// microfacet with the Fresnel reflectance F (the transmission otherwise)
+OPENCL_FORCE_INLINE float OpenPBR_TranslucentReflectProb(const OpenPBRBSDF *b, const float F) {
+	const float r = F * b->transYR;
+	const float t = (1.f - F) * b->transYT;
+
+	return (r + t > 0.f) ? (r / (r + t)) : 1.f;
+}
+
+// f |cos light| of the translucent interface for the eye direction above the
+// surface (front face, rotated frame), eta the relative IOR of the light side
+// over the eye side: the rough dielectric reflection tinted by
+// specular.color and the thin film, and the transmission tinted by
+// transmission.color, a refraction (Walter et al. 2007) or, thin-walled, the
+// reflection lobe mirrored through the surface. Both are energy compensated
+// by the albedo of the whole interface seen from the eye (as Cycles), so the
+// white interface conserves the energy.
+OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateTranslucent(const OpenPBRBSDF *b,
+		const float3 lightDir, const float3 eyeDir, const float eta, const float3 film) {
+	const float muE = eyeDir.z;
+	const float av = OpenPBR_ViewAlpha(b->ax, b->ay, eyeDir);
+	const float E = b->thinWalled ? GGXEnergy_E(av, av, muE, false) : GGXEnergy_GlassE(av, av, muE, eta);
+	const float msScale = 1.f / fmax(E, 1e-3f);
+
+	if ((lightDir.z > 0.f) || b->thinWalled) {
+		const bool transmit = (lightDir.z < 0.f);
+		const float3 l = transmit ? MAKE_FLOAT3(lightDir.x, lightDir.y, -lightDir.z) : lightDir;
+		const float3 wh = normalize(l + eyeDir);
+		const float cosEH = dot(eyeDir, wh);
+		if (!(cosEH > 0.f))
+			return BLACK;
+
+		const float F = FresnelCauchy_Evaluate(eta, cosEH);
+		const float spec = Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, l, eyeDir) /
+				(4.f * muE) * msScale;
+
+		return transmit ? ((spec * (1.f - F)) * b->transmissionColor) : ((spec * F) * b->specularColor * film);
+	}
+
+	// The refraction: the generalized half vector of eta = eta_light / eta_eye
+	float3 wh = eta * lightDir + eyeDir;
+	if (wh.z < 0.f)
+		wh = -wh;
+	const float lengthSquared = dot(wh, wh);
+	if (!(lengthSquared > 0.f))
+		return BLACK;
+	wh /= sqrt(lengthSquared);
+
+	// Only the microfacets that both directions see (Sample() never generates
+	// the others)
+	const float cosEH = dot(eyeDir, wh);
+	const float cosLH = dot(lightDir, wh);
+	if (!(cosEH > 0.f) || !(cosLH < 0.f))
+		return BLACK;
+
+	const float F = FresnelCauchy_Evaluate(eta, cosEH);
+
+	return ((-cosLH) * cosEH * Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, lightDir, eyeDir) /
+			(muE * lengthSquared) * (1.f - F) * msScale) * b->transmissionColor;
+}
+
+// The pdf of sampling sampledDir from fixedDir (above the surface) with the
+// translucent lobe, eta the relative IOR of the other side over the fixed
+// side: a visible normal, then the reflection or the transmission with the
+// probability of OpenPBR_TranslucentReflectProb()
+OPENCL_FORCE_INLINE float OpenPBR_PdfTranslucent(const OpenPBRBSDF *b, const float eta,
+		const float3 fixedDir, const float3 sampledDir) {
+	if ((sampledDir.z > 0.f) || b->thinWalled) {
+		const bool transmit = (sampledDir.z < 0.f);
+		const float3 s = transmit ? MAKE_FLOAT3(sampledDir.x, sampledDir.y, -sampledDir.z) : sampledDir;
+		const float3 wh = normalize(fixedDir + s);
+		const float cosFH = dot(fixedDir, wh);
+		if (!(cosFH > 0.f))
+			return 0.f;
+
+		const float pR = OpenPBR_TranslucentReflectProb(b, FresnelCauchy_Evaluate(eta, cosFH));
+
+		return (transmit ? (1.f - pR) : pR) * Microfacet_PdfH(b->ax, b->ay, fixedDir, wh) / (4.f * cosFH);
+	}
+
+	float3 wh = fixedDir + eta * sampledDir;
+	if (wh.z < 0.f)
+		wh = -wh;
+	const float lengthSquared = dot(wh, wh);
+	if (!(lengthSquared > 0.f))
+		return 0.f;
+	wh /= sqrt(lengthSquared);
+
+	const float cosFH = dot(fixedDir, wh);
+	const float cosSH = dot(sampledDir, wh);
+	if (!(cosFH > 0.f) || !(cosSH < 0.f))
+		return 0.f;
+
+	const float pR = OpenPBR_TranslucentReflectProb(b, FresnelCauchy_Evaluate(eta, cosFH));
+
+	return (1.f - pR) * Microfacet_PdfH(b->ax, b->ay, fixedDir, wh) * eta * eta * (-cosSH) / lengthSquared;
+}
+
+// The albedo of the base seen from the eye direction with the cosine muE (for
+// the coat darkening), with Espec the albedo of the dielectric specular
+// reflection and av, E, Eavg the albedo terms of its lobe
+OPENCL_FORCE_INLINE float3 OpenPBR_BaseAlbedo(const OpenPBRBSDF *b, const float muE,
+		const float av, const float msScale, float3 *Espec) {
+	const float m = b->baseMetalness;
+
+	float3 baseE = BLACK;
+	if (m > 0.f)
+		baseE += m * OpenPBR_MetalFresnel(b, muE);
+	*Espec = b->specularColor * (GGXEnergy_DielectricE(av, av, muE, b->eta) * msScale);
+	if (m < 1.f) {
+		const float opaque = 1.f - b->transmissionWeight;
+		if (opaque > 0.f) {
+			const float3 diffuseAlbedo = b->albedo + b->subsurfaceWeight * (b->subsurfaceColor - b->albedo);
+			baseE += ((1.f - m) * opaque) * (*Espec + (WHITE - *Espec) * diffuseAlbedo);
+		}
+		if (b->transmissionWeight > 0.f)
+			baseE += ((1.f - m) * b->transmissionWeight) * *Espec;
+	}
+
+	return baseE;
+}
+
+// f |cos light| of the base for the eye direction above the surface (front
+// face, rotated frame), etaEye the relative IOR of the translucent interface
+// seen from the eye, sssEntry when the subsurface part is the random walk
+// (sampled only), and the albedo of the base seen from the eye direction (for
+// the coat darkening)
 OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
-		const float3 lightDir, const float3 eyeDir, const float3 wh, float3 *baseE) {
+		const float3 lightDir, const float3 eyeDir, const float etaEye, const bool sssEntry,
+		float3 *baseE) {
 	const float muL = lightDir.z;
 	const float muE = eyeDir.z;
 	const float m = b->baseMetalness;
+	const bool reflect = (muL > 0.f);
 
-	// The microfacet lobe with F = 1, shared by the metal and the dielectric
-	const float cosEH = fmax(0.f, dot(eyeDir, wh));
-	const float spec = Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, lightDir, eyeDir) / (4.f * muE);
 	const float av = OpenPBR_ViewAlpha(b->ax, b->ay, eyeDir);
 	const float E = GGXEnergy_E(av, av, muE, false);
 	const float Eavg = GGXEnergy_Eavg(av, av, false);
+	const float msScale = GGXEnergy_ReflectScale(E, Eavg, b->etaFavg);
+	float3 Espec;
+	*baseE = OpenPBR_BaseAlbedo(b, muE, av, msScale, &Espec);
 
 	float3 film = WHITE;
 	if ((b->thinFilmWeight > 0.f) && (b->thinFilmThickness > 0.f))
 		film = WHITE + b->thinFilmWeight * (OpenPBR_FilmColor(b, eyeDir) - WHITE);
 
 	float3 result = BLACK;
-	*baseE = BLACK;
-	if (m > 0.f) {
-		const float3 ms = MAKE_FLOAT3(GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.x),
-				GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.y),
-				GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.z));
+	if (reflect) {
+		// The microfacet lobe with F = 1, shared by the metal and the dielectric
+		const float3 wh = normalize(lightDir + eyeDir);
+		const float cosEH = fmax(0.f, dot(eyeDir, wh));
+		const float spec = Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, lightDir, eyeDir) / (4.f * muE);
 
-		result += (m * spec) * OpenPBR_MetalFresnel(b, cosEH) * ms * film;
-		*baseE += m * OpenPBR_MetalFresnel(b, muE);
-	}
-	if (m < 1.f) {
-		const float msScale = GGXEnergy_ReflectScale(E, Eavg, b->etaFavg);
-		const float3 specular = (spec * FresnelCauchy_Evaluate(b->eta, cosEH) * msScale) * b->specularColor * film;
-		const float3 diffuse = EON_Evaluate(b->albedo, b->baseDiffuseRoughness, lightDir, eyeDir) * muL;
-		const float3 Espec = b->specularColor * (GGXEnergy_DielectricE(av, av, muE, b->eta) * msScale);
+		if (m > 0.f) {
+			const float3 ms = MAKE_FLOAT3(GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.x),
+					GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.y),
+					GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.z));
 
-		result += (1.f - m) * (specular + (WHITE - Espec) * diffuse);
-		*baseE += (1.f - m) * (Espec + (WHITE - Espec) * b->albedo);
+			result += (m * spec) * OpenPBR_MetalFresnel(b, cosEH) * ms * film;
+		}
+		const float opaque = 1.f - b->transmissionWeight;
+		if ((m < 1.f) && (opaque > 0.f)) {
+			const float3 specular = (spec * FresnelCauchy_Evaluate(b->eta, cosEH) * msScale) * b->specularColor * film;
+			float3 diffuse = (1.f - b->subsurfaceWeight) * EON_Evaluate(b->albedo, b->baseDiffuseRoughness, lightDir, eyeDir) * muL;
+			// The subsurface is a Lambertian base where it isn't the random
+			// walk, half reflected and half transmitted when thin-walled
+			if ((b->subsurfaceWeight > 0.f) && !sssEntry)
+				diffuse += (b->subsurfaceWeight * (b->thinWalled ? .5f : 1.f) * M_1_PI_F * muL) * b->subsurfaceColor;
+
+			result += ((1.f - m) * opaque) * (specular + (WHITE - Espec) * diffuse);
+		}
+	} else if (b->thinWalled && (b->subsurfaceWeight > 0.f) && (b->transmissionWeight < 1.f)) {
+		result += ((1.f - m) * (1.f - b->transmissionWeight) * b->subsurfaceWeight * .5f * M_1_PI_F * (-muL)) *
+				(WHITE - Espec) * b->subsurfaceColor;
 	}
+
+	if ((m < 1.f) && (b->transmissionWeight > 0.f))
+		result += ((1.f - m) * b->transmissionWeight) * OpenPBR_EvaluateTranslucent(b, lightDir, eyeDir, etaEye, film);
 
 	return result;
 }
 
-// f |cos light| for two directions above the surface (front face, rotated
-// frame)
+// f |cos light| for the eye direction above the surface (front face, rotated
+// frame), see OpenPBR_EvaluateBase() for etaEye and sssEntry
 OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
-		const float3 lightDir, const float3 eyeDir) {
-	const float muL = lightDir.z;
+		const float3 lightDir, const float3 eyeDir, const float etaEye, const bool sssEntry) {
 	const float muE = eyeDir.z;
-	if ((muL < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC))
+	if ((fabs(lightDir.z) < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC))
 		return BLACK;
+	const bool reflect = (lightDir.z > 0.f);
 
-	const float3 wh = normalize(lightDir + eyeDir);
 	float3 baseE;
-	float3 result = OpenPBR_EvaluateBase(b, lightDir, eyeDir, wh, &baseE);
+	float3 result = OpenPBR_EvaluateBase(b, lightDir, eyeDir, etaEye, sssEntry, &baseE);
 
 	if (b->coatWeight > 0.f) {
-		const float cosEH = fmax(0.f, dot(eyeDir, wh));
 		const float av = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeDir);
 		const float msScale = OpenPBR_MSScale(av, muE, b->coatEtaFavg);
-		const float coat = b->coatWeight * msScale *
-				Microfacet_D(b->coatAx, b->coatAy, wh) * Microfacet_G(b->coatAx, b->coatAy, lightDir, eyeDir) / (4.f * muE) *
-				FresnelCauchy_Evaluate(b->coatEta, cosEH);
 		const float Ec = b->coatWeight * GGXEnergy_DielectricE(av, av, muE, b->coatEta) * msScale;
+
+		float coat = 0.f;
+		if (reflect) {
+			const float3 wh = normalize(lightDir + eyeDir);
+			const float cosEH = fmax(0.f, dot(eyeDir, wh));
+			coat = b->coatWeight * msScale *
+					Microfacet_D(b->coatAx, b->coatAy, wh) * Microfacet_G(b->coatAx, b->coatAy, lightDir, eyeDir) / (4.f * muE) *
+					FresnelCauchy_Evaluate(b->coatEta, cosEH);
+		}
 
 		result = TO_FLOAT3(coat) + (1.f - Ec) * OpenPBR_CoatTint(b, eyeDir, baseE) * result;
 	}
@@ -396,36 +592,63 @@ OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
 		float ltcA, ltcB;
 		const float Ef = OpenPBR_FuzzE(b, muE, &ltcA, &ltcB);
 		if (Ef > 0.f)
-			result = (Ef * Sheen_LTC(ltcA, ltcB, eyeDir, lightDir)) * b->fuzzColor + (1.f - Ef) * result;
+			result = (reflect ? (Ef * Sheen_LTC(ltcA, ltcB, eyeDir, lightDir)) * b->fuzzColor : BLACK) +
+					(1.f - Ef) * result;
 	}
 
 	return result;
 }
 
-// The probabilities of the lobes from the fixed direction, and the LTC of the
-// fixed direction (the fuzz of eye paths)
+// The probabilities of the lobes from the fixed direction, the LTC of the
+// fixed direction (the fuzz of eye paths) and the relative IOR of the
+// translucent interface seen from it
 typedef struct {
-	float wFuzz, wCoat, wGlossy, wDiffuse;
+	float wFuzz, wCoat, wGlossy, wDiffuse, wTranslucent, wDiffuseT, wSubsurface;
 	float ltcA, ltcB;
+	float eta;
 } OpenPBRLobes;
 
+// w is the fixed direction above the surface (front face, rotated frame),
+// outside when it is on the front side of the shading normal
 OPENCL_FORCE_INLINE void OpenPBR_LobeWeights(const OpenPBRBSDF *b, const float3 w,
-		OpenPBRLobes *lobes) {
+		const bool outside, const bool fromLight, OpenPBRLobes *lobes) {
 	const float mu = w.z;
 	const float Ef = OpenPBR_FuzzE(b, mu, &lobes->ltcA, &lobes->ltcB);
 	const float Ec = OpenPBR_CoatE(b, w);
+	lobes->eta = (b->thinWalled || outside) ? b->etaT : (1.f / b->etaT);
 
 	const float m = b->baseMetalness;
 	float glossy = 0.f;
 	float diffuse = 0.f;
+	float translucent = 0.f;
+	float diffuseT = 0.f;
+	float subsurface = 0.f;
 	if (m > 0.f)
 		glossy += m * OpenPBR_Y(b, OpenPBR_MetalFresnel(b, mu));
 	if (m < 1.f) {
-		const float av = OpenPBR_ViewAlpha(b->ax, b->ay, w);
-		const float Ed = OpenPBR_Y(b, b->specularColor *
-				(GGXEnergy_DielectricE(av, av, mu, b->eta) * OpenPBR_MSScale(av, mu, b->etaFavg)));
-		glossy += (1.f - m) * Ed;
-		diffuse += (1.f - m) * fmax(0.f, 1.f - Ed) * OpenPBR_Y(b, b->albedo);
+		const float opaque = (1.f - m) * (1.f - b->transmissionWeight);
+		if (opaque > 0.f) {
+			const float av = OpenPBR_ViewAlpha(b->ax, b->ay, w);
+			const float Ed = OpenPBR_Y(b, b->specularColor *
+					(GGXEnergy_DielectricE(av, av, mu, b->eta) * OpenPBR_MSScale(av, mu, b->etaFavg)));
+			glossy += opaque * Ed;
+			const float under = opaque * fmax(0.f, 1.f - Ed);
+			diffuse += under * (1.f - b->subsurfaceWeight) * OpenPBR_Y(b, b->albedo);
+			if (b->subsurfaceWeight > 0.f) {
+				const float sss = under * b->subsurfaceWeight * OpenPBR_Y(b, b->subsurfaceColor);
+				if (b->thinWalled) {
+					diffuse += .5f * sss;
+					diffuseT += .5f * sss;
+				} else if ((b->subsurfaceMode == HITPOINT_SSS_ENTRY) && outside && !fromLight)
+					subsurface += sss;
+				else
+					diffuse += sss;
+			}
+		}
+		if (b->transmissionWeight > 0.f) {
+			const float F = FresnelCauchy_Evaluate(lobes->eta, mu);
+			translucent += (1.f - m) * b->transmissionWeight * (F * b->transYR + (1.f - F) * b->transYT);
+		}
 	}
 
 	const float rest = (1.f - Ef) * (1.f - Ec);
@@ -433,33 +656,48 @@ OPENCL_FORCE_INLINE void OpenPBR_LobeWeights(const OpenPBRBSDF *b, const float3 
 	lobes->wCoat = (1.f - Ef) * Ec;
 	lobes->wGlossy = rest * glossy;
 	lobes->wDiffuse = rest * diffuse;
+	lobes->wTranslucent = rest * translucent;
+	lobes->wDiffuseT = rest * diffuseT;
+	lobes->wSubsurface = rest * subsurface;
 
-	const float sum = lobes->wFuzz + lobes->wCoat + lobes->wGlossy + lobes->wDiffuse;
+	const float sum = lobes->wFuzz + lobes->wCoat + lobes->wGlossy + lobes->wDiffuse +
+			lobes->wTranslucent + lobes->wDiffuseT + lobes->wSubsurface;
 	if (sum > 0.f) {
 		const float invSum = 1.f / sum;
 		lobes->wFuzz *= invSum;
 		lobes->wCoat *= invSum;
 		lobes->wGlossy *= invSum;
 		lobes->wDiffuse *= invSum;
+		lobes->wTranslucent *= invSum;
+		lobes->wDiffuseT *= invSum;
+		lobes->wSubsurface *= invSum;
 	}
 }
 
-// The pdf of sampling sampledDir from fixedDir (front face, rotated frame).
-// The fuzz is sampled from its LTC on eye paths and from the cosine on light
-// paths (the LTC is oriented by the eye direction).
+// The pdf of sampling sampledDir from fixedDir (fixedDir above the surface,
+// front face, rotated frame). The fuzz is sampled from its LTC on eye paths
+// and from the cosine on light paths (the LTC is oriented by the eye
+// direction). The subsurface entry has no pdf: its sample is the random walk,
+// never a direction to evaluate.
 OPENCL_FORCE_INLINE float OpenPBR_PdfFront(const OpenPBRBSDF *b, const OpenPBRLobes *lobes,
 		const bool fromLight, const float3 fixedDir, const float3 sampledDir) {
-	if (sampledDir.z <= 0.f)
+	float pdf = 0.f;
+	if (sampledDir.z > 0.f) {
+		pdf = lobes->wDiffuse * sampledDir.z * M_1_PI_F;
+		if (lobes->wGlossy > 0.f)
+			pdf += lobes->wGlossy * Microfacet_PdfReflect(b->ax, b->ay, fixedDir, sampledDir);
+		if (lobes->wCoat > 0.f)
+			pdf += lobes->wCoat * Microfacet_PdfReflect(b->coatAx, b->coatAy, fixedDir, sampledDir);
+		if (lobes->wFuzz > 0.f)
+			pdf += lobes->wFuzz * (fromLight ? (sampledDir.z * M_1_PI_F) :
+				Sheen_LTC(lobes->ltcA, lobes->ltcB, fixedDir, sampledDir));
+	} else if (sampledDir.z < 0.f)
+		pdf = lobes->wDiffuseT * (-sampledDir.z) * M_1_PI_F;
+	else
 		return 0.f;
 
-	float pdf = lobes->wDiffuse * sampledDir.z * M_1_PI_F;
-	if (lobes->wGlossy > 0.f)
-		pdf += lobes->wGlossy * Microfacet_PdfReflect(b->ax, b->ay, fixedDir, sampledDir);
-	if (lobes->wCoat > 0.f)
-		pdf += lobes->wCoat * Microfacet_PdfReflect(b->coatAx, b->coatAy, fixedDir, sampledDir);
-	if (lobes->wFuzz > 0.f)
-		pdf += lobes->wFuzz * (fromLight ? (sampledDir.z * M_1_PI_F) :
-			Sheen_LTC(lobes->ltcA, lobes->ltcB, fixedDir, sampledDir));
+	if (lobes->wTranslucent > 0.f)
+		pdf += lobes->wTranslucent * OpenPBR_PdfTranslucent(b, lobes->eta, fixedDir, sampledDir);
 
 	return pdf;
 }
@@ -474,12 +712,38 @@ OPENCL_FORCE_INLINE float3 OpenPBR_FromLobeFrame(const OpenPBRBSDF *b, const flo
 	return MAKE_FLOAT3(b->cosRot * w.x - b->sinRot * w.y, b->sinRot * w.x + b->cosRot * w.y, flip * w.z);
 }
 
+// Whether the material can transmit at this hit point
+OPENCL_FORCE_INLINE bool OpenPBR_CanTransmit(const OpenPBRBSDF *b) {
+	return (b->baseMetalness < 1.f) && ((b->transmissionWeight > 0.f) ||
+			(b->thinWalled && (b->subsurfaceWeight > 0.f) && (b->transmissionWeight < 1.f)));
+}
+
+// f |cos light| for the local directions in the shading frame: the eye
+// direction decides the face. Light paths get the adjoint of the refraction,
+// the radiance BTDF times (eta_light / eta_eye)^2.
+OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateLocal(const OpenPBRBSDF *b,
+		const float3 localLightDir, const float3 localEyeDir, const bool fromLight) {
+	const bool eyeOutside = (localEyeDir.z > 0.f);
+	const float flip = eyeOutside ? 1.f : -1.f;
+	const float3 lightDir = OpenPBR_ToLobeFrame(b, localLightDir, flip);
+	const float3 eyeDir = OpenPBR_ToLobeFrame(b, localEyeDir, flip);
+	const float etaEye = (b->thinWalled || eyeOutside) ? b->etaT : (1.f / b->etaT);
+	const bool sssEntry = (b->subsurfaceMode == HITPOINT_SSS_ENTRY) && eyeOutside && !b->thinWalled;
+
+	const float3 result = OpenPBR_EvaluateFront(b, lightDir, eyeDir, etaEye, sssEntry);
+
+	return (fromLight && (lightDir.z < 0.f) && !b->thinWalled) ? (result * (etaEye * etaEye)) : result;
+}
+
 //------------------------------------------------------------------------------
 // The material interface (local directions in the shading frame)
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float3 OpenPBR_Albedo(const OpenPBRBSDF *b) {
-	return b->albedo;
+	const float3 opaque = b->albedo + b->subsurfaceWeight * (b->subsurfaceColor - b->albedo);
+	const float3 dielectric = opaque + b->transmissionWeight * (b->transmissionColor - opaque);
+
+	return dielectric + b->baseMetalness * (b->albedo - dielectric);
 }
 
 // f |cos light| (as Material::Evaluate()). directPdfW is the pdf of sampling
@@ -489,83 +753,198 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Albedo(const OpenPBRBSDF *b) {
 OPENCL_FORCE_INLINE float3 OpenPBR_Evaluate(const OpenPBRBSDF *b,
 		const float3 localLightDir, const float3 localEyeDir, const bool fromLight,
 		BSDFEvent *event, float *directPdfW, float *reversePdfW) {
-	if (localLightDir.z * localEyeDir.z <= 0.f)
+	const float3 localFixedDir = fromLight ? localLightDir : localEyeDir;
+	const float3 localSampledDir = fromLight ? localEyeDir : localLightDir;
+
+	if (b->subsurfaceMode == HITPOINT_SSS_EXIT) {
+		// The exit point of a random walk: a Lambertian transmission out of
+		// the object (as the subsurface material)
+		if (localLightDir.z * localEyeDir.z >= 0.f)
+			return BLACK;
+
+		if (directPdfW)
+			*directPdfW = fabs(localSampledDir.z) * M_1_PI_F;
+		if (reversePdfW)
+			*reversePdfW = fabs(localFixedDir.z) * M_1_PI_F;
+		*event = DIFFUSE | TRANSMIT;
+
+		return TO_FLOAT3(fabs(localLightDir.z) * M_1_PI_F);
+	}
+
+	const bool reflect = (localLightDir.z * localEyeDir.z > 0.f);
+	if (!reflect && ((localLightDir.z * localEyeDir.z == 0.f) || !OpenPBR_CanTransmit(b)))
 		return BLACK;
 
-	const float flip = (localEyeDir.z < 0.f) ? -1.f : 1.f;
-	const float3 lightDir = OpenPBR_ToLobeFrame(b, localLightDir, flip);
-	const float3 eyeDir = OpenPBR_ToLobeFrame(b, localEyeDir, flip);
-	const float3 fixedDir = fromLight ? lightDir : eyeDir;
-	const float3 sampledDir = fromLight ? eyeDir : lightDir;
-
-	const float3 result = OpenPBR_EvaluateFront(b, lightDir, eyeDir);
+	const float3 result = OpenPBR_EvaluateLocal(b, localLightDir, localEyeDir, fromLight);
 	if (Spectrum_IsBlack(result))
 		return BLACK;
 
+	const bool fixedOutside = (localFixedDir.z > 0.f);
+	const float fixedFlip = fixedOutside ? 1.f : -1.f;
+	const float3 fixedDir = OpenPBR_ToLobeFrame(b, localFixedDir, fixedFlip);
 	OpenPBRLobes lobes;
-	OpenPBR_LobeWeights(b, fixedDir, &lobes);
+	OpenPBR_LobeWeights(b, fixedDir, fixedOutside, fromLight, &lobes);
 	if (directPdfW)
-		*directPdfW = OpenPBR_PdfFront(b, &lobes, fromLight, fixedDir, sampledDir);
+		*directPdfW = OpenPBR_PdfFront(b, &lobes, fromLight, fixedDir,
+				OpenPBR_ToLobeFrame(b, localSampledDir, fixedFlip));
 	if (reversePdfW) {
+		const bool sampledOutside = (localSampledDir.z > 0.f);
+		const float sampledFlip = sampledOutside ? 1.f : -1.f;
+		const float3 sampledDir = OpenPBR_ToLobeFrame(b, localSampledDir, sampledFlip);
 		OpenPBRLobes reverseLobes;
-		OpenPBR_LobeWeights(b, sampledDir, &reverseLobes);
-		*reversePdfW = OpenPBR_PdfFront(b, &reverseLobes, !fromLight, sampledDir, fixedDir);
+		OpenPBR_LobeWeights(b, sampledDir, sampledOutside, !fromLight, &reverseLobes);
+		*reversePdfW = OpenPBR_PdfFront(b, &reverseLobes, !fromLight, sampledDir,
+				OpenPBR_ToLobeFrame(b, localFixedDir, sampledFlip));
 	}
-	*event = ((lobes.wGlossy + lobes.wCoat >= lobes.wDiffuse + lobes.wFuzz) ? GLOSSY : DIFFUSE) | REFLECT;
+	if (reflect)
+		*event = ((lobes.wGlossy + lobes.wCoat + lobes.wTranslucent >= lobes.wDiffuse + lobes.wFuzz) ? GLOSSY : DIFFUSE) | REFLECT;
+	else
+		*event = ((lobes.wTranslucent >= lobes.wDiffuseT) ? GLOSSY : DIFFUSE) | TRANSMIT;
 
 	return result;
 }
 
-// f |cos light| / pdf (as Material::Sample()), BLACK when there is no sample
+// f |cos light| / pdf (as Material::Sample()), BLACK when there is no sample.
+// The subsurface entry (event SUBSURFACE) returns the weight of the walk
+// instead: the part of the light that enters the surface over the
+// probability of the lobe.
 OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 		const float3 localFixedDir, const float u0, const float u1, const float passThroughEvent,
 		const bool fromLight, float3 *localSampledDir, float *pdfW, BSDFEvent *event) {
 	if (fabs(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return BLACK;
 
-	const float flip = (localFixedDir.z < 0.f) ? -1.f : 1.f;
+	if (b->subsurfaceMode == HITPOINT_SSS_EXIT) {
+		// The exit point of a random walk: a Lambertian transmission
+		*localSampledDir = CosineSampleHemisphereWithPdf(u0, u1, pdfW);
+		if (localFixedDir.z > 0.f)
+			localSampledDir->z = -localSampledDir->z;
+		if (fabs(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+			return BLACK;
+
+		*event = DIFFUSE | TRANSMIT;
+		return TO_FLOAT3(fromLight ? fabs(localFixedDir.z / localSampledDir->z) : 1.f);
+	}
+
+	const bool outside = (localFixedDir.z > 0.f);
+	const float flip = outside ? 1.f : -1.f;
 	const float3 fixedDir = OpenPBR_ToLobeFrame(b, localFixedDir, flip);
 
 	OpenPBRLobes lobes;
-	OpenPBR_LobeWeights(b, fixedDir, &lobes);
-	if (lobes.wFuzz + lobes.wCoat + lobes.wGlossy + lobes.wDiffuse <= 0.f)
+	OpenPBR_LobeWeights(b, fixedDir, outside, fromLight, &lobes);
+	if (lobes.wFuzz + lobes.wCoat + lobes.wGlossy + lobes.wDiffuse +
+			lobes.wTranslucent + lobes.wDiffuseT + lobes.wSubsurface <= 0.f)
 		return BLACK;
 
 	float3 sampledDir;
-	if (passThroughEvent < lobes.wFuzz) {
+	const float cFuzz = lobes.wFuzz;
+	const float cCoat = cFuzz + lobes.wCoat;
+	const float cGlossy = cCoat + lobes.wGlossy;
+	const float cTranslucent = cGlossy + lobes.wTranslucent;
+	const float cSubsurface = cTranslucent + lobes.wSubsurface;
+	const float cDiffuseT = cSubsurface + lobes.wDiffuseT;
+	if (passThroughEvent < cFuzz) {
 		if (fromLight) {
 			float pdf;
 			sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdf);
 		} else
 			sampledDir = Sheen_SampleLTC(lobes.ltcA, lobes.ltcB, fixedDir, u0, u1);
 		*event = DIFFUSE | REFLECT;
-	} else if (passThroughEvent < lobes.wFuzz + lobes.wCoat) {
+	} else if (passThroughEvent < cCoat) {
 		if (Microfacet_SampleReflect(b->coatAx, b->coatAy, fixedDir, u0, u1, &sampledDir) <= 0.f)
 			return BLACK;
 		*event = GLOSSY | REFLECT;
-	} else if (passThroughEvent < lobes.wFuzz + lobes.wCoat + lobes.wGlossy) {
+	} else if (passThroughEvent < cGlossy) {
 		if (Microfacet_SampleReflect(b->ax, b->ay, fixedDir, u0, u1, &sampledDir) <= 0.f)
 			return BLACK;
 		*event = GLOSSY | REFLECT;
+	} else if (passThroughEvent < cTranslucent) {
+		// A visible normal, then the reflection or the transmission chosen
+		// with the rest of the lobe selection sample
+		float3 wh;
+		float d, pdfH;
+		Microfacet_SampleH(b->ax, b->ay, fixedDir, u0, u1, &wh, &d, &pdfH);
+		const float cosFH = dot(fixedDir, wh);
+		if (!(cosFH > 0.f))
+			return BLACK;
+
+		const float pR = OpenPBR_TranslucentReflectProb(b, FresnelCauchy_Evaluate(lobes.eta, cosFH));
+		const float u = (passThroughEvent - cGlossy) / lobes.wTranslucent;
+		if ((u < pR) || b->thinWalled) {
+			sampledDir = 2.f * cosFH * wh - fixedDir;
+			if (sampledDir.z <= 0.f)
+				return BLACK;
+			if (u < pR)
+				*event = GLOSSY | REFLECT;
+			else {
+				// The thin wall: the reflection mirrored through the surface
+				sampledDir.z = -sampledDir.z;
+				*event = GLOSSY | TRANSMIT;
+			}
+		} else {
+			// The refraction, with the IOR of the fixed side over the other
+			const float invEta = 1.f / lobes.eta;
+			const float sin2T = invEta * invEta * fmax(0.f, 1.f - cosFH * cosFH);
+			if (sin2T >= 1.f)
+				return BLACK;
+			const float cosT = sqrt(1.f - sin2T);
+			sampledDir = (invEta * cosFH - cosT) * wh - invEta * fixedDir;
+			if (sampledDir.z >= 0.f)
+				return BLACK;
+			*event = GLOSSY | TRANSMIT;
+		}
+	} else if (passThroughEvent < cSubsurface) {
+		// Into the object, for the random walk (eye paths)
+		float pdf;
+		sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdf);
+		if (sampledDir.z < DEFAULT_COS_EPSILON_STATIC)
+			return BLACK;
+		sampledDir.z = -sampledDir.z;
+
+		// The part of the light that enters: what the layers above leave of
+		// the subsurface fraction of the base, under its specular reflection
+		const float muE = fixedDir.z;
+		const float av = OpenPBR_ViewAlpha(b->ax, b->ay, fixedDir);
+		float3 Espec;
+		const float3 baseE = OpenPBR_BaseAlbedo(b, muE, av, OpenPBR_MSScale(av, muE, b->etaFavg), &Espec);
+		float3 weight = ((1.f - b->baseMetalness) * (1.f - b->transmissionWeight) * b->subsurfaceWeight) *
+				(WHITE - Espec);
+		if (b->coatWeight > 0.f)
+			weight *= (1.f - OpenPBR_CoatE(b, fixedDir)) * OpenPBR_CoatTint(b, fixedDir, baseE);
+		if (b->fuzzWeight > 0.f) {
+			float ltcA, ltcB;
+			weight *= 1.f - OpenPBR_FuzzE(b, muE, &ltcA, &ltcB);
+		}
+
+		*localSampledDir = OpenPBR_FromLobeFrame(b, sampledDir, flip);
+		*pdfW = lobes.wSubsurface * pdf;
+		*event = DIFFUSE | TRANSMIT | SUBSURFACE;
+
+		return weight / lobes.wSubsurface;
+	} else if (passThroughEvent < cDiffuseT) {
+		float pdf;
+		sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdf);
+		sampledDir.z = -sampledDir.z;
+		*event = DIFFUSE | TRANSMIT;
 	} else {
 		float pdf;
 		sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdf);
 		*event = DIFFUSE | REFLECT;
 	}
-	if (sampledDir.z < DEFAULT_COS_EPSILON_STATIC)
+	if (fabs(sampledDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return BLACK;
 
 	// The value and the pdf of the mixture
 	*pdfW = OpenPBR_PdfFront(b, &lobes, fromLight, fixedDir, sampledDir);
 	if (!(*pdfW > 0.f))
 		return BLACK;
-	const float3 f = fromLight ?
-		OpenPBR_EvaluateFront(b, fixedDir, sampledDir) :
-		OpenPBR_EvaluateFront(b, sampledDir, fixedDir);
-	if (Spectrum_IsBlack(f))
-		return BLACK;
 
 	*localSampledDir = OpenPBR_FromLobeFrame(b, sampledDir, flip);
+	const float3 f = fromLight ?
+		OpenPBR_EvaluateLocal(b, localFixedDir, *localSampledDir, true) :
+		OpenPBR_EvaluateLocal(b, *localSampledDir, localFixedDir, false);
+	if (Spectrum_IsBlack(f))
+		return BLACK;
 
 	return f / *pdfW;
 }

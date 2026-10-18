@@ -215,8 +215,13 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 					RayHit shadowRayHit;
 					BSDF shadowBsdf;
 					Spectrum connectionThroughput;
-					// Create a new PathVolumeInfo for the path to the light source
+					// Create a new PathVolumeInfo for the path to the light source:
+					// a light on the other side of the surface is seen through
+					// its interior volume, or from inside it (as the path would
+					// be after sampling the same direction)
 					PathVolumeInfo volInfo = pathInfo.volume;
+					if (!bsdf.IsVolume() && (event & TRANSMIT))
+						volInfo.Update(event, bsdf);
 					// Check if the light source is visible
 					if (!scene.Intersect(IntersectionDevicePtr(&device), EYE_RAY | SHADOW_RAY, &volInfo, u4, &shadowRay,
 							&shadowRayHit, &shadowBsdf, &connectionThroughput, nullptr,
@@ -603,7 +608,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		bsdf.hitPoint.regularization = (regularizationEnable && pathInfo.anyNonSpecularBounce) ?
 			regularizationRoughness : 0.f;
 		// The base lobe of a subsurface material enters the object for the walk
-		if (!subsurfaceExit && (bsdf.GetMaterialType() == SUBSURFACEMAT))
+		if (!subsurfaceExit && bsdf.HasSubsurfaceWalk())
 			bsdf.hitPoint.subsurface = HITPOINT_SSS_ENTRY;
 
 		sampleResult.lastPathVertex = pathInfo.depth.IsLastPathVertex(maxPathDepth, bsdf.GetEventTypes());
@@ -922,8 +927,12 @@ void PathTracer::ConnectToEye(IntersectionDeviceRef device,
 
 			BSDF bsdfConn;
 			Spectrum connectionThroughput;
-			// Create a new PathVolumeInfo for the path to the light source
+			// Create a new PathVolumeInfo for the path to the camera: the
+			// camera on the other side of the surface is seen through its
+			// interior volume, or from inside it
 			PathVolumeInfo volInfo = pathInfo.volume;
+			if (!bsdf.IsVolume() && (event & TRANSMIT))
+				volInfo.Update(event, bsdf);
 			if (!scene.Intersect(
 					luxrays::make_observer<IntersectionDevice>(device),
 					LIGHT_RAY | CAMERA_RAY,

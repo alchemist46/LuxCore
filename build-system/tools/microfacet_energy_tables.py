@@ -44,7 +44,7 @@ estimator is G2(wo, wi) / G1(wo) with a negligible variance:
   E - B, B, (E - B) (1 - E) / E and B (1 - E) / E: the average albedo of the
   energy-compensated Schlick lobe is F0 P + Q + Fms (F0 R + S).
 - GGXEnergy_GlassTable[eta][rough][mu] and GGXEnergy_GlassInvTable[1/eta][rough][mu]
-  (8 x 16 x 16):
+  (12 x 16 x 16):
   the albedo of the full rough dielectric interface (Fresnel-weighted
   reflection plus Walter's transmission, in the energy form used by the
   roughglass material) seen from the side with the relative IOR eta >= 1 and
@@ -52,14 +52,21 @@ estimator is G2(wo, wi) / G1(wo) with a negligible variance:
 - GGXEnergy_DielectricTable[eta][rough][mu] (12 x 16 x 16): the albedo of the
   height-correlated reflection lobe weighted by the exact dielectric Fresnel of
   the relative IOR eta >= 1, without the transmission (the specular reflection
-  over the opaque base of the openpbr material). Its eta axis is uniform in
-  sqrt((eta - 1) / 2): near eta = 1 (a base under a coat of a similar IOR) the
-  grazing albedo is far from linear in eta.
+  over the opaque base of the openpbr material).
+
+The eta axes of the glass and dielectric tables are uniform in
+sqrt((eta - 1) / 2): near eta = 1 (water, a base under a coat of a similar
+IOR, the inside of a glass near the critical angle) the albedo is far from
+linear in eta (an axis linear in eta was 3% off inside a glass of IOR 1.5).
+These three tables are stored as 16-bit fixed point (the albedos are in
+[0, 1], the step is 1.5e-5), so that all the __constant tables of the kernels
+stay within the 64 KB of CUDA's constant memory.
 
 The tables are indexed by rough = sqrt(alpha) (the roughness of the LuxCore
 materials is alpha itself, the table resolution is spent where E changes),
 mu = cos(theta_o) and eta in [1, 3] (the inverse table by 1 / eta in [1, 3]),
-all on uniform grids with the end points included and linear interpolation.
+all on uniform grids (eta as above) with the end points included and linear
+interpolation.
 The albedo at mu = 0 is evaluated at mu = 1e-3 (its limit is finite).
 
 Run it from the source tree root (it takes about a minute):
@@ -74,7 +81,7 @@ import numpy as np
 N_ROUGH = 32
 N_MU = 32
 N_GLASS = 16
-N_GLASS_ETA = 8  # the eta axis is coarser: E is smooth in eta and CUDA's constant memory is 64 KB
+N_GLASS_ETA = 12
 N_DIEL_ETA = 12
 ETA_MIN, ETA_MAX = 1.0, 3.0
 MU_MIN = 1e-3
@@ -252,9 +259,15 @@ def coat_tables():
     return B, avg
 
 
+def eta_grid(n):
+    """Uniform in sqrt((eta - eta_min) / (eta_max - eta_min))."""
+    x = np.linspace(0.0, 1.0, n)
+    return ETA_MIN + (ETA_MAX - ETA_MIN) * x * x
+
+
 def glass_tables(inverse):
     E = np.zeros((N_GLASS_ETA, N_GLASS, N_GLASS))
-    for k, e in enumerate(np.linspace(ETA_MIN, ETA_MAX, N_GLASS_ETA)):
+    for k, e in enumerate(eta_grid(N_GLASS_ETA)):
         eta = 1.0 / e if inverse else e
         for i, rough in enumerate(rough_grid(N_GLASS)):
             alpha = rough * rough
@@ -265,14 +278,9 @@ def glass_tables(inverse):
     return E
 
 
-def dielectric_eta_grid():
-    x = np.linspace(0.0, 1.0, N_DIEL_ETA)
-    return ETA_MIN + (ETA_MAX - ETA_MIN) * x * x
-
-
 def dielectric_tables():
     E = np.zeros((N_DIEL_ETA, N_GLASS, N_GLASS))
-    for k, eta in enumerate(dielectric_eta_grid()):
+    for k, eta in enumerate(eta_grid(N_DIEL_ETA)):
         for i, rough in enumerate(rough_grid(N_GLASS)):
             alpha = rough * rough
             for j, mu in enumerate(mu_grid(N_GLASS)):
@@ -295,6 +303,15 @@ def emit_table(out, name, values, dims):
     out.write(f"__constant float {name}[{' * '.join(str(d) for d in dims)}] = {{\n")
     for start in range(0, flat.size, 8):
         out.write("\t" + ", ".join(literal(v) for v in flat[start:start + 8]) + ",\n")
+    out.write("};\n\n")
+
+
+def emit_table_u16(out, name, values, dims):
+    """Values in [0, 1] as 16-bit fixed point (v * 65535)."""
+    flat = np.rint(np.clip(values.ravel(), 0.0, 1.0) * 65535.0).astype(np.int64)
+    out.write(f"__constant ushort {name}[{' * '.join(str(d) for d in dims)}] = {{\n")
+    for start in range(0, flat.size, 12):
+        out.write("\t" + ", ".join(str(v) for v in flat[start:start + 12]) + ",\n")
     out.write("};\n\n")
 
 
@@ -346,9 +363,9 @@ def main():
         emit_table(out, "GGXEnergy_Eavg_SEP", Eavg_sep, (N_ROUGH,))
         emit_table(out, "GGXEnergy_SchlickB_HC", B_coat, (N_ROUGH, N_MU))
         emit_table(out, "GGXEnergy_CoatAvg_HC", coat_avg, (4, N_ROUGH))
-        emit_table(out, "GGXEnergy_GlassTable", G, (N_GLASS_ETA, N_GLASS, N_GLASS))
-        emit_table(out, "GGXEnergy_GlassInvTable", Ginv, (N_GLASS_ETA, N_GLASS, N_GLASS))
-        emit_table(out, "GGXEnergy_DielectricTable", D, (N_DIEL_ETA, N_GLASS, N_GLASS))
+        emit_table_u16(out, "GGXEnergy_GlassTable", G, (N_GLASS_ETA, N_GLASS, N_GLASS))
+        emit_table_u16(out, "GGXEnergy_GlassInvTable", Ginv, (N_GLASS_ETA, N_GLASS, N_GLASS))
+        emit_table_u16(out, "GGXEnergy_DielectricTable", D, (N_DIEL_ETA, N_GLASS, N_GLASS))
         out.write(LOOKUP_CODE)
     print(f"Written {OUTPUT}", file=sys.stderr)
 
@@ -375,6 +392,33 @@ OPENCL_FORCE_INLINE float GGXEnergy_Lerp2D(__constant const float *table, const 
 			t0 * GGXEnergy_Lerp1D(&table[(i0 + 1) * n1], n1, x1);
 }
 
+// The same for the 16-bit fixed point tables
+OPENCL_FORCE_INLINE float GGXEnergy_Lerp1DU16(__constant const ushort *table, const uint n, const float x) {
+	const float fx = clamp(x, 0.f, 1.f) * (float)(n - 1);
+	const uint i0 = min((uint)fx, n - 2);
+	const float t = fx - (float)i0;
+
+	return ((1.f - t) * (float)table[i0] + t * (float)table[i0 + 1]) * (1.f / 65535.f);
+}
+
+OPENCL_FORCE_INLINE float GGXEnergy_Lerp2DU16(__constant const ushort *table, const uint n0, const uint n1,
+		const float x0, const float x1) {
+	const float fx0 = clamp(x0, 0.f, 1.f) * (float)(n0 - 1);
+	const uint i0 = min((uint)fx0, n0 - 2);
+	const float t0 = fx0 - (float)i0;
+
+	return (1.f - t0) * GGXEnergy_Lerp1DU16(&table[i0 * n1], n1, x1) +
+			t0 * GGXEnergy_Lerp1DU16(&table[(i0 + 1) * n1], n1, x1);
+}
+
+// The position of eta on the eta axes of the glass and dielectric tables,
+// uniform in sqrt((eta - eta_min) / (eta_max - eta_min))
+OPENCL_FORCE_INLINE float GGXEnergy_EtaAxis(const float eta) {
+	const float e = clamp(eta, GGXENERGY_ETA_MIN, GGXENERGY_ETA_MAX);
+
+	return sqrt((e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN));
+}
+
 // The albedo of the F = 1 GGX reflection lobe (alpha = (u, v) as in Microfacet_*,
 // mu = |cos(theta)| of the viewing direction). separable selects the Disney
 // masking (G1 G1) instead of the height-correlated one.
@@ -397,15 +441,14 @@ OPENCL_FORCE_INLINE float GGXEnergy_Eavg(const float u, const float v, const boo
 OPENCL_FORCE_INLINE float GGXEnergy_GlassE(const float u, const float v, const float mu, const float eta) {
 	const float rough = sqrt(sqrt(u * v));
 	const bool inverse = (eta < 1.f);
-	const float e = clamp((inverse ? 1.f / eta : eta), GGXENERGY_ETA_MIN, GGXENERGY_ETA_MAX);
-	const float fe = (e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN) * (float)(GGXENERGY_N_GLASS_ETA - 1);
+	const float fe = GGXEnergy_EtaAxis(inverse ? 1.f / eta : eta) * (float)(GGXENERGY_N_GLASS_ETA - 1);
 	const uint ie = min((uint)fe, (uint)(GGXENERGY_N_GLASS_ETA - 2));
 	const float te = fe - (float)ie;
-	__constant const float *table = inverse ? GGXEnergy_GlassInvTable : GGXEnergy_GlassTable;
+	__constant const ushort *table = inverse ? GGXEnergy_GlassInvTable : GGXEnergy_GlassTable;
 	const uint stride = GGXENERGY_N_GLASS * GGXENERGY_N_GLASS;
 
-	return (1.f - te) * GGXEnergy_Lerp2D(&table[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
-			te * GGXEnergy_Lerp2D(&table[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
+	return (1.f - te) * GGXEnergy_Lerp2DU16(&table[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
+			te * GGXEnergy_Lerp2DU16(&table[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
 }
 
 // The albedo of the GGX reflection lobe (height-correlated, no energy
@@ -413,15 +456,13 @@ OPENCL_FORCE_INLINE float GGXEnergy_GlassE(const float u, const float v, const f
 // without the transmission (the specular reflection of the openpbr material)
 OPENCL_FORCE_INLINE float GGXEnergy_DielectricE(const float u, const float v, const float mu, const float eta) {
 	const float rough = sqrt(sqrt(u * v));
-	const float e = clamp(eta, GGXENERGY_ETA_MIN, GGXENERGY_ETA_MAX);
-	// The eta axis is uniform in sqrt((eta - eta_min) / (eta_max - eta_min))
-	const float fe = sqrt((e - GGXENERGY_ETA_MIN) / (GGXENERGY_ETA_MAX - GGXENERGY_ETA_MIN)) * (float)(GGXENERGY_N_DIEL_ETA - 1);
+	const float fe = GGXEnergy_EtaAxis(eta) * (float)(GGXENERGY_N_DIEL_ETA - 1);
 	const uint ie = min((uint)fe, (uint)(GGXENERGY_N_DIEL_ETA - 2));
 	const float te = fe - (float)ie;
 	const uint stride = GGXENERGY_N_GLASS * GGXENERGY_N_GLASS;
 
-	return (1.f - te) * GGXEnergy_Lerp2D(&GGXEnergy_DielectricTable[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
-			te * GGXEnergy_Lerp2D(&GGXEnergy_DielectricTable[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
+	return (1.f - te) * GGXEnergy_Lerp2DU16(&GGXEnergy_DielectricTable[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
+			te * GGXEnergy_Lerp2DU16(&GGXEnergy_DielectricTable[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
 }
 
 // The coatings (glossy2, glossycoating, glossytranslucent): the GGX reflection

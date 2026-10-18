@@ -661,6 +661,11 @@ void CompiledScene::CompileMaterials() {
 				auto &gm = dynamic_cast<const RoughGlassMaterial &>(*refractive);
 				extIor = gm.GetExteriorIOR();
 				intIor = gm.GetInteriorIOR();
+			} else if (refractive->GetType() == OPENPBR) {
+				// Not set: the default of the specification (see
+				// BSDF_GetRefractionEtaScale())
+				auto &opm = dynamic_cast<const OpenPBRMaterial &>(*refractive);
+				intIor = opm.GetInput(slg::ocl::OPENPBR_SPECULAR_IOR);
 			}
 			if (extIor)
 				mat->refractionExteriorIorTexIndex = scene.GetTextures().GetTextureIndex(extIor);
@@ -979,6 +984,7 @@ void CompiledScene::CompileMaterials() {
 					mat->openpbr.texIndex[i] = tex ? scene.GetTextures().GetTextureIndex(tex) : NULL_INDEX;
 				}
 				mat->openpbr.thinWalled = opm.IsThinWalled() ? 1 : 0;
+				mat->openpbr.subsurfaceWalk = opm.HasSubsurfaceWalk() ? 1 : 0;
 				break;
 			}
 			case SUBSURFACEMAT: {
@@ -1090,7 +1096,8 @@ void CompiledScene::CompileMaterials() {
 
 	hasSubsurface = false;
 	for (const slg::ocl::Material &mat : mats) {
-		if (mat.type == slg::ocl::SUBSURFACEMAT) {
+		if ((mat.type == slg::ocl::SUBSURFACEMAT) ||
+				((mat.type == slg::ocl::OPENPBR) && mat.openpbr.subsurfaceWalk)) {
 			hasSubsurface = true;
 			break;
 		}

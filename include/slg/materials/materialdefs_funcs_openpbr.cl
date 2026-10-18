@@ -21,7 +21,9 @@
 //------------------------------------------------------------------------------
 // OpenPBR material: the textures of the hit point into OpenPBRBSDF, the BSDF
 // itself is in materialdefs_funcs_openpbr_bsdf.cl. The GPU traces eye paths
-// only (fromLight = false).
+// only (fromLight = false). The random walk of the subsurface part starts in
+// AdvancePaths_StartSubsurfaceWalk() with the parameters of
+// OpenPBRMaterial_GetWalkParams().
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float OpenPBRMaterial_GetFloat(__global const Material* restrict material,
@@ -56,6 +58,18 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 	b->specularRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ROUGHNESS, hitPoint TEXTURES_PARAM);
 	b->specularIor = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM);
 	b->specularAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ANISOTROPY, hitPoint TEXTURES_PARAM);
+	b->thinWalled = material->openpbr.thinWalled;
+	b->transmissionWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_WEIGHT, hitPoint TEXTURES_PARAM);
+	if (b->transmissionWeight > 0.f) {
+		// At depth, the interior volume does the colour
+		b->transmissionColor = (!b->thinWalled &&
+				(OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_DEPTH, hitPoint TEXTURES_PARAM) > 0.f)) ?
+			WHITE : OpenPBRMaterial_GetSpectrum(material, OPENPBR_TRANSMISSION_COLOR, hitPoint TEXTURES_PARAM);
+	} else
+		b->transmissionColor = WHITE;
+	b->subsurfaceWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->subsurfaceColor = (b->subsurfaceWeight > 0.f) ?
+		OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM) : WHITE;
 	b->coatWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_WEIGHT, hitPoint TEXTURES_PARAM);
 	if (b->coatWeight > 0.f) {
 		b->coatColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_COAT_COLOR, hitPoint TEXTURES_PARAM);
@@ -87,9 +101,21 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->thinFilmIor = 1.4f;
 	}
 	b->tangentRotation = OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM);
+	b->exteriorIor = ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM);
+	b->subsurfaceMode = hitPoint->subsurface;
 	b->regularization = hitPoint->regularization;
 
 	OpenPBR_Init(b);
+}
+
+// The medium of the subsurface random walk at the entry point
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetWalkParams(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, float3 *color, float3 *radius, float *anisotropy
+		TEXTURES_PARAM_DECL) {
+	*color = Spectrum_Clamp(OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM));
+	*radius = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_RADIUS, hitPoint TEXTURES_PARAM) *
+			OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint TEXTURES_PARAM);
+	*anisotropy = clamp(OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_ANISOTROPY, hitPoint TEXTURES_PARAM), -.9f, .9f);
 }
 
 OPENCL_FORCE_INLINE void OpenPBRMaterial_Albedo(__global const Material* restrict material,

@@ -160,8 +160,10 @@ public:
 		return (hitPoint.regularization > 0.f) ? material->GetRegularizedEventTypes() : material->GetEventTypes();
 	}
 	MaterialType GetMaterialType() const { return material->GetType(); }
-	// The medium of a random-walk subsurface material at this vertex
-	// (GetMaterialType() == SUBSURFACEMAT only)
+	// An eye path entering the material starts the subsurface random walk
+	// (Material::HasSubsurfaceWalk()), in the medium of
+	// GetSubsurfaceWalkParams() at this vertex
+	bool HasSubsurfaceWalk() const;
 	void GetSubsurfaceWalkParams(luxrays::Spectrum *color, luxrays::Spectrum *radius,
 		float *anisotropy) const;
 

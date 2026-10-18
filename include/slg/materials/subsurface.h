@@ -62,7 +62,8 @@ public:
 		float *directPdfW, float *reversePdfW) const;
 
 	// The medium of the walk at the entry point
-	void GetWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
+	virtual bool HasSubsurfaceWalk() const { return true; }
+	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const;
 
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const;

@@ -137,6 +137,13 @@ public:
 	virtual const Material *GetRefractiveMaterial() const { return nullptr; }
 	// The exterior and interior IORs of a refractive material at the hit point
 	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const { return false; }
+	// An eye path entering the material starts the subsurface random walk
+	// (see SubsurfaceMaterial and PathTracer::SubsurfaceRandomWalk()) in the
+	// medium of GetSubsurfaceWalkParams(): the multiple-scattering albedo, the
+	// mean free path per channel and the Henyey-Greenstein g
+	virtual bool HasSubsurfaceWalk() const { return false; }
+	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
+		luxrays::Spectrum *radius, float *anisotropy) const { }
 	// Path regularization (HitPoint::regularization > 0): the delta lobes of
 	// the glass and mirror materials become GGX lobes, so these replace
 	// IsDelta() and GetEventTypes() at a regularized vertex (see BSDF)

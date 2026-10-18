@@ -45,7 +45,11 @@ OPENCL_FORCE_INLINE float BSDF_GetRefractionEtaScale(__global const BSDF *bsdf
 
 	const float nc = ExtractExteriorIors(&bsdf->hitPoint, mat->refractionExteriorIorTexIndex
 			TEXTURES_PARAM);
-	const float nt = ExtractInteriorIors(&bsdf->hitPoint, mat->refractionInteriorIorTexIndex
+	// The openpbr material without specular.ior has the default of the
+	// specification
+	const float nt = ((mat->type == OPENPBR) && (mat->refractionInteriorIorTexIndex == NULL_INDEX)) ?
+		OpenPBR_Defaults[3 * OPENPBR_SPECULAR_IOR] :
+		ExtractInteriorIors(&bsdf->hitPoint, mat->refractionInteriorIorTexIndex
 			TEXTURES_PARAM);
 	if (!(nc > 0.f) || !(nt > 0.f))
 		return 1.f;

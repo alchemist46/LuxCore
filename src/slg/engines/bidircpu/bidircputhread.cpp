@@ -400,6 +400,10 @@ void BiDirCPURenderThread::ConnectToEye(const float time,
 			BSDF bsdfConn;
 			Spectrum connectionThroughput;
 			PathVolumeInfo volInfo = lightVertex.volInfo; // I need to use a copy here
+			// The camera on the other side of the surface is seen through its
+			// interior volume, or from inside it
+			if (!lightVertex.bsdf.IsVolume() && (event & TRANSMIT))
+				volInfo.Update(event, lightVertex.bsdf);
 			if (!scene.Intersect(
 					luxrays::make_observer(device),
 					LIGHT_RAY | CAMERA_RAY,
@@ -482,6 +486,10 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 					BSDF shadowBsdf;
 					Spectrum connectionThroughput;
 					PathVolumeInfo volInfo = eyeVertex.volInfo; // I need to use a copy here
+					// A light on the other side of the surface is seen through
+					// its interior volume, or from inside it
+					if (!eyeVertex.bsdf.IsVolume() && (event & TRANSMIT))
+						volInfo.Update(event, eyeVertex.bsdf);
 					// Check if the light source is visible
 					if (!scene.Intersect(
 						luxrays::make_observer(device),

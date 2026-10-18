@@ -121,6 +121,16 @@ OPENCL_FORCE_INLINE float Material_IsHoldout(const uint matIndex
 	return mats[matIndex].isHoldout;
 }
 
+//------------------------------------------------------------------------------
+// Material_HasSubsurfaceWalk: an eye path entering the material starts the
+// subsurface random walk (Material::HasSubsurfaceWalk())
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE bool Material_HasSubsurfaceWalk(__global const Material* restrict material) {
+	return (material->type == SUBSURFACEMAT) ||
+			((material->type == OPENPBR) && material->openpbr.subsurfaceWalk);
+}
+
 #endif
 
 //------------------------------------------------------------------------------

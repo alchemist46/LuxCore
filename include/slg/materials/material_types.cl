@@ -192,9 +192,12 @@ typedef enum {
 
 typedef struct {
 	// NULL_INDEX when the input is not set: its value is the default of the
-	// specification (OpenPBR_InputDefault())
+	// specification (OpenPBR_Defaults[])
 	unsigned int texIndex[OPENPBR_INPUT_COUNT];
 	int thinWalled;
+	// The subsurface part is the random walk on eye paths
+	// (OpenPBRMaterial::HasSubsurfaceWalk())
+	int subsurfaceWalk;
 } OpenPBRParam;
 
 typedef enum {
