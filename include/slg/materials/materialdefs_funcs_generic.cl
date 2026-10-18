@@ -342,6 +342,32 @@ OPENCL_FORCE_INLINE float3 Microfacet_MSScale(const int multiscattering,
 // Schlick BSDF (the coating lobe)
 //------------------------------------------------------------------------------
 
+// The layering of the coatings over their base (glossy2, glossycoating,
+// glossytranslucent; see glossy2.cpp): the coating albedo per channel, its
+// average, the base scale (1 - Ec(mu_light)) (1 - Ec(mu_eye)) / (1 - Ec_avg)
+// and the probability of sampling the coating
+OPENCL_FORCE_INLINE float3 GGXEnergy_CoatE3(const float u, const float v, const float mu, const float3 F0) {
+	return MAKE_FLOAT3(GGXEnergy_CoatE(u, v, mu, F0.x), GGXEnergy_CoatE(u, v, mu, F0.y),
+			GGXEnergy_CoatE(u, v, mu, F0.z));
+}
+
+OPENCL_FORCE_INLINE float3 GGXEnergy_CoatEavg3(const float u, const float v, const float3 F0) {
+	return MAKE_FLOAT3(GGXEnergy_CoatEavg(u, v, F0.x), GGXEnergy_CoatEavg(u, v, F0.y),
+			GGXEnergy_CoatEavg(u, v, F0.z));
+}
+
+OPENCL_FORCE_INLINE float3 Coating_LayerScale(const float3 EcLight, const float3 EcEye, const float3 EcAvg) {
+	return (WHITE - EcLight) * (WHITE - EcEye) /
+			MAKE_FLOAT3(fmax(1.f - EcAvg.x, 1e-4f), fmax(1.f - EcAvg.y, 1e-4f), fmax(1.f - EcAvg.z, 1e-4f));
+}
+
+OPENCL_FORCE_INLINE float Coating_Probability(const float3 Ec, const float3 baseAlbedo) {
+	const float coat = Spectrum_Filter(Ec);
+	const float base = Spectrum_Filter((WHITE - Ec) * baseAlbedo);
+
+	return ((coat + base) > 0.f) ? coat / (coat + base) : 1.f;
+}
+
 OPENCL_FORCE_INLINE float SchlickBSDF_CoatingWeight(const float3 ks, const float3 fixedDir) {
 	// Approximate H by using reflection direction for wi
 	const float u = fabs(fixedDir.z);

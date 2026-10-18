@@ -397,6 +397,12 @@ extern float GGXEnergy_ReflectScale(const float u, const float v, const float mu
 	const float Fss, const bool separable);
 extern luxrays::Spectrum GGXEnergy_ReflectScale(const float u, const float v, const float mu,
 	const luxrays::Spectrum &Fss, const bool separable);
+// The coatings (glossy2, glossycoating, glossytranslucent): the albedo of the
+// energy-compensated GGX lobe with the Schlick Fresnel of F0 (per channel)
+// seen from mu, and its cosine-weighted average (see microfacet_energy_tables.cl)
+extern luxrays::Spectrum GGXEnergy_CoatE(const float u, const float v, const float mu,
+	const luxrays::Spectrum &F0);
+extern luxrays::Spectrum GGXEnergy_CoatEavg(const float u, const float v, const luxrays::Spectrum &F0);
 // The hemispherical average of the Schlick Fresnel term: F0 + (1 - F0) / 21
 extern float SchlickFresnel_Average(const float F0);
 extern luxrays::Spectrum SchlickFresnel_Average(const luxrays::Spectrum &F0);

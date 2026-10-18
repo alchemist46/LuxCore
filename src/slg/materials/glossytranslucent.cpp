@@ -45,122 +45,139 @@ Spectrum GlossyTranslucentMaterial::Albedo(const HitPoint &hitPoint) const {
 	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 }
 
+//------------------------------------------------------------------------------
+// Since 2026-10-18 the two coatings (front: ks, index, uroughness, vroughness,
+// ka, d; back: the _bf ones) are layered over the diffuse slab by albedo
+// scaling (see glossy2.cpp), with Ec_s the albedo of the energy-compensated
+// coating of side s:
+//
+//  reflection on side s: f_coat_s + kd / pi (1 - Ec_s(mu_light)) (1 - Ec_s(mu_eye)) / (1 - Ec_s_avg)
+//  transmission:         t / pi (1 - Ec_l(mu_light)) (1 - Ec_e(mu_eye)) / (1 - Ec_l_avg)
+//
+// with t = kt (1 - kd), l the side of the light direction and e the one of
+// the eye direction, times the absorption of the coatings crossed. The albedo
+// seen from the eye is Ec + (kd + t) (1 - Ec): 1 with kd + t = 1. With equal
+// coatings on both sides the transmission is reciprocal. The old Schlick
+// blend with the sqrt((1 - S1) (1 - S2)) transmission gained up to 26% at
+// grazing angles. The multibounce options are ignored.
+//------------------------------------------------------------------------------
+
+namespace {
+
+struct GlossyTranslucentSide {
+	Spectrum ks, alpha;
+	float u, v, d;
+};
+
+}
+
+static GlossyTranslucentSide GlossyTranslucent_GetSide(const GlossyTranslucentMaterial &mat,
+		const HitPoint &hitPoint, const bool front) {
+	GlossyTranslucentSide side;
+	side.ks = (front ? mat.GetKs() : mat.GetKs_bf())->GetSpectrumValue(hitPoint);
+	const float i = (front ? mat.GetIndex() : mat.GetIndex_bf())->GetFloatValue(hitPoint);
+	if (i > 0.f) {
+		const float ti = (i - 1.f) / (i + 1.f);
+		side.ks *= ti * ti;
+	}
+	side.ks = side.ks.Clamp(0.f, 1.f);
+	side.u = Microfacet_Regularize(Clamp((front ? mat.GetNu() : mat.GetNu_bf())->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	side.v = Microfacet_Regularize(Clamp((front ? mat.GetNv() : mat.GetNv_bf())->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	side.alpha = (front ? mat.GetKa() : mat.GetKa_bf())->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	side.d = (front ? mat.GetDepth() : mat.GetDepth_bf())->GetFloatValue(hitPoint);
+
+	return side;
+}
+
+// The probabilities of the coating, the diffuse reflection and the diffuse
+// transmission from a direction with the coating albedo Ec
+static void GlossyTranslucent_LobeProbabilities(const Spectrum &Ec, const Spectrum &kd, const Spectrum &t,
+		float *pCoat, float *pReflect, float *pTransmit) {
+	const Spectrum reflectOut = (Spectrum(1.f) - Ec) * kd;
+	const Spectrum transmitOut = (Spectrum(1.f) - Ec) * t;
+	const float coat = Ec.Filter();
+	const float reflect = reflectOut.Filter();
+	const float transmit = transmitOut.Filter();
+	const float sum = coat + reflect + transmit;
+	if (sum > 0.f) {
+		*pCoat = coat / sum;
+		*pReflect = reflect / sum;
+		*pTransmit = transmit / sum;
+	} else {
+		*pCoat = 0.f;
+		*pReflect = 0.f;
+		*pTransmit = 0.f;
+	}
+}
+
+// The pdf of generating sampledDir from fixedDir
+static float GlossyTranslucent_Pdf(const GlossyTranslucentSide &fixedSide, const Spectrum &kd, const Spectrum &t,
+		const Vector &localFixedDir, const Vector &localSampledDir) {
+	const Spectrum EcFixed = GGXEnergy_CoatE(fixedSide.u, fixedSide.v, fabsf(localFixedDir.z), fixedSide.ks);
+	float pCoat, pReflect, pTransmit;
+	GlossyTranslucent_LobeProbabilities(EcFixed, kd, t, &pCoat, &pReflect, &pTransmit);
+
+	if (localFixedDir.z * localSampledDir.z > 0.f) {
+		return pReflect * fabsf(localSampledDir.z) * INV_PI +
+				pCoat * SchlickBSDF_CoatingPdf(fixedSide.u, fixedSide.v, localFixedDir, localSampledDir);
+	} else
+		return pTransmit * fabsf(localSampledDir.z) * INV_PI;
+}
+
 Spectrum GlossyTranslucentMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
-	const float cosi = fabsf(localLightDir.z);
-	const float coso = fabsf(localEyeDir.z);
+	if (directPdfW)
+		*directPdfW = 0.f;
+	if (reversePdfW)
+		*reversePdfW = 0.f;
 
-	const Frame frame(hitPoint.GetFrame());
-	const float sideTest = Dot(frame.ToWorld(localFixedDir), hitPoint.geometryN) * Dot(frame.ToWorld(localSampledDir), hitPoint.geometryN);
+	const float cosLight = fabsf(localLightDir.z);
+	const float cosEye = fabsf(localEyeDir.z);
+	if ((cosLight < DEFAULT_COS_EPSILON_STATIC) || (cosEye < DEFAULT_COS_EPSILON_STATIC))
+		return Spectrum();
 
-	if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
-		// Transmission
+	const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum t = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (Spectrum(1.f) - kd);
+
+	const GlossyTranslucentSide lightSide = GlossyTranslucent_GetSide(*this, hitPoint, localLightDir.z > 0.f);
+	const GlossyTranslucentSide eyeSide = GlossyTranslucent_GetSide(*this, hitPoint, localEyeDir.z > 0.f);
+	const GlossyTranslucentSide &fixedSide = hitPoint.fromLight ? lightSide : eyeSide;
+	const GlossyTranslucentSide &sampledSide = hitPoint.fromLight ? eyeSide : lightSide;
+
+	if (directPdfW)
+		*directPdfW = GlossyTranslucent_Pdf(fixedSide, kd, t, localFixedDir, localSampledDir);
+	if (reversePdfW)
+		*reversePdfW = GlossyTranslucent_Pdf(sampledSide, kd, t, localSampledDir, localFixedDir);
+
+	const Spectrum EcLight = GGXEnergy_CoatE(lightSide.u, lightSide.v, cosLight, lightSide.ks);
+	const Spectrum EcEye = GGXEnergy_CoatE(eyeSide.u, eyeSide.v, cosEye, eyeSide.ks);
+	const Spectrum EcLightAvg = GGXEnergy_CoatEavg(lightSide.u, lightSide.v, lightSide.ks);
+
+	Spectrum layer;
+	for (u_int c = 0; c < 3; ++c)
+		layer.c[c] = (1.f - EcLight.c[c]) * (1.f - EcEye.c[c]) / Max(1.f - EcLightAvg.c[c], 1e-4f);
+
+	if (localLightDir.z * localEyeDir.z < 0.f) {
+		// Transmission: one crossing of each coating
 		*event = DIFFUSE | TRANSMIT;
 
-		if (directPdfW)
-			*directPdfW = fabsf(localSampledDir.z) * (INV_PI * .5f);
-		if (reversePdfW)
-			*reversePdfW = fabsf(localFixedDir.z) * (INV_PI * .5f);
+		const Spectrum absorption = Exp(lightSide.alpha * -(lightSide.d / cosLight) +
+				eyeSide.alpha * -(eyeSide.d / cosEye));
 
-		const Vector H(Normalize(Vector(localLightDir.x + localEyeDir.x, localLightDir.y + localEyeDir.y,
-			localLightDir.z - localEyeDir.z)));
-		const float u = AbsDot(localLightDir, H);
-		Spectrum ks = Ks->GetSpectrumValue(hitPoint);
-		float i = index->GetFloatValue(hitPoint);
-		if (i > 0.f) {
-			const float ti = (i - 1.f) / (i + 1.f);
-			ks *= ti * ti;
-		}
-		ks = ks.Clamp(0.f, 1.f);
-		const Spectrum S1 = FresnelTexture::SchlickEvaluate(ks, u);
-
-		ks = Ks_bf->GetSpectrumValue(hitPoint);
-		i = index_bf->GetFloatValue(hitPoint);
-		if (i > 0.f) {
-			const float ti = (i - 1.f) / (i + 1.f);
-			ks *= ti * ti;
-		}
-		ks = ks.Clamp(0.f, 1.f);
-		const Spectrum S2 = FresnelTexture::SchlickEvaluate(ks, u);
-		Spectrum S(Sqrt((Spectrum(1.f) - S1) * (Spectrum(1.f) - S2)));
-		if (localLightDir.z > 0.f) {
-			S *= Exp(Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * -(depth->GetFloatValue(hitPoint) / cosi) +
-				Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * -(depth_bf->GetFloatValue(hitPoint) / coso));
-		} else {
-			S *= Exp(Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * -(depth->GetFloatValue(hitPoint) / coso) +
-				Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * -(depth_bf->GetFloatValue(hitPoint) / cosi));
-		}
-
-		return (INV_PI * cosi) * S * Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) *
-			(Spectrum(1.f) - Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f));
-	} else if (sideTest > DEFAULT_COS_EPSILON_STATIC) {
-		// Reflection
+		return absorption * layer * t * (INV_PI * cosLight);
+	} else {
+		// Reflection on the side of both directions
 		*event = GLOSSY | REFLECT;
 
-		const Spectrum baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * cosi;
-		Spectrum ks, alpha;
-		float i, u, v, d;
-		bool mbounce;
-		if (localEyeDir.z >= 0.f) {
-			ks = Ks->GetSpectrumValue(hitPoint);
-			i = index->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-			d = depth->GetFloatValue(hitPoint);
-			mbounce = multibounce;
-		} else {
-			ks = Ks_bf->GetSpectrumValue(hitPoint);
-			i = index_bf->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			alpha = Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-			d = depth_bf->GetFloatValue(hitPoint);
-			mbounce = multibounce_bf;
-		}
+		const Spectrum absorption = CoatingAbsorption(cosLight, cosEye, eyeSide.alpha, eyeSide.d);
+		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, eyeSide.ks, eyeSide.u, eyeSide.v,
+				false, true, localFixedDir, localSampledDir);
 
-		if (i > 0.f) {
-			const float ti = (i - 1.f) / (i + 1.f);
-			ks *= ti * ti;
-		}
-		ks = ks.Clamp(0.f, 1.f);
-
-
-		if (directPdfW) {
-			const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
-			const float wBase = 1.f - wCoating;
-
-			*directPdfW = .5f * (wBase * fabsf(localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir));
-		}
-
-		if (reversePdfW) {
-			const float wCoatingR = SchlickBSDF_CoatingWeight(ks, localSampledDir);
-			const float wBaseR = 1.f - wCoatingR;
-
-			*reversePdfW = .5f * (wBaseR * fabsf(localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir));
-		}
-
-		// Absorption
-		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
-
-		// Coating fresnel factor
-		const Vector H(Normalize(localFixedDir + localSampledDir));
-		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(localSampledDir, H));
-
-		const Spectrum coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, mbounce, IsMultiscattering(),
-			localFixedDir, localSampledDir);
-
-		// Blend in base layer Schlick style
-		// assumes coating bxdf takes fresnel factor S into account
-
-		return coatingF + absorption * (Spectrum(1.f) - S) * baseF;
-	} else
-		return Spectrum();
+		return coatingF + absorption * layer * kd * (INV_PI * cosLight);
+	}
 }
 
 Spectrum GlossyTranslucentMaterial::Sample(const HitPoint &hitPoint,
@@ -170,174 +187,47 @@ Spectrum GlossyTranslucentMaterial::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	if (passThroughEvent < .5f) {
-		// Reflection
-		Spectrum ks, alpha;
-		float i, u, v, d;
-		bool mbounce;
-		if (localFixedDir.z >= 0.f) {
-			ks = Ks->GetSpectrumValue(hitPoint);
-			i = index->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-			d = depth->GetFloatValue(hitPoint);
-			mbounce = multibounce;
-		} else {
-			ks = Ks_bf->GetSpectrumValue(hitPoint);
-			i = index_bf->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			alpha = Ka_bf->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
-			d = depth_bf->GetFloatValue(hitPoint);
-			mbounce = multibounce_bf;
-		}
-		if (i > 0.f) {
-			const float ti = (i - 1.f) / (i + 1.f);
-			ks *= ti * ti;
-		}
-		ks = ks.Clamp(0.f, 1.f);
+	const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum t = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (Spectrum(1.f) - kd);
+	const GlossyTranslucentSide fixedSide = GlossyTranslucent_GetSide(*this, hitPoint, localFixedDir.z > 0.f);
 
+	float pCoat, pReflect, pTransmit;
+	GlossyTranslucent_LobeProbabilities(GGXEnergy_CoatE(fixedSide.u, fixedSide.v, fabsf(localFixedDir.z), fixedSide.ks),
+			kd, t, &pCoat, &pReflect, &pTransmit);
+	if (pCoat + pReflect + pTransmit <= 0.f)
+		return Spectrum();
 
-		const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
-		const float wBase = 1.f - wCoating;
-
-		float basePdf, coatingPdf;
-		Spectrum baseF, coatingF;
-
-		if (2.f * passThroughEvent < wBase) {
-			// Sample base BSDF (Matte BSDF)
-			*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, &basePdf);
-
-			const float absCosSampledDir = fabsf(localSampledDir->z);
-			if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-				return Spectrum();
-
-			baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
-
-			// Evaluate coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingF(hitPoint.fromLight, ks, u, v, mbounce, IsMultiscattering(),
-				localFixedDir, *localSampledDir);
-			coatingPdf = SchlickBSDF_CoatingPdf(u, v, localFixedDir, *localSampledDir);
-		} else {
-			// Sample coating BSDF (Schlick BSDF)
-			coatingF = SchlickBSDF_CoatingSampleF(hitPoint.fromLight, ks, u, v, mbounce, IsMultiscattering(),
-				localFixedDir, localSampledDir, u0, u1, &coatingPdf);
-			if (coatingF.Black())
-				return Spectrum();
-
-			const float absCosSampledDir = fabsf(localSampledDir->z);
-			if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-				return Spectrum();
-
-			coatingF *= coatingPdf;
-
-			// Evaluate base BSDF (Matte BSDF)
-			basePdf = absCosSampledDir * INV_PI;
-			baseF = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * fabsf(hitPoint.fromLight ? localFixedDir.z : absCosSampledDir);
-		}
-		*event = GLOSSY | REFLECT;
-
-		const Frame frame(hitPoint.GetFrame());
-		const float sideTest = Dot(frame.ToWorld(localFixedDir), hitPoint.geometryN) * Dot(frame.ToWorld(*localSampledDir), hitPoint.geometryN);
-		if (!(sideTest > DEFAULT_COS_EPSILON_STATIC))
+	if (passThroughEvent < pCoat) {
+		const float pdf = Microfacet_SampleReflect(fixedSide.u, fixedSide.v, localFixedDir, u0, u1, localSampledDir);
+		if ((pdf <= 0.f) || (localFixedDir.z * localSampledDir->z <= 0.f))
 			return Spectrum();
-
-		*pdfW = .5f * (coatingPdf * wCoating + basePdf * wBase);
-
-		// Absorption
-		const float cosi = fabsf(localSampledDir->z);
-		const float coso = fabsf(localFixedDir.z);
-		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
-
-		// Coating fresnel factor
-		const Vector H(Normalize(localFixedDir + *localSampledDir));
-		const Spectrum S = FresnelTexture::SchlickEvaluate(ks, AbsDot(*localSampledDir, H));
-
-		// Blend in base layer Schlick style
-		// coatingF already takes fresnel factor S into account
-
-		return (coatingF + absorption * (Spectrum(1.f) - S) * baseF) / *pdfW;
 	} else {
-		// Transmission
-		*localSampledDir = -Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, pdfW);
-
-		const Frame frame(hitPoint.dpdu, hitPoint.dpdv, hitPoint.shadeN);
-		const float sideTest = Dot(frame.ToWorld(localFixedDir), hitPoint.geometryN) * Dot(frame.ToWorld(*localSampledDir), hitPoint.geometryN);
-		if (!(sideTest < -DEFAULT_COS_EPSILON_STATIC))
-			return Spectrum();
-
-		*pdfW *= .5f;
-
-		const float absCosSampledDir = fabsf(localSampledDir->z);
-		if (absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-			return Spectrum();
-
-		// pdfW and the pdf computed inside Evaluate() are exactly the same so
-		// it doesn't matter if it is overwritten
-		return Evaluate(hitPoint,
-				hitPoint.fromLight ? localFixedDir : *localSampledDir,
-				hitPoint.fromLight ? *localSampledDir : localFixedDir,
-				event, pdfW, NULL) / *pdfW;
+		float pdf;
+		*localSampledDir = CosineSampleHemisphere(u0, u1, &pdf);
+		// A diffuse transmission keeps the azimuth: only z flips
+		if (passThroughEvent < pCoat + pReflect)
+			localSampledDir->z *= Sgn(localFixedDir.z);
+		else
+			localSampledDir->z *= -Sgn(localFixedDir.z);
 	}
+	if (fabsf(localSampledDir->z) < DEFAULT_COS_EPSILON_STATIC)
+		return Spectrum();
+
+	// The value and the pdf of the mixture from the evaluation
+	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
+	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
+	const Spectrum f = Evaluate(hitPoint, localLightDir, localEyeDir, event, pdfW, nullptr);
+	if (f.Black() || !(*pdfW > 0.f))
+		return Spectrum();
+
+	return f / *pdfW;
 }
 
 void GlossyTranslucentMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
-	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
-	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
-
-	if (localFixedDir.z * localSampledDir.z < 0.f) {
-		// Transmission
-		if (directPdfW)
-			*directPdfW = fabsf(localSampledDir.z) * (INV_PI * .5f);
-		if (reversePdfW)
-			*reversePdfW = fabsf(localFixedDir.z) * (INV_PI * .5f);
-	} else if (localFixedDir.z * localSampledDir.z > 0.f) {
-		// Reflection
-		Spectrum ks;
-		float i, u, v;
-		if (localEyeDir.z >= 0.f) {
-			ks = Ks->GetSpectrumValue(hitPoint);
-			i = index->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-		} else {
-			ks = Ks_bf->GetSpectrumValue(hitPoint);
-			i = index_bf->GetFloatValue(hitPoint);
-			u = Microfacet_Regularize(Clamp(nu_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-			v = Microfacet_Regularize(Clamp(nv_bf->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-		}
-
-		if (i > 0.f) {
-			const float ti = (i - 1.f) / (i + 1.f);
-			ks *= ti * ti;
-		}
-		ks = ks.Clamp(0.f, 1.f);
-
-
-		if (directPdfW) {
-			const float wCoating = SchlickBSDF_CoatingWeight(ks, localFixedDir);
-			const float wBase = 1.f - wCoating;
-
-			*directPdfW = .5f * (wBase * fabsf(localSampledDir.z * INV_PI) +
-				wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir));
-		}
-
-		if (reversePdfW) {
-			const float wCoatingR = SchlickBSDF_CoatingWeight(ks, localSampledDir);
-			const float wBaseR = 1.f - wCoatingR;
-
-			*reversePdfW = .5f * (wBaseR * fabsf(localFixedDir.z * INV_PI) +
-				wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir));
-		}
-	} else {
-		if (directPdfW)
-			*directPdfW = 0.f;
-		if (reversePdfW)
-			*reversePdfW = 0.f;
-	}
+	BSDFEvent event;
+	Evaluate(hitPoint, localLightDir, localEyeDir, &event, directPdfW, reversePdfW);
 }
 
 void GlossyTranslucentMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const {

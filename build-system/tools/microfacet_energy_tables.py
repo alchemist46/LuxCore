@@ -36,6 +36,13 @@ estimator is G2(wo, wi) / G1(wo) with a negligible variance:
   (the Disney material).
 - GGXEnergy_Eavg_*[rough]: the cosine-weighted average of E over mu,
   Eavg = 2 integral E(mu) mu dmu.
+- GGXEnergy_SchlickB_HC[rough][mu]: the albedo of the height-correlated lobe
+  weighted by the Schlick term (1 - cos(wo, h))^5, so that the albedo of the
+  lobe with the Schlick Fresnel of F0 is F0 (E - B) + B (the coatings of
+  glossy2, glossycoating and glossytranslucent).
+- GGXEnergy_CoatAvg_HC[4][rough]: the cosine-weighted averages P, Q, R, S of
+  E - B, B, (E - B) (1 - E) / E and B (1 - E) / E: the average albedo of the
+  energy-compensated Schlick lobe is F0 P + Q + Fms (F0 R + S).
 - GGXEnergy_GlassTable[eta][rough][mu] and GGXEnergy_GlassInvTable[1/eta][rough][mu]
   (8 x 16 x 16):
   the albedo of the full rough dielectric interface (Fresnel-weighted
@@ -123,6 +130,22 @@ def albedo_reflect(alpha, mu, separable):
     return float(np.mean(np.where(valid, weight, 0.0)))
 
 
+def albedo_reflect_schlick(alpha, mu):
+    """(E, B): the albedo of the F = 1 height-correlated reflection lobe and of
+    the same lobe weighted by the Schlick term (1 - cos(wo, h))^5."""
+    if alpha == 0.0:
+        return 1.0, (1.0 - mu) ** 5
+    wo = np.array([np.sqrt(max(0.0, 1.0 - mu * mu)), 0.0, mu])
+    h = sample_vndf(alpha, wo)
+    woh = wo[0] * h[0] + wo[1] * h[1] + wo[2] * h[2]
+    wi = 2.0 * woh * h - wo[:, None]
+    valid = wi[2] > 0.0
+    wiz = np.where(valid, wi[2], 1.0)
+    weight = np.where(valid, g2_over_g1(alpha, wo, (wi[0], wi[1], wiz), False), 0.0)
+    schlick = (1.0 - np.clip(woh, 0.0, 1.0)) ** 5
+    return float(np.mean(weight)), float(np.mean(weight * schlick))
+
+
 def fresnel_dielectric(cos_i, eta):
     """Unpolarized Fresnel reflectance; eta is n_t / n_i for the side of cos_i
     (cos_i > 0). Total internal reflection gives 1."""
@@ -185,6 +208,26 @@ def reflect_tables(separable):
     return E, Eavg
 
 
+def coat_tables():
+    B = np.zeros((N_ROUGH, N_MU))
+    avg = np.zeros((4, N_ROUGH))
+    mus_avg = (np.arange(EAVG_MU_SAMPLES) + 0.5) / EAVG_MU_SAMPLES
+    for i, rough in enumerate(rough_grid(N_ROUGH)):
+        alpha = rough * rough
+        for j, mu in enumerate(mu_grid(N_MU)):
+            B[i, j] = albedo_reflect_schlick(alpha, mu)[1]
+        EB = np.array([albedo_reflect_schlick(alpha, mu) for mu in mus_avg])
+        E, Bm = np.maximum(EB[:, 0], 1e-4), EB[:, 1]
+        w = 2.0 * mus_avg
+        avg[0, i] = np.mean((E - Bm) * w)
+        avg[1, i] = np.mean(Bm * w)
+        avg[2, i] = np.mean((E - Bm) * (1.0 - E) / E * w)
+        avg[3, i] = np.mean(Bm * (1.0 - E) / E * w)
+        print(f"  coat rough {rough:.3f}: B(1) {B[i, -1]:.4f} B(0.5) {B[i, N_MU // 2]:.4f} "
+              f"P {avg[0, i]:.4f} Q {avg[1, i]:.4f} R {avg[2, i]:.4f} S {avg[3, i]:.4f}", file=sys.stderr)
+    return B, avg
+
+
 def glass_tables(inverse):
     E = np.zeros((N_GLASS_ETA, N_GLASS, N_GLASS))
     for k, e in enumerate(np.linspace(ETA_MIN, ETA_MAX, N_GLASS_ETA)):
@@ -218,6 +261,8 @@ def main():
     print("Reflection tables", file=sys.stderr)
     E_hc, Eavg_hc = reflect_tables(False)
     E_sep, Eavg_sep = reflect_tables(True)
+    print("Coating tables", file=sys.stderr)
+    B_coat, coat_avg = coat_tables()
     print("Glass tables", file=sys.stderr)
     G = glass_tables(False)
     Ginv = glass_tables(True)
@@ -255,6 +300,8 @@ def main():
         emit_table(out, "GGXEnergy_Eavg_HC", Eavg_hc, (N_ROUGH,))
         emit_table(out, "GGXEnergy_E_SEP", E_sep, (N_ROUGH, N_MU))
         emit_table(out, "GGXEnergy_Eavg_SEP", Eavg_sep, (N_ROUGH,))
+        emit_table(out, "GGXEnergy_SchlickB_HC", B_coat, (N_ROUGH, N_MU))
+        emit_table(out, "GGXEnergy_CoatAvg_HC", coat_avg, (4, N_ROUGH))
         emit_table(out, "GGXEnergy_GlassTable", G, (N_GLASS_ETA, N_GLASS, N_GLASS))
         emit_table(out, "GGXEnergy_GlassInvTable", Ginv, (N_GLASS_ETA, N_GLASS, N_GLASS))
         out.write(LOOKUP_CODE)
@@ -314,6 +361,40 @@ OPENCL_FORCE_INLINE float GGXEnergy_GlassE(const float u, const float v, const f
 
 	return (1.f - te) * GGXEnergy_Lerp2D(&table[ie * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu) +
 			te * GGXEnergy_Lerp2D(&table[(ie + 1) * stride], GGXENERGY_N_GLASS, GGXENERGY_N_GLASS, rough, mu);
+}
+
+// The coatings (glossy2, glossycoating, glossytranslucent): the GGX reflection
+// lobe (height-correlated) with the Schlick Fresnel of F0, energy compensated
+// as Microfacet_MSScale() does (the average Fresnel F0 + (1 - F0) / 21). The
+// albedo of the compensated lobe seen from mu, and its cosine-weighted average
+// over the hemisphere: the layering of a coating over its base scales the base
+// by (1 - E(mu_i)) (1 - E(mu_o)) / (1 - Eavg), reciprocal and exact for a
+// Lambertian base.
+OPENCL_FORCE_INLINE float GGXEnergy_CoatFms(const float u, const float v, const float F0) {
+	const float rough = sqrt(sqrt(u * v));
+	const float Eavg = GGXEnergy_Lerp1D(GGXEnergy_Eavg_HC, GGXENERGY_N_ROUGH, rough);
+	const float Fss = F0 + (1.f - F0) * (1.f / 21.f);
+
+	return Fss * Eavg / fmax(1.f - Fss * (1.f - Eavg), 1e-4f);
+}
+
+OPENCL_FORCE_INLINE float GGXEnergy_CoatE(const float u, const float v, const float mu, const float F0) {
+	const float rough = sqrt(sqrt(u * v));
+	const float E = GGXEnergy_Lerp2D(GGXEnergy_E_HC, GGXENERGY_N_ROUGH, GGXENERGY_N_MU, rough, mu);
+	const float B = GGXEnergy_Lerp2D(GGXEnergy_SchlickB_HC, GGXENERGY_N_ROUGH, GGXENERGY_N_MU, rough, mu);
+	const float EF = F0 * (E - B) + B;
+
+	return EF * (1.f + GGXEnergy_CoatFms(u, v, F0) * (1.f - E) / fmax(E, 1e-4f));
+}
+
+OPENCL_FORCE_INLINE float GGXEnergy_CoatEavg(const float u, const float v, const float F0) {
+	const float rough = sqrt(sqrt(u * v));
+	const float P = GGXEnergy_Lerp1D(&GGXEnergy_CoatAvg_HC[0 * GGXENERGY_N_ROUGH], GGXENERGY_N_ROUGH, rough);
+	const float Q = GGXEnergy_Lerp1D(&GGXEnergy_CoatAvg_HC[1 * GGXENERGY_N_ROUGH], GGXENERGY_N_ROUGH, rough);
+	const float R = GGXEnergy_Lerp1D(&GGXEnergy_CoatAvg_HC[2 * GGXENERGY_N_ROUGH], GGXENERGY_N_ROUGH, rough);
+	const float S = GGXEnergy_Lerp1D(&GGXEnergy_CoatAvg_HC[3 * GGXENERGY_N_ROUGH], GGXENERGY_N_ROUGH, rough);
+
+	return F0 * P + Q + GGXEnergy_CoatFms(u, v, F0) * (F0 * R + S);
 }
 
 // The multiple-scattering scale of a reflection lobe with the average Fresnel

@@ -74,3 +74,18 @@ luxrays::Spectrum slg::Microfacet_MSScale(const bool multiscattering,
 		return luxrays::Spectrum(1.f);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
+
+luxrays::Spectrum slg::GGXEnergy_CoatE(const float u, const float v, const float mu,
+		const luxrays::Spectrum &F0) {
+	return luxrays::Spectrum(
+			slg::ocl::GGXEnergy_CoatE(u, v, mu, F0.c[0]),
+			slg::ocl::GGXEnergy_CoatE(u, v, mu, F0.c[1]),
+			slg::ocl::GGXEnergy_CoatE(u, v, mu, F0.c[2]));
+}
+
+luxrays::Spectrum slg::GGXEnergy_CoatEavg(const float u, const float v, const luxrays::Spectrum &F0) {
+	return luxrays::Spectrum(
+			slg::ocl::GGXEnergy_CoatEavg(u, v, F0.c[0]),
+			slg::ocl::GGXEnergy_CoatEavg(u, v, F0.c[1]),
+			slg::ocl::GGXEnergy_CoatEavg(u, v, F0.c[2]));
+}
