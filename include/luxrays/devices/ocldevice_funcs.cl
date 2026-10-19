@@ -31,7 +31,7 @@
 #define MAKE_FLOAT3(x, y, z) ((float3)(x, y, z))
 #define MAKE_FLOAT4(x, y, z, w) ((float4)(x, y, z, w))
 
-#define TO_FLOAT2(x) ((float2)x)
-#define TO_FLOAT3(x) ((float3)x)
-#define TO_FLOAT4(x) ((float4)x)
+#define TO_FLOAT2(x) ((float2)(x))
+#define TO_FLOAT3(x) ((float3)(x))
+#define TO_FLOAT4(x) ((float4)(x))
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
