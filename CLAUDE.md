@@ -28,6 +28,8 @@ After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon
 
 Use high sample counts only when a result needs them, so that iterations stay fast. Long references (thousands of spp) are rarely needed:
 
+- Render on the GPU (PATHOCL) by default. Use the CPU engines only when a test needs them: CPU/GPU parity, BiDir or the other CPU-only engines, or a machine without a working GPU backend.
+
 - Noise can be measured without a reference: render the same spp twice with different seeds; the variance of one render is `mean((a - b)^2) / 2`. The G0 scripts (`tests/benchmark/g0_run.sh`, `g0_analyze.py`) work this way, with 64 and 256 spp by default.
 - Render a reference only to check bias, or to compare the look of two images, and keep it moderate (around 1024 spp). Do not repeat a bias check that already passed on the same scene and engine unless the change can affect the image.
 - Start with a small resolution or a few spp to check that a setup works, before any long run.
