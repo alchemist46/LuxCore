@@ -421,6 +421,71 @@ The survey found these specific gaps:
 
   *The trace is 2-8% of the GPU time. The six big state kernels (RT_NEXT_VERTEX, DL_ILLUMINATE, GENERATE_NEXT_VERTEX_RAY, DL_SAMPLE_BSDF, HIT_OBJECT, RT_DL) are 75-90% and all six use 248 VGPRs and 512 bytes of scratch per lane (no spills: private arrays and the call stack), i.e. 4 of 16 waves per SIMD; the small ones (HIT_NOTHING 53, NEXT_SAMPLE 46, GENERATE_CAMERA_RAY 66, SPLAT_SAMPLE 97 VGPRs) are cheap. **Decision: G7 before G6.** G7 lowers the register count of exactly the kernels that hold the time; the occupancy and the share of idle lanes that would justify G6 cannot be measured without the hardware counters of rocprofv3, so G6 waits for G7's result. Worth a look later: GENERATE_CAMERA_RAY at 20% on manylights (short paths, so the camera ray is a large part of a sample) and HIT_NOTHING at 11% on luxball-hdr (the environment map lookup).*
 - **G9. No cold compile in Blender.** The first PATHOCL render on a GPU pays 57 s of kernel compile on HIP (17 ms cached). Options, by preference: a warm kernel cache for the common architectures shipped with the wheel (the cache key already hashes the sources and options); a background compile started by the addon at install or at Blender launch; a compile progress report in the addon so the wait is at least visible. This is the BlendLuxCore-visible counterpart of Cycles' precompiled kernels. *Also (reported in Blender 2026-10-15): material edits recompile the kernel when they cross the G11 private-stack bound (16 material / 32 texture floats), e.g. adding a Mix material; each variant compiles once (~65 s on HIP) and is cached, but after every engine update each variant (x engine: PATHOCL and RTPATHOCL, x working colour space) pays it again. Two fixes, planned together: (1) when a kernel variant is ready, compile the other evaluation-stack variant in the background (low priority, its own thread), so an edit that switches finds it cached; (2) the G11 open item, a peak-depth bound of the evaluation stacks instead of the sum over the op tree, so most Mix materials stay in the private variant and the switch is rare. Dropping the private variant (one kernel, no switch, -1 to -4%) is the fallback.*
+  *Plan (2026-10-19): precompiled HIP kernels shipped in the wheel, so that an RDNA2/3/4 user needs only the AMD driver: no HIP SDK and no compile wait. Today the Windows driver ships the HIP runtime (`amdhip64_6.dll`, HIP 6.4) but no hiprtc, so every AMD user must install the HIP SDK (`HIP_PATH`), and on Linux the ROCm compiler. With the SDK the behaviour stays as it is now: a GPU or kernel variant that is not baked is compiled at run time.*
+  - *Probed on the RX 6950 XT:*
+    - Code objects built offline by the SDK 7.2 `clang++ -x hip --cuda-device-only` load and run correctly on the driver's HIP 6.4 runtime. That includes the generic targets (code object v6). Three targets therefore cover the consumer GPUs that HIPRT supports:
+      - `gfx10-3-generic`: RDNA2, gfx1030-1036, HIPRT RTIP 11.
+      - `gfx11-generic`: RDNA3/3.5, gfx1100-1103 and gfx1150-1153, RTIP 20.
+      - `gfx12-generic`: RDNA4, gfx1200-1201, RTIP 31.
+    - hiprtc cannot target the generic architectures: its device libraries lack them, and with the SDK's libraries it fails to link `__ockl_*`. The bake therefore uses the offline clang.
+    - The HIPRT trace kernel can be compiled offline too. Its source is `#include <hiprt/impl/hiprt_device_impl.h>`, then the empty `intersectFunc`/`filterFunc` dispatch of `Compiler::addCustomFuncsSwitchCase()`, then `hiprtaccel.cl` and its type headers. The options are `-std=c++17 -D__USE_HIP__ -DHIPRT_RTIP=<rtip>` plus ours, and `-include hip/hip_runtime.h`, which hiprtc adds implicitly. It compiles in 3 s per target to 26-31 KB, loads on the driver runtime, and `HiprtAccel_Intersect_RayBuffer` resolves. Its traces are not checked yet.
+    - The SDK ships HIPRT's BVH build kernels precompiled: `hiprt03001_7.2_amd.hipfb` (62 MB, about 30 architectures) and `oro_compiled_kernels.hipfb` (2.2 MB, the Orochi radix sort). HIPRT's `PRECOMPILE` / `BAKE_COMPILED_KERNEL` options produce the same files.
+  - *What needs hiprtc today:*
+    - HIP itself: `init.cpp` requires `HIPEW_INIT_HIPRTC`, so without hiprtc the HIP device is reported missing.
+    - The path kernels: 1.7 MB per variant and architecture.
+    - About 17 image pipeline programs; `film.hw.enable` is on by default.
+    - The HIPRT trace kernel (`hiprtBuildTraceKernels`) and HIPRT's own build kernels (the `BAKE_KERNEL` build compiles them from embedded source).
+    - The BVH/MBVH accelerator kernels, used only without HIPRT.
+  - *Kernel variants today:* the cache key hashes the options and the source. The options include:
+    - `RENDER_ENGINE_{PATHOCL,RTPATHOCL,TILEPATHOCL}`.
+    - `PARAM_RAY_EPSILON_MIN/MAX`.
+    - `PARAM_EVALSTACK_PRIVATE` and its two sizes.
+    - `PARAM_ENABLE_SUBSURFACE`.
+    - The working colour space's 21 defines: Rec.709, Rec.2020 or ACEScg.
+
+    That is 3 x 2 x 2 x 3 = 36 path kernels per target, about 180 MB for the three targets: too many to ship.
+  1. **Fewer variants.** All of these are bit-identical. Measure each with samples/s on HIP over the G0 scenes. G4 found that branches on `__constant` values cost nothing measurable.
+     - (a) The working colour space matrices and luminance weights become values in a `__constant` buffer instead of defines.
+     - (b) The epsilons become run-time values as well. This also fixes the SPIR-V bake missing on non-default `scene.epsilon.*`.
+     - (c) `RENDER_ENGINE_*` becomes a run-time value if it measures neutral. Otherwise bake only PATHOCL and RTPATHOCL, and let TILEPATHOCL compile at run time.
+     - (d) The G11 open item: bound the evaluation stacks by peak depth instead of the sum over the op tree. Most Mix materials then stay in the private variant.
+
+     Target: 4 path variants (stack x subsurface), about 20 MB for the three targets before the wheel's zip compression.
+  2. **Bake tool.** `hip-kernel-baker`, modelled on `spirvbaker`, writes for each variant the exact source and parameters used at run time, plus the run-time cache key. The key is the existing hash with the `--offload-arch` option left out.
+     - A CMake target runs the SDK clang (found through `HIP_PATH`/`ROCM_PATH`) on each variant, with the three generic targets in one bundle: `<key>.hipfb`, installed to `pyluxcore/kernels/hip/` with a manifest.
+     - The runtime's `GetCompilerOptions()` maps to clang flags: `-O3 -w --gpu-max-threads-per-block=256 -mcode-object-version=6`. Parity with hiprtc's defaults (fp-contract, denormals) must be checked by an image diff.
+     - The same variant generator serves `InitKernels()` and the baker, so the keys cannot drift. A test checks that the default-config key is in the manifest, like the SPIR-V stale-module warning.
+  3. **Run-time lookup.** `hipKernelPersistentCache::CompileCodeObject()` tries, in order:
+     1. The shipped bundle, when the device architecture maps to a baked family; `hipModuleLoadData` picks the target from the bundle.
+     2. The user cache.
+     3. A hiprtc compile.
+     4. If none applies, a clear error: "this GPU or kernel variant needs the HIP SDK (HIP_PATH)".
+
+     The shipped kernels are skipped when `LUXRAYS_HIP_COMPILER_OPTIONS` or the additional kernel options are set. In `init.cpp`, hiprtc becomes optional: HIP is available with the runtime alone, and a new `isHiprtcAvailable` flag records whether hiprtc was found. The log says "precompiled kernels (gfx10-3-generic)".
+  4. **HIPRT without run-time compilation.**
+     - The trace kernel goes through our own cache and bake, with the source and options above. There are 2 variants (with or without `HIPRTACCEL_GEOMETRY_ONLY`) x 3 targets, each with the RTIP of its family; the bake uses the family's RTIP. It is loaded with `hipModuleLoadData`, replacing `hiprtBuildTraceKernels`. Check: with no custom functions, nothing set up by `hiprtBuildTraceKernels` is needed, and the RTIP matches the BVH layout that `Context::getRtip()` builds.
+     - The build kernels come from a HIPRT built with `PRECOMPILE` + `BAKE_COMPILED_KERNEL`, restricted to the RDNA2+ architectures (or the generic ones, if HIPRT's precompile accepts them) to keep the 62 MB down. Verify that no hiprtc call is left by rendering with the hiprtc DLL hidden.
+     - Then the HIPRT headers, `SetHiprtPath()` and the Windows program-name patch (see the Windows build notes) are no longer needed for the shipped path.
+  5. **Image pipeline.** Each HW plugin exposes its program source and options through a static function, used by the plugin and by the baker. They are about 17 programs of a few KB each, plus the `PARAM_CAMERARESPONSE_COLOR`-style variants.
+     - The BVH/MBVH kernels are not baked: every baked family has HIPRT. A user who turns HIPRT off still needs the SDK; document this.
+     - Fallback if a program is missing: the CPU image pipeline (`film.hw.enable = 0`) instead of an error.
+  6. **Build and packaging.**
+     - The Windows wheel build needs the HIP SDK; the Linux one needs ROCm with clang.
+     - The bake runs once per wheel, in about 1-2 minutes in parallel; it does not need a GPU.
+     - Linux users still need the ROCm runtime (`libamdhip64`, not the compiler), as Blender's Cycles does.
+     - The background compile of the other stack variant (item (1) above) only matters on the SDK path once the variants are baked. Keep it as an option, not part of this item.
+     - CUDA follows the same scheme later: cubins per SM plus PTX; nvrtc can be redistributed. It is not part of this item.
+  7. **Tests.** On the RX 6950 XT with the SDK hidden (a `LUXRAYS_HIP_DISABLE_HIPRTC=1` switch in hipew simulates the no-SDK machine):
+     - A Blender final render (PATHOCL + HIPRT), the viewport (RTPATHOCL), and a Mix material edit that switches the stack variant.
+     - First render under 2 s (it is 57 s cold today).
+     - The image at 256 spp against the hiprtc-compiled gfx1030 kernel: equal within the noise floor, as a CPU/GPU check would be.
+     - samples/s of the generic code against the gfx1030-specific code on the G0 scenes. If generic is slower by more than 1-2%, bake the specific architectures instead (about 17), and the size grows accordingly.
+     - The addon reports a missing HIP runtime clearly. On Windows that is only an old driver; there is no SDK step any more.
+  - *Risks:*
+    - Drivers older than HIP 6.x may not load code object v6 or generic targets. The minimum Adrenalin version needs to be documented.
+    - The HIPRT BVH layout and the baked trace kernel must stay on the same HIPRT version; the manifest records it.
+    - Clang and hiprtc may disagree in their defaults; the image diff in step 7 checks that.
+  - *Estimate:* about 1.5 weeks. Steps 1, 3 and 4 carry the risk; step 1 helps even without the bake (fewer cold compiles on the SDK path).
 
 **CPU track**
 - **[DONE] C1. Occlusion-only shadow rays** (bit-identical). *`43a3aaead`: +2.2% cornell, +2.8% luxball-hdr, +6.7% classroom, +3.0% kitchen, +1.3% manylights, 0% luxball-hdr-vol (volumes), less than expected because the shortcut only saves work on blocked shadow rays. The flags are in `Scene` (`shadowBlockers`), not in `SceneObject` (serialized).* `Accelerator::Occluded` with an `rtcOccluded1` override in `embreeaccel.cpp` and `IntersectionDevice::TraceOccluded` (keeps rays/sec comparable). `Material::HasPassThroughTransparency` (transparency textures; always true for null and archglass; union of the children for mix, twosided, glossycoating). A cached `shadowOpaque` flag per `SceneObject` (no bevel, no pass-through, black shadow transparency) recomputed in `Scene::Preprocess` before `lightDefs.Preprocess` (DLSC and the env visibility cache trace shadow rays there). In `Scene::Intersect`: (a) all objects shadow-opaque, no default world volume and no current volume → return `TraceOccluded`; (b) otherwise, after the trace and before `BSDF::Init`, return true if the hit object is a shadow blocker. Exact because `PathVolumeInfo::ContinueToTrace` cannot fire without a current volume (`CompareVolumePriorities` returns false for a null first argument) and the callers only read `connectionThroughput` on a miss. Rejected: a cut-down `BSDF::InitForShadow` (archglass needs the full frame) and Embree filter callbacks (not front-to-back).
