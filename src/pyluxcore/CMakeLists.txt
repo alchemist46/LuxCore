@@ -216,5 +216,25 @@ if(NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE_HIP)
       DESTINATION pyluxcore
       COMPONENT pyluxcore
     )
+
+    # HIPRT compiles its kernels at run time and reads headers of its own
+    # from HIPRT_PATH, which hiprtew sets to the folder of the library when
+    # they are there (see HiprtInit()). They are in the HIPRT source tree,
+    # 3 levels above the library (dist/bin/Release).
+    get_filename_component(hiprt_root "${LUXRAYS_HIPRT_LIBRARY}" DIRECTORY)
+    get_filename_component(hiprt_root "${hiprt_root}/../../.." ABSOLUTE)
+    if(EXISTS "${hiprt_root}/hiprt/hiprt_types.h")
+      message(STATUS "Shipping HIPRT headers: ${hiprt_root}/hiprt")
+      install(
+        DIRECTORY "${hiprt_root}/hiprt"
+        DESTINATION pyluxcore
+        COMPONENT pyluxcore
+        FILES_MATCHING PATTERN "*.h"
+        PATTERN "cache" EXCLUDE
+      )
+    else()
+      message(WARNING "HIPRT headers not found in ${hiprt_root}/hiprt: "
+        "HIPRT_PATH must point to them at run time")
+    endif()
   endif()
 endif()

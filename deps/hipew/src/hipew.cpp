@@ -18,7 +18,9 @@
 
 #include <hipew.h>
 
+#include <cstdlib>
 #include <mutex>
+#include <string>
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -139,9 +141,36 @@ struct LoadedLibrary {
 LoadedLibrary hipLib;
 LoadedLibrary hiprtcLib;
 
+#if defined(_WIN32)
+// The bin folder of the HIP SDK (empty without one). The SDK doesn't put it in
+// the PATH, it sets HIP_PATH. It has hiprtc, which the driver doesn't ship,
+// and the HIP runtime of the same version.
+std::string HipSdkBinDir() {
+	const char *hipPath = getenv("HIP_PATH");
+	if (!hipPath || !hipPath[0])
+		return std::string();
+
+	std::string dir(hipPath);
+	if ((dir.back() != '\\') && (dir.back() != '/'))
+		dir += '\\';
+	return dir + "bin\\";
+}
+#endif
+
+// The first library of the list, by priority: each name from the system
+// search path, then (Windows) from the HIP SDK, so a newer runtime of the SDK
+// is used with its hiprtc rather than an older one of the driver
 DynamicLibrary OpenFirst(const char **paths, const char **name) {
+#if defined(_WIN32)
+	const std::string sdkBinDir = HipSdkBinDir();
+#endif
 	for (int i = 0; paths[i]; ++i) {
 		DynamicLibrary lib = dynamic_library_open(paths[i]);
+#if defined(_WIN32)
+		// Its dependencies (amd_comgr...) are next to it
+		if (!lib && !sdkBinDir.empty())
+			lib = LoadLibraryExA((sdkBinDir + paths[i]).c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+#endif
 		if (lib) {
 			*name = paths[i];
 			return lib;

@@ -19,6 +19,7 @@
 #include <hiprtew.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@ typedef HMODULE DynamicLibrary;
 #else
 #  include <dlfcn.h>
 #  include <link.h>
+#  include <unistd.h>
 
 typedef void* DynamicLibrary;
 
@@ -93,6 +95,8 @@ thiprtSetLogLevel *hiprtSetLogLevel;
 namespace {
 
 #if defined(_WIN32)
+// Not the HIPRT of the HIP SDK: it misses the headers HIPRT compiles its
+// kernels with (see SetHiprtPath())
 const char *hiprtRocmDirs[] = { nullptr };
 const char pathSeparator = '\\';
 #else
@@ -177,6 +181,45 @@ int HiprtOpenFlags() {
 }
 #endif
 
+// HIPRT compiles its kernels at run time with headers of its own (hiprt/*.h,
+// hiprt/impl/*.h, also in a "baked" build), which it finds in HIPRT_PATH, or
+// in ".." of the current directory without it. When they are shipped next to
+// the loaded library (pyluxcore), HIPRT_PATH is set to that folder, unless it
+// is already set.
+void SetHiprtPath() {
+	const char *current = getenv("HIPRT_PATH");
+	if (current && current[0])
+		return;
+
+	std::string libPath;
+#if defined(_WIN32)
+	char buff[MAX_PATH];
+	const DWORD size = GetModuleFileNameA(hiprtLib.lib, buff, MAX_PATH);
+	if ((size > 0) && (size < MAX_PATH))
+		libPath = std::string(buff, size);
+#else
+	Dl_info info;
+	if (dladdr((void *)hiprtCreateContext, &info) && info.dli_fname)
+		libPath = info.dli_fname;
+#endif
+	const size_t pos = libPath.find_last_of(pathSeparator);
+	if (pos == std::string::npos)
+		return;
+	const std::string libDir = libPath.substr(0, pos);
+
+	const std::string header = libDir + pathSeparator + "hiprt" + pathSeparator + "hiprt_types.h";
+#if defined(_WIN32)
+	if (GetFileAttributesA(header.c_str()) == INVALID_FILE_ATTRIBUTES)
+		return;
+	// HIPRT reads it with _dupenv_s()
+	_putenv_s("HIPRT_PATH", libDir.c_str());
+#else
+	if (access(header.c_str(), R_OK) != 0)
+		return;
+	setenv("HIPRT_PATH", libDir.c_str(), 0);
+#endif
+}
+
 void HiprtInit() {
 	std::vector<std::string> paths;
 	paths.push_back(HIPRTEW_LIBRARY_NAME);
@@ -187,7 +230,14 @@ void HiprtInit() {
 		paths.push_back(std::string(hiprtRocmDirs[i]) + pathSeparator + HIPRTEW_LIBRARY_NAME);
 
 	for (const auto &p : paths) {
+#if defined(_WIN32)
+		// A full path: its dependencies are next to it
+		hiprtLib.lib = (p.find(pathSeparator) == std::string::npos) ?
+				dynamic_library_open(p.c_str()) :
+				LoadLibraryExA(p.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+#else
 		hiprtLib.lib = dynamic_library_open(p.c_str());
+#endif
 		if (hiprtLib.lib) {
 			hiprtLib.name = p;
 			break;
@@ -215,6 +265,8 @@ void HiprtInit() {
 	HIPRTEW_LIBRARY_FIND(hiprtLib.lib, hiprtSetLogLevel);
 
 	hiprtLib.result = missingSymbol ? HIPRTEW_ERROR_MISSING_SYMBOL : HIPRTEW_SUCCESS;
+	if (hiprtLib.result == HIPRTEW_SUCCESS)
+		SetHiprtPath();
 }
 
 }
