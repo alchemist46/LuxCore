@@ -73,7 +73,7 @@ const char *OpenPBRInputNames[slg::ocl::OPENPBR_INPUT_COUNT] = {
 	"base.weight", "base.color", "base.diffuseroughness", "base.metalness",
 	"specular.weight", "specular.color", "specular.roughness", "specular.ior", "specular.anisotropy",
 	"transmission.weight", "transmission.color", "transmission.depth", "transmission.scatter",
-	"transmission.scatteranisotropy",
+	"transmission.scatteranisotropy", "transmission.dispersionscale", "transmission.dispersionabbenumber",
 	"subsurface.weight", "subsurface.color", "subsurface.radius", "subsurface.radiusscale",
 	"subsurface.anisotropy",
 	"fuzz.weight", "fuzz.color", "fuzz.roughness",
@@ -108,6 +108,8 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 			(mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, hitPoint) > 0.f))) ?
 		slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_TRANSMISSION_COLOR, hitPoint)) :
 		slg::ocl::make_float3(1.f, 1.f, 1.f);
+	b.transmissionDispersionScale = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONSCALE, hitPoint);
+	b.transmissionDispersionAbbe = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONABBENUMBER, hitPoint);
 	b.subsurfaceWeight = mat.GetFloat(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, hitPoint);
 	b.subsurfaceColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint));
 	b.coatWeight = mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint);
@@ -126,6 +128,7 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.exteriorIor = ExtractExteriorIors(hitPoint, nullptr);
 	b.subsurfaceMode = hitPoint.subsurface;
 	b.regularization = hitPoint.regularization;
+	b.wavelengthU = hitPoint.passThroughEvent;
 	b.lumWeights = slg::ocl::ToFloat3(workingColorSpace.GetLuminanceWeights());
 	const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
 	for (u_int i = 0; i < 3; ++i)
@@ -169,6 +172,56 @@ bool OpenPBRMaterial::IsZero(const slg::ocl::OpenPBRInput input) const {
 	return (tex->GetType() == CONST_FLOAT) && (static_cast<const ConstFloatTexture *>(tex)->GetValue() == 0.f);
 }
 
+bool OpenPBRMaterial::GetConstant(const slg::ocl::OpenPBRInput input, float *value) const {
+	const Texture *tex = inputs[input];
+	if (!tex) {
+		*value = slg::ocl::OpenPBR_Defaults[3 * input];
+		return true;
+	}
+	if (tex->GetType() != CONST_FLOAT)
+		return false;
+
+	*value = static_cast<const ConstFloatTexture *>(tex)->GetValue();
+	return true;
+}
+
+void OpenPBRMaterial::GetAlwaysDelta(bool *spec, bool *coat) const {
+	*spec = false;
+	*coat = false;
+
+	// The coat: absent, or of constant delta alphas
+	float cw, coatRoughness = 0.f;
+	if (!GetConstant(slg::ocl::OPENPBR_COAT_WEIGHT, &cw))
+		return;
+	cw = Clamp(cw, 0.f, 1.f);
+	if (cw > 0.f) {
+		float coatAnisotropy;
+		if (!GetConstant(slg::ocl::OPENPBR_COAT_ROUGHNESS, &coatRoughness) ||
+				!GetConstant(slg::ocl::OPENPBR_COAT_ANISOTROPY, &coatAnisotropy))
+			return;
+		coatRoughness = Clamp(coatRoughness, 0.f, 1.f);
+		float ax, ay;
+		slg::ocl::OpenPBR_Alphas(coatRoughness, Clamp(coatAnisotropy, 0.f, 1.f), 0.f, &ax, &ay);
+		*coat = (ax <= OPENPBR_MIN_ALPHA) && (ay <= OPENPBR_MIN_ALPHA);
+		if (!*coat)
+			return;
+	} else
+		*coat = true;
+
+	// The base specular lobes, their roughness raised by the coat
+	float roughness, anisotropy;
+	if (!GetConstant(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS, &roughness) ||
+			!GetConstant(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, &anisotropy))
+		return;
+	const float r = Clamp(roughness, 0.f, 1.f);
+	const float r2 = r * r;
+	const float rc2 = coatRoughness * coatRoughness;
+	const float rCoated = Min(1.f, sqrtf(sqrtf(r2 * r2 + 2.f * rc2 * rc2)));
+	float ax, ay;
+	slg::ocl::OpenPBR_Alphas(r + cw * (rCoated - r), Clamp(anisotropy, 0.f, 1.f), 0.f, &ax, &ay);
+	*spec = (ax <= OPENPBR_MIN_ALPHA) && (ay <= OPENPBR_MIN_ALPHA);
+}
+
 bool OpenPBRMaterial::HasTransmissionDepth() const {
 	return !thinWalled && !IsZero(slg::ocl::OPENPBR_TRANSMISSION_DEPTH);
 }
@@ -180,11 +233,38 @@ void OpenPBRMaterial::Update() {
 	const bool transmission = dielectric && !IsZero(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT);
 	const bool subsurface = dielectric && !IsZero(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT);
 
-	eventTypes = DIFFUSE | GLOSSY | REFLECT;
-	if (transmission || subsurface)
-		eventTypes |= TRANSMIT;
+	// A roughness up to 0.01 makes a delta lobe (see OpenPBR_Init())
+	auto canBeSmooth = [&](const slg::ocl::OpenPBRInput input) {
+		const Texture *tex = inputs[input];
+		if (!tex)
+			return slg::ocl::OpenPBR_Defaults[3 * input] <= .01f;
+		return (tex->GetType() != CONST_FLOAT) ||
+				(static_cast<const ConstFloatTexture *>(tex)->GetValue() <= .01f);
+	};
+
+	// The kinds of events the material can have: the path depth checks the
+	// budget of each (PathDepthInfo::IsLastPathVertex())
+	bool specAlwaysDelta, coatAlwaysDelta;
+	GetAlwaysDelta(&specAlwaysDelta, &coatAlwaysDelta);
+	float value;
+	const bool opaque = !(GetConstant(slg::ocl::OPENPBR_BASE_METALNESS, &value) && (value >= 1.f)) &&
+			!(GetConstant(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, &value) && (value >= 1.f));
+	const bool diffuse = opaque || !IsZero(slg::ocl::OPENPBR_FUZZ_WEIGHT);
+	isDelta = !diffuse && specAlwaysDelta && coatAlwaysDelta;
+
+	// Path regularization roughens every lobe
+	regularizedEventTypes = GLOSSY | REFLECT | (diffuse ? DIFFUSE : NONE) |
+			((transmission || subsurface) ? TRANSMIT : NONE);
+
+	eventTypes = REFLECT | (diffuse ? DIFFUSE : NONE) | ((transmission || subsurface) ? TRANSMIT : NONE);
+	if (!specAlwaysDelta || !coatAlwaysDelta)
+		eventTypes |= GLOSSY;
+	if (canBeSmooth(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS) ||
+			(!IsZero(slg::ocl::OPENPBR_COAT_WEIGHT) && canBeSmooth(slg::ocl::OPENPBR_COAT_ROUGHNESS)))
+		eventTypes |= SPECULAR;
 	refractive = transmission && !thinWalled;
-	subsurfaceWalk = subsurface && !thinWalled;
+	// The walk enters through the opaque base
+	subsurfaceWalk = subsurface && !thinWalled && opaque;
 
 	UpdateGlossiness();
 }

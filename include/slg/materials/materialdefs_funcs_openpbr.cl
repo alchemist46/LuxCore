@@ -67,6 +67,13 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 			WHITE : OpenPBRMaterial_GetSpectrum(material, OPENPBR_TRANSMISSION_COLOR, hitPoint TEXTURES_PARAM);
 	} else
 		b->transmissionColor = WHITE;
+	if ((b->transmissionWeight > 0.f) && !b->thinWalled) {
+		b->transmissionDispersionScale = OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_DISPERSIONSCALE, hitPoint TEXTURES_PARAM);
+		b->transmissionDispersionAbbe = OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_DISPERSIONABBENUMBER, hitPoint TEXTURES_PARAM);
+	} else {
+		b->transmissionDispersionScale = 0.f;
+		b->transmissionDispersionAbbe = 20.f;
+	}
 	b->subsurfaceWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_WEIGHT, hitPoint TEXTURES_PARAM);
 	b->subsurfaceColor = (b->subsurfaceWeight > 0.f) ?
 		OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM) : WHITE;
@@ -104,6 +111,7 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 	b->exteriorIor = ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM);
 	b->subsurfaceMode = hitPoint->subsurface;
 	b->regularization = hitPoint->regularization;
+	b->wavelengthU = hitPoint->passThroughEvent;
 
 	OpenPBR_Init(b);
 }

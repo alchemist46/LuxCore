@@ -45,6 +45,11 @@ public:
 
 	virtual MaterialType GetType() const { return OPENPBR; }
 	virtual BSDFEvent GetEventTypes() const { return eventTypes; };
+	// Only delta lobes everywhere (constant inputs): the engines skip the
+	// light sampling. Path regularization roughens the lobes.
+	virtual bool IsDelta() const { return isDelta; }
+	virtual bool IsRegularizedDelta() const { return false; }
+	virtual BSDFEvent GetRegularizedEventTypes() const { return regularizedEventTypes; }
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
@@ -101,12 +106,17 @@ private:
 	void UpdateGlossiness();
 	// The input is not set or a constant 0
 	bool IsZero(const ocl::OpenPBRInput input) const;
+	// The value of an input that is not set or a constant
+	bool GetConstant(const ocl::OpenPBRInput input, float *value) const;
+	// Whether the base specular lobes and the coat (absent or) are deltas
+	// wherever the material is (constant inputs, see OpenPBR_Init())
+	void GetAlwaysDelta(bool *spec, bool *coat) const;
 
 	Inputs inputs;
 	bool thinWalled;
 
-	BSDFEvent eventTypes;
-	bool refractive, subsurfaceWalk;
+	BSDFEvent eventTypes, regularizedEventTypes;
+	bool refractive, subsurfaceWalk, isDelta;
 };
 
 }

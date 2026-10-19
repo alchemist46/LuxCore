@@ -156,6 +156,26 @@ def cases():
         c.append((f"openpbr-halfglass-a{a}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.base.color = 1 1 1\n"
                   "scene.materials.m.transmission.weight = 0.5\n" + orr, 1.0))
+    # The OpenPBR smooth lobes (roughness 0, delta lobes, SPECULAR events)
+    smooth = "scene.materials.m.specular.roughness = 0\n"
+    c.append(("openpbr-smooth-dielectric", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.base.color = 1 1 1\n" + smooth, 1.0))
+    c.append(("openpbr-smooth-metal", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n" + smooth, 1.0))
+    c.append(("openpbr-smooth-glass", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.transmission.weight = 1\n" + smooth, 1.0))
+    c.append(("openpbr-smooth-thinwalled", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.transmission.weight = 1\nscene.materials.m.geometry.thinwalled = 1\n" + smooth, 1.0))
+    c.append(("openpbr-smooth-coat", "scene.materials.m.type = openpbr\n"
+              "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
+              "scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = 0\n", 1.0))
+    # The OpenPBR dispersion (Abbe number 20): smooth and rough glass. The
+    # wavelength is one per vertex: the rough sphere reads 1.5-2% low near the
+    # total internal reflection (see materialdefs_funcs_openpbr_bsdf.cl)
+    for r, expected in ((0.0, 1.0), (0.3, None)):
+        c.append((f"openpbr-dispersion-r{r}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.transmission.weight = 1\nscene.materials.m.transmission.dispersionscale = 1\n"
+                  f"scene.materials.m.specular.roughness = {r}\n", expected))
     # The OpenPBR glass with its interior volume: clear, and white scattering
     for scatter in (0, 1):
         c.append((f"openpbr-glass-depth-s{scatter}", "scene.materials.m.type = openpbr\n"

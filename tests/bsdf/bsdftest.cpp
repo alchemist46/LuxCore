@@ -238,6 +238,46 @@ vector<TestCase> BuildTestCases() {
 			NO_EXPECT, a >= 0.2f });
 	}
 
+	// OpenPBR smooth lobes (roughness 0): delta lobes, checked by their albedo
+	// (lossless ones) and the consistency of the rest; the dispersion of a
+	// rough and of a smooth glass (no chi-square: the wavelength follows the
+	// pass-through sample)
+	cases.push_back({ "openpbr-dielectric-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0\n", 1.f, false });
+	cases.push_back({ "openpbr-metal-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n"
+		"scene.materials.m.specular.roughness = 0\n", 1.f, false });
+	cases.push_back({ "openpbr-thinwalled-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.geometry.thinwalled = 1\n"
+		"scene.materials.m.specular.roughness = 0\n", 1.f, false });
+	cases.push_back({ "openpbr-coat-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
+		"scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = 0\n", 1.f, false });
+	cases.push_back({ "openpbr-glass-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0\n", NO_EXPECT, false });
+	cases.push_back({ "openpbr-coatmetal-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.base.metalness = 1\n"
+		"scene.materials.m.specular.roughness = 0\nscene.materials.m.coat.weight = 1\n", 1.f, false });
+	cases.push_back({ "openpbr-glasscoat-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.transmission.color = 0.9 0.6 0.3\n"
+		"scene.materials.m.specular.color = 0.8 0.9 1\nscene.materials.m.specular.ior = 1.33\n"
+		"scene.materials.m.specular.roughness = 0\nscene.materials.m.coat.weight = 0.7\n"
+		"scene.materials.m.coat.color = 0.9 0.8 0.7\nscene.materials.m.thinfilm.weight = 1\n"
+		"scene.materials.m.thinfilm.thickness = 0.4\n", NO_EXPECT, false });
+	cases.push_back({ "openpbr-metalglass-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 0.9 0.6 0.3\nscene.materials.m.base.metalness = 0.5\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0\n", NO_EXPECT, false });
+	cases.push_back({ "openpbr-diamond-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.ior = 2.42\n"
+		"scene.materials.m.specular.roughness = 0\nscene.materials.m.transmission.dispersionscale = 1\n"
+		"scene.materials.m.transmission.dispersionabbenumber = 55\n", NO_EXPECT, false });
+	cases.push_back({ "openpbr-dispersion-a0.2", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0.447\n"
+		"scene.materials.m.transmission.dispersionscale = 1\n", NO_EXPECT, false });
+	cases.push_back({ "openpbr-dispersion-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0\n"
+		"scene.materials.m.transmission.dispersionscale = 1\n", NO_EXPECT, false });
+
 	// OpenPBR subsurface: the surface form (light paths, Mix) of the white
 	// medium is a Lambertian base, thin-walled half reflected and half
 	// transmitted; the exit of a walk a Lambertian transmission

@@ -109,6 +109,14 @@ class OpenPBRSubsurfaceMaterial(ImageTest):
 
 OpenPBRSubsurfaceMaterial = AddTests(OpenPBRSubsurfaceMaterial, TestOpenPBRSubsurfaceMaterial, GetTestCases())
 
+def TestOpenPBRSmoothMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-openpbr-smooth-area.cfg", "OpenPBRSmoothMaterial")
+
+class OpenPBRSmoothMaterial(ImageTest):
+    pass
+
+OpenPBRSmoothMaterial = AddTests(OpenPBRSmoothMaterial, TestOpenPBRSmoothMaterial, GetTestCases())
+
 ################################################################################
 # Glass material test
 ################################################################################
