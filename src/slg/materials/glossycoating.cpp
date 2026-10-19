@@ -17,6 +17,7 @@
  ***************************************************************************/
 
 #include "slg/textures/fresnel/fresneltexture.h"
+#include "slg/textures/constfloat.h"
 #include "slg/materials/glossycoating.h"
 
 using namespace std;
@@ -37,6 +38,16 @@ using namespace slg;
 // the coating once, (1 - Ec(mu)) of the direction on the coated side. The old
 // Schlick blend lost or gained up to 25% at grazing angles. The multibounce
 // option is ignored.
+//
+// The darkening (0 by default, as before 2026-10-19) is the one of OpenPBR's
+// coat.darkening: the light the coating reflects back down from inside hits
+// the base again, so the base is scaled by (1 - K) / (1 - E_base K), blended
+// by the darkening amount. K = 1 - (1 - Favg) / eta^2 is the internal
+// reflectance of the coating (eta from the Schlick F0 ks per channel, Favg
+// its hemispherical average) and E_base the albedo of the base,
+// Material::Albedo() (the diffuse color, the normal Fresnel of a metal, white
+// for a glass). A white base keeps its albedo; a colored one gets darker and
+// more saturated.
 //------------------------------------------------------------------------------
 
 namespace {
@@ -46,6 +57,22 @@ namespace {
 // base through its own ops)
 float GlossyCoating_CoatProbability(const Spectrum &ks, const Spectrum &Ec) {
 	return ks.Black() ? 0.f : Clamp(Ec.Filter(), .1f, .9f);
+}
+
+// The darkening (1 - K) / (1 - E_base K) blended by amount (see above)
+Spectrum GlossyCoating_Darkening(const Spectrum &ks, const Spectrum &baseAlbedo, const float amount) {
+	Spectrum result;
+	for (u_int c = 0; c < 3; ++c) {
+		const float F0 = Clamp(ks.c[c], 0.f, .95f);
+		const float sqrtF0 = sqrtf(F0);
+		const float eta = (1.f + sqrtF0) / (1.f - sqrtF0);
+		const float Favg = F0 + (1.f - F0) / 21.f;
+		const float K = 1.f - (1.f - Favg) / (eta * eta);
+		const float delta = (1.f - K) / (1.f - Clamp(baseAlbedo.c[c], 0.f, 1.f) * K);
+		result.c[c] = 1.f + amount * (delta - 1.f);
+	}
+
+	return result;
 }
 
 }
@@ -62,9 +89,10 @@ GlossyCoatingMaterial::GlossyCoatingMaterial(
 	TextureConstPtr v,
 	TextureConstPtr ka, TextureConstPtr d,
 	TextureConstPtr i,
-const bool mbounce) :
+	const bool mbounce,
+	TextureConstPtr dark) :
 			Material(frontTransp, backTransp, emitted, bump), matBase(mB), Ks(ks), nu(u), nv(v),
-			Ka(ka), depth(d), index(i), multibounce(mbounce) {
+			Ka(ka), depth(d), index(i), multibounce(mbounce), darkening(dark) {
 	glossiness = Min(ComputeGlossiness(nu, nv), matBase->GetGlossiness());
 }
 
@@ -111,6 +139,19 @@ Spectrum GlossyCoatingMaterial::GetEmittedRadiance(const HitPoint &hitPoint, con
 
 Spectrum GlossyCoatingMaterial::Albedo(const HitPoint &hitPoint) const {
 	return matBase->Albedo(hitPoint);
+}
+
+bool GlossyCoatingMaterial::HasDarkening() const {
+	return !((darkening->GetType() == CONST_FLOAT) &&
+			(static_cast<const ConstFloatTexture &>(*darkening).GetValue() <= 0.f));
+}
+
+Spectrum GlossyCoatingMaterial::DarkeningFactor(const HitPoint &hitPoint, const Spectrum &ks) const {
+	const float amount = Clamp(darkening->GetFloatValue(hitPoint), 0.f, 1.f);
+	if (!(amount > 0.f))
+		return Spectrum(1.f);
+
+	return GlossyCoating_Darkening(ks, matBase->Albedo(hitPoint), amount);
 }
 
 Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
@@ -194,7 +235,7 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const Spectrum coatingF = SchlickBSDF_CoatingF(true, ks, u, v,
 			localLightDir, localEyeDir);
 
-		return coatingF + absorption * (Spectrum(1.f) - EcEye) * baseF;
+		return coatingF + absorption * (Spectrum(1.f) - EcEye) * DarkeningFactor(hitPoint, ks) * baseF;
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
 		// Transmission
 
@@ -251,9 +292,14 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		const float d = depth->GetFloatValue(hitPoint);
 		const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
-		// One crossing of the coating, by the direction on the coated side
+		// One crossing of the coating, by the direction on the coated side.
+		// The exit of a subsurface walk has none: the albedo scaling of its
+		// entry covers the round trip, as the one of a reflection does.
+		if (hitPoint.subsurface == HITPOINT_SSS_EXIT)
+			return baseF;
 		const float muCoated = (localLightDir.z > 0.f) ? localLightDir.z : localEyeDir.z;
-		return absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) * baseF;
+		return absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) *
+				DarkeningFactor(hitPoint, ks) * baseF;
 	} else
 		return Spectrum();
 }
@@ -365,14 +411,19 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			const Spectrum EcEye = hitPoint.fromLight ?
 				GGXEnergy_CoatE(u, v, fabsf(localSampledDir->z), ks) : EcFixed;
 
-			result = coatingF + absorption * (Spectrum(1.f) - EcEye) * baseF;
+			result = coatingF + absorption * (Spectrum(1.f) - EcEye) * DarkeningFactor(hitPoint, ks) * baseF;
 			assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
 		}
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
 		// Transmission: one crossing of the coating, by the direction on the
-		// coated side
-		const float muCoated = (localFixedDir.z > 0.f) ? localFixedDir.z : localSampledDir->z;
-		result = absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) * baseF;
+		// coated side (none at the exit of a subsurface walk, see Evaluate())
+		if (hitPoint.subsurface == HITPOINT_SSS_EXIT)
+			result = baseF;
+		else {
+			const float muCoated = (localFixedDir.z > 0.f) ? localFixedDir.z : localSampledDir->z;
+			result = absorption * (Spectrum(1.f) - GGXEnergy_CoatE(u, v, fabsf(muCoated), ks)) *
+					DarkeningFactor(hitPoint, ks) * baseF;
+		}
 		assert (!result.IsNaN() && !result.IsInf() && !result.IsNeg());
 	} else
 		return Spectrum();
@@ -461,6 +512,7 @@ void GlossyCoatingMaterial::AddReferencedTextures(std::unordered_set<const Textu
 	Ka->AddReferencedTextures(referencedTexs);
 	depth->AddReferencedTextures(referencedTexs);
 	index->AddReferencedTextures(referencedTexs);
+	darkening->AddReferencedTextures(referencedTexs);
 }
 
 void GlossyCoatingMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
@@ -478,6 +530,8 @@ void GlossyCoatingMaterial::UpdateTextureReferences(TextureConstRef oldTex, Text
 		depth = &newTex;
 	if (index == &oldTex)
 		index = &newTex;
+	if (darkening == &oldTex)
+		darkening = &newTex;
 
 	// Always update glossiness just in case matBase->GetGlossiness() has changed
 	const float coatGlossiness = ComputeGlossiness(nu, nv);
@@ -500,6 +554,7 @@ PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCa
 	props->Set(Property("scene.materials." + name + ".d")(depth->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".index")(index->GetSDLValue()));
 	props->Set(Property("scene.materials." + name + ".multibounce")(multibounce));
+	props->Set(Property("scene.materials." + name + ".darkening")(darkening->GetSDLValue()));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

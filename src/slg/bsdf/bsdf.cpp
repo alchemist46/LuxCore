@@ -218,13 +218,14 @@ const string &BSDF::GetMaterialName() const {
 }
 
 bool BSDF::HasSubsurfaceWalk() const {
-	return material->HasSubsurfaceWalk();
+	return material->GetSubsurfaceWalkMaterial() != nullptr;
 }
 
 void BSDF::GetSubsurfaceWalkParams(Spectrum *color, Spectrum *radius, float *anisotropy) const {
-	assert (material->HasSubsurfaceWalk());
+	const Material *walkMaterial = material->GetSubsurfaceWalkMaterial();
+	assert (walkMaterial);
 
-	material->GetSubsurfaceWalkParams(hitPoint, color, radius, anisotropy);
+	walkMaterial->GetSubsurfaceWalkParams(hitPoint, color, radius, anisotropy);
 }
 
 Spectrum BSDF::Albedo() const {

@@ -161,7 +161,7 @@ public:
 	}
 	MaterialType GetMaterialType() const { return material->GetType(); }
 	// An eye path entering the material starts the subsurface random walk
-	// (Material::HasSubsurfaceWalk()), in the medium of
+	// (Material::GetSubsurfaceWalkMaterial()), in the medium of
 	// GetSubsurfaceWalkParams() at this vertex
 	bool HasSubsurfaceWalk() const;
 	void GetSubsurfaceWalkParams(luxrays::Spectrum *color, luxrays::Spectrum *radius,

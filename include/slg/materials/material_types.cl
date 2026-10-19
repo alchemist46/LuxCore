@@ -197,7 +197,7 @@ typedef struct {
 	unsigned int texIndex[OPENPBR_INPUT_COUNT];
 	int thinWalled;
 	// The subsurface part is the random walk on eye paths
-	// (OpenPBRMaterial::HasSubsurfaceWalk())
+	// (OpenPBRMaterial::GetSubsurfaceWalkMaterial())
 	int subsurfaceWalk;
 } OpenPBRParam;
 
@@ -312,6 +312,11 @@ typedef struct {
 	unsigned int depthTexIndex;
 	unsigned int indexTexIndex;
 	int multibounce;
+	// The darkening by the internal reflection of the coating: when it is not
+	// the constant 0, the eval. ops of the base push its albedo (see
+	// CompiledScene::CompileMaterialOps())
+	unsigned int darkeningTexIndex;
+	int darkening;
 } GlossyCoatingParam;
 
 typedef struct {
@@ -403,6 +408,11 @@ typedef struct {
 	// roulette on the path throughput (BSDF_GetRefractionEtaScale())
 	int isRefractive;
 	unsigned int refractionExteriorIorTexIndex, refractionInteriorIorTexIndex;
+
+	// Material::GetSubsurfaceWalkMaterial(): the subsurface or OpenPBR
+	// material whose random walk an eye path entering this one starts (itself,
+	// or the base of a glossy coating), NULL_INDEX when there is none
+	unsigned int subsurfaceWalkMatIndex;
 
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;

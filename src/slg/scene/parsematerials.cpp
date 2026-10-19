@@ -652,6 +652,7 @@ MaterialUPtr Scene::CreateMaterial(
 		auto d = parseTex("d", {0.f});
 		auto index = parseTex("index", {0.f, 0.f, 0.f});
 		const bool multibounce = parseBool("multibounce", false);
+		auto darkening = parseTex("darkening", {0.f});
 
 		mat = std::make_unique<GlossyCoatingMaterial>(
 			frontTransparencyTex,
@@ -665,7 +666,8 @@ MaterialUPtr Scene::CreateMaterial(
 			ka,
 			d,
 			index,
-			multibounce
+			multibounce,
+			darkening
 		);
 	} else if (matType == "disney") {
 		auto baseColor = parseTex("basecolor", {.5f, .5f, .5f});

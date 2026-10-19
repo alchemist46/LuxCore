@@ -83,6 +83,38 @@ OPENCL_FORCE_INLINE float GlossyCoatingMaterial_CoatProbability(const float3 ks,
 	return Spectrum_IsBlack(ks) ? 0.f : clamp(Spectrum_Filter(Ec), .1f, .9f);
 }
 
+// The darkening (1 - K) / (1 - E_base K) of a channel (see glossycoating.cpp)
+OPENCL_FORCE_INLINE float GlossyCoatingMaterial_DarkeningChannel(const float ks, const float baseAlbedo,
+		const float amount) {
+	const float F0 = clamp(ks, 0.f, .95f);
+	const float sqrtF0 = sqrt(F0);
+	const float eta = (1.f + sqrtF0) / (1.f - sqrtF0);
+	const float Favg = F0 + (1.f - F0) * (1.f / 21.f);
+	const float K = 1.f - (1.f - Favg) / (eta * eta);
+	const float delta = (1.f - K) / (1.f - clamp(baseAlbedo, 0.f, 1.f) * K);
+
+	return 1.f + amount * (delta - 1.f);
+}
+
+// The factor of the base for the internal reflection of the coating, with the
+// albedo of the base pushed by its eval. ops (WHITE without darkening)
+OPENCL_FORCE_INLINE float3 GlossyCoatingMaterial_Darkening(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, const float3 ks, const float3 baseAlbedo
+		TEXTURES_PARAM_DECL) {
+	if (!material->glossycoating.darkening)
+		return WHITE;
+
+	const float amount = clamp(Texture_GetFloatValue(material->glossycoating.darkeningTexIndex,
+			hitPoint TEXTURES_PARAM), 0.f, 1.f);
+	if (!(amount > 0.f))
+		return WHITE;
+
+	return MAKE_FLOAT3(
+			GlossyCoatingMaterial_DarkeningChannel(ks.x, baseAlbedo.x, amount),
+			GlossyCoatingMaterial_DarkeningChannel(ks.y, baseAlbedo.y, amount),
+			GlossyCoatingMaterial_DarkeningChannel(ks.z, baseAlbedo.z, amount));
+}
+
 OPENCL_FORCE_INLINE void GlossyCoatingMaterial_EvaluateSetUp(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -129,6 +161,12 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
+	// Pop the albedo of the base for the darkening, on top of the stack
+	float3 baseAlbedo = WHITE;
+	if (material->glossycoating.darkening) {
+		EvalStack_PopFloat3(baseAlbedo);
+	}
+
 	// Pop the result of the base material evaluation
 	float directPdfWMatBase;
 	BSDFEvent eventMatBase;
@@ -218,7 +256,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 coatingF = SchlickBSDF_CoatingF(ks, u, v, fixedDir, sampledDir);
 
 		// Albedo scaling by the eye direction (see glossycoating.cpp)
-		const float3 result = coatingF + absorption * (WHITE - EcEye) * baseF;
+		const float3 result = coatingF + absorption * (WHITE - EcEye) *
+				GlossyCoatingMaterial_Darkening(material, hitPoint, ks, baseAlbedo TEXTURES_PARAM) * baseF;
 		
 		EvalStack_PushFloat3(result);
 		EvalStack_PushBSDFEvent(event);
@@ -269,8 +308,11 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
 
 		// One crossing of the coating, by the direction on the coated side
+		// (none at the exit of a subsurface walk, see glossycoating.cpp)
 		const float muCoated = (lightDir.z > 0.f) ? lightDir.z : eyeDir.z;
-		const float3 result = absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) * baseF;
+		const float3 result = (hitPoint->subsurface == HITPOINT_SSS_EXIT) ? baseF :
+			absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) *
+			GlossyCoatingMaterial_Darkening(material, hitPoint, ks, baseAlbedo TEXTURES_PARAM) * baseF;
 		
 		EvalStack_PushFloat3(result);
 		EvalStack_PushBSDFEvent(event);
@@ -403,7 +445,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Sample(__global const Material* r
 		const float3 baseF, const float basePdf,
 		const float3 coatingF, const float coatingPdf,
 		const float3 fixedDir, const float3 sampledDir,
-		const BSDFEvent event,	const float3 ks, const float u, const float v
+		const BSDFEvent event,	const float3 ks, const float u, const float v,
+		const float3 baseAlbedo
 		MATERIALS_PARAM_DECL) {
 	// Absorption
 	const float cosi = fabs(sampledDir.z);
@@ -428,13 +471,16 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Sample(__global const Material* r
 			// Front face reflection: coating + base, albedo-scaled by the eye
 			// direction (the fixed one on the GPU, see glossycoating.cpp)
 			const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks);
-			result = coatingF + absorption * (WHITE - EcEye) * baseF;
+			result = coatingF + absorption * (WHITE - EcEye) *
+					GlossyCoatingMaterial_Darkening(material, hitPoint, ks, baseAlbedo TEXTURES_PARAM) * baseF;
 		}
 	} else if (sideTest < -DEFAULT_COS_EPSILON_STATIC) {
 		// Transmission: one crossing of the coating, by the direction on the
-		// coated side
+		// coated side (none at the exit of a subsurface walk)
 		const float muCoated = (fixedDir.z > 0.f) ? fixedDir.z : sampledDir.z;
-		result = absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) * baseF;
+		result = (hitPoint->subsurface == HITPOINT_SSS_EXIT) ? baseF :
+			absorption * (WHITE - GGXEnergy_CoatE3(u, v, fabs(muCoated), ks)) *
+			GlossyCoatingMaterial_Darkening(material, hitPoint, ks, baseAlbedo TEXTURES_PARAM) * baseF;
 	} else {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
@@ -452,6 +498,12 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
+	// Pop the albedo of the base for the darkening, on top of the stack
+	float3 baseAlbedo = WHITE;
+	if (material->glossycoating.darkening) {
+		EvalStack_PopFloat3(baseAlbedo);
+	}
+
 	// Pop the result of the base material sample
 	float3 resultMatBase, sampledDirMatBase;
 	float pdfWMatBase;
@@ -537,7 +589,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseSample(__global cons
 		baseF, basePdf,
 		coatingF, coatingPdf,
 		fixedDir, sampledDir,
-		event, ks, u, v
+		event, ks, u, v, baseAlbedo
 		MATERIALS_PARAM);
 }
 
@@ -545,6 +597,12 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
+	// Pop the albedo of the base for the darkening, on top of the stack
+	float3 baseAlbedo = WHITE;
+	if (material->glossycoating.darkening) {
+		EvalStack_PopFloat3(baseAlbedo);
+	}
+
 	// Pop the result of the base material evaluate
 	float3 resultMatBase;
 	BSDFEvent eventMatBase;
@@ -620,7 +678,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 		baseF, basePdf,
 		coatingF, coatingPdf,
 		fixedDir, sampledDir,
-		event, ks, u, v
+		event, ks, u, v, baseAlbedo
 		MATERIALS_PARAM);
 }
 

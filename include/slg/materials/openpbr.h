@@ -68,7 +68,7 @@ public:
 	virtual const Material *GetRefractiveMaterial() const { return refractive ? this : nullptr; }
 	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const;
 
-	virtual bool HasSubsurfaceWalk() const { return subsurfaceWalk; }
+	virtual const Material *GetSubsurfaceWalkMaterial() const { return subsurfaceWalk ? this : nullptr; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const;
 

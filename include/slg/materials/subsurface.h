@@ -32,9 +32,11 @@ namespace slg {
 // the path tracer walks it through the medium (subsurface_funcs.cl): color is
 // the multiple-scattering albedo, radius * scale the mean free path per
 // channel and anisotropy the Henyey-Greenstein g. The walk leaves the object
-// at a new point with a Lambertian transmission. Elsewhere (light paths,
-// BiDir, inside a Mix) the medium is approximated by a Lambertian base of
-// albedo color under the same reflection.
+// at a new point with a Lambertian transmission. The walk also runs under a
+// glossy coating (GlossyCoatingMaterial::GetSubsurfaceWalkMaterial()).
+// Elsewhere (light paths, BiDir, inside a Mix or a two-sided material) the
+// medium is approximated by a Lambertian base of albedo color under the same
+// reflection.
 //------------------------------------------------------------------------------
 
 class SubsurfaceMaterial : public Material {
@@ -62,7 +64,7 @@ public:
 		float *directPdfW, float *reversePdfW) const;
 
 	// The medium of the walk at the entry point
-	virtual bool HasSubsurfaceWalk() const { return true; }
+	virtual const Material *GetSubsurfaceWalkMaterial() const { return this; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const;
 

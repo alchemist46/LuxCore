@@ -42,7 +42,8 @@ public:
 		TextureConstPtr ka,
 		TextureConstPtr d,
 		TextureConstPtr i,
-		const bool mbounce
+		const bool mbounce,
+		TextureConstPtr dark
 	);
 
 	virtual MaterialType GetType() const { return GLOSSYCOATING; }
@@ -53,6 +54,10 @@ public:
 	}
 
 	virtual const Material *GetRefractiveMaterial() const { return matBase->GetRefractiveMaterial(); }
+	// The walk of the base: its entry is albedo-scaled by the eye direction
+	// (the transmission of Evaluate() and Sample()), its exit passes the base
+	// through
+	virtual const Material *GetSubsurfaceWalkMaterial() const { return matBase->GetSubsurfaceWalkMaterial(); }
 	virtual bool IsRegularizedDelta() const { return matBase->IsRegularizedDelta(); }
 	virtual BSDFEvent GetRegularizedEventTypes() const { return (GLOSSY | REFLECT | matBase->GetRegularizedEventTypes()); }
 	virtual bool IsDelta() const {
@@ -105,11 +110,18 @@ public:
 	auto GetDepth() const { return depth; }
 	auto GetIndex() const { return index; }
 	const bool IsMultibounce() const { return multibounce; }
+	auto GetDarkening() const { return darkening; }
+	// The darkening texture is not the constant 0
+	bool HasDarkening() const;
 
 protected:
 	virtual void UpdateAvgPassThroughTransparency();
 
 private:
+	// The factor of the base for the internal reflection of the coating
+	// (white without darkening)
+	luxrays::Spectrum DarkeningFactor(const HitPoint &hitPoint, const luxrays::Spectrum &ks) const;
+
 	MaterialConstPtr matBase;
 	TextureConstPtr Ks;
 	TextureConstPtr nu;
@@ -118,6 +130,7 @@ private:
 	TextureConstPtr depth;
 	TextureConstPtr index;
 	const bool multibounce;
+	TextureConstPtr darkening;
 };
 
 }

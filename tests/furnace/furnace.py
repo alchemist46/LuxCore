@@ -234,6 +234,42 @@ def cases():
     c.append(("subsurface-aniso", "scene.materials.m.type = subsurface\n"
               "scene.materials.m.color = 1 1 1\nscene.materials.m.radius = 0.1 0.1 0.1\nscene.materials.m.scale = 1\n"
               "scene.materials.m.anisotropy = 0.7\nscene.materials.m.ior = 1\n", 1.0))
+    # The walk under a glossy coating: lossless when white; with color 0.5 and
+    # radius 10 close to subsurface-c05-rad10 (the light crosses the sphere),
+    # far above the ~0.5 of the Lambertian fallback of the base
+    for rad in (0.1, 1.0):
+        c.append((f"glossycoating-subsurface-rad{rad}", "scene.materials.b.type = subsurface\n"
+                  "scene.materials.b.color = 1 1 1\n"
+                  f"scene.materials.b.radius = {rad} {rad} {rad}\nscene.materials.b.scale = 1\n"
+                  "scene.materials.b.ior = 1.4\nscene.materials.b.roughness = 0.5\n"
+                  "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
+                  "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
+                  "scene.materials.m.uroughness = 0.1\nscene.materials.m.vroughness = 0.1\n", 1.0))
+    # The darkening of the glossy coating: a white base keeps the albedo 1; a
+    # base of albedo 0.5 under a coat of F0 0.04 (K = 0.594) is scaled by 0.578
+    c.append(("glossycoating-darkening-white", "scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
+              "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
+              "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
+              "scene.materials.m.darkening = 1\n" + rough(0.2), 1.0))
+    for d in (0, 1):
+        c.append((f"glossycoating-darkening{d}-c05", "scene.materials.b.type = matte\nscene.materials.b.kd = 0.5 0.5 0.5\n"
+                  "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
+                  "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
+                  f"scene.materials.m.darkening = {d}\n" + rough(0.2), None))
+    c.append(("glossycoating-darkening-subsurface-c05", "scene.materials.b.type = subsurface\n"
+              "scene.materials.b.color = 0.5 0.5 0.5\n"
+              "scene.materials.b.radius = 0.1 0.1 0.1\nscene.materials.b.scale = 1\n"
+              "scene.materials.b.ior = 1\n"
+              "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
+              "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
+              "scene.materials.m.darkening = 1\n" + rough(0.2), None))
+    c.append(("glossycoating-subsurface-c05-rad10.0", "scene.materials.b.type = subsurface\n"
+              "scene.materials.b.color = 0.5 0.5 0.5\n"
+              "scene.materials.b.radius = 10.0 10.0 10.0\nscene.materials.b.scale = 1\n"
+              "scene.materials.b.ior = 1\n"
+              "scene.materials.m.type = glossycoating\nscene.materials.m.base = b\n"
+              "scene.materials.m.ks = 0.04 0.04 0.04\nscene.materials.m.index = 0 0 0\n"
+              "scene.materials.m.uroughness = 0.1\nscene.materials.m.vroughness = 0.1\n", None))
     c.append(("mattetranslucent", "scene.materials.m.type = mattetranslucent\n"
               "scene.materials.m.kr = 0.5 0.5 0.5\nscene.materials.m.kt = 1 1 1\n", 1.0))
     for s in (0.0, 0.5, 1.0):

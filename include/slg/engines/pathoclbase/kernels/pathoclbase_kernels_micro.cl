@@ -81,7 +81,8 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 		const float3 sampledDir, const float u,
 		__global GPUTaskSSSWalk *taskWalk, __global Ray *ray
 		MATERIALS_PARAM_DECL) {
-	__global const Material* restrict material = &mats[bsdf->materialIndex];
+	// The material of the walk: the hit one or the base of its glossy coating
+	__global const Material* restrict material = &mats[mats[bsdf->materialIndex].subsurfaceWalkMatIndex];
 	__global const HitPoint *hitPoint = &bsdf->hitPoint;
 
 	float3 color, radius;

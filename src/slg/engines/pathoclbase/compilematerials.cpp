@@ -330,6 +330,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 				case slg::ocl::EVAL_EVALUATE:
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_GLOSSYCOATING_SETUP, evalOps);
 					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, evalOps);
+					// The albedo of the base for the darkening, on top of the
+					// stack for the glossy coating evaluation
+					if (mat->glossycoating.darkening)
+						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOps);
 					break;
 				case slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_SETUP:
 					// 6 x parameters and 35 x results
@@ -348,10 +352,14 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					
 					vector<slg::ocl::MaterialEvalOp> evalOpsSampleBase;
 					u_int evalOpStackSizeSampleBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_SAMPLE, evalOpsSampleBase);
+					if (mat->glossycoating.darkening)
+						evalOpStackSizeSampleBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOpsSampleBase);
 					evalOpStackSizeSampleBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE, evalOpsSampleBase);
 
 					vector<slg::ocl::MaterialEvalOp> evalOpsEvaluateBase;
 					u_int evalOpStackSizeEvaluateBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, evalOpsEvaluateBase);
+					if (mat->glossycoating.darkening)
+						evalOpStackSizeEvaluateBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOpsEvaluateBase);
 					evalOpStackSizeEvaluateBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_EVALUATE_BASE, evalOpsEvaluateBase);
 							
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
@@ -673,6 +681,11 @@ void CompiledScene::CompileMaterials() {
 				mat->refractionInteriorIorTexIndex = scene.GetTextures().GetTextureIndex(intIor);
 		}
 
+		// Bake Material::GetSubsurfaceWalkMaterial()
+		const Material *walkMaterial = m.GetSubsurfaceWalkMaterial();
+		mat->subsurfaceWalkMatIndex = walkMaterial ?
+			scene.GetMaterials().GetMaterialIndex(*walkMaterial) : NULL_INDEX;
+
 		// Material specific parameters
 		switch (m.GetType()) {
 			case MATTE: {
@@ -944,6 +957,8 @@ void CompiledScene::CompileMaterials() {
 				auto indexTex = gcm.GetIndex();
 				mat->glossycoating.indexTexIndex = scene.GetTextures().GetTextureIndex(indexTex);
 				mat->glossycoating.multibounce = gcm.IsMultibounce() ? 1 : 0;
+				mat->glossycoating.darkeningTexIndex = scene.GetTextures().GetTextureIndex(gcm.GetDarkening());
+				mat->glossycoating.darkening = gcm.HasDarkening() ? 1 : 0;
 				break;
 			}
 			case DISNEY: {
@@ -984,7 +999,7 @@ void CompiledScene::CompileMaterials() {
 					mat->openpbr.texIndex[i] = tex ? scene.GetTextures().GetTextureIndex(tex) : NULL_INDEX;
 				}
 				mat->openpbr.thinWalled = opm.IsThinWalled() ? 1 : 0;
-				mat->openpbr.subsurfaceWalk = opm.HasSubsurfaceWalk() ? 1 : 0;
+				mat->openpbr.subsurfaceWalk = opm.GetSubsurfaceWalkMaterial() ? 1 : 0;
 				break;
 			}
 			case SUBSURFACEMAT: {
@@ -1096,8 +1111,7 @@ void CompiledScene::CompileMaterials() {
 
 	hasSubsurface = false;
 	for (const slg::ocl::Material &mat : mats) {
-		if ((mat.type == slg::ocl::SUBSURFACEMAT) ||
-				((mat.type == slg::ocl::OPENPBR) && mat.openpbr.subsurfaceWalk)) {
+		if (mat.subsurfaceWalkMatIndex != NULL_INDEX) {
 			hasSubsurface = true;
 			break;
 		}
