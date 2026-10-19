@@ -60,18 +60,30 @@ OPENCL_FORCE_INLINE bool EyePathInfo_CanBeNearlySpecular(__global EyePathInfo *p
 	return (eventTypes & SPECULAR) || ((eventTypes & GLOSSY) && (BSDF_GetGlossiness(bsdf MATERIALS_PARAM) <= glossinessThreshold));
 }
 
+// See PathDepthInfo::GetDepthEvent()
+OPENCL_FORCE_INLINE BSDFEvent PathDepthInfo_GetDepthEvent(__global const BSDF *bsdf, const BSDFEvent event
+		MATERIALS_PARAM_DECL) {
+	if (!bsdf->isVolume && !bsdf->hitPoint.intoObject &&
+			(BSDF_GetEventTypes(bsdf MATERIALS_PARAM) & TRANSMIT) &&
+			(event & (GLOSSY | SPECULAR)) && (event & REFLECT))
+		return (event & ~REFLECT) | TRANSMIT;
+
+	return event;
+}
+
 // trackEtaScale: update etaScale (the Russian roulette on the path throughput
 // is in use)
 OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 		__global const BSDF *bsdf, const BSDFEvent event, const float pdfW,
-		const float glossinessThreshold, const bool trackEtaScale
+		const float glossinessThreshold, const bool trackEtaScale,
+		const float regularizationRoughness
 		MATERIALS_PARAM_DECL) {
 	//--------------------------------------------------------------------------
 	// PathInfo::AddVertex() inlined here for performances
 	//--------------------------------------------------------------------------
 
 	// Increment path depth information
-	PathDepthInfo_IncDepths(&pathInfo->depth, event);
+	PathDepthInfo_IncDepths(&pathInfo->depth, PathDepthInfo_GetDepthEvent(bsdf, event MATERIALS_PARAM));
 
 	// Update volume information
 	PathVolumeInfo_Update(&pathInfo->volume, event, bsdf MATERIALS_PARAM);
@@ -120,7 +132,9 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	if (trackEtaScale && (event & TRANSMIT))
 		pathInfo->etaScale *= BSDF_GetRefractionEtaScale(bsdf MATERIALS_PARAM);
 
-	pathInfo->anyNonSpecularBounce = pathInfo->anyNonSpecularBounce || !(event & SPECULAR);
+	// A rough bounce only (see EyePathInfo::AddVertex())
+	pathInfo->anyNonSpecularBounce = pathInfo->anyNonSpecularBounce || (event & DIFFUSE) ||
+			((event & GLOSSY) && (BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM) >= regularizationRoughness));
 }
 
 OPENCL_FORCE_INLINE bool EyePathInfo_IsCausticPath(__global EyePathInfo *pathInfo) {

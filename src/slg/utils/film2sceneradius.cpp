@@ -162,6 +162,7 @@ static void Film2SceneRadiusThread(Film2SceneRadiusThreadParams &params) {
 	maxPathDepthInfo.diffuseDepth = params.maxPathDepth;
 	maxPathDepthInfo.glossyDepth = params.maxPathDepth;
 	maxPathDepthInfo.specularDepth = params.maxPathDepth;
+	maxPathDepthInfo.transmissionDepth = params.maxPathDepth;
 
 	for (u_int sampleIndex = 0; sampleIndex < params.workSize; ++sampleIndex) {
 		sampleResult.radiance[0] = Spectrum();
@@ -215,7 +216,8 @@ static void Film2SceneRadiusThread(Film2SceneRadiusThreadParams &params) {
 			}
 
 			// Check if I reached the max. depth
-			sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo, bsdf.GetEventTypes());
+			sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo,
+					PathDepthInfo::GetDepthEvent(bsdf, bsdf.GetEventTypes()));
 			if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex)
 				break;
 
@@ -239,7 +241,7 @@ static void Film2SceneRadiusThread(Film2SceneRadiusThreadParams &params) {
 				sampleResult.firstPathVertexEvent = lastBSDFEvent;
 
 			// Increment path depth information
-			depthInfo.IncDepths(lastBSDFEvent);
+			depthInfo.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, lastBSDFEvent));
 
 			// Russian Roulette
 			if (!(lastBSDFEvent & SPECULAR) && (depthInfo.GetRRDepth() >= rrDepth)) {

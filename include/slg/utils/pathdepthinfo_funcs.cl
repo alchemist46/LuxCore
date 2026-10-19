@@ -27,15 +27,19 @@ OPENCL_FORCE_INLINE void PathDepthInfo_Init(__global PathDepthInfo *depthInfo) {
 	depthInfo->diffuseDepth = 0;
 	depthInfo->glossyDepth = 0;
 	depthInfo->specularDepth = 0;
+	depthInfo->transmissionDepth = 0;
 }
 
 OPENCL_FORCE_INLINE void PathDepthInfo_IncDepths(__global PathDepthInfo *depthInfo, const BSDFEvent event) {
 	++(depthInfo->depth);
-	if (event & DIFFUSE)
+	// A glossy or specular transmission counts in transmissionDepth only
+	if ((event & TRANSMIT) && (event & (GLOSSY | SPECULAR)))
+		++(depthInfo->transmissionDepth);
+	else if (event & DIFFUSE)
 		++(depthInfo->diffuseDepth);
-	if (event & GLOSSY)
+	else if (event & GLOSSY)
 		++(depthInfo->glossyDepth);
-	if (event & SPECULAR)
+	else if (event & SPECULAR)
 		++(depthInfo->specularDepth);
 }
 
@@ -43,8 +47,10 @@ OPENCL_FORCE_INLINE bool PathDepthInfo_IsLastPathVertex(__global PathDepthInfo *
 		__constant const PathDepthInfo* restrict maxDepthInfo, const BSDFEvent event) {
 	return (depthInfo->depth + 1 >= maxDepthInfo->depth) ||
 			((event & DIFFUSE) && (depthInfo->diffuseDepth + 1 >= maxDepthInfo->diffuseDepth)) ||
-			((event & GLOSSY) && (depthInfo->glossyDepth + 1 >= maxDepthInfo->glossyDepth)) ||
-			((event & SPECULAR) && (depthInfo->specularDepth + 1 >= maxDepthInfo->specularDepth));
+			((event & GLOSSY) && (event & REFLECT) && (depthInfo->glossyDepth + 1 >= maxDepthInfo->glossyDepth)) ||
+			((event & SPECULAR) && (event & REFLECT) && (depthInfo->specularDepth + 1 >= maxDepthInfo->specularDepth)) ||
+			((event & (GLOSSY | SPECULAR)) && (event & TRANSMIT) &&
+				(depthInfo->transmissionDepth + 1 >= maxDepthInfo->transmissionDepth));
 }
 
 OPENCL_FORCE_INLINE bool PathDepthInfo_CheckComponentDepths(
@@ -52,7 +58,8 @@ OPENCL_FORCE_INLINE bool PathDepthInfo_CheckComponentDepths(
 		const BSDFEvent component) {
 	return ((maxDepthInfo->diffuseDepth > 0) && (component & DIFFUSE)) ||
 			((maxDepthInfo->glossyDepth > 0) && (component & GLOSSY)) ||
-			((maxDepthInfo->specularDepth > 0) && (component & SPECULAR));
+			((maxDepthInfo->specularDepth > 0) && (component & SPECULAR)) ||
+			((maxDepthInfo->transmissionDepth > 0) && (component & TRANSMIT) && (component & (GLOSSY | SPECULAR)));
 }
 
 OPENCL_FORCE_INLINE uint PathDepthInfo_GetRRDepth(__global PathDepthInfo *depthInfo) {

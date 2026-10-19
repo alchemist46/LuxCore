@@ -179,6 +179,15 @@ void RenderEngineWindow::PathGUI(const std::unique_ptr<Properties> & props, bool
 			modifiedProps = true;
 		}
 		LuxCoreApp::HelpMarker("path.pathdepth.specular");
+
+		// The specular depth when it isn't set
+		ival = props->IsDefined("path.pathdepth.transmission") ?
+			props->Get("path.pathdepth.transmission").Get<int>() : props->Get("path.pathdepth.specular").Get<int>();
+		if (ImGui::InputInt("Total maximum transmission recursion bounces", &ival)) {
+			props->Set(Property("path.pathdepth.transmission")(ival));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.pathdepth.transmission");
 	}
 
 	if (ImGui::CollapsingHeader("Russian Roulette", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {

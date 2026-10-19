@@ -379,7 +379,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 	// Note: I was using a local variable before to save, use and than restore
 	// the depthInfo variable but it was triggering a AMD OpenCL compiler bug.
 	*tmpDepthInfo = pathInfo->depth;
-	PathDepthInfo_IncDepths(tmpDepthInfo, event);
+	PathDepthInfo_IncDepths(tmpDepthInfo, PathDepthInfo_GetDepthEvent(bsdf, event MATERIALS_PARAM));
 
 	const float directLightSamplingPdfW = info->directPdfW * info->pickPdf;
 	const float factor = 1.f / directLightSamplingPdfW;

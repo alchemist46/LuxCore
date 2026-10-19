@@ -144,6 +144,7 @@ void SceneVisibility<T>::TraceVisibilityThread::RenderFunc(std::stop_token stop_
 	maxPathDepthInfo.diffuseDepth = sv.maxPathDepth;
 	maxPathDepthInfo.glossyDepth = sv.maxPathDepth;
 	maxPathDepthInfo.specularDepth = sv.maxPathDepth;
+	maxPathDepthInfo.transmissionDepth = sv.maxPathDepth;
 
 	vector<T> visibilityParticles;
 
@@ -213,7 +214,8 @@ void SceneVisibility<T>::TraceVisibilityThread::RenderFunc(std::stop_token stop_
 					break;
 
 				// Check if I reached the max. depth
-				sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo, bsdf.GetEventTypes());
+				sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo,
+					PathDepthInfo::GetDepthEvent(bsdf, bsdf.GetEventTypes()));
 				if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex)
 					break;
 
@@ -237,7 +239,7 @@ void SceneVisibility<T>::TraceVisibilityThread::RenderFunc(std::stop_token stop_
 					sampleResult.firstPathVertexEvent = lastBSDFEvent;
 
 				// Increment path depth information
-				depthInfo.IncDepths(lastBSDFEvent);
+				depthInfo.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, lastBSDFEvent));
 
 				// Russian Roulette
 				if (!(lastBSDFEvent & SPECULAR) && (depthInfo.GetRRDepth() >= rrDepth)) {

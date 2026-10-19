@@ -58,13 +58,14 @@ EyePathInfo::EyePathInfo() : isPassThroughPath(true),
 
 void EyePathInfo::AddVertex(const BSDF &bsdf,
 		const BSDFEvent event, const float pdfW,
-		const float glossinessThreshold, const bool trackEtaScale) {
+		const float glossinessThreshold, const bool trackEtaScale,
+		const float regularizationRoughness) {
 	//--------------------------------------------------------------------------
 	// PathInfo::AddVertex() inlined here for performances
 	//--------------------------------------------------------------------------
 
 	// Increment path depth information
-	depth.IncDepths(event);
+	depth.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, event));
 	
 	// Update volume information
 	volume.Update(event, bsdf);
@@ -112,7 +113,11 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 	if (trackEtaScale && (event & TRANSMIT))
 		etaScale *= bsdf.GetRefractionEtaScale();
 
-	anyNonSpecularBounce = anyNonSpecularBounce || !(event & SPECULAR);
+	// A sharp glossy bounce (a near mirror, a slightly rough glass) keeps
+	// what follows as sharp as a specular one: the regularization is for the
+	// paths after a rough bounce
+	anyNonSpecularBounce = anyNonSpecularBounce || (event & DIFFUSE) ||
+			((event & GLOSSY) && (bsdf.GetUnregularizedGlossiness() >= regularizationRoughness));
 }
 
 bool EyePathInfo::IsCausticPath(const BSDFEvent event,
@@ -136,7 +141,7 @@ void LightPathInfo::AddVertex(const BSDF &bsdf, const BSDFEvent event,
 	//--------------------------------------------------------------------------
 
 	// Increment path depth information
-	depth.IncDepths(event);
+	depth.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, event));
 	
 	// Update volume information
 	volume.Update(event, bsdf);

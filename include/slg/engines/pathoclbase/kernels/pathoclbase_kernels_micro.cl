@@ -229,7 +229,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 
 	EyePathInfo_AddVertex(pathInfo, bsdf, bsdfEvent, bsdfPdfW,
 			taskConfig->pathTracer.hybridBackForward.glossinessThreshold,
-			taskConfig->pathTracer.rrType != RR_BOUNCE
+			taskConfig->pathTracer.rrType != RR_BOUNCE,
+			taskConfig->pathTracer.regularization
 			MATERIALS_PARAM);
 
 	// Russian Roulette (the throughput is still the one before the bounce)
@@ -1003,7 +1004,7 @@ __kernel void AdvancePaths_MK_RT(
 						MATERIALS_PARAM);
 
 				sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
-						&taskConfig->pathTracer.maxPathDepth, eventTypes);
+						&taskConfig->pathTracer.maxPathDepth, PathDepthInfo_GetDepthEvent(bsdf, eventTypes MATERIALS_PARAM));
 
 				// The next vertex ray can be sampled without waiting for the
 				// shadow ray if the shadow ray is final after one trace and

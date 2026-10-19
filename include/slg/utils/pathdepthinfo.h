@@ -37,15 +37,25 @@ public:
 	~PathDepthInfo() { }
 
 	void IncDepths(const BSDFEvent event);
+	// The kind of an event (or of the possible events of a vertex) for the
+	// path depth: a glossy or specular reflection on the back side of a
+	// transmissive surface (an internal reflection of a glass, the total
+	// internal reflection) is part of the way through the object, so it
+	// counts as a transmission
+	static BSDFEvent GetDepthEvent(const BSDF &bsdf, const BSDFEvent event);
 	bool IsLastPathVertex(const PathDepthInfo &maxPathDepth,
 		const BSDFEvent event) const;
 	u_int GetRRDepth() const;
 
-	u_int depth, diffuseDepth, glossyDepth, specularDepth;
+	// A glossy or specular transmission (a refraction, a thin wall) counts
+	// in transmissionDepth only (as Cycles' transmission bounces), every
+	// other event in the depth of its kind
+	u_int depth, diffuseDepth, glossyDepth, specularDepth, transmissionDepth;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const PathDepthInfo &pdi) {
-	os << "PathDepthInfo[" << pdi.depth << ", " << pdi.diffuseDepth << ", " << pdi.glossyDepth << ", " << pdi.specularDepth << "]";
+	os << "PathDepthInfo[" << pdi.depth << ", " << pdi.diffuseDepth << ", " << pdi.glossyDepth << ", " <<
+			pdi.specularDepth << ", " << pdi.transmissionDepth << "]";
 	return os;
 }
 

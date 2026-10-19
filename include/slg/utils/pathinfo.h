@@ -75,9 +75,12 @@ public:
 	~EyePathInfo() { }
 
 	// trackEtaScale: update etaScale (the Russian roulette on the path
-	// throughput is in use)
+	// throughput is in use). regularizationRoughness: the floor of the path
+	// regularization, a glossy bounce sharper than it doesn't start the
+	// regularization (anyNonSpecularBounce)
 	void AddVertex(const BSDF &bsdf, const BSDFEvent event, const float pdfW,
-			const float glossinessThreshold, const bool trackEtaScale = false);
+			const float glossinessThreshold, const bool trackEtaScale = false,
+			const float regularizationRoughness = 0.f);
 	
 	bool IsCausticPath() const { return isNearlyCaustic && (depth.depth > 1); }
 	bool IsCausticPath(const BSDFEvent event, const float glossiness, const float glossinessThreshold) const;
@@ -94,6 +97,8 @@ public:
 	// PathTracer_RussianRouletteProb()); 1 when the rule is not in use
 	float etaScale;
 	// A non-specular bounce happened (the path regularization starts after it)
+	// A rough bounce (diffuse, or glossy at least as rough as the path
+	// regularization floor) happened: the path regularization starts
 	bool anyNonSpecularBounce;
 
 private:

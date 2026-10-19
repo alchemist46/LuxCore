@@ -116,6 +116,7 @@ void ImageMapResizePolicy::RenderFunc(
 	maxPathDepthInfo.diffuseDepth = maxPathDepth;
 	maxPathDepthInfo.glossyDepth = maxPathDepth;
 	maxPathDepthInfo.specularDepth = maxPathDepth;
+	maxPathDepthInfo.transmissionDepth = maxPathDepth;
 
 	//--------------------------------------------------------------------------
 	// Rendering
@@ -187,7 +188,8 @@ void ImageMapResizePolicy::RenderFunc(
 					//--------------------------------------------------------------
 
 					// Check if I reached the max. depth
-					sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo, bsdf.GetEventTypes());
+					sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepthInfo,
+					PathDepthInfo::GetDepthEvent(bsdf, bsdf.GetEventTypes()));
 					if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex)
 						break;
 
@@ -215,7 +217,7 @@ void ImageMapResizePolicy::RenderFunc(
 						sampleResult.firstPathVertexEvent = lastBSDFEvent;
 
 					// Increment path depth information
-					depthInfo.IncDepths(lastBSDFEvent);
+					depthInfo.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, lastBSDFEvent));
 
 					pathThroughput *= bsdfSample;
 					assert (!pathThroughput.IsNaN() && !pathThroughput.IsInf());

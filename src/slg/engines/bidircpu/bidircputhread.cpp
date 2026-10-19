@@ -99,6 +99,7 @@ void BiDirCPURenderThread::AOVWarmUp(
 	maxPathDepthInfo.diffuseDepth = engine->maxEyePathDepth;
 	maxPathDepthInfo.glossyDepth = engine->maxEyePathDepth;
 	maxPathDepthInfo.specularDepth = engine->maxEyePathDepth;
+	maxPathDepthInfo.transmissionDepth = engine->maxEyePathDepth;
 
 	while (sampler.GetPassCount() < engine->aovWarmupSPP) {
 		if (stop_token.stop_requested())

@@ -32,23 +32,38 @@ PathDepthInfo::PathDepthInfo() {
 	diffuseDepth = 0;
 	glossyDepth = 0;
 	specularDepth = 0;
+	transmissionDepth = 0;
+}
+
+BSDFEvent PathDepthInfo::GetDepthEvent(const BSDF &bsdf, const BSDFEvent event) {
+	if (!bsdf.IsVolume() && !bsdf.hitPoint.intoObject && (bsdf.GetEventTypes() & TRANSMIT) &&
+			(event & (GLOSSY | SPECULAR)) && (event & REFLECT))
+		return (event & ~REFLECT) | TRANSMIT;
+
+	return event;
 }
 
 void PathDepthInfo::IncDepths(const BSDFEvent event) {
 	++depth;
-	if (event & DIFFUSE)
+	if ((event & TRANSMIT) && (event & (GLOSSY | SPECULAR)))
+		++transmissionDepth;
+	else if (event & DIFFUSE)
 		++diffuseDepth;
-	if (event & GLOSSY)
+	else if (event & GLOSSY)
 		++glossyDepth;
-	if (event & SPECULAR)
+	else if (event & SPECULAR)
 		++specularDepth;
 }
 
+// The possible events are a mask: a glossy or specular kind with TRANSMIT may
+// transmit, with REFLECT reflect
 bool PathDepthInfo::IsLastPathVertex(const PathDepthInfo &maxPathDepth, const BSDFEvent possibleEvents) const {
 	return (depth + 1 >= maxPathDepth.depth) ||
 			((possibleEvents & DIFFUSE) && (diffuseDepth + 1 >= maxPathDepth.diffuseDepth)) ||
-			((possibleEvents & GLOSSY) && (glossyDepth + 1 >= maxPathDepth.glossyDepth)) ||
-			((possibleEvents & SPECULAR) && (specularDepth + 1 >= maxPathDepth.specularDepth));
+			((possibleEvents & GLOSSY) && (possibleEvents & REFLECT) && (glossyDepth + 1 >= maxPathDepth.glossyDepth)) ||
+			((possibleEvents & SPECULAR) && (possibleEvents & REFLECT) && (specularDepth + 1 >= maxPathDepth.specularDepth)) ||
+			((possibleEvents & (GLOSSY | SPECULAR)) && (possibleEvents & TRANSMIT) &&
+				(transmissionDepth + 1 >= maxPathDepth.transmissionDepth));
 }
 
 u_int PathDepthInfo::GetRRDepth() const {
