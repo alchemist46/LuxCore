@@ -17,6 +17,7 @@
  ***************************************************************************/
 
 #include "luxrays/utils/properties.h"
+#include <cstdlib>
 #include <memory>
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
@@ -79,7 +80,19 @@ void RTPathOCLRenderEngine::StartLockLess() {
 
 	resolutionReduction = RoundUpPow2(Min(Max(1, cfg.Get(GetDefaultProps()->Get("rtpath.resolutionreduction")).Get<int>()), 64));
 
-	TilePathOCLRenderEngine::StartLockLess();
+	try {
+		TilePathOCLRenderEngine::StartLockLess();
+
+		// SLG_TEST_RTPATHOCL_FAIL_START=1 fails after the render threads have
+		// started, as a later device that can't start would
+		const char *testFail = getenv("SLG_TEST_RTPATHOCL_FAIL_START");
+		if (testFail && (string(testFail) == "1"))
+			throw runtime_error("SLG_TEST_RTPATHOCL_FAIL_START: simulated failure after the render threads started");
+	} catch (...) {
+		if (!compileOnly)
+			ReleaseStartedRenderThreads();
+		throw;
+	}
 
 	// Force to use only 1 tile for each device
 	maxTilePerDevice = 1;
@@ -103,6 +116,34 @@ void RTPathOCLRenderEngine::StartLockLess() {
 	renderThreadsSynced = true;
 }
 
+void RTPathOCLRenderEngine::ReleaseStartedRenderThreads() {
+	// A device failed after the render threads of the devices before it had
+	// started (they start in order, so those are a prefix with thread 0).
+	// They wait at the start barriers: release them with a stop request, or
+	// Stop() would wait for them forever.
+	size_t startedCount = 0;
+	for (auto *t : renderOCLThreads) {
+		auto *thread = (RTPathOCLRenderThread *)t;
+		if (!thread || !thread->renderThread || !thread->renderThread->joinable())
+			break;
+
+		thread->renderThread->request_stop();
+		++startedCount;
+	}
+	if (startedCount == 0)
+		return;
+
+	// The threads that never started won't arrive at frameBarrier
+	if (frameBarrier) {
+		for (size_t i = startedCount; i < renderOCLThreads.size(); ++i)
+			frameBarrier->arrive_and_drop();
+	}
+
+	// Render thread 0 waits for the engine at syncBarrier
+	syncType = SYNCTYPE_NONE;
+	syncBarrier->arrive_and_wait();
+}
+
 void RTPathOCLRenderEngine::StopLockLess() {
 	if (!renderThreadsSynced) {
 		// The render threads have not been started (compile only, or
@@ -110,6 +151,12 @@ void RTPathOCLRenderEngine::StopLockLess() {
 		// can't be compiled): there is nothing to synchronize, and waiting
 		// at the barrier would never return
 		TilePathOCLRenderEngine::StopLockLess();
+
+		// ReleaseStartedRenderThreads() may have dropped participants
+		if (frameBarrier) {
+			delete frameBarrier;
+			frameBarrier = new std::barrier(renderOCLThreads.size(), completion_t());
+		}
 		return;
 	}
 

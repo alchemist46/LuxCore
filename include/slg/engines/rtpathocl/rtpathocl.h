@@ -120,6 +120,7 @@ protected:
 
 	void PauseThreads();
 	void ResumeThreads();
+	void ReleaseStartedRenderThreads();
 
 	EditActionList updateActions;
 	bool useFastCameraEditPath, cameraIsUsingCustomBokeh;
