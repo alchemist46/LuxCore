@@ -62,9 +62,12 @@ private:
 	}
 
 	void InitFilterTable(const Film &film);
-	void BloomFilterX(const Film &film, luxrays::Spectrum *pixels);
-	void BloomFilterY(const Film &film);
-	void BloomFilter(const Film &film, luxrays::Spectrum *pixels);
+	void BloomFilterX(const Film &film, const luxrays::Spectrum *pixels,
+			const std::vector<char> &hasSamples, const std::vector<char> &rowHasSamples);
+	void BloomFilterY(const Film &film, const std::vector<char> &hasSamples,
+			const std::vector<char> &rowHasSamples);
+	void BloomFilter(const Film &film, const luxrays::Spectrum *pixels,
+			const std::vector<char> &hasSamples);
 
 	luxrays::Spectrum *bloomBuffer;
 	luxrays::Spectrum *bloomBufferTmp;

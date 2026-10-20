@@ -16,6 +16,7 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "luxrays/kernels/kernels.h"
@@ -114,12 +115,22 @@ void BloomFilterPlugin::InitFilterTable(const Film &film) {
 // CPU version
 //------------------------------------------------------------------------------
 
-void BloomFilterPlugin::BloomFilterX(const Film &film, Spectrum *pixels) {
+// The CPU version has a fast path for the parts of the image where all the
+// pixels have samples (usually all of it): it accumulates whole rows, one tap
+// offset at a time, so the pixels are independent of each other and the memory
+// is accessed sequentially. Each pixel still accumulates its taps in the same
+// order as the per pixel path, so the result is the same (the Spectrum
+// operations are per component, so the rows are processed as float arrays,
+// which the compiler vectorizes). The taps at distance bloomWidth are skipped:
+// their weight is 0 (see InitFilterTable()).
+
+static_assert(sizeof(Spectrum) == 3 * sizeof(float), "Spectrum must be 3 packed floats");
+
+void BloomFilterPlugin::BloomFilterX(const Film &film, const Spectrum *pixels,
+		const vector<char> &hasSamples, const vector<char> &rowHasSamples) {
 	const u_int width = film.GetWidth();
 	const u_int height = film.GetHeight();
-
-	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
-	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+	const int fastWidth = (int)bloomWidth - 1;
 
 	// Apply bloom filter to image pixels
 	#pragma omp parallel for
@@ -129,26 +140,57 @@ void BloomFilterPlugin::BloomFilterX(const Film &film, Spectrum *pixels) {
 		unsigned
 #endif
 		int y = 0; y < height; ++y) {
+		if (rowHasSamples[y]) {
+			// Fast path: all the pixels of the row have samples
+			const Spectrum *src = &pixels[y * width];
+			Spectrum *dst = &bloomBufferTmp[y * width];
+			vector<float> sumWt(width, 0.f);
+			for (u_int x = 0; x < width; ++x)
+				dst[x] = Spectrum();
+
+			for (int d = -fastWidth; d <= fastWidth; ++d) {
+				const float wt = bloomFilter[d * d];
+				if (wt == 0.f)
+					continue;
+
+				const int xBegin = Max(0, -d);
+				const int xEnd = Min((int)width, (int)width - d);
+				for (int x = xBegin; x < xEnd; ++x)
+					sumWt[x] += wt;
+
+				float *dstF = &dst[xBegin].c[0];
+				const float *srcF = &src[xBegin + d].c[0];
+				const int count = 3 * (xEnd - xBegin);
+				for (int i = 0; i < count; ++i)
+					dstF[i] += wt * srcF[i];
+			}
+
+			for (u_int x = 0; x < width; ++x) {
+				if (sumWt[x] > 0.f)
+					dst[x] /= sumWt[x];
+			}
+			continue;
+		}
+
 		for (u_int x = 0; x < width; ++x) {
-			if (film.HasSamples(hasPN, hasSN, x, y)) {
+			if (hasSamples[x + y * width]) {
 				// Compute bloom for pixel (x, y)
 				// Compute extent of pixels contributing bloom
 				const u_int x0 = Max<u_int>(x, bloomWidth) - bloomWidth;
 				const u_int x1 = Min<u_int>(x + bloomWidth, width - 1);
 
 				float sumWt = 0.f;
-				const u_int by = y;
 				Spectrum &pixel(bloomBufferTmp[x + y * width]);
 				pixel = Spectrum();
 				for (u_int bx = x0; bx <= x1; ++bx) {
-					if (film.HasSamples(hasPN, hasSN, bx, by)) {
-						// Accumulate bloom from pixel (bx, by)
-						const u_int dist2 = (x - bx) * (x - bx) + (y - by) * (y - by);
+					const u_int bloomOffset = bx + y * width;
+					if (hasSamples[bloomOffset]) {
+						// Accumulate bloom from pixel (bx, y)
+						const u_int dist2 = (x - bx) * (x - bx);
 						const float wt = bloomFilter[dist2];
 						if (wt == 0.f)
 							continue;
 
-						const u_int bloomOffset = bx + by * width;
 						sumWt += wt;
 						pixel += wt * pixels[bloomOffset];
 					}
@@ -160,12 +202,15 @@ void BloomFilterPlugin::BloomFilterX(const Film &film, Spectrum *pixels) {
 	}
 }
 
-void BloomFilterPlugin::BloomFilterY(const Film &film) {
+void BloomFilterPlugin::BloomFilterY(const Film &film, const vector<char> &hasSamples,
+		const vector<char> &rowHasSamples) {
 	const u_int width = film.GetWidth();
 	const u_int height = film.GetHeight();
 
-	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
-	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+	// The number of rows with some pixels without samples, before each row
+	vector<u_int> rowsWithoutSamples(height + 1, 0);
+	for (u_int y = 0; y < height; ++y)
+		rowsWithoutSamples[y + 1] = rowsWithoutSamples[y] + (rowHasSamples[y] ? 0 : 1);
 
 	// Apply bloom filter to image pixels
 	#pragma omp parallel for
@@ -174,27 +219,54 @@ void BloomFilterPlugin::BloomFilterY(const Film &film) {
 #if _OPENMP >= 200805
 		unsigned
 #endif
-		int x = 0; x < width; ++x) {
-		for (u_int y = 0; y < height; ++y) {
-			if (film.HasSamples(hasPN, hasSN, x, y)) {
-				// Compute bloom for pixel (x, y)
-				// Compute extent of pixels contributing bloom
-				const u_int y0 = Max<u_int>(y, bloomWidth) - bloomWidth;
-				const u_int y1 = Min<u_int>(y + bloomWidth, height - 1);
+		int y = 0; y < height; ++y) {
+		// Compute extent of pixels contributing bloom
+		const u_int y0 = Max<u_int>(y, bloomWidth) - bloomWidth;
+		const u_int y1 = Min<u_int>(y + bloomWidth, height - 1);
 
+		if (rowsWithoutSamples[y1 + 1] == rowsWithoutSamples[y0]) {
+			// Fast path: all the pixels of the rows y0 to y1 have samples
+			Spectrum *dst = &bloomBuffer[y * width];
+			for (u_int x = 0; x < width; ++x)
+				dst[x] = Spectrum();
+
+			float sumWt = 0.f;
+			for (u_int by = y0; by <= y1; ++by) {
+				const u_int dist2 = (y - by) * (y - by);
+				const float wt = bloomFilter[dist2];
+				if (wt == 0.f)
+					continue;
+
+				sumWt += wt;
+				float *dstF = &dst[0].c[0];
+				const float *srcF = &bloomBufferTmp[by * width].c[0];
+				const u_int count = 3 * width;
+				for (u_int i = 0; i < count; ++i)
+					dstF[i] += wt * srcF[i];
+			}
+
+			if (sumWt > 0.f) {
+				for (u_int x = 0; x < width; ++x)
+					dst[x] /= sumWt;
+			}
+			continue;
+		}
+
+		for (u_int x = 0; x < width; ++x) {
+			if (hasSamples[x + y * width]) {
+				// Compute bloom for pixel (x, y)
 				float sumWt = 0.f;
-				const u_int bx = x;
 				Spectrum &pixel(bloomBuffer[x + y * width]);
 				pixel = Spectrum();
 				for (u_int by = y0; by <= y1; ++by) {
-					if (film.HasSamples(hasPN, hasSN, bx, by)) {
-						// Accumulate bloom from pixel (bx, by)
-						const u_int dist2 = (x - bx) * (x - bx) + (y - by) * (y - by);
+					const u_int bloomOffset = x + by * width;
+					if (hasSamples[bloomOffset]) {
+						// Accumulate bloom from pixel (x, by)
+						const u_int dist2 = (y - by) * (y - by);
 						const float wt = bloomFilter[dist2];
 						if (wt == 0.f)
 							continue;
 
-						const u_int bloomOffset = bx + by * width;
 						sumWt += wt;
 						pixel += wt * bloomBufferTmp[bloomOffset];
 					}
@@ -207,9 +279,19 @@ void BloomFilterPlugin::BloomFilterY(const Film &film) {
 	}
 }
 
-void BloomFilterPlugin::BloomFilter(const Film &film, Spectrum *pixels) {
-	BloomFilterX(film, pixels);
-	BloomFilterY(film);
+void BloomFilterPlugin::BloomFilter(const Film &film, const Spectrum *pixels,
+		const vector<char> &hasSamples) {
+	const u_int width = film.GetWidth();
+	const u_int height = film.GetHeight();
+
+	// Rows where all the pixels have samples
+	vector<char> rowHasSamples(height);
+	for (u_int y = 0; y < height; ++y)
+		rowHasSamples[y] = all_of(hasSamples.begin() + y * width,
+				hasSamples.begin() + (y + 1) * width, [](const char v) { return v != 0; });
+
+	BloomFilterX(film, pixels, hasSamples, rowHasSamples);
+	BloomFilterY(film, hasSamples, rowHasSamples);
 }
 
 void BloomFilterPlugin::Apply(Film &film, const u_int index) {
@@ -234,11 +316,23 @@ void BloomFilterPlugin::Apply(Film &film, const u_int index) {
 		InitFilterTable(film);
 	}
 
+	// Film::HasSamples() is evaluated once for each pixel instead of once for
+	// each filter tap
+	vector<char> hasSamples(bloomBufferSize);
+	#pragma omp parallel for
+	for (
+		// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+		unsigned
+#endif
+		int i = 0; i < bloomBufferSize; ++i)
+		hasSamples[i] = film.HasSamples(hasPN, hasSN, i);
+
 	// Apply separable filter
-	BloomFilter(film, pixels);
+	BloomFilter(film, pixels, hasSamples);
 
 	for (u_int i = 0; i < bloomBufferSize; ++i) {
-		if (film.HasSamples(hasPN, hasSN, i))
+		if (hasSamples[i])
 			pixels[i] = Lerp(weight, pixels[i], bloomBuffer[i]);
 	}
 

@@ -32,6 +32,27 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+namespace {
+
+// Makes the device current for the scope, also when an exception is thrown
+class ScopedThreadCurrentDevice {
+public:
+	ScopedThreadCurrentDevice(HardwareDevice &dev) : device(dev) {
+		device.PushThreadCurrentDevice();
+	}
+	~ScopedThreadCurrentDevice() {
+		try {
+			device.PopThreadCurrentDevice();
+		} catch (...) {
+		}
+	}
+
+private:
+	HardwareDevice &device;
+};
+
+}
+
 //------------------------------------------------------------------------------
 // Film HardwareDevice related code
 //------------------------------------------------------------------------------
@@ -99,6 +120,17 @@ void Film::CreateHWContext() {
 		}
 	}
 
+	// Without the HIP run-time compiler (hiprtc, installed with the HIP SDK),
+	// a HIP device only loads precompiled programs, and the image pipeline
+	// ones are not precompiled
+	if (selectedDeviceDesc && (selectedDeviceDesc->GetType() & DEVICE_TYPE_HIP_ALL) &&
+			!isHiprtcAvailable) {
+		SLG_LOG("WARNING: the film hardware device " << selectedDeviceDesc->GetName() <<
+				" can not compile the image pipeline programs without the HIP run-time"
+				" compiler (hiprtc): the image pipeline runs on the CPU");
+		selectedDeviceDesc = nullptr;
+	}
+
 	if (selectedDeviceDesc) {
 #if !defined(LUXRAYS_DISABLE_CUDA)
 		// Force the Optix usage also on no-RTX GPUs for Optix denoiser plugin
@@ -126,7 +158,7 @@ void Film::CreateHWContext() {
 			<< ")"
 		);
 
-		hardwareDevice->PushThreadCurrentDevice();
+		ScopedThreadCurrentDevice currentDevice(*hardwareDevice);
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 		auto oclDesc = dynamic_observer_cast<OpenCLDeviceDescription>(selectedDeviceDesc);
@@ -175,8 +207,6 @@ void Film::CreateHWContext() {
 		dataSet->Preprocess();
 		ctx->SetDataSet(dataSet);
 		ctx->Start();
-
-		hardwareDevice->PopThreadCurrentDevice();
 	}
 }
 
@@ -205,7 +235,7 @@ void Film::DeleteHWContext() {
 
 void Film::AllocateHWBuffers() {
 	ctx->SetVerbose(true);
-	hardwareDevice->PushThreadCurrentDevice();
+	ScopedThreadCurrentDevice currentDevice(*hardwareDevice);
 
 	FilmChannels hwChannelsUsed;
 	for (auto const ip : imagePipelines)
@@ -229,13 +259,12 @@ void Film::AllocateHWBuffers() {
 	if (mergeBufferSize > 0)
 		hardwareDevice->AllocBufferRO(&hw_mergeBuffer, nullptr, mergeBufferSize, "Merge");
 
-	hardwareDevice->PopThreadCurrentDevice();
 	ctx->SetVerbose(false);
 }
 
 void Film::CompileHWKernels() {
 	ctx->SetVerbose(true);
-	hardwareDevice->PushThreadCurrentDevice();
+	ScopedThreadCurrentDevice currentDevice(*hardwareDevice);
 
 	// Compile MergeSampleBuffersOCL() kernels
 	const double tStart = WallClockTime();
@@ -310,7 +339,6 @@ void Film::CompileHWKernels() {
 	const double tEnd = WallClockTime();
 	SLG_LOG("[MergeSampleBuffersOCL] Kernels compilation time: " << int((tEnd - tStart) * 1000.0) << "ms");
 
-	hardwareDevice->PopThreadCurrentDevice();
 	ctx->SetVerbose(false);
 }
 

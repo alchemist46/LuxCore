@@ -165,11 +165,20 @@ void Film::ExecuteImagePipelineImpl(const u_int index) {
 
 	// Initialize OpenCL device
 	if (hwEnable && !ctx) {
-		CreateHWContext();
-	
-		if (hardwareDevice) {
-			AllocateHWBuffers();
-			CompileHWKernels();
+		try {
+			CreateHWContext();
+
+			if (hardwareDevice) {
+				AllocateHWBuffers();
+				CompileHWKernels();
+			}
+		} catch (const exception &e) {
+			// Fall back to the CPU image pipeline instead of failing the
+			// rendering
+			SLG_LOG("WARNING: unable to start the film hardware image pipeline (" <<
+					e.what() << "): the image pipeline runs on the CPU");
+			DeleteHWContext();
+			hwEnable = false;
 		}
 	}
 
