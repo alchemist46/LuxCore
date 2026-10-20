@@ -164,6 +164,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `pyluxcore.Init(lambda s: None)` and exit the interpreter.
 - Notes: see also the memory note on the log handler dropping thread logs.
 
+### Viewport "Filter" (nearest/linear) setting has no effect
+- Found: 2026-10-21
+- Area: addon
+- Problem: `scene.luxcore.viewport.mag_filter` is shown in the viewport panel (enabled when Pixel Size is not 1x) but `draw/viewport.py` never reads it: the texture is drawn with the builtin `IMAGE` shader and the default sampler, so the upscaled viewport always looks the same whichever filter is chosen.
+- Reproduce: viewport render with Pixel Size 2x or more, switch Filter between Nearest and Linear.
+- Notes: the old `bgl` draw code set `GL_TEXTURE_MAG_FILTER` from the property; the port to the `gpu` module (BlendLuxCore `d3435a32`) dropped it. Fix: a `gpu.types.GPUShaderCreateInfo` image shader with a sampler state, or `texture` sampler settings when the gpu API exposes them; the same shader is where an FSR-style upscale would go.
+
 ### EnvironmentCamera TILEPATHOCL fails at the threshold
 - Found: 2026-10-15
 - Area: tests
