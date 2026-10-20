@@ -19,6 +19,7 @@
 #include <memory>
 #if !defined(LUXRAYS_DISABLE_HIP)
 
+#include <algorithm>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -99,7 +100,7 @@ bool hipKernelPersistentCache::ForcedCompileCodeObject(
 
 	if (!isHiprtcAvailable) {
 		if (error) {
-			*error = "There is no precompiled kernel for this program on " + gpuArch +
+			*error = "There is no usable precompiled kernel for this program on " + gpuArch +
 					" and it can't be compiled: that requires the HIP run-time compiler (hiprtc), "
 #if defined(_WIN32)
 					"installed with the AMD HIP SDK (HIP_PATH)";
@@ -246,6 +247,19 @@ hipModule_t hipKernelPersistentCache::LoadPrecompiled(
 	const unsigned char *code = GetPrecompiled(kernelsParameters, kernelSource);
 	if (!code)
 		return nullptr;
+
+	// LUXRAYS_HIP_TEST_CORRUPT_PRECOMPILED_KERNELS=1 loads a copy of the
+	// embedded code object with a broken ELF header, to test the fall-through
+	// to the kernel cache and hiprtc
+	std::vector<unsigned char> corrupted;
+	if (GetEnvFlag("LUXRAYS_HIP_TEST_CORRUPT_PRECOMPILED_KERNELS")) {
+		size_t size = 0;
+		GetEmbeddedHIPKernel(GetHIPBakedKernelKey(kernelsParameters, kernelSource),
+				precompiledFamily, &size);
+		corrupted.assign(code, code + size);
+		std::fill_n(corrupted.begin(), std::min<size_t>(4, size), 0);
+		code = corrupted.data();
+	}
 
 	hipModule_t module;
 	const hipError_t err = hipModuleLoadData(&module, code);

@@ -38,6 +38,7 @@ RTPathOCLRenderEngine::RTPathOCLRenderEngine(RenderConfigRef rcfg) :
 		throw runtime_error("opencl.native.threads.count must be 0 for RTPATHOCL");
 
 	syncBarrier = new std::barrier(2, completion_t());
+	renderThreadsSynced = false;
 	if (renderOCLThreads.size() > 1)
 		frameBarrier = new std::barrier(renderOCLThreads.size(), completion_t());
 	else
@@ -99,12 +100,15 @@ void RTPathOCLRenderEngine::StartLockLess() {
 	// To synchronize the start of all threads
 	syncType = SYNCTYPE_NONE;
 	syncBarrier->arrive_and_wait();
+	renderThreadsSynced = true;
 }
 
 void RTPathOCLRenderEngine::StopLockLess() {
-	if (compileOnly) {
-		// The render threads have not been started: there is nothing to
-		// synchronize (and no renderThread to stop)
+	if (!renderThreadsSynced) {
+		// The render threads have not been started (compile only, or
+		// StartLockLess() threw, e.g. a wrong sampler or a kernel that
+		// can't be compiled): there is nothing to synchronize, and waiting
+		// at the barrier would never return
 		TilePathOCLRenderEngine::StopLockLess();
 		return;
 	}
@@ -118,6 +122,7 @@ void RTPathOCLRenderEngine::StopLockLess() {
 
 	syncType = SYNCTYPE_NONE;
 	syncBarrier->arrive_and_wait();
+	renderThreadsSynced = false;
 
 	// Render threads will now detect the interruption
 
@@ -162,6 +167,7 @@ void RTPathOCLRenderEngine::BeginFilmEdit() {
 
 	syncType = SYNCTYPE_NONE;
 	syncBarrier->arrive_and_wait();
+	renderThreadsSynced = false;
 
 	// Render threads will now detect the interruption
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i)
@@ -197,6 +203,7 @@ void RTPathOCLRenderEngine::EndFilmEdit(FilmRef flm, std::mutex *flmMutex) {
 	// To synchronize the start of all threads
 	syncType = SYNCTYPE_NONE;
 	syncBarrier->arrive_and_wait();
+	renderThreadsSynced = true;
 }
 
 void RTPathOCLRenderEngine::UpdateFilmLockLess() {

@@ -127,6 +127,9 @@ protected:
 	// Used by RTPathOCLRenderEngine code to sync. with render thread 0
 	std::barrier<completion_t> *syncBarrier;
 	std::atomic<RTPathOCLSyncType> syncType;
+	// True once render thread 0 has passed the start barrier: before that
+	// (compile only, or a Start() that threw) there is no one to sync. with
+	bool renderThreadsSynced;
 
 	// Used by all render threads to sync.
 	std::barrier<completion_t> *frameBarrier;
