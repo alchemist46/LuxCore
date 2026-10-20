@@ -99,7 +99,7 @@ jobs:
           test -f bake-build/baked/spirvmanifest.txt
 
       - name: Upload the SPIR-V modules
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: spirv-baked
           path: bake-build/baked/
@@ -180,7 +180,7 @@ jobs:
           ls -l bake-build/baked/*.co
 
       - name: Upload the HIP kernels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hip-baked
           path: |
@@ -304,13 +304,13 @@ jobs:
           arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Download the pre-baked SPIR-V modules
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: spirv-baked
           path: spirv-baked
 
       - name: Download the pre-baked HIP kernels
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: hip-baked
           path: hip-baked
@@ -596,7 +596,7 @@ jobs:
         #uses: mxschmitt/action-tmate@v3
 
       # Upload artifacts
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         id: upload
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ matrix.python-minor }}
@@ -632,7 +632,7 @@ jobs:
           python-version: 3.${{ env.PYTHON_MINOR }}
 
       - name: Download the wheel
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: cibw-wheels-ubuntu-latest-${{ env.PYTHON_MINOR }}
           path: wheel
@@ -662,14 +662,14 @@ jobs:
 
       - name: Upload the test images
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: unit-tests-images
           path: pyunittests/images/*.png
 
       - name: Upload the benchmark results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-linux-cpu
           path: benchmark.json

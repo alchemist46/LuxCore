@@ -73,8 +73,8 @@ jobs:
           _version=${{ needs.call-build-samples.outputs.version }}
           echo "Creating release '${_version}'"
           echo "RELEASE_TAG=v${_version}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           pattern: LuxCore-Samples-*
           path: ${{ github.workspace }}/dist

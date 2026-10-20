@@ -49,14 +49,14 @@ jobs:
     steps:
       - name: Checkout main repository (standard context)
         if: ${{ !env.ACT }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
 
       - name: Checkout main repository (act context)
         if: env.ACT
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install build tools
         shell: bash
@@ -81,7 +81,7 @@ jobs:
           test -f bake-build/baked/spirvmanifest.txt
 
       - name: Upload the SPIR-V modules
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: spirv-baked
           path: bake-build/baked/
@@ -101,14 +101,14 @@ jobs:
     steps:
       - name: Checkout main repository (standard context)
         if: ${{ !env.ACT }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
 
       - name: Checkout main repository (act context)
         if: env.ACT
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Read the HIPRT ref
         id: hiprt
@@ -120,7 +120,7 @@ jobs:
           echo "ref=$(python3 -c "import json; print(json.load(open('build-system/build-settings.json'))['HIPRT']['ref'])")" >> "$GITHUB_OUTPUT"
 
       - name: Checkout HIPRT (headers of the trace kernel)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GPUOpen-LibrariesAndSDKs/HIPRT
           ref: ${{ steps.hiprt.outputs.ref }}
@@ -162,7 +162,7 @@ jobs:
           ls -l bake-build/baked/*.co
 
       - name: Upload the HIP kernels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hip-baked
           path: |
@@ -202,14 +202,14 @@ jobs:
 
       - name: Checkout main repository (standard context)
         if: ${{ !env.ACT }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
 
       - name: Checkout main repository (act context)
         if: env.ACT
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get current commit
         id: current-commit
@@ -263,7 +263,7 @@ jobs:
             echo "CONAN_HOME=${_conan_home}" >> $GITHUB_ENV
 
       - name: Configure ccache
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const workspace = String.raw`${{ github.workspace }}`;
@@ -282,7 +282,7 @@ jobs:
                 core.exportVariable(key, value);
             }
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: 3.13
 
@@ -309,20 +309,20 @@ jobs:
           arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Download the pre-baked SPIR-V modules
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: spirv-baked
           path: spirv-baked
 
       - name: Download the pre-baked HIP kernels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: hip-baked
           path: hip-baked
 
       - name: Set MacOS deployment target
         if: runner.os == 'macOS'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             if ('${{ runner.arch }}' == 'X64') {
@@ -531,7 +531,7 @@ jobs:
           7z a -snl ../../LuxCoreSamples-${{ runner.os }}-${{ runner.arch }}.zip LuxCore/
 
       # Upload artifacts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         id: upload
         with:
           name: LuxCore-Samples-${{ runner.os }}-${{ runner.arch }}
@@ -548,7 +548,7 @@ jobs:
       attestation-url: ${{ steps.attestation-step.outputs.attestation-url }}
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         if: ${{ !env.ACT }}
         with:
           pattern: LuxCore-*
@@ -558,6 +558,6 @@ jobs:
       - name: Generate artifact attestations
         id: attestation-step
         if: ${{ !env.ACT }}
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: ${{ github.workspace }}/dist/*

@@ -101,7 +101,7 @@ jobs:
           sha256sum hiprt-*.zip
 
       - name: Upload the archive
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hiprt-linux
           path: hiprt-*.zip
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Download the archive
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: hiprt-linux
 
