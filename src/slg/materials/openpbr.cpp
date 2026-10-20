@@ -265,6 +265,10 @@ void OpenPBRMaterial::Update() {
 	refractive = transmission && !thinWalled;
 	// The walk enters through the opaque base
 	subsurfaceWalk = subsurface && !thinWalled && opaque;
+	// The EON diffuse (unless the subsurface weight is 1) and the fuzz are
+	// diffuse lobes beside the walk
+	diffuseBesideWalk = !(GetConstant(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, &value) && (value >= 1.f)) ||
+			!IsZero(slg::ocl::OPENPBR_FUZZ_WEIGHT);
 
 	UpdateGlossiness();
 }

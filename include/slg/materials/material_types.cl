@@ -413,6 +413,8 @@ typedef struct {
 	// material whose random walk an eye path entering this one starts (itself,
 	// or the base of a glossy coating), NULL_INDEX when there is none
 	unsigned int subsurfaceWalkMatIndex;
+	// Material::HasDiffuseBesideSubsurfaceWalk()
+	int hasDiffuseBesideSubsurfaceWalk;
 
 	// Material eval. ops start index and length 
 	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;

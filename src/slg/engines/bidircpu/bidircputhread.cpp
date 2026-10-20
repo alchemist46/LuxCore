@@ -98,7 +98,7 @@ void BiDirCPURenderThread::AOVWarmUp(
 	maxPathDepthInfo.depth = engine->maxEyePathDepth;
 	maxPathDepthInfo.diffuseDepth = engine->maxEyePathDepth;
 	maxPathDepthInfo.glossyDepth = engine->maxEyePathDepth;
-	maxPathDepthInfo.specularDepth = engine->maxEyePathDepth;
+	maxPathDepthInfo.subsurfaceDepth = engine->maxEyePathDepth;
 	maxPathDepthInfo.transmissionDepth = engine->maxEyePathDepth;
 
 	while (sampler.GetPassCount() < engine->aovWarmupSPP) {

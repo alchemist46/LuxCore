@@ -685,6 +685,7 @@ void CompiledScene::CompileMaterials() {
 		const Material *walkMaterial = m.GetSubsurfaceWalkMaterial();
 		mat->subsurfaceWalkMatIndex = walkMaterial ?
 			scene.GetMaterials().GetMaterialIndex(*walkMaterial) : NULL_INDEX;
+		mat->hasDiffuseBesideSubsurfaceWalk = m.HasDiffuseBesideSubsurfaceWalk() ? 1 : 0;
 
 		// Material specific parameters
 		switch (m.GetType()) {

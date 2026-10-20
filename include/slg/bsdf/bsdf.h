@@ -164,6 +164,8 @@ public:
 	// (Material::GetSubsurfaceWalkMaterial()), in the medium of
 	// GetSubsurfaceWalkParams() at this vertex
 	bool HasSubsurfaceWalk() const;
+	// Material::HasDiffuseBesideSubsurfaceWalk()
+	bool HasDiffuseBesideSubsurfaceWalk() const;
 	void GetSubsurfaceWalkParams(luxrays::Spectrum *color, luxrays::Spectrum *radius,
 		float *anisotropy) const;
 

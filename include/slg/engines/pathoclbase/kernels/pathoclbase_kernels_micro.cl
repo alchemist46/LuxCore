@@ -695,8 +695,13 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 	// Check if this is the last path vertex (but not also the first)
 	//
 	// I handle as a special case when the path vertex is both the first
-	// and the last: I do direct light sampling without MIS.
-	if (sampleResult->lastPathVertex && !sampleResult->firstPathVertex) {
+	// and the last: I do direct light sampling without MIS. The exit of a
+	// subsurface walk too (see PathTracer::RenderEyePath()).
+	if (sampleResult->lastPathVertex && !sampleResult->firstPathVertex
+#if defined(PARAM_ENABLE_SUBSURFACE)
+			&& (bsdf->hitPoint.subsurface != HITPOINT_SSS_EXIT)
+#endif
+			) {
 		return MK_SPLAT_SAMPLE;
 	}
 
@@ -994,18 +999,26 @@ __kernel void AdvancePaths_MK_RT(
 				// lobes become rough (see HitPoint::regularization)
 				bsdf->hitPoint.regularization = ((taskConfig->pathTracer.regularization > 0.f) && pathInfo->anyNonSpecularBounce) ?
 					taskConfig->pathTracer.regularization : 0.f;
+				BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
+						MATERIALS_PARAM);
 #if defined(PARAM_ENABLE_SUBSURFACE)
 				// The base lobe of a subsurface material enters the object
-				// for the walk
-				if (!subsurfaceExit && Material_HasSubsurfaceWalk(&mats[bsdf->materialIndex]))
-					bsdf->hitPoint.subsurface = HITPOINT_SSS_ENTRY;
+				// for the walk while the subsurface depth lasts, out of the
+				// diffuse depth (see PathTracer::RenderEyePath())
+				__global const Material* restrict hitMaterial = &mats[bsdf->materialIndex];
+				const bool walkEntry = !subsurfaceExit && Material_HasSubsurfaceWalk(hitMaterial) &&
+						PathDepthInfo_CanStartSubsurfaceWalk(&pathInfo->depth, &taskConfig->pathTracer.maxPathDepth);
+				if (walkEntry && !hitMaterial->hasDiffuseBesideSubsurfaceWalk)
+					eventTypes &= ~DIFFUSE;
 #endif
-
-				const BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
-						MATERIALS_PARAM);
 
 				sampleResult->lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
 						&taskConfig->pathTracer.maxPathDepth, PathDepthInfo_GetDepthEvent(bsdf, eventTypes MATERIALS_PARAM));
+#if defined(PARAM_ENABLE_SUBSURFACE)
+				// The last vertex keeps the Lambertian stand-in
+				if (walkEntry && !sampleResult->lastPathVertex)
+					bsdf->hitPoint.subsurface = HITPOINT_SSS_ENTRY;
+#endif
 
 				// The next vertex ray can be sampled without waiting for the
 				// shadow ray if the shadow ray is final after one trace and

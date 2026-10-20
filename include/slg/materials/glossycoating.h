@@ -58,6 +58,7 @@ public:
 	// (the transmission of Evaluate() and Sample()), its exit passes the base
 	// through
 	virtual const Material *GetSubsurfaceWalkMaterial() const { return matBase->GetSubsurfaceWalkMaterial(); }
+	virtual bool HasDiffuseBesideSubsurfaceWalk() const { return matBase->HasDiffuseBesideSubsurfaceWalk(); }
 	virtual bool IsRegularizedDelta() const { return matBase->IsRegularizedDelta(); }
 	virtual BSDFEvent GetRegularizedEventTypes() const { return (GLOSSY | REFLECT | matBase->GetRegularizedEventTypes()); }
 	virtual bool IsDelta() const {

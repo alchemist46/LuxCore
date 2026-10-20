@@ -20,6 +20,7 @@
 
 typedef struct {
 	// See PathDepthInfo in pathdepthinfo.h
-	unsigned int depth, diffuseDepth, glossyDepth, specularDepth, transmissionDepth;
+	unsigned int depth, diffuseDepth, glossyDepth, transmissionDepth, subsurfaceDepth,
+			rouletteDepth;
 } PathDepthInfo;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

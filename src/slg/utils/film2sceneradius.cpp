@@ -161,7 +161,7 @@ static void Film2SceneRadiusThread(Film2SceneRadiusThreadParams &params) {
 	maxPathDepthInfo.depth = params.maxPathDepth;
 	maxPathDepthInfo.diffuseDepth = params.maxPathDepth;
 	maxPathDepthInfo.glossyDepth = params.maxPathDepth;
-	maxPathDepthInfo.specularDepth = params.maxPathDepth;
+	maxPathDepthInfo.subsurfaceDepth = params.maxPathDepth;
 	maxPathDepthInfo.transmissionDepth = params.maxPathDepth;
 
 	for (u_int sampleIndex = 0; sampleIndex < params.workSize; ++sampleIndex) {

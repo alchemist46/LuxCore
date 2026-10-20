@@ -143,7 +143,7 @@ void SceneVisibility<T>::TraceVisibilityThread::RenderFunc(std::stop_token stop_
 	maxPathDepthInfo.depth = sv.maxPathDepth;
 	maxPathDepthInfo.diffuseDepth = sv.maxPathDepth;
 	maxPathDepthInfo.glossyDepth = sv.maxPathDepth;
-	maxPathDepthInfo.specularDepth = sv.maxPathDepth;
+	maxPathDepthInfo.subsurfaceDepth = sv.maxPathDepth;
 	maxPathDepthInfo.transmissionDepth = sv.maxPathDepth;
 
 	vector<T> visibilityParticles;

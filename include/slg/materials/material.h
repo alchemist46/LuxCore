@@ -147,6 +147,10 @@ public:
 	virtual const Material *GetSubsurfaceWalkMaterial() const { return nullptr; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const { }
+	// At the entry of a walk, whether the DIFFUSE of GetEventTypes() can also
+	// be a diffuse lobe beside the walk: without one, the diffuse depth
+	// doesn't end the path there (the walk has the subsurface depth)
+	virtual bool HasDiffuseBesideSubsurfaceWalk() const { return true; }
 	// Path regularization (HitPoint::regularization > 0): the delta lobes of
 	// the glass and mirror materials become GGX lobes, so these replace
 	// IsDelta() and GetEventTypes() at a regularized vertex (see BSDF)

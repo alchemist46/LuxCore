@@ -221,6 +221,10 @@ bool BSDF::HasSubsurfaceWalk() const {
 	return material->GetSubsurfaceWalkMaterial() != nullptr;
 }
 
+bool BSDF::HasDiffuseBesideSubsurfaceWalk() const {
+	return material->HasDiffuseBesideSubsurfaceWalk();
+}
+
 void BSDF::GetSubsurfaceWalkParams(Spectrum *color, Spectrum *radius, float *anisotropy) const {
 	const Material *walkMaterial = material->GetSubsurfaceWalkMaterial();
 	assert (walkMaterial);

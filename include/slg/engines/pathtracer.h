@@ -159,6 +159,11 @@ public:
 
 	static luxrays::PropertiesUPtr ToProperties(const luxrays::Properties &cfg);
 	static luxrays::PropertiesUPtr GetDefaultProps();
+	// The path.pathdepth.* settings (with the older ones, see pathtracer.cpp)
+	static PathDepthInfo GetMaxPathDepth(luxrays::PropertiesConstRef cfg,
+		const luxrays::Properties &defaultProps);
+	static luxrays::Properties MaxPathDepthToProperties(luxrays::PropertiesConstRef cfg,
+		const luxrays::Properties &defaultProps);
 
 	static ocl::RussianRouletteType String2RussianRouletteType(const std::string &type);
 	static std::string RussianRouletteType2String(const ocl::RussianRouletteType type);

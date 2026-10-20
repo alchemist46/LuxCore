@@ -607,12 +607,21 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// rough (see HitPoint::regularization)
 		bsdf.hitPoint.regularization = (regularizationEnable && pathInfo.anyNonSpecularBounce) ?
 			regularizationRoughness : 0.f;
-		// The base lobe of a subsurface material enters the object for the walk
-		if (!subsurfaceExit && bsdf.HasSubsurfaceWalk())
-			bsdf.hitPoint.subsurface = HITPOINT_SSS_ENTRY;
+		// The base lobe of a subsurface material enters the object for the
+		// walk while the subsurface depth lasts. The walk is then the base's
+		// diffuse lobe (unless it has another one), out of the diffuse depth.
+		// Beyond the subsurface depth, and on the last vertex (no next vertex
+		// for the walk), the base is the Lambertian stand-in.
+		const bool walkEntry = !subsurfaceExit && bsdf.HasSubsurfaceWalk() &&
+				pathInfo.depth.CanStartSubsurfaceWalk(maxPathDepth);
+		BSDFEvent eventTypes = bsdf.GetEventTypes();
+		if (walkEntry && !bsdf.HasDiffuseBesideSubsurfaceWalk())
+			eventTypes &= ~DIFFUSE;
 
 		sampleResult.lastPathVertex = pathInfo.depth.IsLastPathVertex(maxPathDepth,
-				PathDepthInfo::GetDepthEvent(bsdf, bsdf.GetEventTypes()));
+				PathDepthInfo::GetDepthEvent(bsdf, eventTypes));
+		if (walkEntry && !sampleResult.lastPathVertex)
+			bsdf.hitPoint.subsurface = HITPOINT_SSS_ENTRY;
 
 		//----------------------------------------------------------------------
 		// Check if it is a baked material
@@ -711,8 +720,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// I avoid to do DL on the last vertex otherwise it introduces a lot of
 		// noise because I can not use MIS.
 		// I handle as a special case when the path vertex is both the first
-		// and the last: I do direct light sampling without MIS.
-		if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex)
+		// and the last: I do direct light sampling without MIS. The exit of a
+		// subsurface walk too: the walk's light comes from there (the entry
+		// has no light sampling of the base), so the depths it reaches don't
+		// make the material black.
+		if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex && !subsurfaceExit)
 			break;
 
 		const DirectLightResult directLightResult = DirectLightSampling(
@@ -1088,7 +1100,7 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 					// used in light tracing part of hybrid rendering. In this case
 					// I render also some not-caustic sample to make an "easy"
 					// computation of the avg. image luminance.
-					(pathInfo.depth.diffuseDepth + pathInfo.depth.glossyDepth > 1))
+					(pathInfo.depth.GetRRDepth() > 1))
 				break;
 
 			// Russian Roulette
@@ -1195,21 +1207,16 @@ void PathTracer::RenderSample(PathTracerThreadState &state) const {
 // ParseOptions
 //------------------------------------------------------------------------------
 
-void PathTracer::ParseOptions(
-	luxrays::PropertiesConstRef cfg,
-	const luxrays::Properties &defaultProps
-) {
-	// Path depth settings
-	maxPathDepth.depth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.total")).Get<int>());
-	maxPathDepth.diffuseDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.diffuse")).Get<int>());
-	maxPathDepth.glossyDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.glossy")).Get<int>());
-	maxPathDepth.specularDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.specular")).Get<int>());
-	// The glossy and specular transmissions: the specular depth unless set
-	// (the refractions counted there before, the rough ones in the glossy one)
-	maxPathDepth.transmissionDepth = cfg.IsDefined("path.pathdepth.transmission") ?
-		Max(0, cfg.Get("path.pathdepth.transmission").Get<int>()) : maxPathDepth.specularDepth;
+// The path depths, as Arnold and Cycles: total, diffuse, glossy (rough and
+// sharp reflections), transmission and subsurface. Older settings:
+//  - path.pathdepth.specular (the sharp reflections, and the refractions
+//    before path.pathdepth.transmission): the glossy depth is at least it,
+//    and it is the transmission depth when that isn't set;
+//  - path.maxdepth alone: every depth.
+PathDepthInfo PathTracer::GetMaxPathDepth(luxrays::PropertiesConstRef cfg,
+		const luxrays::Properties &defaultProps) {
+	PathDepthInfo maxPathDepth;
 
-	// For compatibility with the past
 	if (cfg.IsDefined("path.maxdepth") &&
 			!cfg.IsDefined("path.pathdepth.total") &&
 			!cfg.IsDefined("path.pathdepth.diffuse") &&
@@ -1219,9 +1226,53 @@ void PathTracer::ParseOptions(
 		maxPathDepth.depth = maxDepth;
 		maxPathDepth.diffuseDepth = maxDepth;
 		maxPathDepth.glossyDepth = maxDepth;
-		maxPathDepth.specularDepth = maxDepth;
 		maxPathDepth.transmissionDepth = maxDepth;
+		maxPathDepth.subsurfaceDepth = maxDepth;
+		return maxPathDepth;
 	}
+
+	maxPathDepth.depth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.total")).Get<int>());
+	maxPathDepth.diffuseDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.diffuse")).Get<int>());
+	maxPathDepth.glossyDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.glossy")).Get<int>());
+	maxPathDepth.transmissionDepth = Max(0, cfg.Get(defaultProps.Get("path.pathdepth.transmission")).Get<int>());
+	if (cfg.IsDefined("path.pathdepth.specular")) {
+		const u_int specularDepth = Max(0, cfg.Get("path.pathdepth.specular").Get<int>());
+		maxPathDepth.glossyDepth = Max(maxPathDepth.glossyDepth, specularDepth);
+		if (!cfg.IsDefined("path.pathdepth.transmission"))
+			maxPathDepth.transmissionDepth = specularDepth;
+	}
+	// The walks counted in the diffuse depth before
+	maxPathDepth.subsurfaceDepth = cfg.IsDefined("path.pathdepth.subsurface") ?
+		Max(0, cfg.Get("path.pathdepth.subsurface").Get<int>()) : maxPathDepth.diffuseDepth;
+
+	return maxPathDepth;
+}
+
+// The resolved depths: the older path.maxdepth and path.pathdepth.specular are
+// not written back
+Properties PathTracer::MaxPathDepthToProperties(luxrays::PropertiesConstRef cfg,
+		const luxrays::Properties &defaultProps) {
+	const PathDepthInfo maxPathDepth = GetMaxPathDepth(cfg, defaultProps);
+
+	Properties props;
+	props <<
+			Property("path.pathdepth.total")(maxPathDepth.depth) <<
+			Property("path.pathdepth.diffuse")(maxPathDepth.diffuseDepth) <<
+			Property("path.pathdepth.glossy")(maxPathDepth.glossyDepth) <<
+			Property("path.pathdepth.transmission")(maxPathDepth.transmissionDepth);
+	// No default value: the diffuse depth when it isn't set
+	if (cfg.IsDefined("path.pathdepth.subsurface"))
+		props << Property("path.pathdepth.subsurface")(maxPathDepth.subsurfaceDepth);
+
+	return props;
+}
+
+void PathTracer::ParseOptions(
+	luxrays::PropertiesConstRef cfg,
+	const luxrays::Properties &defaultProps
+) {
+	// Path depth settings
+	maxPathDepth = GetMaxPathDepth(cfg, defaultProps);
 
 	// Russian Roulette settings
 	rrType = String2RussianRouletteType(cfg.Get(defaultProps.Get("path.russianroulette.type")).Get<string>());
@@ -1283,27 +1334,7 @@ PropertiesUPtr PathTracer::ToProperties(const Properties &cfg) {
 	auto props_ptr = std::make_unique<Properties>();
 	auto& props = *props_ptr;
 
-	if (cfg.IsDefined("path.maxdepth") &&
-			!cfg.IsDefined("path.pathdepth.total") &&
-			!cfg.IsDefined("path.pathdepth.diffuse") &&
-			!cfg.IsDefined("path.pathdepth.glossy") &&
-			!cfg.IsDefined("path.pathdepth.specular")) {
-		const u_int maxDepth = Max(0, cfg.Get("path.maxdepth").Get<int>());
-		props << 
-				Property("path.pathdepth.total")(maxDepth) <<
-				Property("path.pathdepth.diffuse")(maxDepth) <<
-				Property("path.pathdepth.glossy")(maxDepth) <<
-				Property("path.pathdepth.specular")(maxDepth);
-	} else {
-		props <<
-				cfg.Get(GetDefaultProps()->Get("path.pathdepth.total")) <<
-				cfg.Get(GetDefaultProps()->Get("path.pathdepth.diffuse")) <<
-				cfg.Get(GetDefaultProps()->Get("path.pathdepth.glossy")) <<
-				cfg.Get(GetDefaultProps()->Get("path.pathdepth.specular"));
-		// No default value: the specular depth when it isn't set
-		if (cfg.IsDefined("path.pathdepth.transmission"))
-			props << cfg.Get("path.pathdepth.transmission");
-	}
+	props << MaxPathDepthToProperties(cfg, *GetDefaultProps());
 
 	props <<
 			cfg.Get(GetDefaultProps()->Get("path.hybridbackforward.enable")) <<
@@ -1332,7 +1363,7 @@ PropertiesUPtr PathTracer::GetDefaultProps() {
 			Property("path.pathdepth.total")(6) <<
 			Property("path.pathdepth.diffuse")(4) <<
 			Property("path.pathdepth.glossy")(4) <<
-			Property("path.pathdepth.specular")(6) <<
+			Property("path.pathdepth.transmission")(6) <<
 			Property("path.russianroulette.type")("BOUNCE") <<
 			Property("path.russianroulette.depth")(3) <<
 			Property("path.russianroulette.cap")(.5f) <<

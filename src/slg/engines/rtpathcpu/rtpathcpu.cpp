@@ -150,10 +150,7 @@ PropertiesUPtr RTPathCPURenderEngine::ToProperties(const Properties &cfg) {
 			// Overwrite some PathCPURenderEngine property
 			//------------------------------------------------------------------
 			cfg.Get(GetDefaultProps()->Get("renderengine.type")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.total")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.diffuse")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.glossy")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.specular")) <<
+			PathTracer::MaxPathDepthToProperties(cfg, *GetDefaultProps()) <<
 			//------------------------------------------------------------------
 			cfg.Get(GetDefaultProps()->Get("rtpathcpu.zoomphase.size")) <<
 			cfg.Get(GetDefaultProps()->Get("rtpathcpu.zoomphase.weight"));
@@ -176,7 +173,7 @@ PropertiesUPtr RTPathCPURenderEngine::GetDefaultProps() {
 			Property("path.pathdepth.total")(5) <<
 			Property("path.pathdepth.diffuse")(3) <<
 			Property("path.pathdepth.glossy")(3) <<
-			Property("path.pathdepth.specular")(3) <<
+			Property("path.pathdepth.transmission")(3) <<
 			//------------------------------------------------------------------
 			Property("rtpathcpu.zoomphase.size")(4) <<
 			Property("rtpathcpu.zoomphase.weight")(.1f);

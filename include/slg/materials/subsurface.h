@@ -65,6 +65,8 @@ public:
 
 	// The medium of the walk at the entry point
 	virtual const Material *GetSubsurfaceWalkMaterial() const { return this; }
+	// The base lobe of an entry is the walk only
+	virtual bool HasDiffuseBesideSubsurfaceWalk() const { return false; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const;
 

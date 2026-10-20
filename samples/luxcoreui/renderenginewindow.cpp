@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
 #include <thread>
 
@@ -166,28 +167,36 @@ void RenderEngineWindow::PathGUI(const std::unique_ptr<Properties> & props, bool
 		}
 		LuxCoreApp::HelpMarker("path.pathdepth.diffuse");
 
+		// The glossy depth covers the rough and the sharp reflections (an
+		// older path.pathdepth.specular is the minimum, see PathTracer)
 		ival = props->Get("path.pathdepth.glossy").Get<int>();
+		if (props->IsDefined("path.pathdepth.specular"))
+			ival = std::max(ival, props->Get("path.pathdepth.specular").Get<int>());
 		if (ImGui::InputInt("Total maximum glossy recursion bounces", &ival)) {
 			props->Set(Property("path.pathdepth.glossy")(ival));
+			props->Delete("path.pathdepth.specular");
 			modifiedProps = true;
 		}
 		LuxCoreApp::HelpMarker("path.pathdepth.glossy");
 
-		ival = props->Get("path.pathdepth.specular").Get<int>();
-		if (ImGui::InputInt("Total maximum specular recursion bounces", &ival)) {
-			props->Set(Property("path.pathdepth.specular")(ival));
-			modifiedProps = true;
-		}
-		LuxCoreApp::HelpMarker("path.pathdepth.specular");
-
-		// The specular depth when it isn't set
+		// The older specular depth, or 6, when it isn't set
 		ival = props->IsDefined("path.pathdepth.transmission") ?
-			props->Get("path.pathdepth.transmission").Get<int>() : props->Get("path.pathdepth.specular").Get<int>();
+			props->Get("path.pathdepth.transmission").Get<int>() :
+			props->Get(Property("path.pathdepth.specular")(6)).Get<int>();
 		if (ImGui::InputInt("Total maximum transmission recursion bounces", &ival)) {
 			props->Set(Property("path.pathdepth.transmission")(ival));
 			modifiedProps = true;
 		}
 		LuxCoreApp::HelpMarker("path.pathdepth.transmission");
+
+		// The diffuse depth when it isn't set
+		ival = props->IsDefined("path.pathdepth.subsurface") ?
+			props->Get("path.pathdepth.subsurface").Get<int>() : props->Get("path.pathdepth.diffuse").Get<int>();
+		if (ImGui::InputInt("Total maximum subsurface recursion bounces", &ival)) {
+			props->Set(Property("path.pathdepth.subsurface")(ival));
+			modifiedProps = true;
+		}
+		LuxCoreApp::HelpMarker("path.pathdepth.subsurface");
 	}
 
 	if (ImGui::CollapsingHeader("Russian Roulette", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {

@@ -225,10 +225,7 @@ PropertiesUPtr RTPathOCLRenderEngine::ToProperties(const Properties &cfg) {
 			// Overwrite some TilePathOCLRenderEngine property
 			//------------------------------------------------------------------
 			cfg.Get(GetDefaultProps()->Get("renderengine.type")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.total")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.diffuse")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.glossy")) <<
-			cfg.Get(GetDefaultProps()->Get("path.pathdepth.specular")) <<
+			PathTracer::MaxPathDepthToProperties(cfg, *GetDefaultProps()) <<
 			cfg.Get(GetDefaultProps()->Get("tilepath.sampling.aa.size")) <<
 			cfg.Get(GetDefaultProps()->Get("tilepathocl.devices.maxtiles")) <<
 			//------------------------------------------------------------------
@@ -253,7 +250,7 @@ PropertiesUPtr RTPathOCLRenderEngine::GetDefaultProps() {
 			Property("path.pathdepth.total")(5) <<
 			Property("path.pathdepth.diffuse")(3) <<
 			Property("path.pathdepth.glossy")(3) <<
-			Property("path.pathdepth.specular")(3) <<
+			Property("path.pathdepth.transmission")(3) <<
 			Property("tilepath.sampling.aa.size")(1) <<
 			Property("tilepathocl.devices.maxtiles")(1) <<
 			//------------------------------------------------------------------

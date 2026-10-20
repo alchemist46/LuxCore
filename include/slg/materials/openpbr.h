@@ -69,6 +69,7 @@ public:
 	virtual bool GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const;
 
 	virtual const Material *GetSubsurfaceWalkMaterial() const { return subsurfaceWalk ? this : nullptr; }
+	virtual bool HasDiffuseBesideSubsurfaceWalk() const { return diffuseBesideWalk; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
 		luxrays::Spectrum *radius, float *anisotropy) const;
 
@@ -116,7 +117,7 @@ private:
 	bool thinWalled;
 
 	BSDFEvent eventTypes, regularizedEventTypes;
-	bool refractive, subsurfaceWalk, isDelta;
+	bool refractive, subsurfaceWalk, diffuseBesideWalk, isDelta;
 };
 
 }

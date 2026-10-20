@@ -31,8 +31,9 @@ PathDepthInfo::PathDepthInfo() {
 	depth = 0;
 	diffuseDepth = 0;
 	glossyDepth = 0;
-	specularDepth = 0;
 	transmissionDepth = 0;
+	subsurfaceDepth = 0;
+	rouletteDepth = 0;
 }
 
 BSDFEvent PathDepthInfo::GetDepthEvent(const BSDF &bsdf, const BSDFEvent event) {
@@ -45,14 +46,20 @@ BSDFEvent PathDepthInfo::GetDepthEvent(const BSDF &bsdf, const BSDFEvent event) 
 
 void PathDepthInfo::IncDepths(const BSDFEvent event) {
 	++depth;
-	if ((event & TRANSMIT) && (event & (GLOSSY | SPECULAR)))
+	// The entry of a walk is DIFFUSE | TRANSMIT | SUBSURFACE
+	if (event & SUBSURFACE) {
+		++subsurfaceDepth;
+		++rouletteDepth;
+	} else if ((event & TRANSMIT) && (event & (GLOSSY | SPECULAR)))
 		++transmissionDepth;
-	else if (event & DIFFUSE)
+	else if (event & DIFFUSE) {
 		++diffuseDepth;
-	else if (event & GLOSSY)
+		++rouletteDepth;
+	} else if (event & (GLOSSY | SPECULAR)) {
 		++glossyDepth;
-	else if (event & SPECULAR)
-		++specularDepth;
+		if (event & GLOSSY)
+			++rouletteDepth;
+	}
 }
 
 // The possible events are a mask: a glossy or specular kind with TRANSMIT may
@@ -60,13 +67,16 @@ void PathDepthInfo::IncDepths(const BSDFEvent event) {
 bool PathDepthInfo::IsLastPathVertex(const PathDepthInfo &maxPathDepth, const BSDFEvent possibleEvents) const {
 	return (depth + 1 >= maxPathDepth.depth) ||
 			((possibleEvents & DIFFUSE) && (diffuseDepth + 1 >= maxPathDepth.diffuseDepth)) ||
-			((possibleEvents & GLOSSY) && (possibleEvents & REFLECT) && (glossyDepth + 1 >= maxPathDepth.glossyDepth)) ||
-			((possibleEvents & SPECULAR) && (possibleEvents & REFLECT) && (specularDepth + 1 >= maxPathDepth.specularDepth)) ||
+			((possibleEvents & (GLOSSY | SPECULAR)) && (possibleEvents & REFLECT) && (glossyDepth + 1 >= maxPathDepth.glossyDepth)) ||
 			((possibleEvents & (GLOSSY | SPECULAR)) && (possibleEvents & TRANSMIT) &&
 				(transmissionDepth + 1 >= maxPathDepth.transmissionDepth));
 }
 
+bool PathDepthInfo::CanStartSubsurfaceWalk(const PathDepthInfo &maxPathDepth) const {
+	return (subsurfaceDepth + 1 < maxPathDepth.subsurfaceDepth);
+}
+
 u_int PathDepthInfo::GetRRDepth() const {
-	return diffuseDepth + glossyDepth;
+	return rouletteDepth;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

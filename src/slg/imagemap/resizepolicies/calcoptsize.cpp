@@ -115,7 +115,7 @@ void ImageMapResizePolicy::RenderFunc(
 	maxPathDepthInfo.depth = maxPathDepth;
 	maxPathDepthInfo.diffuseDepth = maxPathDepth;
 	maxPathDepthInfo.glossyDepth = maxPathDepth;
-	maxPathDepthInfo.specularDepth = maxPathDepth;
+	maxPathDepthInfo.subsurfaceDepth = maxPathDepth;
 	maxPathDepthInfo.transmissionDepth = maxPathDepth;
 
 	//--------------------------------------------------------------------------
