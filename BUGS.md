@@ -1,0 +1,172 @@
+# Known bugs
+
+Bugs and issues found during a task that were not fixed right away. See "Keep the bug list" in [CLAUDE.md](CLAUDE.md) for the rules. Remove an entry when it is fixed.
+
+The first entries were collected on 2026-10-20 from "Known open issues" in [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) (the "Found" date is the date given there) and from [SPEEDUP_CHANGES.md](SPEEDUP_CHANGES.md); the plan has the full measurements. Entries the plan already marks as fixed are not listed.
+
+## Entry format
+
+```
+### <short title>
+- Found: YYYY-MM-DD
+- Area: engine | material | texture | light | film | addon | build | tests | ...
+- Problem: what happens, and what was expected
+- Reproduce: scene, engine, command, spp
+- Notes: cause, suspects, what was ruled out
+```
+
+## Open
+
+### Render-thread segfaults when many tests run in one process
+- Found: 2026-10-13
+- Area: engine, tests
+- Problem: SIGSEGV or SIGBUS in a CPU render thread in the middle of a render, roughly once every 20-160 tests (every 20-90 with `--filter OCL`). Each crashed test passes when re-run alone.
+- Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device; `--filter HaltEdit` (PATHCPU, 12 threads, RANDOM sampler, `simple` scene) crashed in 2 of 3 runs. Single `*_PATHOCL_METROPOLIS` tests on the HIP device (`GlassMaterial`, `ImageMapTexture`) crash on their own.
+- Notes: the frames look overwritten (float-like values in saved pointers). Not a stop-time use-after-free. With `opencl.native.threads.count = 0` 0 of 10 runs crashed, so the suspect is the native CPU threads that PATHOCL runs beside the GPU (Metropolis sampler); the GPU kernels are not involved. A `-fstack-protector-all` build passed 8 runs. Next step: a LuxCore-only ASan build (needs `libasan`/`libubsan` on the development machine).
+
+### Scene serialization crashes (.bcf, .rsm, .bsc)
+- Found: 2026-10-15
+- Area: engine
+- Problem: `.bcf` and `.rsm` serialization of scenes with instances crashes (`observer_ptr<TriangleMesh>` of `InstanceTriangleMesh`). `RenderConfig::serialize()` is empty, so `.rsm` files never contained the configuration and the scene. `Scene.Save()` of `.bsc` segfaults in `ExtMeshCache::GetRealFileName()` (from `SceneObject::ToProperties()`) for any scene with a mesh object, and loading a `.bsc` with an image map fails with `class version St10unique_ptrIN3slg8ImageMapE...`.
+- Reproduce: save any scene with a mesh object as `.bsc`; save a scene with instances as `.bcf`.
+- Notes: the same in the build before the working colour space. The cache saves its image maps through another pointer type than it loads them with. The serialization hook of the working colour space could not be tested because of this.
+
+### GPU environment light sampling with the visibility cache
+- Found: 2026-10-15
+- Area: engine (OpenCL/HIP)
+- Problem: `LIGHTS_PARAM` (`light_types.cl`) passes `elvcTilesXCount` twice, so every GPU function that gets the light parameters sees the X tile count of the env. light visibility cache as its Y count (`EnvLightVisibilityCache_Sample` scales `uv.y` and the pdf with it). Wrong GPU env. light sampling when the cache has different X and Y tile counts.
+- Reproduce: CPU/GPU parity check on an env.-lit scene with the visibility cache enabled.
+- Notes: since the OpenCL port of the 2-level cache (`e5813b8cc`). To be fixed on its own.
+
+### CPU/GPU gap of 2% on the working colour space test scene
+- Found: 2026-10-15
+- Area: engine, material
+- Problem: PATHOCL renders 2.2% darker in red and 1.7% in green than PATHCPU.
+- Reproduce: `wcs.py --scene full` (gold fresnel-preset metal2, Cauchy-fresnel metal2, dispersive glass with a thin film, image-map matte, sun, sky2, a point light with a temperature, emission with a temperature), 2 seeds each, 256 spp.
+- Notes: the same in `rec709` and in the build before. A scene with only the glass, rough glass, Disney and sky2 agrees to 0.3%, so the gap is in one of the other elements. Not bisected yet. The Disney 0.1-0.2% gap was not re-measured after the Disney rebuild (the furnace agrees within 0.03%).
+
+### WHITE_BALANCE makes the image black with `normalize = false`
+- Found: 2026-10-15
+- Area: film
+- Problem: the default `normalize = false` gives a black image: the white point of `TemperatureToWhitePoint()` is not normalized (values in the tens of thousands), so the reverse scale is about 1e-5.
+- Reproduce: enable the WHITE_BALANCE image pipeline plugin without setting `normalize`.
+- Notes: the same in every build; BlendLuxCore always sets `normalize = true`. Either normalize by default or divide by the white point's luminance.
+
+### Dark values of byte image maps are quantized after decoding
+- Found: 2026-10-17
+- Area: texture
+- Problem: byte image maps decoded by a gamma or an OCIO transform are stored back in bytes, already linear, so the dark values are quantized (sRGB 30/255 becomes 3/255 = 0.0118 instead of 0.013). Banding in dark gradients, up to 10% off Cycles on small channels.
+- Reproduce: render a dark sRGB byte texture and compare with Cycles.
+- Notes: the gamma path always did it. Storing decoded byte images as half floats would fix it at twice the memory.
+
+### Image is one row off Cycles
+- Found: 2026-10-17
+- Area: engine (cameras)
+- Problem: the cameras flip the film row with `filmHeight - filmY - 1` while the pixel centres are at `j + 0.5`. A diffuse sphere at 64x64 reads 1.075 of Cycles unshifted and 1.001 shifted by one row.
+- Reproduce: `tests/test_openpbr_principled.py` (it aligns the two images first).
+- Notes: found during BlendLuxCore work, measured again 2026-10-19.
+
+### PATHOCL halt bias with the subsurface material
+- Found: 2026-10-18
+- Area: engine (PATHOCL)
+- Problem: a subsurface walk takes one iteration per step, so the long walks (the darker ones) are the paths in flight at the halt, and a subsurface sphere reads up to 1.8% too bright at 64 spp (0.2% at 512).
+- Reproduce: subsurface sphere, PATHOCL, `batch.haltspp = 64`.
+- Notes: the general halt bias (paths in flight) was fixed on 2026-10-18; this is the opposite effect of the subsurface walks.
+
+### Scattering media behind smooth boundaries lose energy
+- Found: 2026-10-18
+- Area: material, engine (volumes)
+- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`): the delta `glass` reads 0.630 at sigma_s 1 on PATHCPU, PATHOCL and (0.71) BIDIRCPU, as much with `interiorior = 1.0001`, while the `null` material around the same volume is lossless (0.999). The rough OpenPBR glass is close (0.994 at sigma_s 1, roughness 0.3) but reads 0.894 at sigma_s 4 and 0.910 at sigma_s 4 with roughness 0; BIDIRCPU reads it 3% high at sigma_s 1.
+- Reproduce: white furnace with a unit sphere and a white homogeneous interior volume, glass or OpenPBR surface.
+- Notes: the depth limits are not the cause (0.633 at depth 1000). Rough glass with a scattering interior is too noisy to read at 64-256 spp (fireflies from the 50/50 reflect/refract choice).
+
+### BiDir reads 2-4% low on rough glass
+- Found: 2026-10-18
+- Area: engine (BIDIRCPU), material
+- Problem: BiDir is 2-4% low on rough glass and on the OpenPBR glass alike (OpenPBR 0.990/0.973/0.966 at alpha 0.2/0.5/1, half glass over a white base 0.955). The path engines read 0.997/0.992 at alpha 0.5/1.
+- Reproduce: white furnace with a rough glass sphere, BIDIRCPU against PATHCPU.
+- Notes: not the interface's compensation. The `fromLight` branches of `Sample()` have not been derived against the adjoint BSDF.
+
+### Dispersion draws one wavelength per vertex
+- Found: 2026-10-19
+- Area: material
+- Problem: a photon keeps its wavelength along the path; here every vertex draws its own, so a vertex is the average of its wavelengths. Exact for one interface, not along a chain of interfaces. Smooth dispersive glass passes the furnace (0.997); OpenPBR rough glass at roughness 0.3 reads 1.5-2% low near the total internal reflection. The glass material does the same (its -1.3%).
+- Reproduce: furnace with dispersive rough glass at roughness 0.3.
+- Notes: tinting the reflection too multiplies independent colours (relative std 0.07 -> 0.50). The fix is a wavelength per path: a sampler dimension kept in the path state of every engine and passed to the materials through the hit point, applied once at the first dispersive vertex.
+
+### OpenPBR subsurface is up to 10% brighter than Cycles
+- Found: 2026-10-19
+- Area: material
+- Problem: skin-like color (0.8, 0.5, 0.4), radius (1, 0.2, 0.1) x 0.2 reads 1.02/1.10/1.10 of Cycles' Principled BSDF. Without the specular layer 1.02-1.05; a white medium 1.003.
+- Reproduce: `tests/test_openpbr_principled.py`-style comparison against Cycles.
+- Notes: Cycles' walk exits through the rough dielectric (Fresnel, some light goes back into the medium), OpenPBR's exits diffusely.
+
+### OpenPBR thin film differs from Cycles
+- Found: 2026-10-19
+- Area: material
+- Problem: the thin film is `CalcFilmColor()`, LuxCore's old model, not Cycles' (Belcour & Barla 2017, with the conductor phase shift). 400 nm on a dark dielectric reads 1.22/0.87/0.89 of Cycles; on a metal the interference color is another one (magenta against yellow-green).
+- Reproduce: OpenPBR thin film at 400 nm, compare with Cycles.
+- Notes: implementing the Belcour & Barla model would fix it.
+
+### Light tracing: Metropolis importance and the first-vertex connection
+- Found: 2026-10-16
+- Area: engine (light tracing)
+- Problem: with `path.hybridbackforward.enable`, the light-path Metropolis sampler computes its importance from all connections, including the non-caustic ones it discards (`metropolis.cpp:262` vs `:333`), and every light path connects its first vertex to the camera although that connection can never be caustic (`pathtracer.cpp:900`, `pathinfo.cpp:150`). Unbiased but inefficient.
+- Reproduce: hybrid back/forward on with a Metropolis light path sampler.
+- Notes: items L1 and L2 of the light-tracing block in Phase 2 of the plan.
+
+### Caustics seen through a specular surface are missing with light tracing
+- Found: 2026-10-16
+- Area: engine (light tracing)
+- Problem: a floor caustic reflected in a mirror or seen through a window is produced by neither side: the eye path drops it as caustic and the light tracer connects only directly to the lens. Missing energy with light tracing on, unless PhotonGI's caustic cache is on too.
+- Reproduce: caustic on a floor, seen in a mirror, with `path.hybridbackforward.enable`.
+- Notes: MNEE covers part of it; the rest is a bidirectional connection, out of scope for the hybrid.
+
+### BiDir Russian roulette factor is inconsistent in the MIS weights
+- Found: 2026-10-17
+- Area: engine (BIDIRCPU)
+- Problem: the BiDir engines compute the Russian-roulette factor of their MIS weights from `bsdfEval` (f cos) while the path continues with a factor from the sample weight (f cos / pdf), the inconsistency fixed in the path engines.
+- Reproduce: not checked against a BSDF-only reference yet.
+- Notes: needs a BSDF-only reference render to see whether the image is biased.
+
+### Direct light sampling is off for emissive meshes above 256 triangles
+- Found: 2026-10-16
+- Area: light
+- Problem: `emission.directlightsampling.type = AUTO` (the default) disables direct light sampling for emissive meshes with more than 256 triangles; they are found by BSDF rays only (noisy). The classroom's lamp meshes are such lights.
+- Reproduce: classroom scene.
+- Notes: the light tree keeps the limit (measured 2026-10-16): lifting it lets decorative lamp meshes take the picks of the real lights next to them.
+
+### GPU Metropolis sampler bias with short chains
+- Found: 2026-10-17
+- Area: engine (PATHOCL)
+- Problem: each task estimates the mean image luminance (the Kelemen normalization) from its own large steps, and each chain starts at a uniform sample, not at one drawn proportionally to the luminance. Both bias short chains in opposite directions (simple scene, 150x100, one task per pixel, at the test halt: +0.9%; with a fixed exact luminance and 512K tasks the start-up alone is -20% at 267 spp).
+- Reproduce: `*_PATHOCL_METROPOLIS` tests; small films or few spp.
+- Notes: a global luminance estimate (a reduction over the tasks) and a resampled start (PSSMLT bootstrap) would remove both. Only matters when the chains are short.
+
+### GPU AOV problems: SHADING_NORMAL not deterministic, NaN in DIRECT_DIFFUSE_REFLECT
+- Found: 2026-10-15 (G7 step 4 AOV check; the plan gives no exact date)
+- Area: film (AOV), engine (OpenCL/HIP)
+- Problem: on the GPU the SHADING_NORMAL output is not deterministic: the sample that wins the depth test overwrites the pixel, and with depth ties (pass-through surfaces, volumes) the winner depends on the timing (2 to 10 pixels of transparencyball at 160x120 differ between two runs of the same build). The same check shows a NaN in DIRECT_DIFFUSE_REFLECT on the Cornell box (TILEPATHOCL, both builds), not looked into.
+- Reproduce: transparencyball at 160x120, SHADING_NORMAL AOV, two runs; Cornell box with TILEPATHOCL and DIRECT_DIFFUSE_REFLECT.
+- Notes: the NaN has not been investigated.
+
+### PATHOCL `stats.renderengine.pass` is short after Stop() at a halt spp
+- Found: 2026-10-17
+- Area: engine (PATHOCL)
+- Problem: 36 reported, 65 on the film's SAMPLECOUNT at 320x320 with `batch.haltspp = 64`. The film is right; the statistic lags the last transfers.
+- Reproduce: PATHOCL, 320x320, `batch.haltspp = 64`, read the statistic after Stop().
+- Notes: measure the spp from the film's SAMPLECOUNT output meanwhile.
+
+### pyluxcore crashes at exit when a Python log handler is left set
+- Found: 2026-10-19
+- Area: pyluxcore
+- Problem: a crash at interpreter exit after `pyluxcore.Init(lambda s: None)` unless `pyluxcore.SetLogHandler(None)` is called first.
+- Reproduce: `pyluxcore.Init(lambda s: None)` and exit the interpreter.
+- Notes: see also the memory note on the log handler dropping thread logs.
+
+### EnvironmentCamera TILEPATHOCL fails at the threshold
+- Found: 2026-10-15
+- Area: tests
+- Problem: the `EnvironmentCamera` TILEPATHOCL unit test is a known failure on the HIP device, at the comparison threshold.
+- Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device.
+- Notes: listed in [SPEEDUP_CHANGES.md](SPEEDUP_CHANGES.md) as a known failure; the other one listed there (Cloth on the GPU) was fixed in `8b4b32b64`.

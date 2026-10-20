@@ -24,6 +24,17 @@ After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon
 5. A commit in this repo that changes the engine also needs a fresh `pyluxcore` wheel, which Blender loads from `path_to_wheel` in `blc_settings.json`. Rebuild the wheel first, or say that it was not rebuilt.
 6. Do not bump `PYLUXCORE_VERSION` in the addon's `luxloader/__init__.py` until that version is on PyPI.
 
+## Keep the bug list
+
+[BUGS.md](BUGS.md) in the repo root is the list of known bugs and issues that are not fixed yet. Every bug or issue found during a task that is not resolved right away goes into it, so it can be fixed later:
+
+1. Add an entry as soon as the problem is found, before moving on, even when it is unrelated to the current task or only suspected.
+2. Each entry has a short title, the date found, the area (engine, material, film, addon, build, tests, and so on), what happens, how to reproduce it (scene, engine, command, spp), and what is already known about the cause or ruled out.
+3. Do not add a problem that is fixed in the same task.
+4. When an entry is fixed, remove it from the list and mention the entry in the fix commit message.
+5. Mention new entries in the final report of the task.
+6. Commit changes to `BUGS.md` together with the work during which the problem was found, or on their own.
+
 ## Keep render measurements short
 
 Use high sample counts only when a result needs them, so that iterations stay fast. Long references (thousands of spp) are rarely needed:
