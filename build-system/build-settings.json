@@ -15,7 +15,8 @@
     "repo": "LuxCore",
     "release": "hiprt-3.1.0.cb09c56-1",
     "sha256": {
-      "Windows-X64": "68ce78e0a3f067ae050f977d599e0a6a779d1a38c6eed0b287d1e338971f4af9"
+      "Windows-X64": "68ce78e0a3f067ae050f977d599e0a6a779d1a38c6eed0b287d1e338971f4af9",
+      "Linux-X64": "d1bde0d3325f86f981e0722d07a63df138d10d20d809afd3794d45853635c2d3"
     }
   },
   "Build": {
