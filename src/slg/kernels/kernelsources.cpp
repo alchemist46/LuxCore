@@ -245,5 +245,24 @@ void GetKernelParamters(vector<string> &params,
 	}
 }
 
+void AddPathKernelVariantParameters(vector<string> &params,
+		const bool privateEvalStack, const bool subsurface) {
+	if (privateEvalStack) {
+		params.push_back("-D PARAM_EVALSTACK_PRIVATE");
+		params.push_back("-D PARAM_MATERIAL_EVALSTACK_SIZE=" + luxrays::ToString(PrivateMaterialEvalStackSize));
+		params.push_back("-D PARAM_TEXTURE_EVALSTACK_SIZE=" + luxrays::ToString(PrivateTextureEvalStackSize));
+	}
+
+	if (subsurface)
+		params.push_back("-D PARAM_ENABLE_SUBSURFACE");
+}
+
+vector<string> GetHIPPathCompileOptions() {
+	// -ffast-math -fno-finite-math-only is the hiprtc equivalent of CUDA's
+	// --use_fast_math. The kernels use isinf()/isnan(), which -ffast-math
+	// alone folds to false.
+	return { "-ffast-math", "-fno-finite-math-only" };
+}
+
 }
 }

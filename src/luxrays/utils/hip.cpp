@@ -28,6 +28,7 @@
 #include "luxrays/luxrays.h"
 #include "luxrays/utils/utils.h"
 #include "luxrays/utils/config.h"
+#include "luxrays/utils/embeddedhip.h"
 #include "luxrays/utils/hipcache.h"
 #include "luxrays/utils/oclcache.h"
 
@@ -37,10 +38,26 @@ namespace luxrays {
 // hipKernelPersistentCache
 //------------------------------------------------------------------------------
 
+// True if the environment variable is set to anything but "" or "0"
+static bool GetEnvFlag(const char *name) {
+	const char *value = getenv(name);
+	return value && value[0] && (std::string(value) != "0");
+}
+
 hipKernelPersistentCache::hipKernelPersistentCache(const std::string &applicationName,
 		const std::string &gpuArch) : appName(applicationName), arch(gpuArch) {
 	// Create the cache directory
 	std::filesystem::create_directories(GetCacheDir(appName));
+
+	// The embedded kernels are not used when the code would differ:
+	// LUXRAYS_HIP_COMPILER_OPTIONS adds compiler options. They can be
+	// disabled with LUXRAYS_HIP_DISABLE_PRECOMPILED_KERNELS=1, e.g. to compare
+	// them with the architecture specific code compiled by hiprtc.
+	const char *extraOpts = getenv("LUXRAYS_HIP_COMPILER_OPTIONS");
+	if (HasEmbeddedHIPKernels() &&
+			!(extraOpts && extraOpts[0]) &&
+			!GetEnvFlag("LUXRAYS_HIP_DISABLE_PRECOMPILED_KERNELS"))
+		precompiledFamily = GetHIPBakedKernelFamily(arch);
 }
 
 hipKernelPersistentCache::~hipKernelPersistentCache() {
@@ -53,18 +70,11 @@ std::filesystem::path hipKernelPersistentCache::GetCacheDir(const std::string &a
 std::vector<std::string> hipKernelPersistentCache::GetCompilerOptions(const std::string &gpuArch) {
 	std::vector<std::string> opts = {
 		// Compile for the architecture of the device the program will run on
-		"--offload-arch=" + gpuArch,
-		"-O3",
-		// The OpenCL-style sources produce a lot of harmless warnings once
-		// compiled as HIP (unused variables, sign conversions, etc.)
-		"-w",
-		// By default, kernels are compiled to run work groups of up to 1024
-		// threads, which halves the registers available to each thread. The
-		// render engines use much smaller work groups and the kernels are
-		// register hungry: on gfx1030, this is about 20% faster (the same
-		// speed of the AMD OpenCL compiler) and spills less to the stack.
-		"--gpu-max-threads-per-block=" + std::to_string(MaxWorkGroupSize)
+		"--offload-arch=" + gpuArch
 	};
+	// The options shared with the baked kernels (see hipkernel.h)
+	const std::vector<std::string> baseOpts = GetHIPBaseCompilerOptions();
+	opts.insert(opts.end(), baseOpts.begin(), baseOpts.end());
 
 	// For experiments (e.g. "-mllvm -amdgpu-num-vgpr=192"): extra options,
 	// separated by spaces. They are part of the cache key.
@@ -85,6 +95,19 @@ bool hipKernelPersistentCache::ForcedCompileCodeObject(
 ) {
 	if (error)
 		*error = "";
+
+	if (!isHiprtcAvailable) {
+		if (error) {
+			*error = "There is no precompiled kernel for this program on " + gpuArch +
+					" and it can't be compiled: that requires the HIP run-time compiler (hiprtc), "
+#if defined(_WIN32)
+					"installed with the AMD HIP SDK (HIP_PATH)";
+#else
+					"the ROCm hiprtc library (libhiprtc.so)";
+#endif
+		}
+		return false;
+	}
 
 	hiprtcProgram prog;
 	CHECK_HIPRTC_ERROR(hiprtcCreateProgram(&prog, kernelSource.c_str(), programName.c_str(), 0, nullptr, nullptr));
@@ -198,15 +221,62 @@ bool hipKernelPersistentCache::CompileCodeObject(const std::vector<std::string> 
 	return true;
 }
 
-hipModule_t hipKernelPersistentCache::Compile(const std::vector<std::string> &kernelsParameters,
-		const std::string &kernelSource, const std::string &programName,
-		bool *cached, std::string *error) {
-	std::unique_ptr<char[]> code;
-	size_t codeSize;
-	if (!CompileCodeObject(kernelsParameters, kernelSource, programName, &code, &codeSize, cached, error))
+const unsigned char *hipKernelPersistentCache::GetPrecompiled(
+		const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource) const {
+	if (precompiledFamily.empty())
+		return nullptr;
+
+	return GetEmbeddedHIPKernel(GetHIPBakedKernelKey(kernelsParameters, kernelSource),
+			precompiledFamily, nullptr);
+}
+
+bool hipKernelPersistentCache::HasPrecompiled(const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource) const {
+	return GetPrecompiled(kernelsParameters, kernelSource) != nullptr;
+}
+
+hipModule_t hipKernelPersistentCache::LoadPrecompiled(
+		const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource, std::string *warning) const {
+	const unsigned char *code = GetPrecompiled(kernelsParameters, kernelSource);
+	if (!code)
 		return nullptr;
 
 	hipModule_t module;
+	const hipError_t err = hipModuleLoadData(&module, code);
+	if (err != hipSuccess) {
+		*warning = "Unable to load the precompiled kernels for " + precompiledFamily +
+				" (" + hipGetErrorName(err) + "): they are compiled instead\n";
+		return nullptr;
+	}
+
+	return module;
+}
+
+hipModule_t hipKernelPersistentCache::Compile(const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource, const std::string &programName,
+		CodeOrigin *origin, std::string *error) {
+	std::string warning;
+	hipModule_t module = LoadPrecompiled(kernelsParameters, kernelSource, &warning);
+	if (module) {
+		*origin = CodeOrigin::PRECOMPILED;
+		if (error)
+			*error = "";
+		return module;
+	}
+
+	std::unique_ptr<char[]> code;
+	size_t codeSize;
+	bool cached;
+	const bool compiled = CompileCodeObject(kernelsParameters, kernelSource, programName,
+			&code, &codeSize, &cached, error);
+	if (error)
+		*error = warning + *error;
+	if (!compiled)
+		return nullptr;
+	*origin = cached ? CodeOrigin::CACHED : CodeOrigin::COMPILED;
+
 	CHECK_HIP_ERROR(hipModuleLoadData(&module, code.get()));
 
 	return module;
@@ -214,36 +284,52 @@ hipModule_t hipKernelPersistentCache::Compile(const std::vector<std::string> &ke
 
 std::vector<hipModule_t> hipKernelPersistentCache::CompileMultiple(
 		const std::vector<std::tuple<std::vector<std::string>, std::string, std::string>> &kernels,
-		std::vector<bool> *cached, std::vector<std::string> *errors) {
+		std::vector<CodeOrigin> *origins, std::vector<std::string> *errors) {
 	const size_t count = kernels.size();
 
+	std::vector<hipModule_t> modules(count, nullptr);
 	std::vector<std::unique_ptr<char[]>> codes(count);
 	std::vector<size_t> codeSizes(count, 0);
 	std::vector<char> compiled(count, 0);
-	std::vector<char> isCached(count, 0);
+	std::vector<CodeOrigin> codeOrigins(count, CodeOrigin::COMPILED);
+	std::vector<std::string> warnings(count);
 	std::vector<std::string> compileErrors(count);
 
-	// Compile the code objects in parallel: no HIP device is required
+	// Load the precompiled programs on the calling thread, where the device is
+	// current
+	for (size_t i = 0; i < count; ++i) {
+		const auto &[params, source, name] = kernels[i];
+
+		modules[i] = LoadPrecompiled(params, source, &warnings[i]);
+		if (modules[i])
+			codeOrigins[i] = CodeOrigin::PRECOMPILED;
+	}
+
+	// Compile the other code objects in parallel: no HIP device is required
 	tbb::parallel_for(tbb::blocked_range<size_t>(0, count),
 		[&](const tbb::blocked_range<size_t> &range) {
 			for (size_t i = range.begin(); i < range.end(); ++i) {
+				if (modules[i])
+					continue;
+
 				const auto &[params, source, name] = kernels[i];
 
 				bool c = false;
 				compiled[i] = CompileCodeObject(params, source, name, &codes[i], &codeSizes[i], &c, &compileErrors[i]);
-				isCached[i] = c;
+				if (c)
+					codeOrigins[i] = CodeOrigin::CACHED;
 			}
 		});
 
 	// Load the modules on the calling thread, where the device is current
-	std::vector<hipModule_t> modules(count, nullptr);
 	for (size_t i = 0; i < count; ++i) {
 		if (compiled[i])
 			CHECK_HIP_ERROR(hipModuleLoadData(&modules[i], codes[i].get()));
+		compileErrors[i] = warnings[i] + compileErrors[i];
 	}
 
-	if (cached)
-		cached->assign(isCached.begin(), isCached.end());
+	if (origins)
+		*origins = std::move(codeOrigins);
 	if (errors)
 		*errors = std::move(compileErrors);
 

@@ -192,6 +192,9 @@ public:
 		const std::string &kernelName
 	) override;
 	virtual u_int GetKernelWorkGroupSize(HardwareDeviceKernelRPtr kernel) override;
+	virtual bool HasPrecompiledPrograms() const override;
+	virtual bool HasPrecompiledProgram(const std::vector<std::string> &programParameters,
+		const std::string &programSource) const override;
 	virtual bool HasProgramConstants() const override { return true; }
 	virtual bool SetProgramConstant(HardwareDeviceProgramRef program,
 			const std::string &name, const size_t size, const void *data) override;
@@ -232,8 +235,8 @@ public:
 	// pipeline don't need it.
 	hiprtContext GetHIPRTContext();
 
-	std::vector<std::string> AddKernelOpts(const std::vector<std::string> &programParameters);
-	std::string GetKernelSource(const std::string &kernelSource);
+	std::vector<std::string> AddKernelOpts(const std::vector<std::string> &programParameters) const;
+	std::string GetKernelSource(const std::string &kernelSource) const;
 
 	// Wraps a function of a module not loaded by this device (i.e. a HIPRT
 	// trace kernel), so it can be used with SetKernelArg()/EnqueueKernel()

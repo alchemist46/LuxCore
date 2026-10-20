@@ -150,7 +150,8 @@ Context::Context(LuxRaysDebugHandler handler, PropertiesUPtr&& config)
 	LR_LOG((*this), "HIP support: enabled");
 
 	if (isHipAvailable) {
-		LR_LOG((*this), "HIP support: available (" << hipewHipLibraryName() << ", " << hipewHiprtcLibraryName() << ")");
+		LR_LOG((*this), "HIP support: available (" << hipewHipLibraryName() << ", " <<
+				(isHiprtcAvailable ? hipewHiprtcLibraryName() : "no hiprtc: precompiled kernels only") << ")");
 
 		int driverVersion;
 		CHECK_HIP_ERROR(hipDriverGetVersion(&driverVersion));

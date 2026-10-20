@@ -602,6 +602,196 @@ endif()
 
 #############################################################################
 #
+# Embedded pre-compiled HIP kernels
+#
+#############################################################################
+
+option(LUXRAYS_PRECOMPILE_HIP "Pre-compile the HIP path kernels at build time" ON)
+
+if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE_HIP AND NOT APPLE AND NOT CMAKE_CROSSCOMPILING)
+  # The code objects are device code, the same for every platform: they can
+  # be baked beforehand (e.g. by a Linux CI job) and reused on all the
+  # platforms. LUXRAYS_HIP_BAKED_DIR points to a directory with a
+  # hipmanifest.txt file and the baked <variant>_<family>.co code objects (as
+  # produced by the in-tree bake below, see the hip-kernel-baker target).
+  # When empty, the kernels are baked with the clang of the HIP SDK or ROCm,
+  # if there is one. It can also be set through the environment.
+  set(LUXRAYS_HIP_BAKED_DIR "" CACHE PATH
+    "Directory with pre-baked HIP kernels (hipmanifest.txt and <variant>_<family>.co files). Leave empty to bake them with the HIP SDK or ROCm clang.")
+  if(NOT LUXRAYS_HIP_BAKED_DIR AND DEFINED ENV{LUXRAYS_HIP_BAKED_DIR})
+    file(TO_CMAKE_PATH "$ENV{LUXRAYS_HIP_BAKED_DIR}" LUXRAYS_HIP_BAKED_DIR)
+  endif()
+
+  # HIP_VARIANTS and HIP_BAKE_FAMILIES are defined in
+  # build-system/cmake/KernelFiles.cmake. A local build can bake fewer
+  # families (e.g. only the one of its GPU) to save build time.
+  set(LUXRAYS_HIP_BAKE_FAMILIES "${HIP_BAKE_FAMILIES}" CACHE STRING
+    "The families of architectures the HIP kernels are baked for (a subset of ${HIP_BAKE_FAMILIES})")
+  foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
+    if(NOT hip_family IN_LIST HIP_BAKE_FAMILIES)
+      message(FATAL_ERROR "Unknown family in LUXRAYS_HIP_BAKE_FAMILIES: ${hip_family} (valid: ${HIP_BAKE_FAMILIES})")
+    endif()
+  endforeach()
+
+  set(hip_dir "${GENERATED_DIR}/hip")
+  file(MAKE_DIRECTORY ${hip_dir})
+
+  set(hip_module_sources ${hip_dir}/embeddedhip.cpp)
+  foreach(hip_variant ${HIP_VARIANTS})
+    foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
+      list(APPEND hip_module_sources ${hip_dir}/${hip_variant}_${hip_family}_module.cpp)
+    endforeach()
+  endforeach()
+
+  set(hip_co_files)
+
+  if(LUXRAYS_HIP_BAKED_DIR)
+    #--------------------------------------------------------------------
+    # Use the pre-baked kernels
+    #--------------------------------------------------------------------
+    set(hip_baked_dir "${LUXRAYS_HIP_BAKED_DIR}")
+
+    if(NOT EXISTS ${hip_baked_dir}/hipmanifest.txt)
+      message(FATAL_ERROR "Missing ${hip_baked_dir}/hipmanifest.txt (LUXRAYS_HIP_BAKED_DIR)")
+    endif()
+    foreach(hip_variant ${HIP_VARIANTS})
+      foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
+        if(NOT EXISTS ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
+          message(FATAL_ERROR "Missing ${hip_baked_dir}/${hip_variant}_${hip_family}.co (LUXRAYS_HIP_BAKED_DIR)")
+        endif()
+        list(APPEND hip_co_files ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
+      endforeach()
+    endforeach()
+
+    message(STATUS "Using the pre-baked HIP kernels from ${hip_baked_dir} (${LUXRAYS_HIP_BAKE_FAMILIES})")
+  else()
+    #--------------------------------------------------------------------
+    # Bake the kernels with the HIP SDK or ROCm clang
+    #--------------------------------------------------------------------
+    include("${PROJECT_SOURCE_DIR}/build-system/cmake/HIPCompiler.cmake")
+    find_hip_clang()
+
+    if(NOT HIP_CLANG_EXECUTABLE)
+      message(STATUS "No HIP SDK or ROCm clang found (HIP_PATH, ROCM_PATH, LUXRAYS_HIP_CLANG): HIP kernels pre-compilation disabled, they will be compiled at run time with hiprtc")
+    else()
+      message(STATUS "Pre-compiling the HIP kernels with ${HIP_CLANG_EXECUTABLE} (${LUXRAYS_HIP_BAKE_FAMILIES})")
+
+      # The tool used to write the kernel sources and parameters. It uses only
+      # the kernel sources: no object other than the generated kernel sources
+      # is pulled from the libraries.
+      add_executable(hip-kernel-baker
+        ${PROJECT_SOURCE_DIR}/src/slg/kernels/hipkernelbaker.cpp
+      )
+      # slg-kernels must come before luxrays: kernelsources.cpp.o references
+      # the luxrays kernel sources and the linker doesn't rescan archives.
+      target_link_libraries(hip-kernel-baker PRIVATE
+        slg-kernels
+        luxrays
+        # Headers only (luxrays/utils/utils.h)
+        boost::boost
+      )
+
+      set(hip_baked_dir "${hip_dir}/baked")
+      file(MAKE_DIRECTORY ${hip_baked_dir})
+
+      # Write the kernel sources and parameters for each variant. The tool
+      # rewrites a file only if its content changed, so a rebuild of the tool
+      # (e.g. any change in luxrays) doesn't compile the kernels again.
+      set(hip_baker_outputs ${hip_baked_dir}/hipmanifest.txt)
+      foreach(hip_variant ${HIP_VARIANTS})
+        list(APPEND hip_baker_outputs
+          ${hip_baked_dir}/${hip_variant}.hip
+          ${hip_baked_dir}/${hip_variant}.params
+        )
+      endforeach()
+
+      add_custom_command(
+        OUTPUT ${hip_baker_outputs}
+        COMMAND $<TARGET_FILE:hip-kernel-baker> ${hip_baked_dir}
+        DEPENDS hip-kernel-baker
+        COMMENT "Baking the HIP kernel sources for the pre-compilation"
+      )
+
+      # The header hiprtc includes implicitly, extracted from the hiprtc library
+      # of the same SDK (written only if its content changed)
+      set(hiprtc_header ${hip_baked_dir}/hiprtc_runtime.h)
+      add_custom_command(
+        OUTPUT ${hiprtc_header}
+        COMMAND ${CMAKE_COMMAND}
+          -DBAKER=$<TARGET_FILE:hip-kernel-baker>
+          -DDST=${hiprtc_header}
+          -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/ExtractHiprtcHeader.cmake"
+        DEPENDS
+          hip-kernel-baker
+          "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/ExtractHiprtcHeader.cmake"
+        COMMENT "Extracting the hiprtc runtime header"
+      )
+
+      # Compile each variant for each family. A compilation of the path kernel
+      # takes minutes and GBs of memory: the number of the concurrent ones is
+      # limited (Ninja generators only).
+      set(LUXRAYS_HIP_BAKE_JOBS 4 CACHE STRING "The maximum number of HIP kernels compiled at the same time")
+      set_property(GLOBAL APPEND PROPERTY JOB_POOLS hip_bake=${LUXRAYS_HIP_BAKE_JOBS})
+
+      foreach(hip_variant ${HIP_VARIANTS})
+        foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
+          set(hip_co_file ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
+          list(APPEND hip_co_files ${hip_co_file})
+
+          add_custom_command(
+            OUTPUT ${hip_co_file}
+            COMMAND ${CMAKE_COMMAND}
+              -DHIP_CLANG_EXECUTABLE=${HIP_CLANG_EXECUTABLE}
+              -DFAMILY=${hip_family}
+              -DSRC=${hip_baked_dir}/${hip_variant}.hip
+              -DPARAMS=${hip_baked_dir}/${hip_variant}.params
+              -DHIPRTC_HEADER=${hiprtc_header}
+              -DDST=${hip_co_file}
+              -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
+            DEPENDS
+              ${hip_baked_dir}/${hip_variant}.hip
+              ${hip_baked_dir}/${hip_variant}.params
+              ${hiprtc_header}
+              "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
+            COMMENT "Compiling the ${hip_variant} HIP kernels for ${hip_family}"
+            JOB_POOL hip_bake
+          )
+        endforeach()
+      endforeach()
+    endif()
+  endif()
+
+  if(hip_co_files)
+    # Generate the sources embedding the code objects
+    string(REPLACE ";" "|" hip_families_arg "${LUXRAYS_HIP_BAKE_FAMILIES}")
+    add_custom_command(
+      OUTPUT ${hip_module_sources}
+      COMMAND ${CMAKE_COMMAND}
+        -DINPUT_DIR=${hip_baked_dir}
+        -DOUTPUT_DIR=${hip_dir}
+        -DFAMILIES=${hip_families_arg}
+        -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/GenerateEmbeddedHIP.cmake"
+      DEPENDS
+        ${hip_baked_dir}/hipmanifest.txt
+        ${hip_co_files}
+        "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/GenerateEmbeddedHIP.cmake"
+      COMMENT "Generating the embedded HIP kernels registry"
+    )
+
+    add_library(hip-embedded STATIC ${hip_module_sources})
+  endif()
+endif()
+
+if(NOT TARGET hip-embedded)
+  # No embedded pre-compiled HIP kernels available
+  add_library(hip-embedded STATIC ${PROJECT_SOURCE_DIR}/src/luxrays/utils/embeddedhipstub.cpp)
+endif()
+
+# Note: hip-embedded is linked via the $<LINK_GROUP:RESCAN,...> expression in
+# src/luxcore/CMakeLists.txt, like spirv-embedded
+
+#############################################################################
+#
 # SLG Film library
 #
 #############################################################################

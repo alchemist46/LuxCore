@@ -24,11 +24,10 @@
 #include <fstream>
 #include <cstring>
 
-#include <boost/algorithm/string/replace.hpp>
-
 #include "luxrays/devices/ocldevice.h"
 #include "luxrays/devices/hipdevice.h"
 #include "luxrays/kernels/kernels.h"
+#include "luxrays/utils/hipkernel.h"
 
 using namespace std;
 using namespace luxrays;
@@ -207,16 +206,12 @@ void HIPDevice::PopThreadCurrentDevice() {
 // Kernels handling for hardware (aka GPU) only applications
 //------------------------------------------------------------------------------
 
-vector<string> HIPDevice::AddKernelOpts(const vector<string> &programParameters) {
+vector<string> HIPDevice::AddKernelOpts(const vector<string> &programParameters) const {
 	vector<string> hipProgramParameters = programParameters;
 
-	// HIP kernels are compiled from the same CUDA-flavoured sources, so the
-	// CUDA code paths are enabled too. LUXRAYS_HIP_DEVICE marks the few places
-	// where HIP is different.
-	hipProgramParameters.push_back("-D LUXRAYS_CUDA_DEVICE");
-	hipProgramParameters.push_back("-D LUXRAYS_HIP_DEVICE");
-	// Note: no LUXRAYS_OS_* parameter, as on OpenCL: no kernel uses it, and
-	// the compiled code (and its cache key) must be the same on every OS
+	const vector<string> deviceParameters = GetHIPDeviceKernelParameters();
+	hipProgramParameters.insert(hipProgramParameters.end(),
+			deviceParameters.begin(), deviceParameters.end());
 
 	hipProgramParameters.insert(hipProgramParameters.end(),
 			additionalCompileOpts.begin(), additionalCompileOpts.end());
@@ -263,23 +258,31 @@ static void LoadKernelSource(string &source, const string &programName) {
 	source.assign(istreambuf_iterator<char>(file), istreambuf_iterator<char>());
 }
 
-string HIPDevice::GetKernelSource(const string &kernelSource) {
-	// The pragma only covers functions: file scope tables (always declared at
-	// the start of a line as "__constant <type> <name>[] = { ... }", while the
-	// __constant pointer qualifiers are always indented or follow a "(") must
-	// be explicitly moved to the device
-	string source = "\n" + kernelSource;
-	boost::replace_all(source, "\n__constant ", "\n__constant__ ");
+string HIPDevice::GetKernelSource(const string &kernelSource) const {
+	return GetHIPKernelSource(kernelSource);
+}
 
-	// The OpenCL sources don't mark device functions: NVRTC handles that with
-	// --device-as-default-execution-space, hiprtc with this pragma
-	return
-		"#pragma clang force_cuda_host_device begin\n" +
-		luxrays::ocl::KernelSource_cudadevice_oclemul_types +
-		luxrays::ocl::KernelSource_cudadevice_math +
-		luxrays::ocl::KernelSource_cudadevice_oclemul_funcs +
-		source +
-		"\n#pragma clang force_cuda_host_device end\n";
+// How a program was obtained, for the log
+static string CodeOriginDesc(const hipKernelPersistentCache::CodeOrigin origin,
+		const hipKernelPersistentCache &kernelCache) {
+	switch (origin) {
+		case hipKernelPersistentCache::CodeOrigin::CACHED:
+			return " (cached)";
+		case hipKernelPersistentCache::CodeOrigin::PRECOMPILED:
+			return " (precompiled kernels, " + kernelCache.GetPrecompiledFamily() + ")";
+		default:
+			return "";
+	}
+}
+
+bool HIPDevice::HasPrecompiledPrograms() const {
+	return !kernelCache->GetPrecompiledFamily().empty();
+}
+
+bool HIPDevice::HasPrecompiledProgram(const std::vector<std::string> &programParameters,
+		const std::string &programSource) const {
+	return kernelCache->HasPrecompiled(AddKernelOpts(programParameters),
+			GetKernelSource(programSource));
 }
 
 HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
@@ -299,9 +302,9 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 	DumpKernelSource(hipProgramParameters, hipProgramSource, programName);
 	LoadKernelSource(hipProgramSource, programName);
 
-	bool cached;
+	hipKernelPersistentCache::CodeOrigin origin;
 	string error;
-	hipModule_t module = kernelCache->Compile(hipProgramParameters, hipProgramSource, programName, &cached, &error);
+	hipModule_t module = kernelCache->Compile(hipProgramParameters, hipProgramSource, programName, &origin, &error);
 	if (!module) {
 		LR_LOG(deviceContext, "[" << programName << "] HIP program compilation error: " << endl << error);
 
@@ -315,7 +318,7 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 	LR_LOG(deviceContext, "[" << programName << "] Compilation completed in " << duration.count() << " ms" <<
-			(cached ? " (cached)" : ""));
+			CodeOriginDesc(origin, *kernelCache));
 
 	auto hipDeviceProgram = std::make_unique<HIPDeviceProgram>();
 	hipDeviceProgram->Set(module);
@@ -348,9 +351,9 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 
 	LR_LOG(deviceContext, "[" << requests.size() << " programs] Compiling kernels in parallel for " << deviceDesc.GetHIPArch());
 
-	std::vector<bool> cached;
+	std::vector<hipKernelPersistentCache::CodeOrigin> origins;
 	std::vector<std::string> errors;
-	std::vector<hipModule_t> modules = kernelCache->CompileMultiple(kernels, &cached, &errors);
+	std::vector<hipModule_t> modules = kernelCache->CompileMultiple(kernels, &origins, &errors);
 
 	// Keep track of the loaded modules before checking for errors, so they are
 	// unloaded in any case
@@ -384,7 +387,7 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 	for (std::size_t i = 0; i < requests.size(); ++i) {
 		LR_LOG(deviceContext, "[" << requests[i].name << "] Compilation completed in " <<
-			duration.count() << " ms" << (cached[i] ? " (cached)" : ""));
+			duration.count() << " ms" << CodeOriginDesc(origins[i], *kernelCache));
 	}
 
 	return programs;

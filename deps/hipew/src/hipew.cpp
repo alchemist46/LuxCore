@@ -227,6 +227,12 @@ void HipInit() {
 }
 
 void HiprtcInit() {
+	// LUXRAYS_HIP_DISABLE_HIPRTC=1 simulates a machine without hiprtc (e.g.
+	// Windows without the HIP SDK)
+	const char *disable = getenv("LUXRAYS_HIP_DISABLE_HIPRTC");
+	if (disable && disable[0] && (std::string(disable) != "0"))
+		return;
+
 	hiprtcLib.lib = OpenFirst(hiprtcLibraryPaths, &hiprtcLib.name);
 	if (!hiprtcLib.lib)
 		return;

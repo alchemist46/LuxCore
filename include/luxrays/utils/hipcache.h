@@ -27,6 +27,7 @@
 
 #include "luxrays/luxrays.h"
 #include "luxrays/utils/hip.h"
+#include "luxrays/utils/hipkernel.h"
 
 #if !defined(LUXRAYS_DISABLE_HIP)
 
@@ -34,8 +35,17 @@
 
 namespace luxrays {
 
-// Compiles programs with hiprtc and keeps the resulting code objects in a
-// persistent cache, one per GPU architecture.
+// Loads programs from the precompiled kernels embedded in the binaries or
+// compiles them with hiprtc, and keeps the compiled code objects in a
+// persistent cache, one per GPU architecture. A program is looked for, in
+// order:
+// 1. in the embedded kernels (see embeddedhip.h), when the architecture
+//    belongs to a baked family. A code object that fails to load (e.g. an
+//    old runtime rejecting the code object v6 or the generic targets) falls
+//    through to the next step;
+// 2. in the persistent cache;
+// 3. it is compiled with hiprtc, if available (it is optional: the HIP SDK on
+//    Windows, the ROCm hiprtc library on Linux).
 //
 // Unlike the CUDA cache, the target architecture is given explicitly: code
 // objects are compiled without any HIP device being current, so the parallel
@@ -44,12 +54,16 @@ namespace luxrays {
 class hipKernelPersistentCache {
 public:
 	// The largest work group the compiled kernels can be launched with
-	static constexpr u_int MaxWorkGroupSize = 256;
+	static constexpr u_int MaxWorkGroupSize = HIPMaxWorkGroupSize;
+
+	// Where the code object of a program comes from
+	enum class CodeOrigin { COMPILED, CACHED, PRECOMPILED };
 
 	hipKernelPersistentCache(const std::string &applicationName, const std::string &gpuArch);
 	~hipKernelPersistentCache();
 
 	// Returns the code object of the program, compiling it if it isn't cached
+	// (the embedded kernels are not looked for)
 	bool CompileCodeObject(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
 		std::unique_ptr<char[]> *code, size_t *codeSize, bool *cached, std::string *error);
@@ -57,14 +71,22 @@ public:
 	// Returns a module loaded on the current device, nullptr on compilation error
 	hipModule_t Compile(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
-		bool *cached, std::string *error);
+		CodeOrigin *origin, std::string *error);
 
 	// Compiles all the programs in parallel and loads them on the current device
 	std::vector<hipModule_t> CompileMultiple(
 		const std::vector<std::tuple<std::vector<std::string>, std::string, std::string>> &kernels,
-		std::vector<bool> *cached = nullptr,
+		std::vector<CodeOrigin> *origins = nullptr,
 		std::vector<std::string> *errors = nullptr
 	);
+
+	// The family of architectures of the embedded kernels used for this
+	// architecture, empty if they are not used (none for this architecture,
+	// none embedded, or disabled)
+	const std::string &GetPrecompiledFamily() const { return precompiledFamily; }
+	// True if there is an embedded code object for the program
+	bool HasPrecompiled(const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource) const;
 
 	const std::string &GetApplicationName() const { return appName; }
 	const std::string &GetGPUArch() const { return arch; }
@@ -86,7 +108,15 @@ public:
 		std::unique_ptr<char[]> *code, size_t *codeSize, std::string *error);
 
 private:
-	std::string appName, arch;
+	// The embedded code object of the program, nullptr if there is none
+	const unsigned char *GetPrecompiled(const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource) const;
+	// Loads the embedded code object of the program on the current device.
+	// Returns nullptr if there is none or if it fails to load (with a warning).
+	hipModule_t LoadPrecompiled(const std::vector<std::string> &kernelsParameters,
+		const std::string &kernelSource, std::string *warning) const;
+
+	std::string appName, arch, precompiledFamily;
 
 	std::mutex cacheMutex;
 };

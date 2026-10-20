@@ -43,6 +43,7 @@
 #include "slg/engines/pathoclbase/pathoclbase.h"
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/kernels/kernels.h"
+#include "slg/kernels/kernelsources.h"
 #include "slg/renderconfig.h"
 #include "slg/film/filters/filter.h"
 #include "slg/scene/scene.h"
@@ -117,15 +118,11 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(RenderConfigRef rcfg,
 			intersectionDevices.push_back(dev);
 
 			// Suggested compiler options: -ffast-math -fno-finite-math-only
-			// (the hiprtc equivalent of --use_fast_math). The kernels use
-			// isinf()/isnan(), which -ffast-math alone folds to false.
+			// (the hiprtc equivalent of --use_fast_math), shared with the
+			// hip-kernel-baker
 			auto& hwDev = dynamic_cast<HardwareDeviceRef>(dev);
 
-			std::vector<std::string> compileOpts;
-			compileOpts.push_back("-ffast-math");
-			compileOpts.push_back("-fno-finite-math-only");
-
-			hwDev.SetAdditionalCompileOpts(compileOpts);
+			hwDev.SetAdditionalCompileOpts(slg::ocl::GetHIPPathCompileOptions());
 		}
 	}
 #endif

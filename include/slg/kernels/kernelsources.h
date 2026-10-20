@@ -50,6 +50,22 @@ void GetKernelParamters(std::vector<std::string> &params,
 	const float epsilonMin, const float epsilonMax,
 	const bool useKernelConstants = false);
 
+// The sizes of the private material and texture evaluation stacks of the path
+// kernels (PARAM_EVALSTACK_PRIVATE, HIP only)
+constexpr unsigned int PrivateMaterialEvalStackSize = 16;
+constexpr unsigned int PrivateTextureEvalStackSize = 32;
+
+// Add the parameters of the path kernel variants that depend on the scene:
+// the private evaluation stacks (HIP only) and the subsurface random walk.
+// Used both at run time and at build time (by the hip-kernel-baker tool).
+void AddPathKernelVariantParameters(std::vector<std::string> &params,
+	const bool privateEvalStack, const bool subsurface);
+
+// The additional compiler options of the path programs on HIP devices (see
+// HardwareDevice::SetAdditionalCompileOpts()). Used both at run time and at
+// build time (by the hip-kernel-baker tool).
+std::vector<std::string> GetHIPPathCompileOptions();
+
 }
 }
 

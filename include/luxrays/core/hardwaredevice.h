@@ -169,6 +169,16 @@ public:
 		return false;
 	}
 
+	// Return true if the device loads programs from precompiled kernels
+	// embedded in the binaries (i.e. there are some for its architecture), and
+	// if there is one matching the given program parameters and source (i.e.
+	// the program is loaded without any compilation)
+	virtual bool HasPrecompiledPrograms() const { return false; }
+	virtual bool HasPrecompiledProgram(const std::vector<std::string> &programParameters,
+		const std::string &programSource) const {
+		return false;
+	}
+
 	// Compile a batch of programs. The default implementation compiles the
 	// programs sequentially; devices supporting parallel compilation override
 	// this method.

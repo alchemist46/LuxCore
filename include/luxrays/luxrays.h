@@ -64,6 +64,8 @@ inline bool isOpenCLAvilable = true;
 inline bool isCudaAvilable = true;
 inline bool isOptixAvilable = true;
 inline bool isHipAvailable = true;
+// The HIP run-time compiler (it is optional, see Init())
+inline bool isHiprtcAvailable = true;
 inline bool isHiprtAvailable = true;
 inline std::locale cLocale("C");
 

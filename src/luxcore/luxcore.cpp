@@ -40,6 +40,7 @@
 #endif
 #if !defined(LUXRAYS_DISABLE_HIP)
 #include "luxrays/devices/hipdevice.h"
+#include "luxrays/utils/embeddedhip.h"
 #include "luxrays/utils/hipcache.h"
 #endif
 #if !defined(LUXRAYS_DISABLE_OPENCL)
@@ -177,10 +178,14 @@ PropertiesUPtr luxcore::GetPlatformDesc() {
 	props << Property("compile.LUXRAYS_DISABLE_HIP")(!luxrays::isHipAvailable);
 	props << Property("compile.LUXRAYS_ENABLE_HIP")(luxrays::isHipAvailable);
 	props << Property("compile.LUXRAYS_ENABLE_HIPRT")(luxrays::isHiprtAvailable);
+	props << Property("compile.LUXRAYS_ENABLE_HIPRTC")(luxrays::isHiprtcAvailable);
+	props << Property("compile.LUXRAYS_HIP_PRECOMPILED_KERNELS")(luxrays::HasEmbeddedHIPKernels());
 #else
 	props << Property("compile.LUXRAYS_DISABLE_HIP")(true);
 	props << Property("compile.LUXRAYS_ENABLE_HIP")(false);
 	props << Property("compile.LUXRAYS_ENABLE_HIPRT")(false);
+	props << Property("compile.LUXRAYS_ENABLE_HIPRTC")(false);
+	props << Property("compile.LUXRAYS_HIP_PRECOMPILED_KERNELS")(false);
 #endif
 
 #if !defined(LUXCORE_DISABLE_OIDN)

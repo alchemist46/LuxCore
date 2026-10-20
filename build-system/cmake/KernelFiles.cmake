@@ -198,3 +198,16 @@ set(SPIRV_VARIANTS
   tilepathocl_generic tilepathocl_amd tilepathocl_nvidia
   rtpathocl_generic rtpathocl_amd rtpathocl_nvidia
 )
+
+# The HIP bake variants: (render engine, evaluation stacks, subsurface). The
+# names must match the ones used by the hip-kernel-baker tool (see
+# src/slg/kernels/hipkernelbaker.cpp).
+set(HIP_VARIANTS
+  pathocl pathocl_subsurface pathocl_private pathocl_private_subsurface
+  rtpathocl rtpathocl_subsurface rtpathocl_private rtpathocl_private_subsurface
+)
+
+# The families of architectures the HIP kernels can be baked for: one generic
+# code object each (see GetHIPBakedKernelFamilies() in
+# include/luxrays/utils/hipkernel.h)
+set(HIP_BAKE_FAMILIES gfx10-3-generic gfx11-generic gfx12-generic)

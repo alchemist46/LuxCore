@@ -403,9 +403,9 @@ include_directories(${GENERATED_INCLUDE_DIR})
 # they have to be searched repeatedly (i.e. grouped). Not all the linkers
 # support it (e.g. MSVC doesn't need it because it is not single-pass).
 if(CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED)
-  set(KERNEL_ARCHIVES_LINK "$<LINK_GROUP:RESCAN,slg-core,slg-film,slg-kernels,luxrays,spirv-embedded>")
+  set(KERNEL_ARCHIVES_LINK "$<LINK_GROUP:RESCAN,slg-core,slg-film,slg-kernels,luxrays,spirv-embedded,hip-embedded>")
 else()
-  set(KERNEL_ARCHIVES_LINK slg-core slg-film slg-kernels luxrays spirv-embedded)
+  set(KERNEL_ARCHIVES_LINK slg-core slg-film slg-kernels luxrays spirv-embedded hip-embedded)
 endif()
 
 add_subdirectory(src/luxrays)

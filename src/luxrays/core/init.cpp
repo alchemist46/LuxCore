@@ -97,8 +97,8 @@ void Init() {
 #if !defined(LUXRAYS_DISABLE_HIP)
 	// Report HIP as available only once fully initialized
 	isHipAvailable = false;
-	if (hipewInit(HIPEW_INIT_HIP | HIPEW_INIT_HIPRTC) != HIPEW_SUCCESS) {
-		std::cerr << "HIP disabled: HIP runtime or hiprtc library not found\n";
+	if (hipewInit(HIPEW_INIT_HIP) != HIPEW_SUCCESS) {
+		std::cerr << "HIP disabled: HIP runtime library not found\n";
 	} else {
 		// hipErrorNoDevice is the normal case when ROCm is installed without
 		// any supported AMD GPU
@@ -109,8 +109,16 @@ void Init() {
 			std::cerr << "HIP disabled: hipInit() error " << err << "\n";
 	}
 
-	// HIPRT is optional: without it, HIP devices use the BVH/MBVH accelerators
-	isHiprtAvailable = isHipAvailable && (hiprtewInit() == HIPRTEW_SUCCESS);
+	// hiprtc is optional: the precompiled kernels need only the HIP runtime
+	// (the AMD driver on Windows). Without it, the programs that aren't
+	// precompiled can't be compiled (see hipKernelPersistentCache).
+	isHiprtcAvailable = isHipAvailable && (hipewInit(HIPEW_INIT_HIPRTC) == HIPEW_SUCCESS);
+
+	// HIPRT is optional: without it, HIP devices use the BVH/MBVH accelerators.
+	// It requires hiprtc too, for now: its trace kernel is compiled by
+	// hiprtBuildTraceKernels(), which crashes when HIPRT's own loader doesn't
+	// find hiprtc (it doesn't check the entry points).
+	isHiprtAvailable = isHiprtcAvailable && (hiprtewInit() == HIPRTEW_SUCCESS);
 #endif
 }
 

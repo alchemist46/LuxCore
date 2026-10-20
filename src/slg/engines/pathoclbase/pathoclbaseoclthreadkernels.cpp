@@ -136,24 +136,16 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	// whose size depends on the scene). The sizes are fixed, so there are only
 	// two kernel variants whatever the scene: a scene-sized array would be
 	// faster still, but would require a new kernel compilation for each size.
-	if (intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) {
-		const u_int privateMaterialEvalStackSize = 16;
-		const u_int privateTextureEvalStackSize = 32;
-
-		const CompiledScene *cscene = renderEngine->compiledScene;
-		if ((cscene->maxMaterialEvalStackSize <= privateMaterialEvalStackSize) &&
-				(cscene->maxTextureEvalStackSize <= privateTextureEvalStackSize)) {
-			kernelsParameters.push_back("-D PARAM_EVALSTACK_PRIVATE");
-			kernelsParameters.push_back("-D PARAM_MATERIAL_EVALSTACK_SIZE=" + ToString(privateMaterialEvalStackSize));
-			kernelsParameters.push_back("-D PARAM_TEXTURE_EVALSTACK_SIZE=" + ToString(privateTextureEvalStackSize));
-		}
-	}
+	const CompiledScene *cscene = renderEngine->compiledScene;
+	const bool privateEvalStack = (intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) &&
+			(cscene->maxMaterialEvalStackSize <= slg::ocl::PrivateMaterialEvalStackSize) &&
+			(cscene->maxTextureEvalStackSize <= slg::ocl::PrivateTextureEvalStackSize);
 
 	// The random walk of the subsurface materials is compiled only for the
 	// scenes that have one: it costs the other scenes up to a few percent
 	// (the code changes how the big kernel is compiled, not what it runs)
-	if (renderEngine->compiledScene->hasSubsurface)
-		kernelsParameters.push_back("-D PARAM_ENABLE_SUBSURFACE");
+	slg::ocl::AddPathKernelVariantParameters(kernelsParameters, privateEvalStack,
+			cscene->hasSubsurface);
 
 	// The working colour space matrix (no parameter in Rec.709)
 	if (!useKernelConstants)
@@ -232,6 +224,17 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			"or the device doesn't support the SPIR-V ingestion. The kernels will be "
 			"compiled from source. (Re-build the modules, e.g. with 'make spirv' "
 			"followed by 'make <target>'.)");
+	}
+
+	// The same for the precompiled HIP kernels. Only PATHOCL and RTPATHOCL are
+	// baked (see src/slg/kernels/hipkernelbaker.cpp).
+	if ((renderEngine->GetType() != TILEPATHOCL) &&
+			intersectionDevice.HasPrecompiledPrograms() &&
+			!intersectionDevice.HasPrecompiledProgram(kernelsParameters, fullKernelSource)) {
+		SLG_LOG("[PathOCLBaseRenderThread::" << threadIndex << "] WARNING: none of the "
+			"precompiled HIP kernels matches these kernels: they are probably stale "
+			"(i.e. the kernel sources have been modified after the bake) or the "
+			"kernel parameters differ. The kernels will be compiled at run time.");
 	}
 
 	std::vector<HardwareDevice::ProgramRequest> requests;
