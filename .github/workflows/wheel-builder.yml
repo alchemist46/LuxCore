@@ -58,7 +58,7 @@ jobs:
   # build legs (which don't need a clang anymore)
   bake-spirv:
     name: Bake SPIR-V modules
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout main repository (standard context)
@@ -92,8 +92,8 @@ jobs:
           # build-system/spirv): no LuxCoreDeps, no conan, no 'make deps',
           # only the system g++ and clang. The configure fails with a clear
           # error if the clang can not compile OpenCL C in SPIR-V format.
-          cmake -S build-system/spirv -B bake-build -G Ninja
-          cmake --build bake-build
+          bash .github/scripts/run-annotated.sh "SPIR-V bake configure" cmake -S build-system/spirv -B bake-build -G Ninja
+          bash .github/scripts/run-annotated.sh "SPIR-V bake" cmake --build bake-build
 
           # Check that the modules have actually been baked
           test -f bake-build/baked/spirvmanifest.txt
@@ -111,7 +111,7 @@ jobs:
   # rendering). See build-system/hip and MODERNIZATION_PLAN.md (G9).
   bake-hip:
     name: Bake HIP kernels
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # The ROCm release whose clang and hiprtc bake the kernels
       ROCM_VERSION: '7.2'
@@ -170,10 +170,10 @@ jobs:
           # build-system/hip): no LuxCoreDeps, no conan, no 'make deps', only
           # the system g++ and the ROCm clang.
           export ROCM_PATH=/opt/rocm
-          cmake -S build-system/hip -B bake-build -G Ninja \
+          bash .github/scripts/run-annotated.sh "HIP bake configure" cmake -S build-system/hip -B bake-build -G Ninja \
             -DHIPRT_INCLUDE_DIR="${GITHUB_WORKSPACE}/hiprt-src" \
             -DLUXRAYS_HIP_BAKE_JOBS=$(nproc)
-          cmake --build bake-build
+          bash .github/scripts/run-annotated.sh "HIP bake" cmake --build bake-build
 
           # Check that the kernels have actually been baked
           test -f bake-build/baked/hipmanifest.txt
