@@ -84,6 +84,7 @@ thipStreamSynchronize *hipStreamSynchronize;
 thipModuleLoadData *hipModuleLoadData;
 thipModuleUnload *hipModuleUnload;
 thipModuleGetFunction *hipModuleGetFunction;
+thipModuleGetGlobal *hipModuleGetGlobal;
 thipFuncGetAttribute *hipFuncGetAttribute;
 thipModuleLaunchKernel *hipModuleLaunchKernel;
 
@@ -218,6 +219,7 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLoadData);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleUnload);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleGetFunction);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleGetGlobal);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipFuncGetAttribute);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLaunchKernel);
 

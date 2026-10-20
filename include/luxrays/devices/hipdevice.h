@@ -192,6 +192,9 @@ public:
 		const std::string &kernelName
 	) override;
 	virtual u_int GetKernelWorkGroupSize(HardwareDeviceKernelRPtr kernel) override;
+	virtual bool HasProgramConstants() const override { return true; }
+	virtual bool SetProgramConstant(HardwareDeviceProgramRef program,
+			const std::string &name, const size_t size, const void *data) override;
 	virtual void SetKernelArg(HardwareDeviceKernelRPtr kernel,
 			const u_int index, const size_t size, const void *arg) override;
 

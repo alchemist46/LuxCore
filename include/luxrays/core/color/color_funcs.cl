@@ -45,7 +45,9 @@ OPENCL_FORCE_INLINE float Spectrum_Filter(const float3 s)  {
 // The luminance of a colour in the working colour space (see
 // WorkingColorSpace::Y())
 OPENCL_FORCE_INLINE float Spectrum_Y(const float3 s) {
-#if defined(PARAM_WCS_Y_R)
+#if defined(PARAM_KERNEL_CONSTANTS)
+	return kernelConstants.wcsY[0] * s.x + kernelConstants.wcsY[1] * s.y + kernelConstants.wcsY[2] * s.z;
+#elif defined(PARAM_WCS_Y_R)
 	return PARAM_WCS_Y_R * s.x + PARAM_WCS_Y_G * s.y + PARAM_WCS_Y_B * s.z;
 #else
 	return 0.212671f * s.x + 0.715160f * s.y + 0.072169f * s.z;
@@ -67,8 +69,18 @@ OPENCL_FORCE_INLINE float3 Spectrum_Pow(const float3 s, const float e) {
 // Linear Rec.709 to the working colour space, for the colours the kernels
 // compute in Rec.709 (dispersion, thin film, sky2). The matrix is set by the
 // host (WorkingColorSpace::AddKernelParameters()), only when the working space
-// is not Rec.709.
-#if defined(PARAM_WCS_FROM_REC709_00)
+// is not Rec.709, or is in the kernel constants.
+#if defined(PARAM_KERNEL_CONSTANTS)
+OPENCL_FORCE_INLINE float3 WorkingColorSpace_FromRec709(const float3 c) {
+	if (kernelConstants.wcsIsRec709)
+		return c;
+
+	return MAKE_FLOAT3(
+		kernelConstants.wcsFromRec709[0] * c.x + kernelConstants.wcsFromRec709[1] * c.y + kernelConstants.wcsFromRec709[2] * c.z,
+		kernelConstants.wcsFromRec709[3] * c.x + kernelConstants.wcsFromRec709[4] * c.y + kernelConstants.wcsFromRec709[5] * c.z,
+		kernelConstants.wcsFromRec709[6] * c.x + kernelConstants.wcsFromRec709[7] * c.y + kernelConstants.wcsFromRec709[8] * c.z);
+}
+#elif defined(PARAM_WCS_FROM_REC709_00)
 OPENCL_FORCE_INLINE float3 WorkingColorSpace_FromRec709(const float3 c) {
 	return MAKE_FLOAT3(
 		PARAM_WCS_FROM_REC709_00 * c.x + PARAM_WCS_FROM_REC709_01 * c.y + PARAM_WCS_FROM_REC709_02 * c.z,
@@ -81,7 +93,17 @@ OPENCL_FORCE_INLINE float3 WorkingColorSpace_FromRec709(const float3 c) {
 
 // The working colour space to Linear Rec.709, for the formulas written for
 // Rec.709 colours
-#if defined(PARAM_WCS_TO_REC709_00)
+#if defined(PARAM_KERNEL_CONSTANTS)
+OPENCL_FORCE_INLINE float3 WorkingColorSpace_ToRec709(const float3 c) {
+	if (kernelConstants.wcsIsRec709)
+		return c;
+
+	return MAKE_FLOAT3(
+		kernelConstants.wcsToRec709[0] * c.x + kernelConstants.wcsToRec709[1] * c.y + kernelConstants.wcsToRec709[2] * c.z,
+		kernelConstants.wcsToRec709[3] * c.x + kernelConstants.wcsToRec709[4] * c.y + kernelConstants.wcsToRec709[5] * c.z,
+		kernelConstants.wcsToRec709[6] * c.x + kernelConstants.wcsToRec709[7] * c.y + kernelConstants.wcsToRec709[8] * c.z);
+}
+#elif defined(PARAM_WCS_TO_REC709_00)
 OPENCL_FORCE_INLINE float3 WorkingColorSpace_ToRec709(const float3 c) {
 	return MAKE_FLOAT3(
 		PARAM_WCS_TO_REC709_00 * c.x + PARAM_WCS_TO_REC709_01 * c.y + PARAM_WCS_TO_REC709_02 * c.z,

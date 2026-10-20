@@ -36,6 +36,7 @@ string GetPathOCLBaseKernelSources() {
 	ssKernel <<
 			// OpenCL LuxRays Types
 			luxrays::ocl::KernelSource_luxrays_types <<
+			luxrays::ocl::KernelSource_kernelconstants_types <<
 			luxrays::ocl::KernelSource_bvhbuild_types <<
 			luxrays::ocl::KernelSource_randomgen_types <<
 			luxrays::ocl::KernelSource_uv_types <<
@@ -231,12 +232,17 @@ vector<pair<string, string>> SplitMicroKernelSources(const string &src) {
 
 void GetKernelParamters(vector<string> &params,
 		const string &renderEngineType,
-		const float epsilonMin, const float epsilonMax) {
+		const float epsilonMin, const float epsilonMax,
+		const bool useKernelConstants) {
 	params.push_back("-D LUXRAYS_OPENCL_KERNEL");
 	params.push_back("-D SLG_OPENCL_KERNEL");
 	params.push_back("-D RENDER_ENGINE_" + renderEngineType);
-	params.push_back("-D PARAM_RAY_EPSILON_MIN=" + luxrays::ToString(epsilonMin) + "f");
-	params.push_back("-D PARAM_RAY_EPSILON_MAX=" + luxrays::ToString(epsilonMax) + "f");
+	if (useKernelConstants)
+		params.push_back("-D PARAM_KERNEL_CONSTANTS");
+	else {
+		params.push_back("-D PARAM_RAY_EPSILON_MIN=" + luxrays::ToString(epsilonMin) + "f");
+		params.push_back("-D PARAM_RAY_EPSILON_MAX=" + luxrays::ToString(epsilonMax) + "f");
+	}
 }
 
 }

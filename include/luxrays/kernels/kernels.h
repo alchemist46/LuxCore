@@ -54,6 +54,7 @@ extern std::string KernelSource_frame_types;
 extern std::string KernelSource_frame_funcs;
 extern std::string KernelSource_epsilon_types;
 extern std::string KernelSource_epsilon_funcs;
+extern std::string KernelSource_kernelconstants_types;
 extern std::string KernelSource_ray_types;
 extern std::string KernelSource_ray_funcs;
 extern std::string KernelSource_point_types;

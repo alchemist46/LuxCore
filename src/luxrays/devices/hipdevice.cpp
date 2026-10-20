@@ -215,13 +215,8 @@ vector<string> HIPDevice::AddKernelOpts(const vector<string> &programParameters)
 	// where HIP is different.
 	hipProgramParameters.push_back("-D LUXRAYS_CUDA_DEVICE");
 	hipProgramParameters.push_back("-D LUXRAYS_HIP_DEVICE");
-#if defined (__APPLE__)
-	hipProgramParameters.push_back("-D LUXRAYS_OS_APPLE");
-#elif defined (WIN32)
-	hipProgramParameters.push_back("-D LUXRAYS_OS_WINDOWS");
-#elif defined (__linux__)
-	hipProgramParameters.push_back("-D LUXRAYS_OS_LINUX");
-#endif
+	// Note: no LUXRAYS_OS_* parameter, as on OpenCL: no kernel uses it, and
+	// the compiled code (and its cache key) must be the same on every OS
 
 	hipProgramParameters.insert(hipProgramParameters.end(),
 			additionalCompileOpts.begin(), additionalCompileOpts.end());
@@ -418,6 +413,25 @@ HardwareDeviceKernelUPtr HIPDevice::GetKernel(
 	hipDeviceKernel.Set(function);
 
 	return std::move(kernel);
+}
+
+bool HIPDevice::SetProgramConstant(HardwareDeviceProgramRef program,
+		const string &name, const size_t size, const void *data) {
+	auto& hipDeviceProgram = dynamic_cast<HIPDeviceProgramRef>(program);
+
+	hipDeviceptr_t ptr;
+	size_t bytes;
+	if (hipModuleGetGlobal(&ptr, &bytes, hipDeviceProgram.GetModule(), name.c_str()) != hipSuccess)
+		return false;
+	if (bytes != size)
+		throw runtime_error("Wrong size of the program constant " + name + " in HIPDevice::SetProgramConstant(): " +
+				ToString(bytes) + " instead of " + ToString(size));
+
+	// The kernels of the program may still be running
+	FinishQueue();
+	CHECK_HIP_ERROR(hipMemcpyHtoD(ptr, data, size));
+
+	return true;
 }
 
 HardwareDeviceKernelUPtr HIPDevice::GetKernel(hipFunction_t function) {

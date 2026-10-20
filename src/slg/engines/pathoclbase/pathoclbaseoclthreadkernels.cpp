@@ -74,9 +74,11 @@ void PathOCLBaseOCLRenderThread::GetKernelParamters(
 	std::vector<std::string> &params,
 	HardwareIntersectionDeviceRef intersectionDevice,
 	const string renderEngineType,
-	const float epsilonMin, const float epsilonMax
+	const float epsilonMin, const float epsilonMax,
+	const bool useKernelConstants
 ) {
-	slg::ocl::GetKernelParamters(params, renderEngineType, epsilonMin, epsilonMax);
+	slg::ocl::GetKernelParamters(params, renderEngineType, epsilonMin, epsilonMax,
+			useKernelConstants);
 
 	try {
 		const auto& oclDeviceDesc =
@@ -118,10 +120,16 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			throw runtime_error("Unknown accelerator in PathOCLBaseRenderThread::InitKernels()");
 	}
 
+	// On the devices with program constants, the working colour space and the
+	// epsilons are kernel constants instead of kernel parameters, so a change
+	// of their values doesn't compile a new kernel
+	const bool useKernelConstants = intersectionDevice.HasProgramConstants();
+
 	vector<string> kernelsParameters;
 	GetKernelParamters(kernelsParameters, intersectionDevice,
 			RenderEngine::RenderEngineType2String(renderEngine->GetType()),
-			MachineEpsilon::GetMin(), MachineEpsilon::GetMax());
+			MachineEpsilon::GetMin(), MachineEpsilon::GetMax(),
+			useKernelConstants);
 
 	// On HIP, the material and texture evaluation stacks are private arrays
 	// when the scene fits in them (2-5% faster than the global memory stacks,
@@ -148,7 +156,8 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		kernelsParameters.push_back("-D PARAM_ENABLE_SUBSURFACE");
 
 	// The working colour space matrix (no parameter in Rec.709)
-	renderEngine->renderConfig.GetScene().GetWorkingColorSpace().AddKernelParameters(kernelsParameters);
+	if (!useKernelConstants)
+		renderEngine->renderConfig.GetScene().GetWorkingColorSpace().AddKernelParameters(kernelsParameters);
 
 	const string kernelSource = GetKernelSources();
 	const string microKernelSource = slg::ocl::KernelSource_pathoclbase_kernels_micro;
@@ -179,7 +188,9 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			+ "-" +
 			oclKernelPersistentCache::HashString(fullKernelSource);
 	if (newKernelSrcHash == kernelSrcHash) {
-		// There is no need to re-compile the kernel
+		// There is no need to re-compile the kernel, only to update the
+		// constants
+		SetKernelConstants();
 		return;
 	} else
 		kernelSrcHash = newKernelSrcHash;
@@ -283,9 +294,30 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			<< advancePathsWorkGroupSize
 	);
 
+	if (useKernelConstants)
+		kernelPrograms = std::move(programs);
+	else
+		kernelPrograms.clear();
+	SetKernelConstants();
+
 	const double tEnd = WallClockTime();
 	SLG_LOG("[PathOCLBaseRenderThread::" << threadIndex << "] Kernels compilation time: " << int((tEnd - tStart) * 1000.0) << "ms");
 
+}
+
+void PathOCLBaseOCLRenderThread::SetKernelConstants() {
+	if (kernelPrograms.empty())
+		return;
+
+	luxrays::ocl::KernelConstants kc;
+	renderEngine->renderConfig.GetScene().GetWorkingColorSpace().SetKernelConstants(kc);
+	kc.rayEpsilonMin = MachineEpsilon::GetMin();
+	kc.rayEpsilonMax = MachineEpsilon::GetMax();
+
+	for (auto &program : kernelPrograms) {
+		if (!intersectionDevice.SetProgramConstant(*program, "kernelConstants", sizeof(kc), &kc))
+			throw runtime_error("The kernel constants are missing in PathOCLBaseOCLRenderThread::SetKernelConstants()");
+	}
 }
 
 void PathOCLBaseOCLRenderThread::SetInitKernelArgs(const u_int filmIndex) {

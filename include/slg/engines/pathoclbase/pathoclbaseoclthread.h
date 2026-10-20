@@ -178,6 +178,7 @@ protected:
 	void InitLights();
 	void InitPhotonGI();
 	void InitKernels();
+	void SetKernelConstants();
 	void InitGPUTaskBuffer();
 	void UpdateGPUTaskConfigurationBuffer();
 	void InitSamplerSharedDataBuffer();
@@ -207,7 +208,8 @@ protected:
 	static void GetKernelParamters(std::vector<std::string> &params,
 			luxrays::HardwareIntersectionDeviceRef intersectionDevice,
 			const std::string renderEngineType,
-			const float epsilonMin, const float epsilonMax);
+			const float epsilonMin, const float epsilonMax,
+			const bool useKernelConstants);
 	static std::string GetKernelSources();
 
 	u_int threadIndex;
@@ -216,6 +218,9 @@ protected:
 
 	// OpenCL variables
 	std::string kernelSrcHash;
+	// The compiled programs, kept on the devices with program constants (see
+	// SetKernelConstants())
+	std::vector<luxrays::HardwareDeviceProgramUPtr> kernelPrograms;
 	luxrays::HardwareDeviceKernelUPtr filmClearKernel;
 	size_t filmClearWorkGroupSize;
 

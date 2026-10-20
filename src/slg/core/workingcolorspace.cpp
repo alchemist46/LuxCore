@@ -120,6 +120,23 @@ void WorkingColorSpace::AddKernelParameters(vector<string> &params) const {
 	}
 }
 
+void WorkingColorSpace::SetKernelConstants(luxrays::ocl::KernelConstants &kc) const {
+	kc.wcsIsRec709 = IsRec709() ? 1u : 0u;
+
+	const float (&from)[3][3] = GetFromRec709Matrix();
+	const float (&to)[3][3] = GetToRec709Matrix();
+	for (u_int y = 0; y < 3; ++y) {
+		for (u_int x = 0; x < 3; ++x) {
+			kc.wcsFromRec709[y * 3 + x] = from[y][x];
+			kc.wcsToRec709[y * 3 + x] = to[y][x];
+		}
+	}
+
+	const Spectrum &w = GetLuminanceWeights();
+	for (u_int i = 0; i < 3; ++i)
+		kc.wcsY[i] = w.c[i];
+}
+
 string WorkingColorSpace::FindOpenColorIOColorSpace(const string &configFileName) const {
 	static const char *interopIDs[] = {
 		"lin_rec709_scene", "lin_rec2020_scene", "lin_ap1_scene"

@@ -43,9 +43,12 @@ std::vector<std::pair<std::string, std::string>> SplitMicroKernelSources(
 // Add the render engine kernel parameters not related to the device used.
 // Used both at run time and at build time (by the spirv-baker tool); the
 // spirv-baker adds the platform/vendor related parameter on its own.
+// With useKernelConstants, the epsilons are left to the kernel constants (see
+// kernelconstants_types.cl) instead of being definitions.
 void GetKernelParamters(std::vector<std::string> &params,
 	const std::string &renderEngineType,
-	const float epsilonMin, const float epsilonMax);
+	const float epsilonMin, const float epsilonMax,
+	const bool useKernelConstants = false);
 
 }
 }

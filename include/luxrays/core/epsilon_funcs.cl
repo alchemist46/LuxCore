@@ -29,7 +29,11 @@ OPENCL_FORCE_INLINE float MachineEpsilon_PreviousFloat(const float value) {
 OPENCL_FORCE_INLINE float MachineEpsilon_E(const float value) {
 	const float epsilon = fabs(MachineEpsilon_NextFloat(value) - value);
 
+#if defined(PARAM_KERNEL_CONSTANTS)
+	return clamp(epsilon, kernelConstants.rayEpsilonMin, kernelConstants.rayEpsilonMax);
+#else
 	return clamp(epsilon, PARAM_RAY_EPSILON_MIN, PARAM_RAY_EPSILON_MAX);
+#endif
 }
 
 OPENCL_FORCE_INLINE float MachineEpsilon_E_Float3(const float3 v) {

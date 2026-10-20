@@ -194,6 +194,17 @@ public:
 	) = 0;
 	virtual u_int GetKernelWorkGroupSize(HardwareDeviceKernelRPtr kernel) = 0;
 
+	// Program scope constants written by the host after the program is
+	// loaded, so their values are not part of the compiled kernel (see
+	// kernelconstants_types.cl). Only the devices returning true from
+	// HasProgramConstants() support SetProgramConstant(), which returns false
+	// if the program has no constant with that name.
+	virtual bool HasProgramConstants() const { return false; }
+	virtual bool SetProgramConstant(HardwareDeviceProgramRef program,
+			const std::string &name, const size_t size, const void *data) {
+		throw std::runtime_error("Program constants are not supported by this device");
+	}
+
 	virtual void SetKernelArg(HardwareDeviceKernelRPtr kernel,
 			const u_int index, const size_t size, const void *arg) = 0;
 protected:

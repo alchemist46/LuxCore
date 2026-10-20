@@ -132,6 +132,7 @@ typedef hipError_t HIPAPI thipStreamSynchronize(hipStream_t stream);
 typedef hipError_t HIPAPI thipModuleLoadData(hipModule_t *module, const void *image);
 typedef hipError_t HIPAPI thipModuleUnload(hipModule_t module);
 typedef hipError_t HIPAPI thipModuleGetFunction(hipFunction_t *function, hipModule_t module, const char *kname);
+typedef hipError_t HIPAPI thipModuleGetGlobal(hipDeviceptr_t *dptr, size_t *bytes, hipModule_t module, const char *name);
 typedef enum hipFunction_attribute {
 	HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 0,
 	HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = 1,
@@ -183,6 +184,7 @@ extern thipStreamSynchronize *hipStreamSynchronize;
 extern thipModuleLoadData *hipModuleLoadData;
 extern thipModuleUnload *hipModuleUnload;
 extern thipModuleGetFunction *hipModuleGetFunction;
+extern thipModuleGetGlobal *hipModuleGetGlobal;
 extern thipFuncGetAttribute *hipFuncGetAttribute;
 extern thipModuleLaunchKernel *hipModuleLaunchKernel;
 

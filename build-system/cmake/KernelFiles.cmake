@@ -30,6 +30,7 @@ set(LUXRAYS_KERNELS
     include/luxrays/core/geometry/frame_funcs.cl
     include/luxrays/core/epsilon_types.cl
     include/luxrays/core/epsilon_funcs.cl
+    include/luxrays/core/kernelconstants_types.cl
     include/luxrays/core/geometry/ray_types.cl
     include/luxrays/core/geometry/ray_funcs.cl
     include/luxrays/core/geometry/point_types.cl

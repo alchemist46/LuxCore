@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "luxrays/core/color/color.h"
+#include "luxrays/core/kernelconstants.h"
 
 namespace slg {
 
@@ -96,6 +97,9 @@ public:
 	// Rec.709 to working and working to Rec.709 matrices and the luminance
 	// weights
 	void AddKernelParameters(std::vector<std::string> &params) const;
+	// The same values in the kernel constants, for the devices that use them
+	// instead of the kernel parameters
+	void SetKernelConstants(luxrays::ocl::KernelConstants &kc) const;
 
 	// The name of the working space in an OpenColorIO config, found by its
 	// interop id (OCIO 2.5) or by one of its usual names. It returns an empty
