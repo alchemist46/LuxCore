@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prepare a .blend for the G0 Cycles/LuxCore A/B (MODERNIZATION_PLAN.md).
+"""Prepare a .blend for the G0 Cycles/LuxCore A/B (docs/history/MODERNIZATION_PLAN.md).
 
 Both engines must render the same scene. BlendLuxCore exports the Cycles
 material nodes through its reader (export/cycles_node_reader.py), which

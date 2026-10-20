@@ -1,7 +1,7 @@
 # Material test kit
 
 Four checks, used for every material change (see the "Material standards pass"
-entry of `MODERNIZATION_PLAN.md`):
+entry of `docs/history/MODERNIZATION_PLAN.md`):
 
 | Check | Tool | Renders? | Target |
 |---|---|---|---|

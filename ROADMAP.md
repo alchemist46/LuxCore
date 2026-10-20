@@ -1,6 +1,6 @@
 # LuxCore roadmap: the open work
 
-Consolidated 2026-10-21 (HEAD `158a5b409`) from the unfinished items of [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) and the whole of [SPEEDUP_CHANGES.md](SPEEDUP_CHANGES.md). It lists open work only. The done items, their measurements and the reasoning behind them stay in those two files and in [MODERNIZATION_RESEARCH.md](MODERNIZATION_RESEARCH.md) (papers, engine comparisons); each entry below says where to look (*History*). Bugs are in [BUGS.md](BUGS.md); an item that fixes one names it. Bugs with no item here are standalone fixes.
+Consolidated 2026-10-21 (HEAD `158a5b409`) from the unfinished items of [MODERNIZATION_PLAN.md](docs/history/MODERNIZATION_PLAN.md) and the whole of [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md). It lists open work only. The done items, their measurements and the reasoning behind them stay in those two files and in [MODERNIZATION_RESEARCH.md](docs/history/MODERNIZATION_RESEARCH.md) (papers, engine comparisons), all in `docs/history/`; each entry below says where to look (*History*). Bugs are in [BUGS.md](BUGS.md); an item that fixes one names it. Bugs with no item here are standalone fixes.
 
 ## 1. Where the engine stands
 
@@ -131,9 +131,9 @@ Tiers A-C of the speedup plan plus the structural leftovers of the plan. Today: 
 
 | Roadmap | Old plan section |
 |---|---|
-| S0, A1-A5, B1-B5, C, D1 | SPEEDUP_CHANGES.md "Step 0", "Tier A" to "Tier D" |
-| E1-E3 | SPEEDUP_CHANGES.md "Tier E" |
-| C (structural), G11b | MODERNIZATION_PLAN.md Phase 1b: G6, G7, G8, G10, G11, G9 |
+| S0, A1-A5, B1-B5, C, D1 | docs/history/SPEEDUP_CHANGES.md "Step 0", "Tier A" to "Tier D" |
+| E1-E3 | docs/history/SPEEDUP_CHANGES.md "Tier E" |
+| C (structural), G11b | docs/history/MODERNIZATION_PLAN.md Phase 1b: G6, G7, G8, G10, G11, G9 |
 | O1-O3 | Phase 1: "GPU OIDN 2.x", "Cycles-style adaptive sampling and noise halt" |
 | G9b | Phase 1b: G9 step 7, "Risks" |
 | LT, MC, V1-V8, L1-L6, M1, PG, P4, P5 | Phase 2 |

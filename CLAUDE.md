@@ -26,7 +26,7 @@ After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon
 
 ## Keep the bug list
 
-[BUGS.md](BUGS.md) in the repo root is the list of known bugs and issues that are not fixed yet. Every bug or issue found during a task that is not resolved right away goes into it, so it can be fixed later:
+[BUGS.md](BUGS.md) in the repo root is the list of known bugs and issues that are not fixed yet. The open work items (features, speed and quality work) are in [ROADMAP.md](ROADMAP.md); the older plans with the measurements of the finished work are in `docs/history/`. Every bug or issue found during a task that is not resolved right away goes into it, so it can be fixed later:
 
 1. Add an entry as soon as the problem is found, before moving on, even when it is unrelated to the current task or only suspected.
 2. Each entry has a short title, the date found, the area (engine, material, film, addon, build, tests, and so on), what happens, how to reproduce it (scene, engine, command, spp), and what is already known about the cause or ruled out.

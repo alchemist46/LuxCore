@@ -1,5 +1,7 @@
 # Speeding PATHOCL up further: the levers left after G1-G11
 
+> Superseded by [ROADMAP.md](../../ROADMAP.md) on 2026-10-21; kept for the done items and their measurements.
+
 ## Context
 
 Cycles on the same RX 6950 XT is still ahead of PATHOCL. The last G0 re-measure (2026-10-17, light tree build, `MODERNIZATION_PLAN.md` Phase 2) puts Cycles at **4.5x** at equal error on the Blender Cornell box and **8.6x** on the Blender classroom. Splitting that into the two factors, from the G0 numbers and the samples/s history since:

@@ -139,7 +139,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LUXCORE_X86_ARCH "" CACHE STRING
   "Override the -march of LuxCore code (e.g. native). Empty: the Conan profile one.")
 # Measured on 2026-10-13 (GCC 16, Ryzen 5 3600, PATHCPU): LTO is a net loss,
-# -4% to +4% depending on the scene, so it is off (see MODERNIZATION_PLAN.md)
+# -4% to +4% depending on the scene, so it is off (see docs/history/MODERNIZATION_PLAN.md)
 OPTION(LUXCORE_ENABLE_LTO "Link time optimization of the Release build" OFF)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   # sqrt() and co. as plain instructions: nothing reads errno. Never

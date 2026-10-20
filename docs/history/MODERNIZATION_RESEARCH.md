@@ -1,5 +1,7 @@
 # LuxCore modernization: plan review and research survey
 
+> Companion of the plans now superseded by [ROADMAP.md](../../ROADMAP.md) (2026-10-21); kept for the papers and engine comparisons.
+
 Date: 2026-10-14. Companion to `MODERNIZATION_PLAN.md`. Sources were checked against the engines' own docs, source trees and the papers; items that could only be found second-hand are marked *(unverified)*. Code facts below were checked in this tree (branch `hip-backend`).
 
 ## 1. Review of the plan

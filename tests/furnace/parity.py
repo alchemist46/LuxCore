@@ -30,7 +30,7 @@ each scene in <out.npz>. Compare two runs with paritycmp.py.
 TILEPATHCPU (with its own sampler) and native.threads.count = 1 is deterministic:
 two builds can be compared bit for bit. PATHOCL runs with opencl.task.count = 4096: with the default 512K tasks the
 small film stops with most paths in flight and is biased dark (see "Known open
-issues" in MODERNIZATION_PLAN.md).
+issues" in docs/history/MODERNIZATION_PLAN.md).
 
 The scenes use paths relative to pyunittests/, so the script changes into it
 (the output path is taken relative to the directory it is started from).

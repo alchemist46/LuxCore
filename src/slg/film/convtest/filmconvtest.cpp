@@ -327,7 +327,7 @@ void FilmConvTest::TestHalfBuffer() {
 	// and luxball-hdr, at equal sample count: 1.31-1.40x more efficient than
 	// uniform sampling, where the same error for every pixel is 1.15-1.25x
 	// (the bound, the optimal allocation with the exact standard deviations,
-	// is 1.36-1.57x). Measured in renders: see MODERNIZATION_PLAN.md.
+	// is 1.36-1.57x). Measured in renders: see docs/history/MODERNIZATION_PLAN.md.
 	struct MeanAcc { double sum; double count; };
 	const MeanAcc meanAcc = tbb::parallel_reduce(
 			tbb::blocked_range<u_int>(0, pixelsCount), MeanAcc{0.0, 0.0},

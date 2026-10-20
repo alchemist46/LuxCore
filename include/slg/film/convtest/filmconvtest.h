@@ -57,7 +57,7 @@ namespace slg {
 //   (minus the tolerance). It reads the
 //   radiance channels, not the image pipeline output. Used when the film has
 //   the half channel (the SOBOL sampler adds it), the classic
-//   test otherwise. Measured on 2026-10-14 (see MODERNIZATION_PLAN.md): about
+//   test otherwise. Measured on 2026-10-14 (see docs/history/MODERNIZATION_PLAN.md): about
 //   the classic test's quality at the same render time where the classic
 //   test does well, much better where its halt time explodes, and always
 //   bounded and predictable; it is not the default (the threshold has a

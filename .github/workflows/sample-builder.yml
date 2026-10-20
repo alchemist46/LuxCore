@@ -90,7 +90,7 @@ jobs:
   # (RDNA2, RDNA3, RDNA4: the code objects are device code, platform and
   # python independent) and the result is embedded by all the build legs, so
   # an AMD GPU needs only the driver (no HIP SDK, no compilation at the first
-  # rendering). See build-system/hip and MODERNIZATION_PLAN.md (G9).
+  # rendering). See build-system/hip and docs/history/MODERNIZATION_PLAN.md (G9).
   bake-hip:
     name: Bake HIP kernels
     runs-on: ubuntu-24.04

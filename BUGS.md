@@ -2,7 +2,7 @@
 
 Bugs and issues found during a task that were not fixed right away. See "Keep the bug list" in [CLAUDE.md](CLAUDE.md) for the rules. Remove an entry when it is fixed.
 
-The first entries were collected on 2026-10-20 from "Known open issues" in [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) (the "Found" date is the date given there) and from [SPEEDUP_CHANGES.md](SPEEDUP_CHANGES.md); the plan has the full measurements. Entries the plan already marks as fixed are not listed.
+The first entries were collected on 2026-10-20 from "Known open issues" in [MODERNIZATION_PLAN.md](docs/history/MODERNIZATION_PLAN.md) (the "Found" date is the date given there) and from [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md); the plan has the full measurements. Entries the plan already marks as fixed are not listed. The open work items are in [ROADMAP.md](ROADMAP.md).
 
 ## Entry format
 
@@ -176,4 +176,4 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: tests
 - Problem: the `EnvironmentCamera` TILEPATHOCL unit test is a known failure on the HIP device, at the comparison threshold.
 - Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device.
-- Notes: listed in [SPEEDUP_CHANGES.md](SPEEDUP_CHANGES.md) as a known failure; the other one listed there (Cloth on the GPU) was fixed in `8b4b32b64`.
+- Notes: listed in [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md) as a known failure; the other one listed there (Cloth on the GPU) was fixed in `8b4b32b64`.

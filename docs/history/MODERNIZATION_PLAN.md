@@ -1,5 +1,7 @@
 # LuxCore modernization roadmap
 
+> Superseded by [ROADMAP.md](../../ROADMAP.md) on 2026-10-21; kept for the done items and their measurements.
+
 ## Context
 LuxCore has a solid core: a wavefront GPU path tracer, BiDir/VCM on the CPU, PhotonGI and DLS caches, noise-aware adaptive sampling, OIDN/OptiX/BCD denoisers, OCIO, and Embree 4, OptiX and (on this branch) HIPRT. It has fallen behind Cycles, Arnold, RenderMan XPU, Karma and V-Ray in three areas: **architecture** (every feature is written twice), **modern sampling and light transport research** (2017 onwards), and **pipeline interop** (USD, MaterialX, OpenPBR).
 
