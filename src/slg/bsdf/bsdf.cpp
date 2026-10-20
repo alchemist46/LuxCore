@@ -26,6 +26,56 @@ using namespace luxrays;
 using namespace slg;
 using namespace std;
 
+namespace {
+
+// The shading normal n bent towards the geometric normal ng (both on the side
+// of the eye direction eyeDir) just enough for the mirror reflection of eyeDir
+// to stay above the surface (Cycles' ensure_valid_specular_reflection()).
+// Smooth shading and bump mapping can otherwise put the eye below the shading
+// normal at grazing angles, where the materials see the back face: black.
+Vector BSDF_EnsureValidReflection(const Vector &ng, const Vector &eyeDir, const Vector &n) {
+	const float iz = Dot(eyeDir, ng);
+	// The reflection may be as shallow as the eye direction
+	const float threshold = Min(.9f * iz, .01f);
+	const Vector r = (2.f * Dot(n, eyeDir)) * n - eyeDir;
+	if (Dot(ng, r) >= threshold)
+		return n;
+
+	// The new normal is in the plane of ng and n, x the part of n orthogonal
+	// to ng: the root of Dot(ng, r) = threshold
+	const Vector t = n - Dot(n, ng) * ng;
+	const float tLength = t.Length();
+	if (tLength <= 0.f)
+		return ng;
+	const Vector x = t / tLength;
+	const float ix = Dot(eyeDir, x);
+	const float a = ix * ix + iz * iz;
+	const float b = 2.f * (a + iz * threshold);
+	const float c = Sqr(threshold + iz);
+	const float d = sqrtf(Max(0.f, b * b - 4.f * a * c));
+	const float nz2 = .25f * ((ix < 0.f) ? (b + d) : (b - d)) / a;
+
+	return Normalize(sqrtf(Max(0.f, 1.f - nz2)) * x + sqrtf(Max(0.f, nz2)) * ng);
+}
+
+// The interpolated and the shading normals of an eye path hit point made valid
+// for its eye direction (see BSDF_EnsureValidReflection())
+void BSDF_EnsureValidNormals(HitPoint &hitPoint) {
+	// The geometric normal on the side of the eye
+	const float side = hitPoint.intoObject ? 1.f : -1.f;
+	const Vector ng = side * Vector(hitPoint.geometryN);
+	if (Dot(hitPoint.fixedDir, ng) < DEFAULT_COS_EPSILON_STATIC)
+		return;
+
+	const bool sameN = (hitPoint.shadeN == hitPoint.interpolatedN);
+	hitPoint.interpolatedN = Normal(side * BSDF_EnsureValidReflection(ng, hitPoint.fixedDir,
+			side * Vector(hitPoint.interpolatedN)));
+	hitPoint.shadeN = sameN ? hitPoint.interpolatedN : Normal(side * BSDF_EnsureValidReflection(ng,
+			hitPoint.fixedDir, side * Vector(hitPoint.shadeN)));
+}
+
+}
+
 // Used when hitting a surface
 void BSDF::Init(
 		const bool fixedFromLight, const bool throughShadowTransparency,
@@ -67,6 +117,8 @@ void BSDF::Init(
 
 	// Apply bump or normal mapping
 	material->Bump(&hitPoint);
+	if (!fixedFromLight)
+		BSDF_EnsureValidNormals(hitPoint);
 
 	// Build the local reference system
 	frame = hitPoint.GetFrame();

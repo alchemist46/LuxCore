@@ -18,6 +18,56 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// The shading normal n bent towards the geometric normal ng (both on the side
+// of the eye direction eyeDir) just enough for the mirror reflection of eyeDir
+// to stay above the surface (Cycles' ensure_valid_specular_reflection()).
+// Smooth shading and bump mapping can otherwise put the eye below the shading
+// normal at grazing angles, where the materials see the back face: black.
+// BSDF_EnsureValidReflection() in bsdf.cpp is the CPU version.
+OPENCL_FORCE_INLINE float3 BSDF_EnsureValidReflection(const float3 ng, const float3 eyeDir, const float3 n) {
+	const float iz = dot(eyeDir, ng);
+	// The reflection may be as shallow as the eye direction
+	const float threshold = fmin(.9f * iz, .01f);
+	const float3 r = (2.f * dot(n, eyeDir)) * n - eyeDir;
+	if (dot(ng, r) >= threshold)
+		return n;
+
+	// The new normal is in the plane of ng and n, x the part of n orthogonal
+	// to ng: the root of dot(ng, r) = threshold
+	const float3 t = n - dot(n, ng) * ng;
+	const float tLength = length(t);
+	if (tLength <= 0.f)
+		return ng;
+	const float3 x = t / tLength;
+	const float ix = dot(eyeDir, x);
+	const float a = ix * ix + iz * iz;
+	const float b = 2.f * (a + iz * threshold);
+	const float c = (threshold + iz) * (threshold + iz);
+	const float d = sqrt(fmax(0.f, b * b - 4.f * a * c));
+	const float nz2 = .25f * ((ix < 0.f) ? (b + d) : (b - d)) / a;
+
+	return normalize(sqrt(fmax(0.f, 1.f - nz2)) * x + sqrt(fmax(0.f, nz2)) * ng);
+}
+
+// The interpolated and the shading normals of a hit point made valid for its
+// eye direction (see BSDF_EnsureValidReflection())
+OPENCL_FORCE_INLINE void BSDF_EnsureValidNormals(__global HitPoint *hitPoint) {
+	const float3 fixedDir = VLOAD3F(&hitPoint->fixedDir.x);
+	// The geometric normal on the side of the eye
+	const float side = hitPoint->intoObject ? 1.f : -1.f;
+	const float3 ng = side * VLOAD3F(&hitPoint->geometryN.x);
+	if (dot(fixedDir, ng) < DEFAULT_COS_EPSILON_STATIC)
+		return;
+
+	const float3 interpolatedN = VLOAD3F(&hitPoint->interpolatedN.x);
+	const float3 shadeN = VLOAD3F(&hitPoint->shadeN.x);
+	const bool sameN = (shadeN.x == interpolatedN.x) && (shadeN.y == interpolatedN.y) && (shadeN.z == interpolatedN.z);
+	const float3 validInterpolatedN = side * BSDF_EnsureValidReflection(ng, fixedDir, side * interpolatedN);
+	VSTORE3F(validInterpolatedN, &hitPoint->interpolatedN.x);
+	VSTORE3F(sameN ? validInterpolatedN : (side * BSDF_EnsureValidReflection(ng, fixedDir, side * shadeN)),
+			&hitPoint->shadeN.x);
+}
+
 // Used when hitting a surface
 OPENCL_FORCE_INLINE void BSDF_Init(
 		__global BSDF *bsdf,
@@ -79,7 +129,8 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 
 	Material_Bump(matIndex, &bsdf->hitPoint
 			MATERIALS_PARAM);
-	// Re-read the shadeN modified by Material_Bump()
+	BSDF_EnsureValidNormals(&bsdf->hitPoint);
+	// Re-read the shadeN modified by Material_Bump() and BSDF_EnsureValidNormals()
 	const float3 shadeN = VLOAD3F(&bsdf->hitPoint.shadeN.x);
 	const float3 dpdu = VLOAD3F(&bsdf->hitPoint.dpdu.x);
 	const float3 dpdv = VLOAD3F(&bsdf->hitPoint.dpdv.x);
