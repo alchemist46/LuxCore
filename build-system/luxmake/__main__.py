@@ -17,6 +17,7 @@ from .build import build_and_install, install
 from .wheel import make_wheel
 from .clear import clean, clear
 from .spirv import spirv
+from .hiprt import hiprt
 from .windows import win_recompose
 
 
@@ -69,6 +70,36 @@ def main():
     # Spirv
     parser_spirv = subparsers.add_parser("spirv")
     parser_spirv.set_defaults(func=spirv)
+
+    # HIPRT
+    parser_hiprt = subparsers.add_parser("hiprt")
+    parser_hiprt.add_argument(
+        "--dest",
+        help="Download into this directory instead of out/hiprt",
+    )
+    parser_hiprt.add_argument(
+        "--archive",
+        help="Install this archive instead of downloading it",
+    )
+    parser_hiprt.add_argument(
+        "--build",
+        metavar="HIPRT_SOURCE_TREE",
+        help="Build HIPRT from this source tree and package it",
+    )
+    parser_hiprt.add_argument(
+        "--package",
+        metavar="HIPRT_SOURCE_TREE",
+        help="Package an existing HIPRT build of this source tree",
+    )
+    parser_hiprt.add_argument(
+        "--hip-path",
+        help="The HIP SDK / ROCm used by --build (default: HIP_PATH or ROCM_PATH)",
+    )
+    parser_hiprt.add_argument(
+        "--output",
+        help="The archive written by --build and --package",
+    )
+    parser_hiprt.set_defaults(func=hiprt)
 
     # Clear
     parser_clear = subparsers.add_parser("clear")

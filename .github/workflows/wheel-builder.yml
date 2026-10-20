@@ -104,9 +104,92 @@ jobs:
           name: spirv-baked
           path: bake-build/baked/
 
+  # The HIP kernels are pre-compiled once for the generic AMD architectures
+  # (RDNA2, RDNA3, RDNA4: the code objects are device code, platform and
+  # python independent) and the result is embedded by all the build legs, so
+  # an AMD GPU needs only the driver (no HIP SDK, no compilation at the first
+  # rendering). See build-system/hip and MODERNIZATION_PLAN.md (G9).
+  bake-hip:
+    name: Bake HIP kernels
+    runs-on: ubuntu-latest
+    env:
+      # The ROCm release whose clang and hiprtc bake the kernels
+      ROCM_VERSION: '7.2'
+
+    steps:
+      - name: Checkout main repository (standard context)
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout main repository (act context)
+        if: env.ACT
+        uses: actions/checkout@v6
+
+      - name: Read the HIPRT ref
+        id: hiprt
+        shell: bash
+        run: |
+          # The HIPRT version whose device code the HIPRT trace kernel
+          # includes: the one shipped with pyluxcore (see
+          # build-system/luxmake/hiprt.py)
+          echo "ref=$(python3 -c "import json; print(json.load(open('build-system/build-settings.json'))['HIPRT']['ref'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout HIPRT (headers of the trace kernel)
+        uses: actions/checkout@v6
+        with:
+          repository: GPUOpen-LibrariesAndSDKs/HIPRT
+          ref: ${{ steps.hiprt.outputs.ref }}
+          path: hiprt-src
+          submodules: false
+
+      - name: Install build tools and ROCm
+        shell: bash
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y g++ cmake ninja-build libboost-dev wget gpg
+
+          # The ROCm compiler (clang and the device libraries), the HIP
+          # headers and the HIP runtime with hiprtc (its runtime header is
+          # extracted by the bake). No GPU and no kernel driver are needed.
+          sudo mkdir -p --mode=0755 /etc/apt/keyrings
+          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/rocm.list
+          printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt-get update -y
+          sudo apt-get install -y rocm-llvm rocm-device-libs hip-dev hip-runtime-amd
+
+      - name: Bake the HIP kernels
+        shell: bash
+        run: |
+          # The bake is done by a dependency-free standalone project (see
+          # build-system/hip): no LuxCoreDeps, no conan, no 'make deps', only
+          # the system g++ and the ROCm clang.
+          export ROCM_PATH=/opt/rocm
+          cmake -S build-system/hip -B bake-build -G Ninja \
+            -DHIPRT_INCLUDE_DIR="${GITHUB_WORKSPACE}/hiprt-src" \
+            -DLUXRAYS_HIP_BAKE_JOBS=$(nproc)
+          cmake --build bake-build
+
+          # Check that the kernels have actually been baked
+          test -f bake-build/baked/hipmanifest.txt
+          ls -l bake-build/baked/*.co
+
+      - name: Upload the HIP kernels
+        uses: actions/upload-artifact@v5
+        with:
+          name: hip-baked
+          path: |
+            bake-build/baked/hipmanifest.txt
+            bake-build/baked/*.co
+
   build-wheels:
     name: Build wheel ${{ matrix.os }}-3.${{ matrix.python-minor }}
-    needs: [bake-spirv]
+    needs: [bake-spirv, bake-hip]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -225,6 +308,23 @@ jobs:
         with:
           name: spirv-baked
           path: spirv-baked
+
+      - name: Download the pre-baked HIP kernels
+        uses: actions/download-artifact@v5
+        with:
+          name: hip-baked
+          path: hip-baked
+
+      # HIPRT (AMD hardware ray tracing) shipped with pyluxcore: the pinned
+      # build, with its kernels precompiled (see build-system/luxmake/hiprt.py
+      # and hiprt-builder.yml). macOS has no HIP.
+      - name: Download HIPRT
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; else PY=python3; fi
+          "$PY" -m build-system.luxmake hiprt --dest hiprt-dist
+          echo "HIPRT_LIBRARY_NAME=$(basename hiprt-dist/dist/bin/Release/*hiprt*64.*)" >> "$GITHUB_ENV"
 
       - name: Prepare Linux
         if: runner.os == 'Linux'
@@ -363,6 +463,8 @@ jobs:
             LUX_BUILD_TYPE=${{ env.BUILD_TYPE }}
             DEPS_WITHOUT_SUDO=1
             LUXRAYS_SPIRV_BAKED_DIR=/project/spirv-baked
+            LUXRAYS_HIP_BAKED_DIR=/project/hip-baked
+            LUXRAYS_HIPRT_LIBRARY=/project/hiprt-dist/dist/bin/Release/${{ env.HIPRT_LIBRARY_NAME }}
           CIBW_ENVIRONMENT_PASS_LINUX: |
             CC
             CXX
@@ -468,6 +570,12 @@ jobs:
           # set through CIBW_ENVIRONMENT_LINUX, on macOS the pre-compilation
           # is disabled)
           LUXRAYS_SPIRV_BAKED_DIR: ${{ github.workspace }}\spirv-baked
+          # The pre-baked HIP kernels (same rule: Windows only here; macOS
+          # has no HIP)
+          LUXRAYS_HIP_BAKED_DIR: ${{ github.workspace }}\hip-baked
+          # The HIPRT library to ship (Windows only here, as above; empty on
+          # macOS)
+          LUXRAYS_HIPRT_LIBRARY: ${{ runner.os == 'Windows' && format('{0}\hiprt-dist\dist\bin\Release\{1}', github.workspace, env.HIPRT_LIBRARY_NAME) || '' }}
 
         with:
             package-dir: .

@@ -1,1 +1,2 @@
 *.ply	binary
+build-system/hiprt/*.patch text eol=lf

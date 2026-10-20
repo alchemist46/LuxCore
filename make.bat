@@ -46,6 +46,8 @@ if "%COMMAND%" == "" (
     call :Config
 ) else if "%COMMAND%" == "spirv" (
     call :Spirv
+) else if "%COMMAND%" == "hiprt" (
+    call :Hiprt
 ) else if "%COMMAND%" == "package" (
     call :BuildAndInstall package
 ) else if "%COMMAND%" == "install" (
@@ -87,6 +89,12 @@ goto :EOF
 REM Bake the OpenCL kernels in SPIR-V format (dependency-free: no 'make deps'
 REM needed). The baked modules are automatically used by the next 'make config'
 call %LUXMAKE% spirv
+goto :EOF
+
+:Hiprt
+REM Download the pinned HIPRT build (see build-system/luxmake/hiprt.py). It is
+REM automatically shipped by the next 'make config'
+call %LUXMAKE% hiprt
 goto :EOF
 
 :BuildAndInstall

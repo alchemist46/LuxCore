@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: 2026 Authors (see AUTHORS.txt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Build HIPRT (the "HIPRT" entry of build-system/build-settings.json: the ref
+# and the release) for Linux, with its kernels precompiled for the RDNA2+
+# architectures, and attach the archive to the HIPRT release, which the wheel
+# builds download (see build-system/luxmake/hiprt.py).
+#
+# The Windows archive is built on a machine with the HIP SDK and attached to
+# the same release by hand:
+#
+#   git clone --depth 1 --branch <ref> https://github.com/GPUOpen-LibrariesAndSDKs/HIPRT.git hiprt-src
+#   python -m build-system.luxmake hiprt --build hiprt-src --hip-path "C:\Program Files\AMD\ROCm\<version>"
+#
+# Run it once per HIPRT version, i.e. after changing the HIPRT entry or the
+# patches in build-system/hiprt, then pin the checksums of both archives in
+# build-settings.json (HIPRT.sha256).
+
+name: HIPRT Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Attach the archive to the release (created if missing)'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build-linux:
+    name: Build HIPRT for Linux
+    runs-on: ubuntu-latest
+    # The library is shipped in the manylinux_2_28 wheels: it is built with
+    # their glibc and toolchain, so the wheel repair accepts it
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      # The ROCm release whose hipcc precompiles the kernels: 6.4 or later
+      # (HIPRT adds RDNA4 and gfx1153 from 6.4), with RHEL 8 packages
+      ROCM_VERSION: '6.4'
+      PYTHON: /opt/python/cp312-cp312/bin/python
+    outputs:
+      ref: ${{ steps.settings.outputs.ref }}
+      release: ${{ steps.settings.outputs.release }}
+      repository: ${{ steps.settings.outputs.repository }}
+
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v6
+
+      - name: Read the HIPRT settings
+        id: settings
+        shell: bash
+        run: |
+          read_setting() {
+            "$PYTHON" -c "import json; print(json.load(open('build-system/build-settings.json'))['HIPRT']['$1'])"
+          }
+          echo "ref=$(read_setting ref)" >> "$GITHUB_OUTPUT"
+          echo "release=$(read_setting release)" >> "$GITHUB_OUTPUT"
+          echo "repository=$(read_setting user)/$(read_setting repo)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout HIPRT
+        uses: actions/checkout@v6
+        with:
+          repository: GPUOpen-LibrariesAndSDKs/HIPRT
+          ref: ${{ steps.settings.outputs.ref }}
+          path: hiprt-src
+
+      - name: Install ROCm
+        shell: bash
+        run: |
+          # hipcc and what it uses: the ROCm clang, the device libraries and
+          # the HIP headers. No GPU and no kernel driver are needed.
+          cat > /etc/yum.repos.d/rocm.repo <<EOF
+          [rocm]
+          name=ROCm ${ROCM_VERSION}
+          baseurl=https://repo.radeon.com/rocm/rhel8/${ROCM_VERSION}/main
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+          EOF
+          dnf install -y hipcc rocm-llvm rocm-device-libs hip-devel hip-runtime-amd
+          /opt/rocm/bin/hipcc --version
+
+      - name: Build and package HIPRT
+        shell: bash
+        run: |
+          "$PYTHON" -m pip install cmake ninja
+          export PATH="$(dirname "$PYTHON"):$PATH"
+          # The checkouts belong to another user than the container's
+          git config --global --add safe.directory '*'
+          "$PYTHON" -m build-system.luxmake hiprt \
+            --build hiprt-src \
+            --hip-path /opt/rocm \
+            --output "hiprt-${{ steps.settings.outputs.ref }}-Linux-X64.zip"
+          sha256sum hiprt-*.zip
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v5
+        with:
+          name: hiprt-linux
+          path: hiprt-*.zip
+
+  publish:
+    name: Attach to the HIPRT release
+    needs: [build-linux]
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the archive
+        uses: actions/download-artifact@v5
+        with:
+          name: hiprt-linux
+
+      - name: Attach the archive to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.build-linux.outputs.release }}
+          REF: ${{ needs.build-linux.outputs.ref }}
+          REPOSITORY: ${{ needs.build-linux.outputs.repository }}
+        run: |
+          # The wheel builds download from the repository of the settings
+          if [ "$REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::build-settings.json pins the HIPRT release in $REPOSITORY, not $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          if ! gh release view "$RELEASE" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$RELEASE" -R "$GITHUB_REPOSITORY" \
+              --title "HIPRT $REF for LuxCore" \
+              --notes "HIPRT $REF (https://github.com/GPUOpen-LibrariesAndSDKs/HIPRT) with its kernels precompiled for the RDNA2+ architectures, shipped with pyluxcore. See build-system/luxmake/hiprt.py."
+          fi
+          gh release upload "$RELEASE" hiprt-*.zip -R "$GITHUB_REPOSITORY" --clobber
+          sha256sum hiprt-*.zip

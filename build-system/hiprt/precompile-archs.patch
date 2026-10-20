@@ -1,0 +1,17 @@
+diff --git a/scripts/bitcodes/common_tools.py b/scripts/bitcodes/common_tools.py
+index 4c3ab1d..6f03017 100644
+--- a/scripts/bitcodes/common_tools.py
++++ b/scripts/bitcodes/common_tools.py
+@@ -67,6 +67,12 @@ def getAMDGPUArchs(hip_sdk_version_num):
+         gpus_archs.append('gfx1150')
+         gpus_archs.append('gfx1151')
+ 
++    # LuxCore local patch: HIPRT_PRECOMPILE_ARCHS (comma separated) restricts
++    # the precompiled kernels to these architectures
++    only = os.environ.get('HIPRT_PRECOMPILE_ARCHS', '')
++    if only:
++        gpus_archs = [a for a in gpus_archs if a in only.split(',')]
++
+     return gpus_archs
+ 
+ 

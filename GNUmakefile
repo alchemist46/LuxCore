@@ -14,7 +14,7 @@ LUX-CMAKE = $(PYTHON) -m build-system.luxmake
 
 build-targets = pyluxcore luxcoreui luxcoreconsole luxcore doc
 
-.PHONY: deps list-presets config spirv luxcore pyluxcore luxcoreui luxcoreconsole install clean clear doc wheel-test
+.PHONY: deps list-presets config spirv hiprt luxcore pyluxcore luxcoreui luxcoreconsole install clean clear doc wheel-test
 
 all: luxcore pyluxcore luxcoreui luxcoreconsole
 
@@ -32,6 +32,11 @@ config:
 # (i.e. by all the build targets).
 spirv:
 	$(LUX-CMAKE) spirv
+
+# Download the pinned HIPRT build (see build-system/luxmake/hiprt.py). It is
+# automatically shipped by the next 'make config'.
+hiprt:
+	$(LUX-CMAKE) hiprt
 
 $(build-targets): %: config
 	$(LUX-CMAKE) build-and-install $*

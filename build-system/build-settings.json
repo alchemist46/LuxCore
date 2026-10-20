@@ -9,6 +9,15 @@
     "user": "LuxCoreRender",
     "release": "2.2.4"
   },
+  "HIPRT": {
+    "ref": "3.1.0.cb09c56",
+    "user": "alchemist46",
+    "repo": "LuxCore",
+    "release": "hiprt-3.1.0.cb09c56-1",
+    "sha256": {
+      "Windows-X64": "68ce78e0a3f067ae050f977d599e0a6a779d1a38c6eed0b287d1e338971f4af9"
+    }
+  },
   "Build": {
     "gcc": "14",
     "cxx": "20",

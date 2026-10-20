@@ -543,6 +543,37 @@ The survey found these specific gaps:
      - The local builds (`make.bat wheel-test` on Windows, the Linux build) bake with the SDK/ROCm clang when found, else build without the table (and say so).
      - The background compile of the other stack variant (item (1) above) only matters on the SDK path once the variants are baked. Keep it as an option, not part of this item.
      - CUDA follows the same scheme later: cubins per SM plus PTX; nvrtc can be redistributed. It is not part of this item.
+
+     *Step 6 written 2026-10-20. It has not run on CI yet: that needs a push.*
+     - **Shared rules.** `build-system/cmake/HIPBake.cmake` holds the bake rules for the main build and the standalone project, so the two can't drift: `hip_bake_modules()` lists the modules and `hip_bake_kernels()` adds the commands. The main build's commands are unchanged, and the refactor reconfigured without re-baking.
+     - **Standalone project** (`build-system/hip`, like `build-system/spirv`). It builds `hip-kernel-baker` from the generated kernel sources, `kernelsources.cpp` and `hipew.cpp` alone, with Boost headers only, and bakes with `find_hip_clang()`.
+       - `HIPRT_INCLUDE_DIR` (a HIPRT source tree) enables the trace kernel; without it, only the path kernels are baked.
+       - The project also builds with MSVC.
+       - Checked on Windows (SDK 7.2, gfx10-3, 20 minutes): the manifest, sources, parameters and hiprtc header are byte-identical to the main build's.
+     - **Reproducible code objects.** The code objects first differed only in the `__hip_cuid_<hash>` symbol, which clang hashes from the source path; the code was identical. `CompileHIP.cmake` now passes `-fuse-cuid=none`, so the bytes are the same from any build tree, and a CI bake can be checked against a local one.
+     - **CI.** A `bake-hip` job in `wheel-builder.yml` and `sample-builder.yml`:
+       - Ubuntu with ROCm 7.2 from `repo.radeon.com`: `rocm-llvm`, `rocm-device-libs`, `hip-dev`, and `hip-runtime-amd` for hiprtc.
+       - HIPRT checked out at `3.1.0.cb09c56`, the tag of the shipped DLL, for the trace kernel headers.
+       - Its `hip-baked` artefact (manifest and `.co` files) reaches the Windows and Linux legs as `LUXRAYS_HIP_BAKED_DIR`, like `spirv-baked`. macOS has no HIP.
+       - Expected, to be checked on the first run: about 24 path compiles at ~1 minute each on Linux with 4 jobs, i.e. 6-10 minutes; about +43 MB of code objects per wheel before compression; and the compile time of the embedded hex sources on each leg.
+     - **HIPRT in the CI wheels: prebuilt once per version and downloaded.** Decided 2026-10-20, as Blender does: its library builder builds HIPRT, and its build machines download it with the other precompiled libraries.
+       - The alternatives were rejected. Installing the HIP SDK or ROCm on each of the 10 wheel legs would mean a multi-GB install per run. Patching HIPRT to embed kernel bundles made elsewhere would be a fork to maintain: HIPRT names the bundles after the SDK version and embeds them in the same build.
+       - Without HIPRT, a HIP device uses the BVH accelerator, whose kernels are not baked. So a CI wheel without HIPRT still needs the SDK.
+       - **Pin.** The `HIPRT` entry of `build-settings.json`: the HIPRT ref (`3.1.0.cb09c56`), the release (`alchemist46/LuxCore`, `hiprt-3.1.0.cb09c56-1`) and the SHA-256 of each archive, checked on download.
+       - **Patch.** `build-system/hiprt/precompile-archs.patch`, the `HIPRT_PRECOMPILE_ARCHS` filter. The two older Windows patches are not needed: HIPRT never compiles at run time any more.
+       - **`build-system/luxmake/hiprt.py`:**
+         - `make hiprt` downloads the pinned archive into `out/hiprt`, and `make config` (so also `make wheel-test`) ships it.
+         - `python -m build-system.luxmake hiprt --build <HIPRT checkout> --hip-path <SDK/ROCm>` applies the patches, builds with `PRECOMPILE`, `BAKE_COMPILED_KERNEL`, the 17 RDNA2+ architectures and no CUDA, then packages the build.
+         - The archive keeps the source-tree layout the LuxCore build expects: `dist/bin/Release/<library>` with `oro_compiled_kernels.hipfb` (the precompiled marker), the `hiprt/` headers, the license and `build-info.json`.
+       - **`hiprt-builder.yml`** (manual). It builds the Linux archive in the `manylinux_2_28` container with ROCm 6.4 (`hipcc`): the library goes into manylinux wheels, so it is built with their glibc. It attaches the archive to the release, creating the release if needed. The Windows archive is built on a machine with the HIP SDK and attached by hand.
+       - **Wheel legs.** Windows and Linux run `luxmake hiprt --dest hiprt-dist` and set `LUXRAYS_HIPRT_LIBRARY`; it is `/project/...` in the Linux container. The sample builds don't ship HIPRT, as before.
+       - **First run, in order:**
+         1. Push.
+         2. Run `HIPRT Builder` (it creates the release with the Linux archive).
+         3. Attach `out/hiprt-3.1.0.cb09c56-Windows-X64.zip` to the release.
+         4. Pin both checksums.
+         5. Re-run the wheel builds. Until the release exists, their `Download HIPRT` step fails.
+     - **Not checked yet:** objects baked on Linux running on Windows. Device code doesn't depend on the OS, except the size of `long`: it is 64-bit on Linux and 32-bit on Windows. The only use is `Rnd_UintValue()`, whose value fits in 32 bits, and no kernel argument or shared struct uses `long`. The first CI artefact must be rendered on the Windows machine (step 7).
   7. **Tests.** A `LUXRAYS_HIP_DISABLE_HIPRTC=1` switch in hipew simulates the no-SDK machine. On the RX 6950 XT (Windows) and on the Linux machine with the ROCm runtime:
      - A Blender final render (PATHOCL + HIPRT), the viewport (RTPATHOCL), and a Mix material edit that switches the stack variant without a compile.
      - First render under 2 s (it is 57 s cold today).
@@ -552,6 +583,12 @@ The survey found these specific gaps:
      - The minimum driver (Windows) and ROCm runtime (Linux) versions that load the kernels, documented in the addon's error message.
      - The addon reports a missing HIP runtime clearly. On Windows that is only an old driver; there is no SDK step any more. On Linux it names the ROCm runtime package.
      - The macOS wheel still builds and passes its tests with the empty table.
+
+     *Done so far (2026-10-20, RX 6950 XT, Windows):* a Blender 5.2 final render through BlendLuxCore, run in a background Blender (HIP backend, HIPRT on, default film device = the HIP GPU, 640x360, 32 spp):
+     - With the SDK: the HIPRT trace kernel and the path kernel load precompiled (13 ms); the film pipeline runs on HIP; the render takes 0.96 s.
+     - Without it (`HIP_PATH` unset, `LUXRAYS_HIP_DISABLE_HIPRTC=1`, i.e. the driver's `amdhip64_6.dll`): the same kernels load precompiled, and the film falls back to the CPU with its warning; 1.38 s. With bloom at 1080p: 3.1 s.
+
+     Still to do: the viewport (RTPATHOCL), a Mix material edit, the Linux machine, the minimum driver versions, the corrupt-entry fall-through, the addon's message, macOS, and a CI-baked artefact on Windows.
   - *Risks:*
     - Drivers older than HIP 6.x may not load code object v6 or generic targets. The minimum versions need to be measured and documented (step 7); the fall-through keeps the device usable with the SDK.
     - The HIPRT BVH layout and the baked trace kernel must stay on the same HIPRT version and RTIP; the manifest records both, and the gfx12 RTIP follows the driver rule above.
@@ -815,6 +852,9 @@ Bugs found by the new tests and fixed:
 - On the GPU the SHADING_NORMAL output is not deterministic: the sample that wins the depth test overwrites the pixel, and with depth ties (pass-through surfaces, volumes) the winner depends on the timing (2 to 10 pixels of transparencyball at 160x120 differ between two runs of the same build, found by the G7 step 4 AOV check). The same AOV check shows a NaN in DIRECT_DIFFUSE_REFLECT on the Cornell box (TILEPATHOCL, both builds), not looked into.
 - PATHOCL's `stats.renderengine.pass` is short after `Stop()` at a halt spp (found 2026-10-17 during P1: 36 reported, 65 on the film's SAMPLECOUNT at 320x320, `batch.haltspp = 64`); the film is right, the statistic lags the last transfers. Measure the spp from the film's SAMPLECOUNT output, not the statistic.
 - pyluxcore crashes at exit when a Python log handler is set (`pyluxcore.Init(lambda s: None)`) and not reset with `pyluxcore.SetLogHandler(None)` before the interpreter shuts down.
+- Deleting a scene with many emissive triangles is slow: `~IntersectableLightSource()` (`include/slg/lights/light.h:131`) logs "Removing intersectable light" for every light (found 2026-10-20, during the G9 tests).
+  - The lightinstances test scene logs 17.9 million of them, presumably one per triangle light of its 4502 instances. Through pyluxcore's Python log handler, that takes ~45 s each time the scene is freed.
+  - Not from G9: the same with and without the SDK. Dropping the log line is the likely fix.
 - Cloth on the GPU differs from the CPU (found 2026-10-20, G9 steps 2-3 test run on HIP). `test_ClothMaterial_{PATHOCL,TILEPATHOCL}` fail against the reference images: 45% of the pixels differ, and the mean brightness differs by 30%. `test_ClothMaterial_PATHCPU` passes. The build before G9 step 1 (`c56bba156`) fails the same way, so the cause is older. Not investigated yet.
 
 ## Language: stay in C++

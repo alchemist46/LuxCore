@@ -86,9 +86,93 @@ jobs:
           name: spirv-baked
           path: bake-build/baked/
 
+  # The HIP kernels are pre-compiled once for the generic AMD architectures
+  # (RDNA2, RDNA3, RDNA4: the code objects are device code, platform and
+  # python independent) and the result is embedded by all the build legs, so
+  # an AMD GPU needs only the driver (no HIP SDK, no compilation at the first
+  # rendering). See build-system/hip and MODERNIZATION_PLAN.md (G9).
+  bake-hip:
+    name: Bake HIP kernels
+    runs-on: ubuntu-latest
+    env:
+      # The ROCm release whose clang and hiprtc bake the kernels
+      ROCM_VERSION: '7.2'
+
+    steps:
+      - name: Checkout main repository (standard context)
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout main repository (act context)
+        if: env.ACT
+        uses: actions/checkout@v4
+
+      - name: Read the HIPRT ref
+        id: hiprt
+        shell: bash
+        run: |
+          # The HIPRT version whose device code the HIPRT trace kernel
+          # includes: the one shipped with pyluxcore (see
+          # build-system/luxmake/hiprt.py)
+          echo "ref=$(python3 -c "import json; print(json.load(open('build-system/build-settings.json'))['HIPRT']['ref'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout HIPRT (headers of the trace kernel)
+        uses: actions/checkout@v4
+        with:
+          repository: GPUOpen-LibrariesAndSDKs/HIPRT
+          ref: ${{ steps.hiprt.outputs.ref }}
+          path: hiprt-src
+          submodules: false
+
+      - name: Install build tools and ROCm
+        shell: bash
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y g++ cmake ninja-build libboost-dev wget gpg
+
+          # The ROCm compiler (clang and the device libraries), the HIP
+          # headers and the HIP runtime with hiprtc (its runtime header is
+          # extracted by the bake). No GPU and no kernel driver are needed.
+          sudo mkdir -p --mode=0755 /etc/apt/keyrings
+          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/rocm.list
+          printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt-get update -y
+          sudo apt-get install -y rocm-llvm rocm-device-libs hip-dev hip-runtime-amd
+
+      - name: Bake the HIP kernels
+        shell: bash
+        run: |
+          # The bake is done by a dependency-free standalone project (see
+          # build-system/hip): no LuxCoreDeps, no conan, no 'make deps', only
+          # the system g++ and the ROCm clang.
+          export ROCM_PATH=/opt/rocm
+          cmake -S build-system/hip -B bake-build -G Ninja \
+            -DHIPRT_INCLUDE_DIR="${GITHUB_WORKSPACE}/hiprt-src" \
+            -DLUXRAYS_HIP_BAKE_JOBS=$(nproc)
+          cmake --build bake-build
+
+          # Check that the kernels have actually been baked
+          test -f bake-build/baked/hipmanifest.txt
+          ls -l bake-build/baked/*.co
+
+      - name: Upload the HIP kernels
+        uses: actions/upload-artifact@v4
+        with:
+          name: hip-baked
+          path: |
+            bake-build/baked/hipmanifest.txt
+            bake-build/baked/*.co
+
+
   build-samples:
     name: Build samples ${{ matrix.os }}
-    needs: [bake-spirv]
+    needs: [bake-spirv, bake-hip]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -230,6 +314,12 @@ jobs:
           name: spirv-baked
           path: spirv-baked
 
+      - name: Download the pre-baked HIP kernels
+        uses: actions/download-artifact@v4
+        with:
+          name: hip-baked
+          path: hip-baked
+
       - name: Set MacOS deployment target
         if: runner.os == 'macOS'
         uses: actions/github-script@v7
@@ -293,6 +383,8 @@ jobs:
           # The pre-baked SPIR-V modules for the OpenCL kernels
           # pre-compilation
           LUXRAYS_SPIRV_BAKED_DIR: ${{ github.workspace }}\spirv-baked
+          # The pre-baked HIP kernels
+          LUXRAYS_HIP_BAKED_DIR: ${{ github.workspace }}\hip-baked
         run: |
           rem We have to install 'wheel', despite it is useless for samples,
           rem Otherwise 'make deps' will complain
@@ -364,6 +456,8 @@ jobs:
             # The pre-baked SPIR-V modules for the OpenCL kernels
             # pre-compilation (the whole workspace is copied to /project)
             export LUXRAYS_SPIRV_BAKED_DIR=/project/spirv-baked
+            # The pre-baked HIP kernels
+            export LUXRAYS_HIP_BAKED_DIR=/project/hip-baked
 
             # Build
             make deps

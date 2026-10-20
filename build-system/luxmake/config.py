@@ -8,9 +8,12 @@ This command has also been extended to export compile commands for CMake
 (`compile_commands.json` file), mainly for syntaxic checkers.
 """
 
+import os
+
 from .constants import PARAMS
 from .utils import run_cmake, fail, logger
 from .spirv import get_pre_baked_dir
+from .hiprt import get_hiprt_library
 
 
 def config(
@@ -43,6 +46,14 @@ def config(
             "Using the pre-baked SPIR-V modules from '%s'",
             str(pre_baked_dir.absolute()),
         )
+
+    # Ship the HIPRT library downloaded by the hiprt command, if available
+    # (i.e. 'make hiprt'), unless one is set in the environment
+    if not os.environ.get("LUXRAYS_HIPRT_LIBRARY") and (
+        hiprt_library := get_hiprt_library()
+    ):
+        cmd.append(f"-DLUXRAYS_HIPRT_LIBRARY={hiprt_library.absolute()}")
+        logger.info("Shipping HIPRT from '%s'", str(hiprt_library.absolute()))
 
     run_cmake(cmd)
 
