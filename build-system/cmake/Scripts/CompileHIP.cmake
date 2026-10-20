@@ -26,7 +26,10 @@
 # ones hiprtc adds itself (as shown by AMD_COMGR_EMIT_VERBOSE_LOGS=1):
 # - its runtime header (HIPRTC_HEADER, see ExtractHiprtcHeader.cmake) instead
 #   of the HIP headers of the SDK;
-# - -fshort-wchar and the symbol internalization.
+# - the symbol internalization;
+# - on Windows only, -fshort-wchar (wchar_t is 16 bits there, and the device
+#   libraries of the HIP SDK are built so: with ROCm on Linux, the flag makes
+#   the link of the device libraries fail). No kernel uses wchar_t.
 # Added here:
 # - the target and the code object version (v6, required by the generic
 #   targets);
@@ -50,12 +53,17 @@ if(INCLUDE_DIR)
   set(HIP_INCLUDE_OPTIONS -I${INCLUDE_DIR})
 endif()
 
+set(HIP_PLATFORM_OPTIONS)
+if(CMAKE_HOST_WIN32)
+  set(HIP_PLATFORM_OPTIONS -fshort-wchar)
+endif()
+
 execute_process(
   COMMAND ${HIP_CLANG_EXECUTABLE} -x hip
   --offload-device-only --no-gpu-bundle-output
   --offload-arch=${FAMILY} -mcode-object-version=6 -fuse-cuid=none
   -D__HIPCC_RTC__ -nogpuinc -include ${HIPRTC_HEADER}
-  -fshort-wchar -mllvm -amdgpu-internalize-symbols -Wno-gnu-line-marker
+  ${HIP_PLATFORM_OPTIONS} -mllvm -amdgpu-internalize-symbols -Wno-gnu-line-marker
   ${HIP_INCLUDE_OPTIONS}
   ${HIP_PARAMETERS}
   ${SRC} -o ${DST}
