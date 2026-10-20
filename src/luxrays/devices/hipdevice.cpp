@@ -285,6 +285,26 @@ static void LoadKernelSource(string &source, const string &programName) {
 	source.assign(istreambuf_iterator<char>(file), istreambuf_iterator<char>());
 }
 
+// The message of the exception thrown when a program can't be built. Without
+// hiprtc, the last line of the error is the reason (no precompiled kernel and
+// no compiler, i.e. the HIP SDK is required): it is short and it is what the
+// user needs to read, so it is part of the message (the full compiler output
+// is only logged).
+static string CompilationErrorMessage(const string &programName, const string &error) {
+	string message = programName + " HIP program compilation error";
+	if (!isHiprtcAvailable) {
+		const size_t end = error.find_last_not_of("\r\n");
+		if (end != string::npos) {
+			const size_t lineStart = error.find_last_of('\n', end);
+			message += ": " + error.substr(
+					(lineStart == string::npos) ? 0 : lineStart + 1,
+					end - ((lineStart == string::npos) ? 0 : lineStart + 1) + 1);
+		}
+	}
+
+	return message;
+}
+
 string HIPDevice::GetKernelSource(const string &kernelSource) const {
 	return GetHIPKernelSource(kernelSource);
 }
@@ -322,7 +342,7 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 	if (!module) {
 		LR_LOG(deviceContext, "[" << programName << "] HIP program compilation error: " << endl << error);
 
-		throw runtime_error(programName + " HIP program compilation error");
+		throw runtime_error(CompilationErrorMessage(programName, error));
 	} else {
 		if (error.length() > 0) {
 			LR_LOG(deviceContext, "[" << programName << "] HIP program compilation warnings: " << endl << error);
@@ -380,7 +400,7 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 		if (!modules[i]) {
 			LR_LOG(deviceContext, "[" << requests[i].name << "] HIP program compilation error: " << endl << errors[i]);
 
-			throw runtime_error(requests[i].name + " HIP program compilation error");
+			throw runtime_error(CompilationErrorMessage(requests[i].name, errors[i]));
 		} else {
 			if (errors[i].length() > 0) {
 				LR_LOG(deviceContext, "[" << requests[i].name << "] HIP program compilation warnings: " << endl << errors[i]);

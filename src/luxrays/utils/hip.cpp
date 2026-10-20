@@ -251,7 +251,7 @@ hipModule_t hipKernelPersistentCache::LoadPrecompiled(
 	const hipError_t err = hipModuleLoadData(&module, code);
 	if (err != hipSuccess) {
 		*warning = "Unable to load the precompiled kernels for " + precompiledFamily +
-				" (" + hipGetErrorName(err) + "): they are compiled instead\n";
+				" (" + hipGetErrorName(err) + "): using the kernel cache or the run-time compiler instead\n";
 		return nullptr;
 	}
 
