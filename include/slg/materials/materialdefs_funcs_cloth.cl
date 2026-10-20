@@ -180,7 +180,9 @@ __constant int ClothPatterns[][6 * 9] = {
     }
 };
 
-OPENCL_FORCE_INLINE ulong sampleTEA(uint v0, uint v1, uint rounds) {
+// Only the low 32 bits of the TEA output are used, so return v0 alone: HIP's
+// ulong is 32-bit on Windows, where ((ulong) v1 << 32) is undefined
+OPENCL_FORCE_INLINE uint sampleTEA(uint v0, uint v1, uint rounds) {
 	uint sum = 0;
 
 	for (uint i = 0; i < rounds; ++i) {
@@ -189,7 +191,7 @@ OPENCL_FORCE_INLINE ulong sampleTEA(uint v0, uint v1, uint rounds) {
 		v1 += ((v0 << 4) + 0xAD90777D) ^ (v0 + sum) ^ ((v0 >> 5) + 0x7E95761E);
 	}
 
-	return ((ulong) v1 << 32) + v0;
+	return v0;
 }
 
 OPENCL_FORCE_INLINE float sampleTEAfloat(uint v0, uint v1, uint rounds) {
@@ -199,7 +201,7 @@ OPENCL_FORCE_INLINE float sampleTEAfloat(uint v0, uint v1, uint rounds) {
 		uint u;
 		float f;
 	} x;
-	x.u = ((sampleTEA(v0, v1, rounds) & 0xFFFFFFFF) >> 9) | 0x3f800000UL;
+	x.u = (sampleTEA(v0, v1, rounds) >> 9) | 0x3f800000u;
 	return x.f - 1.0f;
 }
 

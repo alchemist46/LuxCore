@@ -196,7 +196,8 @@ static const int ClothPatterns[][6 * 9] = {
     }
 };
 
-static uint64_t sampleTEA(uint32_t v0, uint32_t v1, u_int rounds = 4) {
+// Only the low 32 bits of the TEA output are used, as in the GPU version
+static uint32_t sampleTEA(uint32_t v0, uint32_t v1, u_int rounds = 4) {
 	uint32_t sum = 0;
 
 	for (u_int i = 0; i < rounds; ++i) {
@@ -205,7 +206,7 @@ static uint64_t sampleTEA(uint32_t v0, uint32_t v1, u_int rounds = 4) {
 		v1 += ((v0 << 4) + 0xAD90777D) ^ (v0 + sum) ^ ((v0 >> 5) + 0x7E95761E);
 	}
 
-	return ((uint64_t) v1 << 32) + v0;
+	return v0;
 }
 
 static float sampleTEAfloat(uint32_t v0, uint32_t v1, u_int rounds = 4) {
@@ -215,7 +216,7 @@ static float sampleTEAfloat(uint32_t v0, uint32_t v1, u_int rounds = 4) {
 		uint32_t u;
 		float f;
 	} x;
-	x.u = ((sampleTEA(v0, v1, rounds) & 0xFFFFFFFF) >> 9) | 0x3f800000UL;
+	x.u = (sampleTEA(v0, v1, rounds) >> 9) | 0x3f800000u;
 	return x.f - 1.0f;
 }
 

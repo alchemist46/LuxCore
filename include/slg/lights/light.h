@@ -128,7 +128,7 @@ public:
 class IntersectableLightSource : public LightSource {
 public:
 	IntersectableLightSource() : lightMaterial(nullptr) { }
-	virtual ~IntersectableLightSource() { SDL_LOG("Removing intersectable light"); }
+	virtual ~IntersectableLightSource() { }
 
 	virtual bool IsIntersectable() const { return true; }
 
