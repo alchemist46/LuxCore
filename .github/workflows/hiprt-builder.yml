@@ -72,11 +72,15 @@ jobs:
         run: |
           # hipcc and what it uses: the ROCm clang, the device libraries and
           # the HIP headers. No GPU and no kernel driver are needed.
+          # The priority keeps dnf from taking the older ROCm packages of EPEL
+          # (enabled in the manylinux image), whose version numbers are higher
+          # than the AMD ones.
           cat > /etc/yum.repos.d/rocm.repo <<EOF
           [rocm]
           name=ROCm ${ROCM_VERSION}
           baseurl=https://repo.radeon.com/rocm/rhel8/${ROCM_VERSION}/main
           enabled=1
+          priority=50
           gpgcheck=1
           gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
           EOF
