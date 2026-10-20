@@ -606,7 +606,7 @@ endif()
 #
 #############################################################################
 
-option(LUXRAYS_PRECOMPILE_HIP "Pre-compile the HIP path kernels at build time" ON)
+option(LUXRAYS_PRECOMPILE_HIP "Pre-compile the HIP path kernels and the HIPRT trace kernel at build time" ON)
 
 if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE_HIP AND NOT APPLE AND NOT CMAKE_CROSSCOMPILING)
   # The code objects are device code, the same for every platform: they can
@@ -636,12 +636,43 @@ if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE
   set(hip_dir "${GENERATED_DIR}/hip")
   file(MAKE_DIRECTORY ${hip_dir})
 
-  set(hip_module_sources ${hip_dir}/embeddedhip.cpp)
+  # The HIPRT headers, required to bake the HIPRT trace kernel: the ones of the
+  # shipped HIPRT library (see src/pyluxcore/CMakeLists.txt), in the HIPRT
+  # source tree 3 levels above it
+  set(hiprt_include_dir "")
+  set(hiprt_library "${LUXRAYS_HIPRT_LIBRARY}")
+  if(NOT hiprt_library AND DEFINED ENV{LUXRAYS_HIPRT_LIBRARY})
+    file(TO_CMAKE_PATH "$ENV{LUXRAYS_HIPRT_LIBRARY}" hiprt_library)
+  endif()
+  if(hiprt_library)
+    get_filename_component(hiprt_root "${hiprt_library}" DIRECTORY)
+    get_filename_component(hiprt_root "${hiprt_root}/../../.." ABSOLUTE)
+    if(EXISTS "${hiprt_root}/hiprt/impl/hiprt_device_impl.h")
+      set(hiprt_include_dir "${hiprt_root}")
+    endif()
+  endif()
+
+  # The modules to embed, as <variant>:<family> pairs: the path kernel
+  # variants for each family, then the HIPRT trace kernel variants of the
+  # families (HIP_VARIANTS, HIP_HIPRT_VARIANTS)
+  set(hip_modules)
   foreach(hip_variant ${HIP_VARIANTS})
     foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
-      list(APPEND hip_module_sources ${hip_dir}/${hip_variant}_${hip_family}_module.cpp)
+      list(APPEND hip_modules ${hip_variant}:${hip_family})
     endforeach()
   endforeach()
+  set(hip_hiprt_modules)
+  set(hip_hiprt_variants)
+  foreach(hip_module ${HIP_HIPRT_VARIANTS})
+    string(REPLACE ":" ";" hip_module_fields ${hip_module})
+    list(GET hip_module_fields 0 hip_variant)
+    list(GET hip_module_fields 1 hip_family)
+    list(APPEND hip_hiprt_variants ${hip_variant})
+    if(hip_family IN_LIST LUXRAYS_HIP_BAKE_FAMILIES)
+      list(APPEND hip_hiprt_modules ${hip_module})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES hip_hiprt_variants)
 
   set(hip_co_files)
 
@@ -654,13 +685,19 @@ if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE
     if(NOT EXISTS ${hip_baked_dir}/hipmanifest.txt)
       message(FATAL_ERROR "Missing ${hip_baked_dir}/hipmanifest.txt (LUXRAYS_HIP_BAKED_DIR)")
     endif()
-    foreach(hip_variant ${HIP_VARIANTS})
-      foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
-        if(NOT EXISTS ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
-          message(FATAL_ERROR "Missing ${hip_baked_dir}/${hip_variant}_${hip_family}.co (LUXRAYS_HIP_BAKED_DIR)")
-        endif()
-        list(APPEND hip_co_files ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
-      endforeach()
+    # The HIPRT trace kernels are embedded when they were baked
+    foreach(hip_module ${hip_hiprt_modules})
+      string(REPLACE ":" "_" hip_module_name ${hip_module})
+      if(EXISTS ${hip_baked_dir}/${hip_module_name}.co)
+        list(APPEND hip_modules ${hip_module})
+      endif()
+    endforeach()
+    foreach(hip_module ${hip_modules})
+      string(REPLACE ":" "_" hip_module_name ${hip_module})
+      if(NOT EXISTS ${hip_baked_dir}/${hip_module_name}.co)
+        message(FATAL_ERROR "Missing ${hip_baked_dir}/${hip_module_name}.co (LUXRAYS_HIP_BAKED_DIR)")
+      endif()
+      list(APPEND hip_co_files ${hip_baked_dir}/${hip_module_name}.co)
     endforeach()
 
     message(STATUS "Using the pre-baked HIP kernels from ${hip_baked_dir} (${LUXRAYS_HIP_BAKE_FAMILIES})")
@@ -675,6 +712,12 @@ if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE
       message(STATUS "No HIP SDK or ROCm clang found (HIP_PATH, ROCM_PATH, LUXRAYS_HIP_CLANG): HIP kernels pre-compilation disabled, they will be compiled at run time with hiprtc")
     else()
       message(STATUS "Pre-compiling the HIP kernels with ${HIP_CLANG_EXECUTABLE} (${LUXRAYS_HIP_BAKE_FAMILIES})")
+      if(hiprt_include_dir)
+        message(STATUS "Pre-compiling the HIPRT trace kernel with the HIPRT headers of ${hiprt_include_dir}")
+        list(APPEND hip_modules ${hip_hiprt_modules})
+      else()
+        message(STATUS "No HIPRT headers (they are looked for next to LUXRAYS_HIPRT_LIBRARY): the HIPRT trace kernel will be compiled at run time with hiprtc")
+      endif()
 
       # The tool used to write the kernel sources and parameters. It uses only
       # the kernel sources: no object other than the generated kernel sources
@@ -698,7 +741,7 @@ if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE
       # rewrites a file only if its content changed, so a rebuild of the tool
       # (e.g. any change in luxrays) doesn't compile the kernels again.
       set(hip_baker_outputs ${hip_baked_dir}/hipmanifest.txt)
-      foreach(hip_variant ${HIP_VARIANTS})
+      foreach(hip_variant ${HIP_VARIANTS} ${hip_hiprt_variants})
         list(APPEND hip_baker_outputs
           ${hip_baked_dir}/${hip_variant}.hip
           ${hip_baked_dir}/${hip_variant}.params
@@ -727,55 +770,70 @@ if(LUXRAYS_PRECOMPILE_HIP AND NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE
         COMMENT "Extracting the hiprtc runtime header"
       )
 
-      # Compile each variant for each family. A compilation of the path kernel
-      # takes minutes and GBs of memory: the number of the concurrent ones is
-      # limited (Ninja generators only).
+      # Compile each module. A compilation of the path kernel takes minutes
+      # and GBs of memory: the number of the concurrent ones is limited (Ninja
+      # generators only).
       set(LUXRAYS_HIP_BAKE_JOBS 4 CACHE STRING "The maximum number of HIP kernels compiled at the same time")
       set_property(GLOBAL APPEND PROPERTY JOB_POOLS hip_bake=${LUXRAYS_HIP_BAKE_JOBS})
 
-      foreach(hip_variant ${HIP_VARIANTS})
-        foreach(hip_family ${LUXRAYS_HIP_BAKE_FAMILIES})
-          set(hip_co_file ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
-          list(APPEND hip_co_files ${hip_co_file})
+      foreach(hip_module ${hip_modules})
+        string(REPLACE ":" ";" hip_module_fields ${hip_module})
+        list(GET hip_module_fields 0 hip_variant)
+        list(GET hip_module_fields 1 hip_family)
+        set(hip_co_file ${hip_baked_dir}/${hip_variant}_${hip_family}.co)
+        list(APPEND hip_co_files ${hip_co_file})
 
-          add_custom_command(
-            OUTPUT ${hip_co_file}
-            COMMAND ${CMAKE_COMMAND}
-              -DHIP_CLANG_EXECUTABLE=${HIP_CLANG_EXECUTABLE}
-              -DFAMILY=${hip_family}
-              -DSRC=${hip_baked_dir}/${hip_variant}.hip
-              -DPARAMS=${hip_baked_dir}/${hip_variant}.params
-              -DHIPRTC_HEADER=${hiprtc_header}
-              -DDST=${hip_co_file}
-              -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
-            DEPENDS
-              ${hip_baked_dir}/${hip_variant}.hip
-              ${hip_baked_dir}/${hip_variant}.params
-              ${hiprtc_header}
-              "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
-            COMMENT "Compiling the ${hip_variant} HIP kernels for ${hip_family}"
-            JOB_POOL hip_bake
-          )
-        endforeach()
+        # The HIPRT trace kernel includes the HIPRT headers
+        set(hip_include_arg)
+        if(hip_variant IN_LIST hip_hiprt_variants)
+          set(hip_include_arg -DINCLUDE_DIR=${hiprt_include_dir})
+        endif()
+
+        add_custom_command(
+          OUTPUT ${hip_co_file}
+          COMMAND ${CMAKE_COMMAND}
+            -DHIP_CLANG_EXECUTABLE=${HIP_CLANG_EXECUTABLE}
+            -DFAMILY=${hip_family}
+            -DSRC=${hip_baked_dir}/${hip_variant}.hip
+            -DPARAMS=${hip_baked_dir}/${hip_variant}.params
+            -DHIPRTC_HEADER=${hiprtc_header}
+            ${hip_include_arg}
+            -DDST=${hip_co_file}
+            -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
+          DEPENDS
+            ${hip_baked_dir}/${hip_variant}.hip
+            ${hip_baked_dir}/${hip_variant}.params
+            ${hiprtc_header}
+            "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/CompileHIP.cmake"
+          COMMENT "Compiling the ${hip_variant} HIP kernels for ${hip_family}"
+          JOB_POOL hip_bake
+        )
       endforeach()
     endif()
   endif()
 
   if(hip_co_files)
     # Generate the sources embedding the code objects
-    string(REPLACE ";" "|" hip_families_arg "${LUXRAYS_HIP_BAKE_FAMILIES}")
+    set(hip_module_sources ${hip_dir}/embeddedhip.cpp)
+    foreach(hip_module ${hip_modules})
+      string(REPLACE ":" "_" hip_module_name ${hip_module})
+      list(APPEND hip_module_sources ${hip_dir}/${hip_module_name}_module.cpp)
+    endforeach()
+    string(REPLACE ";" "," hip_modules_arg "${hip_modules}")
+
     add_custom_command(
       OUTPUT ${hip_module_sources}
       COMMAND ${CMAKE_COMMAND}
         -DINPUT_DIR=${hip_baked_dir}
         -DOUTPUT_DIR=${hip_dir}
-        -DFAMILIES=${hip_families_arg}
+        -DMODULES=${hip_modules_arg}
         -P "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/GenerateEmbeddedHIP.cmake"
       DEPENDS
         ${hip_baked_dir}/hipmanifest.txt
         ${hip_co_files}
         "${PROJECT_SOURCE_DIR}/build-system/cmake/Scripts/GenerateEmbeddedHIP.cmake"
       COMMENT "Generating the embedded HIP kernels registry"
+      VERBATIM
     )
 
     add_library(hip-embedded STATIC ${hip_module_sources})

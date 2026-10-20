@@ -211,3 +211,19 @@ set(HIP_VARIANTS
 # code object each (see GetHIPBakedKernelFamilies() in
 # include/luxrays/utils/hipkernel.h)
 set(HIP_BAKE_FAMILIES gfx10-3-generic gfx11-generic gfx12-generic)
+
+# The HIPRT trace kernel variants, as <variant>:<family> pairs: each RTIP is
+# compiled for the families HIPRT uses it on (see GetHiprtBakedRtips() in
+# include/luxrays/utils/hipkernel.h; gfx12 is RTIP 3.1 or 2.0, depending on
+# the driver), for the work group sizes 32 and 64
+set(HIP_HIPRT_VARIANTS)
+foreach(hip_hiprt_wg 32 64)
+  foreach(hip_hiprt_geom geometry scene)
+    list(APPEND HIP_HIPRT_VARIANTS
+      hiprt_${hip_hiprt_geom}_wg${hip_hiprt_wg}_rtip11:gfx10-3-generic
+      hiprt_${hip_hiprt_geom}_wg${hip_hiprt_wg}_rtip20:gfx11-generic
+      hiprt_${hip_hiprt_geom}_wg${hip_hiprt_wg}_rtip20:gfx12-generic
+      hiprt_${hip_hiprt_geom}_wg${hip_hiprt_wg}_rtip31:gfx12-generic
+    )
+  endforeach()
+endforeach()

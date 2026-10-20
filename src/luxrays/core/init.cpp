@@ -115,10 +115,9 @@ void Init() {
 	isHiprtcAvailable = isHipAvailable && (hipewInit(HIPEW_INIT_HIPRTC) == HIPEW_SUCCESS);
 
 	// HIPRT is optional: without it, HIP devices use the BVH/MBVH accelerators.
-	// It requires hiprtc too, for now: its trace kernel is compiled by
-	// hiprtBuildTraceKernels(), which crashes when HIPRT's own loader doesn't
-	// find hiprtc (it doesn't check the entry points).
-	isHiprtAvailable = isHiprtcAvailable && (hiprtewInit() == HIPRTEW_SUCCESS);
+	// Whether it works without hiprtc depends on the library and on the device
+	// (see HIPDeviceDescription).
+	isHiprtAvailable = isHipAvailable && (hiprtewInit() == HIPRTEW_SUCCESS);
 #endif
 }
 

@@ -91,7 +91,8 @@ std::vector<std::string> hipKernelPersistentCache::GetCompilerOptions(const std:
 bool hipKernelPersistentCache::ForcedCompileCodeObject(
 	const std::vector<std::string> &kernelsParameters, const std::string &kernelSource,
 	const std::string &programName, const std::string &gpuArch,
-	std::unique_ptr<char[]> *code, size_t *codeSize, std::string *error
+	std::unique_ptr<char[]> *code, size_t *codeSize, std::string *error,
+	const std::vector<std::string> &extraOptions
 ) {
 	if (error)
 		*error = "";
@@ -119,6 +120,8 @@ bool hipKernelPersistentCache::ForcedCompileCodeObject(
 		hipOpts.push_back(o.c_str());
 	for (auto const &p : kernelsParameters)
 		hipOpts.push_back(p.c_str());
+	for (auto const &o : extraOptions)
+		hipOpts.push_back(o.c_str());
 
 	const hiprtcResult compilationResult = hiprtcCompileProgram(prog,
 			hipOpts.size(), hipOpts.data());
@@ -148,7 +151,8 @@ bool hipKernelPersistentCache::ForcedCompileCodeObject(
 
 bool hipKernelPersistentCache::CompileCodeObject(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
-		std::unique_ptr<char[]> *code, size_t *codeSize, bool *cached, std::string *error) {
+		std::unique_ptr<char[]> *code, size_t *codeSize, bool *cached, std::string *error,
+		const std::vector<std::string> &extraOptions) {
 	if (error)
 		*error = "";
 	*cached = false;
@@ -200,7 +204,7 @@ bool hipKernelPersistentCache::CompileCodeObject(const std::vector<std::string> 
 	}
 
 	// It isn't available, compile the source
-	if (!ForcedCompileCodeObject(kernelsParameters, kernelSource, programName, arch, code, codeSize, error))
+	if (!ForcedCompileCodeObject(kernelsParameters, kernelSource, programName, arch, code, codeSize, error, extraOptions))
 		return false;
 
 	// Add the kernel to the cache
@@ -254,9 +258,21 @@ hipModule_t hipKernelPersistentCache::LoadPrecompiled(
 	return module;
 }
 
+std::string hipKernelPersistentCache::GetCodeOriginDesc(const CodeOrigin origin) const {
+	switch (origin) {
+		case CodeOrigin::CACHED:
+			return " (cached)";
+		case CodeOrigin::PRECOMPILED:
+			return " (precompiled kernels, " + precompiledFamily + ")";
+		default:
+			return "";
+	}
+}
+
 hipModule_t hipKernelPersistentCache::Compile(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
-		CodeOrigin *origin, std::string *error) {
+		CodeOrigin *origin, std::string *error,
+		const std::vector<std::string> &extraOptions) {
 	std::string warning;
 	hipModule_t module = LoadPrecompiled(kernelsParameters, kernelSource, &warning);
 	if (module) {
@@ -270,7 +286,7 @@ hipModule_t hipKernelPersistentCache::Compile(const std::vector<std::string> &ke
 	size_t codeSize;
 	bool cached;
 	const bool compiled = CompileCodeObject(kernelsParameters, kernelSource, programName,
-			&code, &codeSize, &cached, error);
+			&code, &codeSize, &cached, error, extraOptions);
 	if (error)
 		*error = warning + *error;
 	if (!compiled)

@@ -32,7 +32,8 @@
 // BlendLuxCore; TILEPATHOCL is compiled at run time), the private or global
 // evaluation stacks and the subsurface random walk. The working colour space
 // and the epsilons are kernel constants (PARAM_KERNEL_CONSTANTS), so they
-// don't add variants.
+// don't add variants. Plus the HIPRT trace kernel of HiprtAccel, with or
+// without instances, for each RTIP (it is compiled with the HIPRT headers).
 
 #include <algorithm>
 #include <fstream>
@@ -42,6 +43,7 @@
 #include <vector>
 
 #include <hipew.h>
+#include <hiprtew.h>
 
 #include "luxrays/kernels/kernels.h"
 #include "luxrays/utils/hipkernel.h"
@@ -130,6 +132,30 @@ int main(int argc, char *argv[]) {
 	const string renderEngineTypes[] = { "PATHOCL", "RTPATHOCL" };
 
 	string manifest;
+	// Write the source and the options of a variant, and add it to the manifest.
+	// The file names must be stable (i.e. independent of the key) in order to
+	// be known at CMake configuration time.
+	auto writeVariant = [&](const string &stableName, const vector<string> &params,
+			const string &source) {
+		const string baseName = outDir + "/" + stableName;
+
+		if (!WriteFile(baseName + ".hip", source))
+			return false;
+
+		// The compiler options: the hashed ones (i.e. without the target
+		// architecture), one per line
+		vector<string> opts = GetHIPBaseCompilerOptions();
+		opts.insert(opts.end(), params.begin(), params.end());
+		string optsText;
+		for (const string &opt : opts)
+			optsText += opt + "\n";
+		if (!WriteFile(baseName + ".params", optsText))
+			return false;
+
+		manifest += stableName + " " + GetHIPBakedKernelKey(params, source) + "\n";
+		return true;
+	};
+
 	for (const string &renderEngineType : renderEngineTypes) {
 		for (const bool privateEvalStack : { false, true }) {
 			for (const bool subsurface : { false, true }) {
@@ -145,30 +171,35 @@ int main(int argc, char *argv[]) {
 				const vector<string> compileOpts = GetHIPPathCompileOptions();
 				params.insert(params.end(), compileOpts.begin(), compileOpts.end());
 
-				// The file names must be stable (i.e. independent of the key) in
-				// order to be known at CMake configuration time
 				string stableName = renderEngineType;
 				transform(stableName.begin(), stableName.end(), stableName.begin(), ::tolower);
 				if (privateEvalStack)
 					stableName += "_private";
 				if (subsurface)
 					stableName += "_subsurface";
-				const string baseName = outDir + "/" + stableName;
 
-				if (!WriteFile(baseName + ".hip", hipSource))
+				if (!writeVariant(stableName, params, hipSource))
 					return EXIT_FAILURE;
+			}
+		}
+	}
 
-				// The compiler options: the hashed ones (i.e. without the target
-				// architecture), one per line
-				vector<string> opts = GetHIPBaseCompilerOptions();
-				opts.insert(opts.end(), params.begin(), params.end());
-				string optsText;
-				for (const string &opt : opts)
-					optsText += opt + "\n";
-				if (!WriteFile(baseName + ".params", optsText))
+	// The HIPRT trace kernel (see HiprtAccel), for each RTIP of the baked
+	// families (HIP_HIPRT_VARIANTS in build-system/cmake/KernelFiles.cmake maps
+	// them to the families). The work group sizes are the default of
+	// opencl.gpu.workgroup.size and 64, used by many of the example scenes.
+	// Its source is the HIPRT one, without the OpenCL emulation.
+	const string hiprtSource = GetHiprtTraceKernelSource();
+	for (const unsigned int rtip : { 11u, 20u, 31u }) {
+		for (const unsigned int workGroupSize : { HiprtTraceKernelBakedWorkGroupSize, 64u }) {
+			for (const bool geometryOnly : { true, false }) {
+				const vector<string> params = GetHiprtTraceKernelParameters(
+						workGroupSize, geometryOnly, rtip, HIPRTEW_API_VERSION);
+
+				const string stableName = string("hiprt_") + (geometryOnly ? "geometry" : "scene") +
+						"_wg" + to_string(workGroupSize) + "_rtip" + to_string(rtip);
+				if (!writeVariant(stableName, params, hiprtSource))
 					return EXIT_FAILURE;
-
-				manifest += stableName + " " + GetHIPBakedKernelKey(params, hipSource) + "\n";
 			}
 		}
 	}

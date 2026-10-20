@@ -36,9 +36,23 @@ using namespace luxrays;
 // HIP Device Description
 //------------------------------------------------------------------------------
 
+// If HIPRT can work on a device of the given architecture. A HIPRT library
+// with precompiled kernels (LUXRAYS_HIPRT_PRECOMPILED, see
+// src/luxrays/CMakeLists.txt) compiles nothing at run time, but its kernels
+// exist only for the RDNA2/3/4 architectures, the ones of the baked families.
+// Otherwise, HIPRT compiles its kernels at run time: it requires hiprtc, and
+// it crashes without it (its loader doesn't check the entry points).
+static bool IsHIPRTSupported(const string &arch) {
+#if defined(LUXRAYS_HIPRT_PRECOMPILED)
+	return !GetHIPBakedKernelFamily(arch).empty();
+#else
+	return isHiprtcAvailable;
+#endif
+}
+
 HIPDeviceDescription::HIPDeviceDescription(hipDevice_t dev, const size_t devIndex) :
 		DeviceDescription("HIPInitializingDevice", DEVICE_TYPE_HIP_GPU),
-		hipDeviceIndex(devIndex), hipDevice(dev), useHIPRT(isHiprtAvailable) {
+		hipDeviceIndex(devIndex), hipDevice(dev), useHIPRT(false) {
 	char buff[256];
 	CHECK_HIP_ERROR(hipDeviceGetName(buff, 256, hipDevice));
 	name = string(buff);
@@ -51,6 +65,8 @@ HIPDeviceDescription::HIPDeviceDescription(hipDevice_t dev, const size_t devInde
 	arch = string(gcnArchName, strnlen(gcnArchName, HIPEW_DEVICE_PROP_GCN_ARCH_NAME_SIZE));
 	if (arch.compare(0, 3, "gfx") != 0)
 		throw runtime_error("Unable to read the architecture of HIP device " + name + ": " + arch);
+
+	useHIPRT = isHiprtAvailable && IsHIPRTSupported(arch);
 }
 
 HIPDeviceDescription::~HIPDeviceDescription() {
@@ -151,7 +167,16 @@ hiprtContext HIPDevice::GetHIPRTContext() {
 		return hiprtCtx;
 	hiprtCtxInitialized = true;
 
-	if (isHiprtAvailable && deviceDesc.useHIPRT) {
+	if (isHiprtAvailable && deviceDesc.useHIPRT && !IsHIPRTSupported(deviceDesc.GetHIPArch())) {
+		// Requested with hip.hiprt.devices.select
+#if defined(LUXRAYS_HIPRT_PRECOMPILED)
+		const string reason = "its kernels are not precompiled for this architecture";
+#else
+		const string reason = "it requires hiprtc";
+#endif
+		LR_LOG(deviceContext, "WARNING HIPRT can't be used on device " << deviceName << " (" <<
+				deviceDesc.GetHIPArch() << "): " << reason);
+	} else if (isHiprtAvailable && deviceDesc.useHIPRT) {
 		// HIPRT works with the driver API: give it the primary context, the
 		// one used by the runtime API calls of this device
 		hipCtx_t hipCtx;
@@ -173,8 +198,10 @@ hiprtContext HIPDevice::GetHIPRTContext() {
 			// HIPRT logs to the standard output otherwise
 			CHECK_HIPRT_ERROR(hiprtSetLogLevel(hiprtCtx, hiprtLogLevelError));
 
-			// The trace kernels compiled by HIPRT are cached next to the
-			// ones of this device, so they are cleared together
+			// The kernels compiled by HIPRT (its build kernels, when they are
+			// not precompiled; the trace kernel goes through the cache of
+			// this device, see HiprtAccel) are cached next to the ones of
+			// this device, so they are cleared together
 			const std::filesystem::path hiprtCacheDir =
 					hipKernelPersistentCache::GetCacheDir(kernelCache->GetApplicationName()) / "hiprt";
 			std::filesystem::create_directories(hiprtCacheDir);
@@ -262,19 +289,6 @@ string HIPDevice::GetKernelSource(const string &kernelSource) const {
 	return GetHIPKernelSource(kernelSource);
 }
 
-// How a program was obtained, for the log
-static string CodeOriginDesc(const hipKernelPersistentCache::CodeOrigin origin,
-		const hipKernelPersistentCache &kernelCache) {
-	switch (origin) {
-		case hipKernelPersistentCache::CodeOrigin::CACHED:
-			return " (cached)";
-		case hipKernelPersistentCache::CodeOrigin::PRECOMPILED:
-			return " (precompiled kernels, " + kernelCache.GetPrecompiledFamily() + ")";
-		default:
-			return "";
-	}
-}
-
 bool HIPDevice::HasPrecompiledPrograms() const {
 	return !kernelCache->GetPrecompiledFamily().empty();
 }
@@ -318,7 +332,7 @@ HardwareDeviceProgramUPtr HIPDevice::CompileProgram(
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 	LR_LOG(deviceContext, "[" << programName << "] Compilation completed in " << duration.count() << " ms" <<
-			CodeOriginDesc(origin, *kernelCache));
+			kernelCache->GetCodeOriginDesc(origin));
 
 	auto hipDeviceProgram = std::make_unique<HIPDeviceProgram>();
 	hipDeviceProgram->Set(module);
@@ -387,7 +401,7 @@ std::vector<HardwareDeviceProgramUPtr> HIPDevice::CompilePrograms(
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 	for (std::size_t i = 0; i < requests.size(); ++i) {
 		LR_LOG(deviceContext, "[" << requests[i].name << "] Compilation completed in " <<
-			duration.count() << " ms" << CodeOriginDesc(origins[i], *kernelCache));
+			duration.count() << " ms" << kernelCache->GetCodeOriginDesc(origins[i]));
 	}
 
 	return programs;

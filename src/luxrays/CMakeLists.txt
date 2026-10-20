@@ -172,6 +172,37 @@ target_link_libraries(luxrays PRIVATE
   OpenMP::OpenMP_CXX
 )
 
+# Whether the HIPRT library shipped with pyluxcore (LUXRAYS_HIPRT_LIBRARY, see
+# src/pyluxcore/CMakeLists.txt) has its kernels precompiled (HIPRT built with
+# PRECOMPILE and BAKE_COMPILED_KERNEL): it then works without hiprtc, but only
+# on the architectures it was compiled for (see IsHIPRTSupported() in
+# hipdevice.cpp). AUTO detects it from the kernel bundles that the HIPRT
+# precompilation writes next to the library.
+if(NOT LUXRAYS_DISABLE_OPENCL AND NOT LUXRAYS_DISABLE_HIP)
+  set(LUXRAYS_HIPRT_PRECOMPILED "AUTO" CACHE STRING
+    "The shipped HIPRT library has precompiled kernels: ON, OFF or AUTO")
+  set(hiprt_precompiled OFF)
+  if(LUXRAYS_HIPRT_PRECOMPILED STREQUAL "AUTO")
+    set(hiprt_library "${LUXRAYS_HIPRT_LIBRARY}")
+    if(NOT hiprt_library AND DEFINED ENV{LUXRAYS_HIPRT_LIBRARY})
+      file(TO_CMAKE_PATH "$ENV{LUXRAYS_HIPRT_LIBRARY}" hiprt_library)
+    endif()
+    if(hiprt_library)
+      get_filename_component(hiprt_library_dir "${hiprt_library}" DIRECTORY)
+      if(EXISTS "${hiprt_library_dir}/oro_compiled_kernels.hipfb")
+        set(hiprt_precompiled ON)
+      endif()
+    endif()
+  elseif(LUXRAYS_HIPRT_PRECOMPILED)
+    set(hiprt_precompiled ON)
+  endif()
+
+  if(hiprt_precompiled)
+    message(STATUS "HIPRT library with precompiled kernels")
+    target_compile_definitions(luxrays PRIVATE LUXRAYS_HIPRT_PRECOMPILED)
+  endif()
+endif()
+
 ################################################################################
 #
 # Predefines

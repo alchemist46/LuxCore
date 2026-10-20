@@ -39,12 +39,20 @@ endif()
 
 file(STRINGS ${PARAMS} HIP_PARAMETERS)
 
+# INCLUDE_DIR (optional): the HIPRT headers of the trace kernel. Not part of
+# the parameters: they are not part of the kernel key.
+set(HIP_INCLUDE_OPTIONS)
+if(INCLUDE_DIR)
+  set(HIP_INCLUDE_OPTIONS -I${INCLUDE_DIR})
+endif()
+
 execute_process(
   COMMAND ${HIP_CLANG_EXECUTABLE} -x hip
   --offload-device-only --no-gpu-bundle-output
   --offload-arch=${FAMILY} -mcode-object-version=6
   -D__HIPCC_RTC__ -nogpuinc -include ${HIPRTC_HEADER}
   -fshort-wchar -mllvm -amdgpu-internalize-symbols -Wno-gnu-line-marker
+  ${HIP_INCLUDE_OPTIONS}
   ${HIP_PARAMETERS}
   ${SRC} -o ${DST}
   RESULT_VARIABLE HIP_RESULT

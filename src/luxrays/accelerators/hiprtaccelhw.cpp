@@ -30,6 +30,7 @@
 #include "luxrays/devices/hipintersectiondevice.h"
 #include "luxrays/accelerators/hiprtaccel.h"
 #include "luxrays/kernels/kernels.h"
+#include "luxrays/utils/hipkernel.h"
 #include "luxrays/utils/oclcache.h"
 
 using namespace std;
@@ -46,7 +47,8 @@ public:
 			HardwareIntersectionKernel(dev), hipDevice(nullptr),
 			hiprtCtx(nullptr), mergedGeometry(nullptr), scene(nullptr),
 			mergedTrianglesBuff(nullptr), instanceMeshesBuff(nullptr),
-			tmpBuff(nullptr), rayTimeOffset(0.f), stackBuffer{} {
+			tmpBuff(nullptr), rayTimeOffset(0.f), stackBuffer{},
+			kernelModule(nullptr) {
 		hipDevice = dynamic_cast<HIPIntersectionDevice *>(&dev);
 
 		// Safety checks
@@ -68,6 +70,7 @@ public:
 
 			CompileKernel();
 		} catch (...) {
+			FreeKernel();
 			FreeScene();
 			hipDevice->PopThreadCurrentDevice();
 			throw;
@@ -77,10 +80,9 @@ public:
 
 	virtual ~HiprtKernel() {
 		hipDevice->PushThreadCurrentDevice();
+		FreeKernel();
 		FreeScene();
 		hipDevice->PopThreadCurrentDevice();
-
-		// The kernel module is unloaded by hiprtDestroyContext()
 	}
 
 	virtual void Update(DataSetConstSPtr newDataSet) { assert(false); }
@@ -493,68 +495,71 @@ private:
 		hipDevice->FreeBuffer(&instanceMeshesBuff);
 	}
 
+	// The trace kernel program is built as hiprtBuildTraceKernels() builds it
+	// (see GetHiprtTraceKernelSource()), but through the kernel cache of the
+	// device: it is precompiled like the other kernels, and hiprtc is required
+	// only when it isn't
 	void CompileKernel() {
 		const double t0 = WallClockTime();
-
-		// The kernel uses only the plain C ray types: the OpenCL emulation of
-		// the other HIP kernels isn't required
-		const string kernelSource =
-				luxrays::ocl::KernelSource_luxrays_types +
-				luxrays::ocl::KernelSource_point_types +
-				luxrays::ocl::KernelSource_vector_types +
-				luxrays::ocl::KernelSource_ray_types +
-				luxrays::ocl::KernelSource_hiprtaccel;
 
 		// The local memory stack is sized for the work group size
 		if (device.GetDeviceDesc().GetForceWorkGroupSize() > 0)
 			kernelWorkGroupSize = device.GetDeviceDesc().GetForceWorkGroupSize();
 		else
-			kernelWorkGroupSize = 64;
+			kernelWorkGroupSize = HiprtTraceKernelWorkGroupSize;
 
-		vector<string> opts = hipKernelPersistentCache::GetCompilerOptions(
-				dynamic_cast<const HIPDeviceDescription &>(hipDevice->GetDeviceDesc()).GetHIPArch());
-		opts.push_back("-D HIPRTACCEL_WORKGROUP_SIZE=" + ToString(kernelWorkGroupSize));
-		opts.push_back("-D HIPRTACCEL_SHARED_STACK_SIZE=" + ToString(SharedStackSize));
+		// The kernel must be compiled for the RTIP of the acceleration
+		// structures HIPRT builds
+		const string &arch = dynamic_cast<const HIPDeviceDescription &>(hipDevice->GetDeviceDesc()).GetHIPArch();
+		int driverVersion;
+		CHECK_HIP_ERROR(hipDriverGetVersion(&driverVersion));
+		const u_int rtip = GetHiprtRtip(arch, driverVersion);
+
 		// Without instances or motion blur, there is only the merged geometry
 		// (or nothing for an empty DataSet)
-		if (!scene)
-			opts.push_back("-D HIPRTACCEL_GEOMETRY_ONLY");
-		// HIPRT doesn't use fast math for the trace kernels: it is ~12% faster
-		// with motion blur (the frame interpolation) and ~6% with instances,
-		// with the same results. Infinite values are still required: the ray
-		// maxt can be INFINITY.
-		opts.push_back("-ffast-math");
-		opts.push_back("-fno-finite-math-only");
-		vector<const char *> optsPtrs;
-		for (auto &o : opts)
-			optsPtrs.push_back(o.c_str());
-		LR_LOG(device.GetContext(), "[HiprtAccel] Compiler options: " << oclKernelPersistentCache::ToOptsString(opts));
+		const vector<string> params = GetHiprtTraceKernelParameters(kernelWorkGroupSize,
+				!scene, rtip, HIPRTEW_API_VERSION);
+		const string source = GetHiprtTraceKernelSource();
+		LR_LOG(device.GetContext(), "[HiprtAccel] Compiler options: " << oclKernelPersistentCache::ToOptsString(params));
 
-		const char *funcName = "HiprtAccel_Intersect_RayBuffer";
-		hiprtApiFunction function;
-		// HIPRT keeps its own persistent cache of the compiled kernels
-		const hiprtError err = hiprtBuildTraceKernels(hiprtCtx,
-				1, &funcName,
-				kernelSource.c_str(), "HiprtAccel",
-				0, nullptr, nullptr,
-				optsPtrs.size(), optsPtrs.data(),
-				0, 1, nullptr,
-				&function, nullptr, true);
-		if (err != hiprtSuccess) {
-			// HIPRT prints the compilation errors to the standard error
-			LR_LOG(device.GetContext(), "[HiprtAccel] HIPRT program compilation error (code: " << err << ")");
+		// hiprtc reads the HIPRT headers from HIPRT_PATH (see SetHiprtPath()
+		// in hiprtew)
+		vector<string> extraOpts;
+		const char *hiprtPath = getenv("HIPRT_PATH");
+		if (hiprtPath && hiprtPath[0])
+			extraOpts.push_back(string("-I") + hiprtPath);
 
-			throw runtime_error("HiprtAccel HIPRT program compilation error");
+		hipKernelPersistentCache &kernelCache = *hipDevice->GetHIPKernelCache();
+		hipKernelPersistentCache::CodeOrigin origin;
+		string error;
+		kernelModule = kernelCache.Compile(params, source, "HiprtAccel", &origin, &error, extraOpts);
+		if (!kernelModule) {
+			LR_LOG(device.GetContext(), "[HiprtAccel] HIP program compilation error: " << endl << error);
+
+			throw runtime_error("HiprtAccel HIP program compilation error");
+		} else if (error.length() > 0)
+			LR_LOG(device.GetContext(), "[HiprtAccel] HIP program compilation warnings: " << endl << error);
+
+		hipFunction_t function;
+		CHECK_HIP_ERROR(hipModuleGetFunction(&function, kernelModule, "HiprtAccel_Intersect_RayBuffer"));
+		kernel = hipDevice->GetKernel(function);
+
+		LR_LOG(device.GetContext(), "[HiprtAccel] Compilation completed in " <<
+				int((WallClockTime() - t0) * 1000) << "ms" << kernelCache.GetCodeOriginDesc(origin));
+	}
+
+	void FreeKernel() {
+		kernel.reset();
+
+		if (kernelModule) {
+			CHECK_HIP_ERROR(hipModuleUnload(kernelModule));
+			kernelModule = nullptr;
 		}
-
-		kernel = hipDevice->GetKernel((hipFunction_t)function);
-
-		LR_LOG(device.GetContext(), "[HiprtAccel] Compilation completed in " << int((WallClockTime() - t0) * 1000) << "ms");
 	}
 
 	// The traversal stack sizes (the same of the HIPRT default stack)
 	static constexpr u_int StackSize = 64;
-	static constexpr u_int SharedStackSize = 16;
+	static constexpr u_int SharedStackSize = HiprtTraceKernelSharedStackSize;
 	// The triangles that can be added to the merged geometry by copying the
 	// instances of a mesh (~100MB)
 	static constexpr u_longlong MergedInstancesTriangleBudget = 1000000;
@@ -575,6 +580,7 @@ private:
 	float rayTimeOffset;
 	hiprtGlobalStackBuffer stackBuffer;
 
+	hipModule_t kernelModule;
 	HardwareDeviceKernelUPtr kernel;
 	u_int kernelWorkGroupSize;
 };

@@ -63,15 +63,22 @@ public:
 	~hipKernelPersistentCache();
 
 	// Returns the code object of the program, compiling it if it isn't cached
-	// (the embedded kernels are not looked for)
+	// (the embedded kernels are not looked for). The extra options are passed
+	// to hiprtc but they are not part of the key (i.e. include directories).
 	bool CompileCodeObject(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
-		std::unique_ptr<char[]> *code, size_t *codeSize, bool *cached, std::string *error);
+		std::unique_ptr<char[]> *code, size_t *codeSize, bool *cached, std::string *error,
+		const std::vector<std::string> &extraOptions = {});
 
 	// Returns a module loaded on the current device, nullptr on compilation error
 	hipModule_t Compile(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
-		CodeOrigin *origin, std::string *error);
+		CodeOrigin *origin, std::string *error,
+		const std::vector<std::string> &extraOptions = {});
+
+	// How the code object of a program was obtained, for the log: empty,
+	// " (cached)" or " (precompiled kernels, <family>)"
+	std::string GetCodeOriginDesc(const CodeOrigin origin) const;
 
 	// Compiles all the programs in parallel and loads them on the current device
 	std::vector<hipModule_t> CompileMultiple(
@@ -105,7 +112,8 @@ public:
 	static bool ForcedCompileCodeObject(const std::vector<std::string> &kernelsParameters,
 		const std::string &kernelSource, const std::string &programName,
 		const std::string &gpuArch,
-		std::unique_ptr<char[]> *code, size_t *codeSize, std::string *error);
+		std::unique_ptr<char[]> *code, size_t *codeSize, std::string *error,
+		const std::vector<std::string> &extraOptions = {});
 
 private:
 	// The embedded code object of the program, nullptr if there is none
