@@ -52,6 +52,12 @@ on:
   push:
   pull_request:
 
+# A newer push (or pull request update) cancels the run of the older one. The
+# full runs, started by hand or by the releaser, are never cancelled.
+concurrency:
+  group: wheels-${{ github.event_name }}-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
 jobs:
   # The OpenCL kernels are pre-compiled in SPIR-V format once (the format
   # is platform and python independent) and the result is served to all the
@@ -194,9 +200,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-minor: [10, 11, 12, 13, 14]
-        #os: [ubuntu-latest, windows-2022, macos-15-intel, macos-15, windows-11-arm]
-        os: [ubuntu-latest, windows-2022, macos-15-intel, macos-15]
+        # A push or a pull request builds the Python of Blender 5 only (the
+        # one the unit tests use); the full runs build every Python version
+        python-minor: ${{ fromJSON((github.event_name == 'push' || github.event_name == 'pull_request') && '[13]' || '[10, 11, 12, 13, 14]') }}
+        # No Intel Mac: Apple Silicon only
+        #os: [ubuntu-latest, windows-2022, macos-15, windows-11-arm]
+        os: [ubuntu-latest, windows-2022, macos-15]
     env:
       # Reminder: report all variables here to CIBW_ENVIRONMENT_PASS_LINUX
       BUILD_TYPE: ${{ github.event.inputs.build-type || 'Release' }}
@@ -310,6 +319,8 @@ jobs:
           path: spirv-baked
 
       - name: Download the pre-baked HIP kernels
+        # macOS has no HIP
+        if: runner.os != 'macOS'
         uses: actions/download-artifact@v7
         with:
           name: hip-baked
