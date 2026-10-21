@@ -53,7 +53,7 @@ Tiers A-C of the speedup plan plus the structural leftovers of the plan. Today: 
 - **G9b. Precompiled HIP kernels: the platforms left.** Linux with the ROCm runtime and no SDK; the minimum Adrenalin and ROCm versions that load code object v6 and the generic targets (measure, document, and name it in the addon's message, which names none); macOS (no wheels for now, `5603ff325`); the clang-vs-hiprtc defaults image diff. None can be done on the Windows machine. *History:* PLAN G9 step 7 and "Risks".
 - **E1. Scene edits without a full rebuild.** A transform edit rebuilds the whole `DataSet`, the HIPRT scene at high quality on every device and the Embree BVH. Keep the HIPRT geometries across transform edits and rebuild only the instance scene (`hiprtaccelhw.cpp:113-143`, `scenepreprocess.cpp:43-64`); the `Balanced` build for RTPATHOCL; no Embree build when `opencl.native.threads.count = 0`. Then put timers on the rest of the startup (scene compile, synchronous pageable uploads, light tree build, image map upload) and make the uploads asynchronous from pinned memory. Target: the 0.85-4.3 s fixed cost.
 - **E2. Native CPU threads default for PATHOCL.** `opencl.native.threads.count` defaults to all hardware threads, which compete with the GPU feeder thread. Default to 0 unless hybrid is asked for, or reserve one core per GPU (also XPU); check what BlendLuxCore exports. Also the suspect of BUGS.md "Render-thread segfaults when many tests run in one process".
-- **E4. Viewport filter** (addon only). BUGS.md "Viewport Filter (nearest/linear) setting has no effect": an image shader with a sampler state; the same place an FSR-style upscale would go.
+- **E4b. Viewport upscale.** An FSR-style upscale of the viewport at Pixel Size > 1, in the image shader of `draw/viewport.py` (BlendLuxCore); the Nearest/Linear filter itself is fixed (BlendLuxCore `72bf7ada`).
 
 ### T3. Noise per sample: sampling and light transport
 
@@ -112,7 +112,7 @@ Tiers A-C of the speedup plan plus the structural leftovers of the plan. Today: 
 4. B2 and B5: statistical checks.
 5. In parallel with 2-4: D1 (measurement only) and the ASan job of K4 (cheap; it also chases the segfault).
 6. Tier C re-assessment; G11b (with the addon's `RemoveUnusedMaterials`).
-7. T2's E1, E2 and E4 (addon) as the Blender-facing track, interleaved as convenient.
+7. T2's E1, E2 and E4b (addon) as the Blender-facing track, interleaved as convenient.
 8. When the Linux machine is available: the LuxCoreDeps rebuild (K3, the O1 device modules, `cppstd=23` for K2 if ready), then O2 as the default with new references and the addon UI, and G9b in the same session. Re-run the G0 harness (`tests/benchmark/g0_run.sh`) at the end of Tier A and of Tier B and update the table in section 1.
 9. Quality, cheap first: V1-V4, L1-L3, BN, GM; then V5-V7, L4-L6, LT(a-b), P5 with MC, M1 (after Tier C), V8, PG, HW.
 10. Materials: RG before K1 reaches them; then SS, OP, ME, P4 (before any OpenPBR coat rework), HA.
