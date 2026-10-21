@@ -542,7 +542,7 @@ private:
 
 		hipFunction_t function;
 		CHECK_HIP_ERROR(hipModuleGetFunction(&function, kernelModule, "HiprtAccel_Intersect_RayBuffer"));
-		kernel = hipDevice->GetKernel(function);
+		kernel = hipDevice->GetKernel(function, "HiprtAccel_Intersect_RayBuffer");
 
 		LR_LOG(device.GetContext(), "[HiprtAccel] Compilation completed in " <<
 				int((WallClockTime() - t0) * 1000) << "ms" << kernelCache.GetCodeOriginDesc(origin));

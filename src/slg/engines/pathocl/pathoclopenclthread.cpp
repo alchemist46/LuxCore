@@ -359,7 +359,10 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 			" in " << int(totalTransferTime * 1000.0) << "ms, the last one in " <<
 			int((WallClockTime() - timeFinalTransferStart) * 1000.0) << "ms, kernels " <<
 			int(totalKernelTime * 1000.0) << "ms");
-	
+	const string kernelTimingReport = intersectionDevice.GetKernelTimingReport();
+	if (kernelTimingReport.length() > 0)
+		SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] " << kernelTimingReport);
+
 	threadDone = true;
 
 	// This is done to stop threads pending on barrier wait

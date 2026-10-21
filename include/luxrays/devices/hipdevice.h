@@ -24,6 +24,9 @@
 #include "luxrays/utils/hip.h"
 #include "luxrays/utils/hipcache.h"
 
+#include <mutex>
+#include <unordered_map>
+
 #if !defined(LUXRAYS_DISABLE_HIP)
 
 #if defined(LUXRAYS_DISABLE_OPENCL)
@@ -87,13 +90,15 @@ public:
 	friend class HIPDevice;
 
 protected:
-	void Set(hipFunction_t kernel) {
+	void Set(hipFunction_t kernel, const std::string &kernelName) {
 		hipKernel = kernel;
+		name = kernelName;
 	}
 
 	hipFunction_t Get() { return hipKernel; }
 
 	hipFunction_t hipKernel;
+	std::string name;
 	std::vector<void *> args;
 };
 
@@ -214,6 +219,7 @@ public:
 	virtual void FinishQueue() override;
 	virtual void RegisterHostMemory(void *ptr, const size_t size) override;
 	virtual void UnregisterHostMemory(void *ptr) override;
+	virtual std::string GetKernelTimingReport() override;
 
 	//--------------------------------------------------------------------------
 	// Memory management for hardware (aka GPU) only applications
@@ -240,7 +246,7 @@ public:
 
 	// Wraps a function of a module not loaded by this device (i.e. a HIPRT
 	// trace kernel), so it can be used with SetKernelArg()/EnqueueKernel()
-	HardwareDeviceKernelUPtr GetKernel(hipFunction_t function);
+	HardwareDeviceKernelUPtr GetKernel(hipFunction_t function, const std::string &kernelName);
 
 	friend class Context;
 
@@ -257,6 +263,24 @@ protected:
 
 	hiprtContext hiprtCtx;
 	bool hiprtCtxInitialized;
+
+	// LUXRAYS_HIP_KERNEL_TIMING: a pair of events around each kernel launch,
+	// read back by FinishQueue(), which waits for them anyway
+	struct KernelTime {
+		u_int launches = 0;
+		double ms = 0.0;
+	};
+	struct KernelLaunchEvents {
+		KernelTime *time;
+		hipEvent_t start, stop;
+	};
+	void ReadKernelLaunchEvents();
+
+	bool kernelTiming;
+	std::mutex kernelTimingMutex;
+	std::unordered_map<std::string, KernelTime> kernelTimes;
+	std::vector<KernelLaunchEvents> pendingLaunchEvents;
+	std::vector<hipEvent_t> freeEvents;
 };
 
 }

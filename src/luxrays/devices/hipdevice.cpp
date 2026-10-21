@@ -20,9 +20,12 @@
 #include "luxrays/usings.h"
 #if !defined(LUXRAYS_DISABLE_HIP)
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <cstring>
+#include <iomanip>
+#include <sstream>
 
 #include "luxrays/devices/ocldevice.h"
 #include "luxrays/devices/hipdevice.h"
@@ -138,11 +141,30 @@ HIPDevice::HIPDevice(
 
 	kernelCache = std::make_unique<hipKernelPersistentCache>("LUXRAYS_" LUXRAYS_VERSION, desc.GetHIPArch());
 
+	// LUXRAYS_HIP_KERNEL_TIMING=1: the GPU time of each kernel, printed by the
+	// render threads when they end (GetKernelTimingReport())
+	const char *timing = getenv("LUXRAYS_HIP_KERNEL_TIMING");
+	kernelTiming = timing && timing[0] && (string(timing) != "0");
+
 	// Like cuCtxCreate() for CUDA, leave the new device current on this thread
 	CHECK_HIP_ERROR(hipSetDevice((int)deviceDesc.GetHIPDeviceIndex()));
 }
 
 HIPDevice::~HIPDevice() {
+	if (pendingLaunchEvents.size() + freeEvents.size() > 0) {
+		PushThreadCurrentDevice();
+
+		hipStreamSynchronize(nullptr);
+		for (auto &e : pendingLaunchEvents) {
+			hipEventDestroy(e.start);
+			hipEventDestroy(e.stop);
+		}
+		for (auto e : freeEvents)
+			hipEventDestroy(e);
+
+		PopThreadCurrentDevice();
+	}
+
 	if (loadedModules.size() > 0) {
 		PushThreadCurrentDevice();
 
@@ -447,7 +469,7 @@ HardwareDeviceKernelUPtr HIPDevice::GetKernel(
 			(hipFuncGetAttribute(&scratchBytes, HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, function) == hipSuccess))
 		LR_LOG(deviceContext, "[" << kernelName << "] " << numRegs << " VGPRs, " << scratchBytes << " bytes of scratch");
 
-	hipDeviceKernel.Set(function);
+	hipDeviceKernel.Set(function, kernelName);
 
 	return std::move(kernel);
 }
@@ -471,11 +493,11 @@ bool HIPDevice::SetProgramConstant(HardwareDeviceProgramRef program,
 	return true;
 }
 
-HardwareDeviceKernelUPtr HIPDevice::GetKernel(hipFunction_t function) {
+HardwareDeviceKernelUPtr HIPDevice::GetKernel(hipFunction_t function, const string &kernelName) {
 	auto [kernel, hipDeviceKernel] =
 		CreateUniquePtr<HardwareDeviceKernel, HIPDeviceKernel>();
 
-	hipDeviceKernel.Set(function);
+	hipDeviceKernel.Set(function, kernelName);
 
 	return std::move(kernel);
 }
@@ -585,12 +607,92 @@ void HIPDevice::EnqueueKernel(HardwareDeviceKernelRPtr kernel,
 				" is larger than the supported maximum of " + ToString(hipKernelPersistentCache::MaxWorkGroupSize) +
 				" (check opencl.gpu.workgroup.size)");
 
-	CHECK_HIP_ERROR(hipModuleLaunchKernel(hipDeviceKernel.hipKernel,
-			blockX, blockY, blockZ,  // blocks
-			threadX, threadY, threadZ,  // threads
-			0, nullptr,
-			hipDeviceKernel.args.data(),
-			nullptr));
+	if (kernelTiming) {
+		hipEvent_t events[2];
+		{
+			unique_lock<mutex> lock(kernelTimingMutex);
+			for (auto &e : events) {
+				if (freeEvents.size() > 0) {
+					e = freeEvents.back();
+					freeEvents.pop_back();
+				} else
+					CHECK_HIP_ERROR(hipEventCreate(&e));
+			}
+			pendingLaunchEvents.push_back({ &kernelTimes[hipDeviceKernel.name], events[0], events[1] });
+		}
+
+		CHECK_HIP_ERROR(hipEventRecord(events[0], nullptr));
+		CHECK_HIP_ERROR(hipModuleLaunchKernel(hipDeviceKernel.hipKernel,
+				blockX, blockY, blockZ,  // blocks
+				threadX, threadY, threadZ,  // threads
+				0, nullptr,
+				hipDeviceKernel.args.data(),
+				nullptr));
+		CHECK_HIP_ERROR(hipEventRecord(events[1], nullptr));
+	} else {
+		CHECK_HIP_ERROR(hipModuleLaunchKernel(hipDeviceKernel.hipKernel,
+				blockX, blockY, blockZ,  // blocks
+				threadX, threadY, threadZ,  // threads
+				0, nullptr,
+				hipDeviceKernel.args.data(),
+				nullptr));
+	}
+}
+
+void HIPDevice::ReadKernelLaunchEvents() {
+	unique_lock<mutex> lock(kernelTimingMutex);
+
+	// The launches of another thread after the synchronization can still be
+	// running: they stay for the next call
+	vector<KernelLaunchEvents> stillRunning;
+	for (auto &e : pendingLaunchEvents) {
+		float ms;
+		const hipError_t err = hipEventElapsedTime(&ms, e.start, e.stop);
+		if (err == hipErrorNotReady) {
+			stillRunning.push_back(e);
+			continue;
+		}
+
+		if (err == hipSuccess) {
+			e.time->launches += 1;
+			e.time->ms += ms;
+		}
+		freeEvents.push_back(e.start);
+		freeEvents.push_back(e.stop);
+	}
+	pendingLaunchEvents.swap(stillRunning);
+}
+
+string HIPDevice::GetKernelTimingReport() {
+	if (!kernelTiming)
+		return "";
+
+	FinishQueue();
+
+	unique_lock<mutex> lock(kernelTimingMutex);
+
+	vector<pair<string, KernelTime>> times;
+	double totalMs = 0.0;
+	for (auto &t : kernelTimes) {
+		if (t.second.launches > 0) {
+			times.push_back(t);
+			totalMs += t.second.ms;
+		}
+		// Reset, not erased: the pending launches point to the entries
+		t.second = KernelTime();
+	}
+	sort(times.begin(), times.end(), [](const auto &a, const auto &b) {
+		return a.second.ms > b.second.ms;
+	});
+
+	stringstream ss;
+	ss << fixed << setprecision(1) << "GPU kernel times, " << totalMs << "ms in total:";
+	for (auto &t : times)
+		ss << "\n  " << t.first << ": " << setprecision(1) << t.second.ms << "ms (" <<
+				(100.0 * t.second.ms / totalMs) << "%) in " << t.second.launches << " launches, " <<
+				setprecision(3) << (t.second.ms / t.second.launches) << "ms each";
+
+	return ss.str();
 }
 
 void HIPDevice::EnqueueReadBuffer(const HardwareDeviceBuffer *buff,
@@ -644,6 +746,9 @@ void HIPDevice::FlushQueue() {
 
 void HIPDevice::FinishQueue() {
 	CHECK_HIP_ERROR(hipStreamSynchronize(nullptr));
+
+	if (kernelTiming)
+		ReadKernelLaunchEvents();
 }
 
 void HIPDevice::RegisterHostMemory(void *ptr, const size_t size) {

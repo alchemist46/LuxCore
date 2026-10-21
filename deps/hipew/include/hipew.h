@@ -50,6 +50,7 @@ typedef enum hipError_t {
 	hipErrorNotInitialized = 3,
 	hipErrorNoDevice = 100,
 	hipErrorInvalidDevice = 101,
+	hipErrorNotReady = 600,
 	hipErrorForceSize = 0x7fffffff
 } hipError_t;
 
@@ -57,6 +58,7 @@ typedef int hipDevice_t;
 typedef struct ihipCtx_t *hipCtx_t;
 typedef void *hipDeviceptr_t;
 typedef struct ihipStream_t *hipStream_t;
+typedef struct ihipEvent_t *hipEvent_t;
 typedef struct ihipModule_t *hipModule_t;
 typedef struct ihipModuleSymbol_t *hipFunction_t;
 
@@ -129,6 +131,10 @@ typedef hipError_t HIPAPI thipHostRegister(void *hostPtr, size_t sizeBytes, unsi
 typedef hipError_t HIPAPI thipHostUnregister(void *hostPtr);
 typedef hipError_t HIPAPI thipMemGetAddressRange(hipDeviceptr_t *pbase, size_t *psize, hipDeviceptr_t dptr);
 typedef hipError_t HIPAPI thipStreamSynchronize(hipStream_t stream);
+typedef hipError_t HIPAPI thipEventCreate(hipEvent_t *event);
+typedef hipError_t HIPAPI thipEventDestroy(hipEvent_t event);
+typedef hipError_t HIPAPI thipEventRecord(hipEvent_t event, hipStream_t stream);
+typedef hipError_t HIPAPI thipEventElapsedTime(float *ms, hipEvent_t start, hipEvent_t stop);
 typedef hipError_t HIPAPI thipModuleLoadData(hipModule_t *module, const void *image);
 typedef hipError_t HIPAPI thipModuleUnload(hipModule_t module);
 typedef hipError_t HIPAPI thipModuleGetFunction(hipFunction_t *function, hipModule_t module, const char *kname);
@@ -181,6 +187,10 @@ extern thipHostRegister *hipHostRegister;
 extern thipHostUnregister *hipHostUnregister;
 extern thipMemGetAddressRange *hipMemGetAddressRange;
 extern thipStreamSynchronize *hipStreamSynchronize;
+extern thipEventCreate *hipEventCreate;
+extern thipEventDestroy *hipEventDestroy;
+extern thipEventRecord *hipEventRecord;
+extern thipEventElapsedTime *hipEventElapsedTime;
 extern thipModuleLoadData *hipModuleLoadData;
 extern thipModuleUnload *hipModuleUnload;
 extern thipModuleGetFunction *hipModuleGetFunction;

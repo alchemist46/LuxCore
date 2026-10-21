@@ -245,6 +245,11 @@ public:
 	virtual void RegisterHostMemory(void *ptr, const size_t size) { }
 	virtual void UnregisterHostMemory(void *ptr) { }
 
+	// The GPU time of each kernel since the last call, one line per kernel
+	// name, and the counters reset. Empty when the device doesn't measure it
+	// (HIP measures it with LUXRAYS_HIP_KERNEL_TIMING=1).
+	virtual std::string GetKernelTimingReport() { return ""; }
+
 	//--------------------------------------------------------------------------
 	// Memory management for hardware (aka GPU) only applications
 	//--------------------------------------------------------------------------
