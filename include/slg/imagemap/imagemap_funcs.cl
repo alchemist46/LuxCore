@@ -319,6 +319,60 @@ OPENCL_FORCE_INLINE float3 ImageMap_GetTexel_Spectrum(
 	return ImageMap_GetTexel_SpectrumValue(storageType, pixels, channelCount, index);
 }
 
+//------------------------------------------------------------------------------
+// The texel indices of a filter footprint
+//------------------------------------------------------------------------------
+
+// Mod(s + 1, width) from u = Mod(s, width)
+OPENCL_FORCE_INLINE uint ImageMap_RepeatNext(const uint u, const uint width) {
+	return (u + 1 >= width) ? 0 : u + 1;
+}
+
+// The indices of the texels (s0, t0), (s0, t0 + 1), (s0 + 1, t0) and
+// (s0 + 1, t0 + 1), or NULL_INDEX and the fixed colour of a texel outside a
+// WRAP_BLACK/WRAP_WHITE image. With WRAP_REPEAT, one Mod() per axis instead of
+// one per texel and axis: a signed 32-bit remainder is tens of instructions on
+// the GPU
+OPENCL_FORCE_INLINE void ImageMap_GetBilinearIndices(
+		const uint width, const uint height, const uint channelCount,
+		const ImageWrapType wrapType, const int s0, const int t0,
+		uint index[4], float fixedColor[4]) {
+	if (wrapType == WRAP_REPEAT) {
+		const uint u0 = Mod(s0, width);
+		const uint u1 = ImageMap_RepeatNext(u0, width);
+		const uint v0 = Mod(t0, height);
+		const uint v1 = ImageMap_RepeatNext(v0, height);
+
+		index[0] = v0 * width + u0;
+		index[1] = v1 * width + u0;
+		index[2] = v0 * width + u1;
+		index[3] = v1 * width + u1;
+	} else {
+		index[0] = ImageMap_GetTexel_Coords(width, height, channelCount, wrapType, s0, t0, &fixedColor[0]);
+		index[1] = ImageMap_GetTexel_Coords(width, height, channelCount, wrapType, s0, t0 + 1, &fixedColor[1]);
+		index[2] = ImageMap_GetTexel_Coords(width, height, channelCount, wrapType, s0 + 1, t0, &fixedColor[2]);
+		index[3] = ImageMap_GetTexel_Coords(width, height, channelCount, wrapType, s0 + 1, t0 + 1, &fixedColor[3]);
+	}
+}
+
+OPENCL_FORCE_INLINE float ImageMap_GetTexel_FloatAt(
+		const ImageMapStorageType storageType,
+		__global const void *pixels,
+		const uint channelCount,
+		const uint index, const float fixedColor) {
+	return (index == NULL_INDEX) ? fixedColor :
+		ImageMap_GetTexel_FloatValue(storageType, pixels, channelCount, index);
+}
+
+OPENCL_FORCE_INLINE float3 ImageMap_GetTexel_SpectrumAt(
+		const ImageMapStorageType storageType,
+		__global const void *pixels,
+		const uint channelCount,
+		const uint index, const float fixedColor) {
+	return (index == NULL_INDEX) ? TO_FLOAT3(fixedColor) :
+		ImageMap_GetTexel_SpectrumValue(storageType, pixels, channelCount, index);
+}
+
 OPENCL_FORCE_NOT_INLINE float ImageMapStorage_GetFloat(__global const ImageMap *imageMap,
 		const uint s0, const uint t0 
 		IMAGEMAPS_PARAM_DECL) {
@@ -381,10 +435,14 @@ OPENCL_FORCE_NOT_INLINE float ImageMap_GetFloat(__global const ImageMap *imageMa
 			const float ids = 1.f - ds;
 			const float idt = 1.f - dt;
 
-			const float c0 = ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0, t0);
-			const float c1 = ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0, t0 + 1);
-			const float c2 = ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0 + 1, t0);
-			const float c3 = ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0 + 1, t0 + 1);
+			uint index[4];
+			float fixedColor[4] = { 0.f, 0.f, 0.f, 0.f };
+			ImageMap_GetBilinearIndices(width, height, channelCount, wrapType, s0, t0, index, fixedColor);
+
+			const float c0 = ImageMap_GetTexel_FloatAt(storageType, pixels, channelCount, index[0], fixedColor[0]);
+			const float c1 = ImageMap_GetTexel_FloatAt(storageType, pixels, channelCount, index[1], fixedColor[1]);
+			const float c2 = ImageMap_GetTexel_FloatAt(storageType, pixels, channelCount, index[2], fixedColor[2]);
+			const float c3 = ImageMap_GetTexel_FloatAt(storageType, pixels, channelCount, index[3], fixedColor[3]);
 
 			const float k0 = ids * idt;
 			const float k1 = ids * dt;
@@ -432,10 +490,14 @@ OPENCL_FORCE_NOT_INLINE float3 ImageMap_GetSpectrum(__global const ImageMap *ima
 			const float ids = 1.f - ds;
 			const float idt = 1.f - dt;
 
-			const float3 c0 = ImageMap_GetTexel_Spectrum(storageType, pixels, width, height, channelCount, wrapType, s0, t0);
-			const float3 c1 = ImageMap_GetTexel_Spectrum(storageType, pixels, width, height, channelCount, wrapType, s0, t0 + 1);
-			const float3 c2 = ImageMap_GetTexel_Spectrum(storageType, pixels, width, height, channelCount, wrapType, s0 + 1, t0);
-			const float3 c3 = ImageMap_GetTexel_Spectrum(storageType, pixels, width, height, channelCount, wrapType, s0 + 1, t0 + 1);
+			uint index[4];
+			float fixedColor[4] = { 0.f, 0.f, 0.f, 0.f };
+			ImageMap_GetBilinearIndices(width, height, channelCount, wrapType, s0, t0, index, fixedColor);
+
+			const float3 c0 = ImageMap_GetTexel_SpectrumAt(storageType, pixels, channelCount, index[0], fixedColor[0]);
+			const float3 c1 = ImageMap_GetTexel_SpectrumAt(storageType, pixels, channelCount, index[1], fixedColor[1]);
+			const float3 c2 = ImageMap_GetTexel_SpectrumAt(storageType, pixels, channelCount, index[2], fixedColor[2]);
+			const float3 c3 = ImageMap_GetTexel_SpectrumAt(storageType, pixels, channelCount, index[3], fixedColor[3]);
 
 			const float k0 = ids * idt;
 			const float k1 = ids * dt;

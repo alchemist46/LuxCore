@@ -51,6 +51,11 @@ CASES = {
     "mix1ball": ("scenes/luxball/mix1ball.cfg", "", ""),
     "imagemap": ("scenes/luxball/luxball-imagemap-speed.cfg", "", ""),
     "glossycoat": ("scenes/luxball/luxball-glossycoat.cfg", "", ""),
+    # An image map bump (ImageMap_GetDuv()) and a normal map; the bump an RGB
+    # image tiled with a negative v scale, as in the Blender exports
+    "bump": ("scenes/bump/bump.cfg", "",
+             "scene.textures.bumpmap.file = scenes/bump/normal2.png\n"
+             "scene.textures.bumpmap.mapping.uvscale = 3 -3"),
 }
 
 PROPS = """
