@@ -319,6 +319,8 @@ OPENCL_HOT_FUNCTION uint Material_GetInteriorVolume(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
+	if (startMat->constVolumes)
+		return startMat->interiorVolumeIndex;
 	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetInteriorVolumeOpStartIndex;
@@ -371,6 +373,8 @@ OPENCL_HOT_FUNCTION uint Material_GetExteriorVolume(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
+	if (startMat->constVolumes)
+		return startMat->exteriorVolumeIndex;
 	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetExteriorVolumeOpStartIndex;

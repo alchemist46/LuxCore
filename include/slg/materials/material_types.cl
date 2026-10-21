@@ -424,6 +424,10 @@ typedef struct {
 	unsigned int evalGetPassThroughTransparencyOpStartIndex, evalGetPassThroughTransparencyOpLength;
 	unsigned int evalEvaluateOpStartIndex, evalEvaluateOpLength;
 	unsigned int evalSampleOpStartIndex, evalSampleOpLength;
+	// Shortcuts of the interpreter (CompiledScene::CompileMaterialOps()): the
+	// volumes are interiorVolumeIndex and exteriorVolumeIndex, the pass
+	// through transparency is black
+	int constVolumes, noPassThroughTransparency;
 
 	union {
 		MatteParam matte;

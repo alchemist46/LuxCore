@@ -345,6 +345,9 @@ OPENCL_FORCE_INLINE float3 BSDF_GetEmittedRadiance(__global const BSDF *bsdf, fl
 
 OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughTransparency(__global const BSDF *bsdf, const bool backTracing
 		MATERIALS_PARAM_DECL) {
+	if (mats[bsdf->materialIndex].noPassThroughTransparency)
+		return BLACK;
+
 	const float3 localFixedDir = Frame_ToLocal(&bsdf->frame, VLOAD3F(&bsdf->hitPoint.fixedDir.x));
 
 	return Material_GetPassThroughTransparency(bsdf->materialIndex,

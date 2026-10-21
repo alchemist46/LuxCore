@@ -112,6 +112,39 @@ u_int CompiledScene::CompileMaterialConditionalOps(const u_int matIndex,
 			evalOps);
 }
 
+// The materials without sub-nodes (the first case of CompileMaterialOps()):
+// their volume ops are DefaultMaterial_GetInteriorVolume() and
+// DefaultMaterial_GetExteriorVolume(), and the pass through transparency op is
+// DefaultMaterial_GetPassThroughTransparency() except for NULLMAT and ARCHGLASS
+static bool IsLeafMaterial(const slg::ocl::MaterialType type) {
+	switch (type) {
+		case slg::ocl::MATTE:
+		case slg::ocl::MIRROR:
+		case slg::ocl::GLASS:
+		case slg::ocl::ARCHGLASS:
+		case slg::ocl::NULLMAT:
+		case slg::ocl::MATTETRANSLUCENT:
+		case slg::ocl::GLOSSY2:
+		case slg::ocl::METAL2:
+		case slg::ocl::ROUGHGLASS:
+		case slg::ocl::VELVET:
+		case slg::ocl::CLOTH:
+		case slg::ocl::CARPAINT:
+		case slg::ocl::ROUGHMATTE:
+		case slg::ocl::ROUGHMATTETRANSLUCENT:
+		case slg::ocl::GLOSSYTRANSLUCENT:
+		case slg::ocl::DISNEY:
+		case slg::ocl::OPENPBR:
+		case slg::ocl::SUBSURFACEMAT:
+		case slg::ocl::HOMOGENEOUS_VOL:
+		case slg::ocl::CLEAR_VOL:
+		case slg::ocl::HETEROGENEOUS_VOL:
+			return true;
+		default:
+			return false;
+	}
+}
+
 u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		const slg::ocl::MaterialEvalOpType opType,
 		vector<slg::ocl::MaterialEvalOp> &evalOps) const {
@@ -491,6 +524,15 @@ void CompiledScene::CompileMaterialOps() {
 
 	for (u_int i = 0; i < mats.size(); ++i) {
 		slg::ocl::Material *mat = &mats[i];
+
+		// The queries the kernels answer without the interpreter: a leaf
+		// material's volumes are its own, and its pass through transparency
+		// is black without a transparency texture (DefaultMaterial_*())
+		const bool leaf = IsLeafMaterial(mat->type);
+		mat->constVolumes = leaf;
+		mat->noPassThroughTransparency = leaf &&
+				(mat->type != slg::ocl::NULLMAT) && (mat->type != slg::ocl::ARCHGLASS) &&
+				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
 
 		//----------------------------------------------------------------------
 		// EVAL_ALBEDO
