@@ -21,8 +21,7 @@ After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon
 2. Build the zip from a clean `git archive HEAD` copy of the addon, not from the working tree: the CMake configure wipes `wheels/` and rewrites the manifest `wheels` line. In the copy, run `cmake -S . -B <build> -DCMAKE_BUILD_TYPE=Release && cmake --build <build>`; the zip lands in `<build>/out/`.
 3. Install it with `blender --command extension install-file -r user_default --enable <zip>`, after backing up the installed copy (`~/.config/blender/5.2/extensions/user_default/blendluxcore`).
 4. Check the output says `BlendLuxCore <version> registered (with pyluxcore <version>)`.
-5. A commit in this repo that changes the engine also needs a fresh `pyluxcore` wheel, which Blender loads from `path_to_wheel` in `blc_settings.json`. Rebuild the wheel first, or say that it was not rebuilt.
-6. Do not bump `PYLUXCORE_VERSION` in the addon's `luxloader/__init__.py` until that version is on PyPI.
+5. Do not bump `PYLUXCORE_VERSION` in the addon's `luxloader/__init__.py` until that version is on PyPI.
 
 ## Keep the bug list
 
