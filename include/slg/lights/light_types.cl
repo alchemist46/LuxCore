@@ -224,7 +224,7 @@ typedef struct {
 	elvcRadius2, \
 	elvcNormalCosAngle, \
 	elvcTilesXCount, \
-	elvcTilesXCount \
+	elvcTilesYCount \
 	MATERIALS_PARAM
 
 #endif

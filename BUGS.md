@@ -24,6 +24,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: a scene with two `OBJECT_ID_MASK` outputs with different ids, `periodicsave.resumerendering.period` set, then load the `.rsm` and write the outputs: both masks are the first one.
 - Notes: found while planning K5 (ROADMAP.md), which replaces this serialization with an EXR checkpoint; fix the two lines (and bump `BOOST_CLASS_VERSION(slg::Film)`, `film.h:651`) if K5 is far off.
 
+### The env. light visibility cache darkens the image
+- Found: 2026-10-21
+- Area: light
+- Problem: with `visibilitymapcache.enable = 1` the image is darker than without the cache, and more so with coarser tiles in Y: a floor half under a roof, lit by sky2, reads 1670 (red, rows 0-63) without the cache, 1647 (-1.4%) with the automatic 32x32 tiles, 1623 (-2.8%) with `map.tilewidth = map.tileheight = 32` (32x16 tiles). PATHCPU and PATHOCL agree once the GPU tile count fix is in. Two seeds differ by 0.02%, so it is a bias, not noise.
+- Reproduce: PATHCPU, 128x128, 256 spp, sky2 at `dir = 0.3 -0.4 0.6`, matte floor `-4..4` at z = 0 and roof `y = 0..4` at z = 1, camera at `0 -3 6` looking at the origin; compare `visibilitymapcache.enable` 0 and 1.
+- Notes: an unbiased cache only changes the noise. Suspects: tiles with a zero visibility estimate getting a zero light pdf while the BSDF-sampled hits use another pdf in the MIS weight, or the pdf of a tile not matching the directions it samples. Not investigated.
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests
@@ -37,13 +44,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: `.bcf` and `.rsm` serialization of scenes with instances crashes (`observer_ptr<TriangleMesh>` of `InstanceTriangleMesh`). `RenderConfig::serialize()` is empty, so `.rsm` files never contained the configuration and the scene. `Scene.Save()` of `.bsc` segfaults in `ExtMeshCache::GetRealFileName()` (from `SceneObject::ToProperties()`) for any scene with a mesh object, and loading a `.bsc` with an image map fails with `class version St10unique_ptrIN3slg8ImageMapE...`.
 - Reproduce: save any scene with a mesh object as `.bsc`; save a scene with instances as `.bcf`.
 - Notes: the same in the build before the working colour space. The cache saves its image maps through another pointer type than it loads them with. The serialization hook of the working colour space could not be tested because of this.
-
-### GPU environment light sampling with the visibility cache
-- Found: 2026-10-15
-- Area: engine (OpenCL/HIP)
-- Problem: `LIGHTS_PARAM` (`light_types.cl`) passes `elvcTilesXCount` twice, so every GPU function that gets the light parameters sees the X tile count of the env. light visibility cache as its Y count (`EnvLightVisibilityCache_Sample` scales `uv.y` and the pdf with it). Wrong GPU env. light sampling when the cache has different X and Y tile counts.
-- Reproduce: CPU/GPU parity check on an env.-lit scene with the visibility cache enabled.
-- Notes: since the OpenCL port of the 2-level cache (`e5813b8cc`). To be fixed on its own.
 
 ### CPU/GPU gap of 2% on the working colour space test scene
 - Found: 2026-10-15
