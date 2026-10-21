@@ -77,8 +77,8 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Found: 2026-10-18
 - Area: material, engine (volumes)
 - Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`): the delta `glass` reads 0.630 at sigma_s 1 on PATHCPU, PATHOCL and (0.71) BIDIRCPU, as much with `interiorior = 1.0001`, while the `null` material around the same volume is lossless (0.999). The rough OpenPBR glass is close (0.994 at sigma_s 1, roughness 0.3) but reads 0.894 at sigma_s 4 and 0.910 at sigma_s 4 with roughness 0; BIDIRCPU reads it 3% high at sigma_s 1.
-- Reproduce: white furnace with a unit sphere and a white homogeneous interior volume, glass or OpenPBR surface.
-- Notes: the depth limits are not the cause (0.633 at depth 1000). Rough glass with a scattering interior is too noisy to read at 64-256 spp (fireflies from the 50/50 reflect/refract choice).
+- Reproduce: white furnace with a unit sphere and a white homogeneous interior volume, glass or OpenPBR surface: `tests/furnace/furnace.py PATHCPU vol` (cases `glass-vol-s1/s4`, `null-vol-s1/s4`).
+- Notes: the depth limits are not the cause (0.633 at depth 1000). Rough glass with a scattering interior is too noisy to read at 64-256 spp (fireflies from the 50/50 reflect/refract choice). *2026-10-21, the suspected cause:* `Scene::Intersect()` and the kernel's `Scene_Intersect()` give the same pass-through event to the homogeneous volume's scatter decision and to the surface at the end of the segment (`hitPoint.passThroughEvent`: the glass lobe choice, the Mix choice and the Mix's volumes). A ray that did not scatter reaches the surface with the event confined to the no-scatter part of [0, 1), so the surface's choice is biased; the null material makes no choice, hence lossless. The same correlation moves the mean of `bigmonkey-vol` (a Mix of glossy2 and null around the medium) when only the volume's distance sampling changes (V3: -4.4% PATHOCL, -1.4% PATHCPU). Fix to try: remap the event to the no-scatter interval, (u - s) / (1 - s), before the surface uses it.
 
 ### BiDir reads 2-4% low on rough glass
 - Found: 2026-10-18

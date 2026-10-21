@@ -840,7 +840,8 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 			const bool transmittanceOnly = shadowRay || (fromLight && cameraRay);
 			Spectrum segmentTransmittance(1.f);
 			const float t = rayVolume->Scatter(*ray, passThrough, volInfo->IsScatteredStart(),
-					transmittanceOnly, transmittanceOnly ? &segmentTransmittance : connectionThroughput, &emis);
+					transmittanceOnly, pathThroughput ? *pathThroughput : Spectrum(1.f),
+					transmittanceOnly ? &segmentTransmittance : connectionThroughput, &emis);
 
 			if (transmittanceOnly) {
 				const float rrProb = segmentTransmittance.Max();

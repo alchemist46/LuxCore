@@ -39,7 +39,7 @@ public:
 			const bool multiScattering);
 
 	virtual float Scatter(const luxrays::Ray &ray, const float u, const bool scatteredStart,
-		const bool transmittanceOnly,
+		const bool transmittanceOnly, const luxrays::Spectrum &pathThroughput,
 		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission) const;
 
 	// Material interface

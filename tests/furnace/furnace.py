@@ -88,6 +88,18 @@ def cases():
     c.append(("glass-disp", "scene.materials.m.type = glass\nscene.materials.m.kr = 1 1 1\n"
               "scene.materials.m.kt = 1 1 1\nscene.materials.m.interiorior = 1.5\n"
               "scene.materials.m.cauchyb = 0.01\n", 1.0))
+    # A white scattering interior (multiscattering) behind a delta glass and a
+    # null boundary: both lossless
+    for mat in ("glass", "null"):
+        for sigma in (1, 4):
+            c.append((f"{mat}-vol-s{sigma}", "scene.volumes.v.type = homogeneous\n"
+                      "scene.volumes.v.absorption = 0 0 0\n"
+                      f"scene.volumes.v.scattering = {sigma} {sigma} {sigma}\n"
+                      "scene.volumes.v.multiscattering = 1\n"
+                      f"scene.materials.m.type = {mat}\n"
+                      + ("scene.materials.m.kr = 1 1 1\nscene.materials.m.kt = 1 1 1\n"
+                         "scene.materials.m.interiorior = 1.5\n" if mat == "glass" else "")
+                      + "scene.materials.m.volume.interior = v\n", 1.0))
     c.append(("archglass", "scene.materials.m.type = archglass\nscene.materials.m.kr = 1 1 1\n"
               "scene.materials.m.kt = 1 1 1\nscene.materials.m.interiorior = 1.5\n", 1.0))
     for a in ROUGHS:

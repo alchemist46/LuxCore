@@ -47,6 +47,7 @@ HomogeneousVolume::HomogeneousVolume(
 float HomogeneousVolume::Scatter(const float u,
 		const bool scatterAllowed, const float segmentLength,
 		const Spectrum &sigmaA, const Spectrum &sigmaS, const Spectrum &emission,
+		const Spectrum &throughput,
 		Spectrum &segmentTransmittance, Spectrum &segmentEmission) {
 	// This code must work also with segmentLength = INFINITY
 
@@ -59,18 +60,63 @@ float HomogeneousVolume::Scatter(const float u,
 	//--------------------------------------------------------------------------
 
 	float scatterDistance = segmentLength;
-	const float sigmaSValue = sigmaS.Filter();
-	if (scatterAllowed && (sigmaSValue > 0.f)) {
+	if (scatterAllowed && !sigmaS.Black()) {
+		// Spectral MIS (Kutz et al. 2017, as Cycles): the distance is sampled
+		// from the sigma_s of one colour channel, picked in proportion to the
+		// throughput times the single scattering albedo, and weighted by the
+		// mix of the three channels' pdfs. The distance takes u itself (the
+		// sampler's stratification, see Scene::Intersect()), the channel a
+		// hash of it (a sequence of its own, not the pass-through one)
+		float channelPdfs[3];
+		float channelPdfsSum = 0.f;
+		for (u_int i = 0; i < 3; ++i) {
+			channelPdfs[i] = (sigmaS.c[i] > 0.f) ?
+				(throughput.c[i] * sigmaS.c[i] / (sigmaA.c[i] + sigmaS.c[i])) : 0.f;
+			channelPdfsSum += channelPdfs[i];
+		}
+		if (!(channelPdfsSum > 0.f) || isinf(channelPdfsSum)) {
+			// No throughput: the channels that scatter, uniformly
+			channelPdfsSum = 0.f;
+			for (u_int i = 0; i < 3; ++i) {
+				channelPdfs[i] = (sigmaS.c[i] > 0.f) ? 1.f : 0.f;
+				channelPdfsSum += channelPdfs[i];
+			}
+		}
+
+		for (u_int i = 0; i < 3; ++i)
+			channelPdfs[i] /= channelPdfsSum;
+
+		union {
+			float f;
+			u_int i;
+		} uBits;
+		uBits.f = u;
+		const float uChannel = TauswortheRandomGenerator(uBits.i ^ 0x9e3779b9u).floatValue();
+
+		u_int channel = 0;
+		float cdf = 0.f;
+		for (u_int i = 0; i < 3; ++i) {
+			if (channelPdfs[i] > 0.f) {
+				channel = i;
+				if (uChannel < cdf + channelPdfs[i])
+					break;
+				cdf += channelPdfs[i];
+			}
+		}
+
 		// Determine scattering distance
-		const float proposedScatterDistance = -logf(1.f - u) / sigmaSValue;
+		const float proposedScatterDistance = -logf(1.f - u) / sigmaS.c[channel];
 
 		scatter = (proposedScatterDistance < segmentLength);
 		scatterDistance = scatter ? proposedScatterDistance : segmentLength;
 
 		// Note: scatterDistance can not be infinity because otherwise there would
 		// have been a scatter event before.
-		const float tau = scatterDistance * sigmaSValue;
-		const float pdf = expf(-tau) * (scatter ? sigmaSValue : 1.f);
+		float pdf = 0.f;
+		for (u_int i = 0; i < 3; ++i) {
+			if (channelPdfs[i] > 0.f)
+				pdf += channelPdfs[i] * expf(-scatterDistance * sigmaS.c[i]) * (scatter ? sigmaS.c[i] : 1.f);
+		}
 		segmentTransmittance /= pdf;
 	}
 
@@ -108,7 +154,7 @@ Spectrum HomogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 
 float HomogeneousVolume::Scatter(const Ray &ray, const float u,
 		const bool scatteredStart, const bool transmittanceOnly,
-		Spectrum *connectionThroughput,
+		const Spectrum &pathThroughput, Spectrum *connectionThroughput,
 		Spectrum *connectionEmission) const {
 	const float segmentLength = ray.maxt - ray.mint;
 
@@ -129,7 +175,7 @@ float HomogeneousVolume::Scatter(const Ray &ray, const float u,
 
 	Spectrum segmentTransmittance, segmentEmission;
 	const float scatterDistance = HomogeneousVolume::Scatter(u, scatterAllowed,
-			segmentLength, sigmaA, sigmaS, emission,
+			segmentLength, sigmaA, sigmaS, emission, pathThroughput * (*connectionThroughput),
 			segmentTransmittance, segmentEmission);
 
 	// I need to update first connectionEmission and than connectionThroughput

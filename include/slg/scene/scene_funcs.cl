@@ -74,7 +74,7 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		const float t = Volume_Scatter(&mats[rayVolumeIndex], ray,
 				hit ? rayHit->t : ray->maxt,
 				passThrough, volInfo->scatteredStart, shadowRay,
-				shadowRay ? &segmentTransmittance : connectionThroughput, &connectionEmission,
+				pathThroughput, shadowRay ? &segmentTransmittance : connectionThroughput, &connectionEmission,
 				tmpHitPoint
 				TEXTURES_PARAM);
 

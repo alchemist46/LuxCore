@@ -55,7 +55,7 @@ Spectrum HeterogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 
 float HeterogeneousVolume::Scatter(const Ray &ray, const float u,
 		const bool scatteredStart, const bool transmittanceOnly,
-		Spectrum *connectionThroughput,
+		const Spectrum &pathThroughput, Spectrum *connectionThroughput,
 		Spectrum *connectionEmission) const {
 	// I need a sequence of pseudo-random numbers starting form a floating point
 	// pseudo-random number
@@ -103,7 +103,7 @@ float HeterogeneousVolume::Scatter(const Ray &ray, const float u,
 		// However the code would be far less simple and readable.
 		Spectrum segmentTransmittance, segmentEmission;
 		const float scatterDistance = HomogeneousVolume::Scatter(rng.floatValue(), scatterAllowed,
-				currentStepSize, sigmaA, sigmaS, emission,
+				currentStepSize, sigmaA, sigmaS, emission, pathThroughput * (*connectionThroughput),
 				segmentTransmittance, segmentEmission);
 
 		// I need to update first connectionEmission and than connectionThroughput

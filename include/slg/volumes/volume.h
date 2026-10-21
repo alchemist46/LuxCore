@@ -63,9 +63,11 @@ public:
 	// no scattering. In any case, it applies transmittance to connectionThroughput
 	// too. With transmittanceOnly (shadow rays), there is no scattering: the
 	// transmittance of the whole segment is applied (exact for the homogeneous
-	// volumes, per step for the heterogeneous ones).
+	// volumes, per step for the heterogeneous ones). pathThroughput is the
+	// throughput of the path before the ray (it steers the choice of the
+	// colour channel the scatter distance is sampled from).
 	virtual float Scatter(const luxrays::Ray &ray, const float u, const bool scatteredStart,
-		const bool transmittanceOnly,
+		const bool transmittanceOnly, const luxrays::Spectrum &pathThroughput,
 		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission) const = 0;
 
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexsreferencedTexs) const;
