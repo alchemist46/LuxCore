@@ -185,8 +185,39 @@ private:
 		slg::ocl::TextureMapping3D *mapping,
 		TextureMapping3DConstRef m
 	);
-	u_int CompileTextureOpsGenericBumpMap(const u_int texIndex);
-	u_int CompileTextureOps(const u_int texIndex, const slg::ocl::TextureEvalOpType opType);
+public:
+	// The stack an evaluation needs: the peak depth, and the floats it leaves
+	// on the stack (its result). The ops of a sub-node leave only its result,
+	// so a node needs max(what its previous sub-nodes left + the peak of the
+	// next one), not the sum of the sub-nodes. "+= n" pushes n floats that
+	// stay until the op of the node, "+= sub-node" evaluates a sub-node; sum
+	// is the bound used before, for the log.
+	struct EvalStackNeed {
+		u_int peak = 0, result = 0, sum = 0;
+
+		EvalStackNeed &operator+=(const EvalStackNeed &subNode) {
+			peak = luxrays::Max(peak, result + subNode.peak);
+			result += subNode.result;
+			sum += subNode.sum;
+			return *this;
+		}
+		EvalStackNeed &operator+=(const u_int pushed) {
+			result += pushed;
+			peak = luxrays::Max(peak, result);
+			sum += pushed;
+			return *this;
+		}
+		// The op of the node pops everything and pushes its result
+		EvalStackNeed &Result(const u_int resultSize) {
+			result = resultSize;
+			peak = luxrays::Max(peak, result);
+			return *this;
+		}
+	};
+
+private:
+	EvalStackNeed CompileTextureOpsGenericBumpMap(const u_int texIndex);
+	EvalStackNeed CompileTextureOps(const u_int texIndex, const slg::ocl::TextureEvalOpType opType);
 	void CompileTextureOps();
 	void CompileTextures();
 	void CompileImageMaps();

@@ -301,8 +301,8 @@ CompiledScene::CompileDistribution2D(Distribution2DConstRef dist) {
 	return std::make_tuple(compDist, size);
 }
 
-u_int CompiledScene::CompileTextureOpsGenericBumpMap(const u_int texIndex) {
-	u_int evalOpStackSize = 0;
+CompiledScene::EvalStackNeed CompiledScene::CompileTextureOpsGenericBumpMap(const u_int texIndex) {
+	EvalStackNeed evalOpStackSize;
 
 	// Eval texture at hit point
 	evalOpStackSize += CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
@@ -330,12 +330,12 @@ u_int CompiledScene::CompileTextureOpsGenericBumpMap(const u_int texIndex) {
 	return evalOpStackSize;
 }
 
-u_int CompiledScene::CompileTextureOps(const u_int texIndex,
+CompiledScene::EvalStackNeed CompiledScene::CompileTextureOps(const u_int texIndex,
 		const slg::ocl::TextureEvalOpType opType) {
 	// Translate textures to texture evaluate ops
 
 	slg::ocl::Texture *tex = &texs[texIndex];
-	u_int evalOpStackSize = 0;
+	EvalStackNeed evalOpStackSize;
 
 	switch (tex->type) {
 		//----------------------------------------------------------------------
@@ -1121,7 +1121,9 @@ u_int CompiledScene::CompileTextureOps(const u_int texIndex,
 
 	texEvalOps.push_back(op);
 
-	return evalOpStackSize;
+	// The result of the evaluation: a float, a spectrum or a bump shading
+	// normal
+	return evalOpStackSize.Result((opType == slg::ocl::TextureEvalOpType::EVAL_FLOAT) ? 1 : 3);
 }
 
 void CompiledScene::CompileTextureOps() {
@@ -1129,6 +1131,7 @@ void CompiledScene::CompileTextureOps() {
 
 	texEvalOps.clear();
 	maxTextureEvalStackSize = 0;
+	u_int maxTextureEvalStackSum = 0;
 
 	for (u_int i = 0; i < texs.size(); ++i) {
 		slg::ocl::Texture *tex = &texs[i];
@@ -1138,34 +1141,37 @@ void CompiledScene::CompileTextureOps() {
 		//----------------------------------------------------------------------
 		
 		tex->evalFloatOpStartIndex = texEvalOps.size();
-		const u_int evalOpsStackSizeFloat = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
+		const EvalStackNeed evalOpsStackSizeFloat = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
 		tex->evalFloatOpLength = texEvalOps.size() - tex->evalFloatOpStartIndex;
 
-		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeFloat);
+		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeFloat.peak);
+		maxTextureEvalStackSum = Max(maxTextureEvalStackSum, evalOpsStackSizeFloat.sum);
 
 		//----------------------------------------------------------------------
 		// EVAL_SPECTRUM
 		//----------------------------------------------------------------------
 
 		tex->evalSpectrumOpStartIndex = texEvalOps.size();
-		const u_int evalOpsStackSizeSpectrum = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_SPECTRUM);
+		const EvalStackNeed evalOpsStackSizeSpectrum = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_SPECTRUM);
 		tex->evalSpectrumOpLength = texEvalOps.size() - tex->evalSpectrumOpStartIndex;
 
-		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeSpectrum);
+		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeSpectrum.peak);
+		maxTextureEvalStackSum = Max(maxTextureEvalStackSum, evalOpsStackSizeSpectrum.sum);
 
 		//----------------------------------------------------------------------
 		// EVAL_BUMP
 		//----------------------------------------------------------------------
 
 		tex->evalBumpOpStartIndex = texEvalOps.size();
-		const u_int evalOpsStackSizeBump = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_BUMP);
+		const EvalStackNeed evalOpsStackSizeBump = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_BUMP);
 		tex->evalBumpOpLength = texEvalOps.size() - tex->evalBumpOpStartIndex;
 
-		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeBump);
+		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeBump.peak);
+		maxTextureEvalStackSum = Max(maxTextureEvalStackSum, evalOpsStackSizeBump.sum);
 	}
 
 	SLG_LOG("Texture evaluation ops count: " << texEvalOps.size());
-	SLG_LOG("Texture evaluation max. stack size: " << maxTextureEvalStackSize);
+	SLG_LOG("Texture evaluation max. stack size: " << maxTextureEvalStackSize << " (the sum of the ops: " << maxTextureEvalStackSum << ")");
 }
 
 void CompiledScene::CompileTextures() {

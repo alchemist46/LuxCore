@@ -99,7 +99,12 @@ def render(out, cases, size, defines):
         pyluxcore.ClearFileNameResolverPaths()
         pyluxcore.AddFileNameResolverPath(str(cfg.parent))
 
-        scene_props = pyluxcore.Properties(props.Get("scene.file").GetString())
+        # The repository scenes are relative to its root, an export (i.e.
+        # g0_export.py) to its .cfg
+        scene_file = props.Get("scene.file").GetString()
+        if not Path(scene_file).is_absolute() and not (REPO_ROOT / scene_file).exists():
+            scene_file = str(cfg.parent / scene_file)
+        scene_props = pyluxcore.Properties(scene_file)
         scene_props.Set(pyluxcore.Properties().SetFromString(scene_extra))
         scene = pyluxcore.Scene()
         scene.Parse(scene_props)
