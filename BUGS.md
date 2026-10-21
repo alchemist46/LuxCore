@@ -171,6 +171,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: viewport render with Pixel Size 2x or more, switch Filter between Nearest and Linear.
 - Notes: the old `bgl` draw code set `GL_TEXTURE_MAG_FILTER` from the property; the port to the `gpu` module (BlendLuxCore `d3435a32`) dropped it. Fix: a `gpu.types.GPUShaderCreateInfo` image shader with a sampler state, or `texture` sampler settings when the gpu API exposes them; the same shader is where an FSR-style upscale would go.
 
+### Cloth (Irawan) gains energy at grazing angles
+- Found: 2026-10-21
+- Area: material
+- Problem: the specular part of the cloth material is not energy conserving: with the diffuse colours at 0 and the specular colours at 1, the white furnace gives 0.73 at normal incidence and 1.23-1.32 at grazing view angles (mu < 0.4): it reflects more light than it receives there. The default denim preset: 0.87 at normal incidence, 1.12-1.15 at grazing.
+- Reproduce: `tests/furnace/furnace.py PATHCPU cloth-denim "scene.materials.m.weft_kd=0 0 0" "scene.materials.m.warp_kd=0 0 0" "scene.materials.m.weft_ks=1 1 1" "scene.materials.m.warp_ks=1 1 1"` (PATHOCL the same: disk 0.865 against 0.862).
+- Notes: the Irawan-Marschner weave model is a fit, not a conserving BSDF; one scale cannot fix it (too dark head-on, too bright at grazing). A per-angle albedo normalization (a table of the directional albedo per preset, as the energy compensation of the microfacet materials) would. The diffuse part alone passes (cloth-diffuse 0.9999).
+
 ### EnvironmentCamera TILEPATHOCL fails at the threshold
 - Found: 2026-10-15
 - Area: tests

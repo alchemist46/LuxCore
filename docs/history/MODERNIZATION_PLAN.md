@@ -156,7 +156,7 @@ The survey found these specific gaps:
       - Disney clear coat on the metal: 1.040;
       - roughmattetranslucent: 0.736 at sigma 0.5 and 0.541 at sigma 1;
       - velvet: 0.336, by construction;
-      - cloth denim: 0.942.
+      - cloth denim: 0.942. *Re-measured 2026-10-21 (ROADMAP ME):* denim 0.932 (PATHOCL); the specular lobe alone (kd 0, ks 1) 0.73 at normal incidence and 1.23-1.32 at grazing, on both devices: the Irawan model gains energy at grazing angles (BUGS.md). Carpaint with three white lobes 1.0003, cloth with only its diffuse 0.9999: consistent, nothing to compensate.
     - **Consistency failures** (bsdftest):
       - glossycoating CPU: the coating pdf takes its two directions swapped;
       - carpaint: the second lobe is never sampled when the first is active (three white lobes: 0.963), and the light-path diffuse value and pdf are wrong;
