@@ -143,20 +143,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: transparencyball at 160x120, SHADING_NORMAL AOV, two runs; Cornell box with TILEPATHOCL and DIRECT_DIFFUSE_REFLECT.
 - Notes: the NaN has not been investigated.
 
-### PATHOCL `stats.renderengine.pass` is short after Stop() at a halt spp
-- Found: 2026-10-17
-- Area: engine (PATHOCL)
-- Problem: 36 reported, 65 on the film's SAMPLECOUNT at 320x320 with `batch.haltspp = 64`. The film is right; the statistic lags the last transfers.
-- Reproduce: PATHOCL, 320x320, `batch.haltspp = 64`, read the statistic after Stop().
-- Notes: measure the spp from the film's SAMPLECOUNT output meanwhile.
-
-### pyluxcore crashes at exit when a Python log handler is left set
-- Found: 2026-10-19
-- Area: pyluxcore
-- Problem: a crash at interpreter exit after `pyluxcore.Init(lambda s: None)` unless `pyluxcore.SetLogHandler(None)` is called first.
-- Reproduce: `pyluxcore.Init(lambda s: None)` and exit the interpreter.
-- Notes: see also the memory note on the log handler dropping thread logs.
-
 ### Cloth (Irawan) gains energy at grazing angles
 - Found: 2026-10-21
 - Area: material
