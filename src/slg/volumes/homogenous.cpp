@@ -48,7 +48,8 @@ float HomogeneousVolume::Scatter(const float u,
 		const bool scatterAllowed, const float segmentLength,
 		const Spectrum &sigmaA, const Spectrum &sigmaS, const Spectrum &emission,
 		const Spectrum &throughput,
-		Spectrum &segmentTransmittance, Spectrum &segmentEmission) {
+		Spectrum &segmentTransmittance, Spectrum &segmentEmission,
+		float *uNoScatter) {
 	// This code must work also with segmentLength = INFINITY
 
 	bool scatter = false;
@@ -110,6 +111,14 @@ float HomogeneousVolume::Scatter(const float u,
 		scatter = (proposedScatterDistance < segmentLength);
 		scatterDistance = scatter ? proposedScatterDistance : segmentLength;
 
+		// Without a scatter event, 1 - u <= exp(-sigma_s * segmentLength):
+		// u remapped to [0, 1) (see Volume::Scatter())
+		if (!scatter && uNoScatter) {
+			const float noScatterProb = expf(-segmentLength * sigmaS.c[channel]);
+			if (noScatterProb > 0.f)
+				*uNoScatter = Clamp(1.f - (1.f - u) / noScatterProb, 0.f, .99999994f);
+		}
+
 		// Note: scatterDistance can not be infinity because otherwise there would
 		// have been a scatter event before.
 		float pdf = 0.f;
@@ -155,7 +164,7 @@ Spectrum HomogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 float HomogeneousVolume::Scatter(const Ray &ray, const float u,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const Spectrum &pathThroughput, Spectrum *connectionThroughput,
-		Spectrum *connectionEmission) const {
+		Spectrum *connectionEmission, float *surfacePassThroughEvent) const {
 	const float segmentLength = ray.maxt - ray.mint;
 
 	// Check if I have to support multi-scattering
@@ -176,7 +185,7 @@ float HomogeneousVolume::Scatter(const Ray &ray, const float u,
 	Spectrum segmentTransmittance, segmentEmission;
 	const float scatterDistance = HomogeneousVolume::Scatter(u, scatterAllowed,
 			segmentLength, sigmaA, sigmaS, emission, pathThroughput * (*connectionThroughput),
-			segmentTransmittance, segmentEmission);
+			segmentTransmittance, segmentEmission, surfacePassThroughEvent);
 
 	// I need to update first connectionEmission and than connectionThroughput
 	*connectionEmission += *connectionThroughput * emission;

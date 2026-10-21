@@ -825,11 +825,11 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 
 		// Check if there is volume scatter event
 		if (rayVolume) {
-			// This applies volume transmittance too
-			//
-			// Note: by using passThrough here, I introduce subtle correlation
-			// between scattering events and pass-through events
+			// This applies volume transmittance too. The surface at the end of
+			// the segment gets the pass-through event the volume leaves for it
+			// (see Volume::Scatter())
 			Spectrum emis;
+			float surfacePassThrough = passThrough;
 			// A shadow ray, or the connection of a light path vertex to the
 			// camera, takes the transmittance of the segment: it can't
 			// scatter, so a sampled scatter event would only block it.
@@ -841,7 +841,8 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 			Spectrum segmentTransmittance(1.f);
 			const float t = rayVolume->Scatter(*ray, passThrough, volInfo->IsScatteredStart(),
 					transmittanceOnly, pathThroughput ? *pathThroughput : Spectrum(1.f),
-					transmittanceOnly ? &segmentTransmittance : connectionThroughput, &emis);
+					transmittanceOnly ? &segmentTransmittance : connectionThroughput, &emis,
+					&surfacePassThrough);
 
 			if (transmittanceOnly) {
 				const float rrProb = segmentTransmittance.Max();
@@ -883,6 +884,9 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 
 				return true;
 			}
+
+			if (hit && (surfacePassThrough != passThrough))
+				bsdf->SetPassThroughEvent(*this, surfacePassThrough, volInfo);
 		}
 
 		if (hit) {

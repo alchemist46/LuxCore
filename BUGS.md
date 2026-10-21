@@ -73,12 +73,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: subsurface sphere, PATHOCL, `batch.haltspp = 64`.
 - Notes: the general halt bias (paths in flight) was fixed on 2026-10-18; this is the opposite effect of the subsurface walks.
 
-### Scattering media behind smooth boundaries lose energy
-- Found: 2026-10-18
+### Dense scattering media behind a delta glass read wrong in the furnace
+- Found: 2026-10-18 (the sigma_s 1 loss, fixed 2026-10-21); this part 2026-10-21
 - Area: material, engine (volumes)
-- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`): the delta `glass` reads 0.630 at sigma_s 1 on PATHCPU, PATHOCL and (0.71) BIDIRCPU, as much with `interiorior = 1.0001`, while the `null` material around the same volume is lossless (0.999). The rough OpenPBR glass is close (0.994 at sigma_s 1, roughness 0.3) but reads 0.894 at sigma_s 4 and 0.910 at sigma_s 4 with roughness 0; BIDIRCPU reads it 3% high at sigma_s 1.
-- Reproduce: white furnace with a unit sphere and a white homogeneous interior volume, glass or OpenPBR surface: `tests/furnace/furnace.py PATHCPU vol` (cases `glass-vol-s1/s4`, `null-vol-s1/s4`).
-- Notes: the depth limits are not the cause (0.633 at depth 1000). Rough glass with a scattering interior is too noisy to read at 64-256 spp (fireflies from the 50/50 reflect/refract choice). *2026-10-21, the suspected cause:* `Scene::Intersect()` and the kernel's `Scene_Intersect()` give the same pass-through event to the homogeneous volume's scatter decision and to the surface at the end of the segment (`hitPoint.passThroughEvent`: the glass lobe choice, the Mix choice and the Mix's volumes). A ray that did not scatter reaches the surface with the event confined to the no-scatter part of [0, 1), so the surface's choice is biased; the null material makes no choice, hence lossless. The same correlation moves the mean of `bigmonkey-vol` (a Mix of glossy2 and null around the medium) when only the volume's distance sampling changes (V3: -4.4% PATHOCL, -1.4% PATHCPU). Fix to try: remap the event to the no-scatter interval, (u - s) / (1 - s), before the surface uses it.
+- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) and BIDIRCPU 3% high at sigma_s 1 before the fix: not re-measured.
+- Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s4 spp=1024` (and PATHOCL).
+- Notes: the sigma_s 1 loss (0.630) was the correlation of the volume's scatter decision with the glass lobe choice (both read the same pass-through event), fixed by remapping the event for the surface. The CPU and GPU disagree at sigma_s 4 in opposite directions, so it is not a shared estimator bias; the fireflies come from long internal paths with the lobe probability clamped to [0.25, 0.75].
 
 ### BiDir reads 2-4% low on rough glass
 - Found: 2026-10-18

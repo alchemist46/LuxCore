@@ -56,7 +56,7 @@ Spectrum HeterogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 float HeterogeneousVolume::Scatter(const Ray &ray, const float u,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const Spectrum &pathThroughput, Spectrum *connectionThroughput,
-		Spectrum *connectionEmission) const {
+		Spectrum *connectionEmission, float *surfacePassThroughEvent) const {
 	// I need a sequence of pseudo-random numbers starting form a floating point
 	// pseudo-random number
 	TauswortheRandomGenerator rng(u);

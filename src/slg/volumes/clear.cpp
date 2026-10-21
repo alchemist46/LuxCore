@@ -46,7 +46,7 @@ Spectrum ClearVolume::SigmaS(const HitPoint &hitPoint) const {
 float ClearVolume::Scatter(const Ray &ray, const float u,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const Spectrum &pathThroughput, Spectrum *connectionThroughput,
-		Spectrum *connectionEmission) const {
+		Spectrum *connectionEmission, float *surfacePassThroughEvent) const {
 	// Point where to evaluate the volume
 	HitPoint hitPoint;
 	hitPoint.Init();

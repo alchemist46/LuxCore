@@ -66,9 +66,15 @@ public:
 	// volumes, per step for the heterogeneous ones). pathThroughput is the
 	// throughput of the path before the ray (it steers the choice of the
 	// colour channel the scatter distance is sampled from).
+	// surfacePassThroughEvent: when the segment had no scatter event, the
+	// pass-through event for the surface at its end. A homogeneous volume
+	// decides with u, so u is confined to the no-scatter part of [0, 1): it
+	// is remapped to [0, 1) again, otherwise the surface's own choices (the
+	// glass lobe, the Mix component) would be biased. The others leave it.
 	virtual float Scatter(const luxrays::Ray &ray, const float u, const bool scatteredStart,
 		const bool transmittanceOnly, const luxrays::Spectrum &pathThroughput,
-		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission) const = 0;
+		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission,
+		float *surfacePassThroughEvent) const = 0;
 
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexsreferencedTexs) const;
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex);

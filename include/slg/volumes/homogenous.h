@@ -38,7 +38,8 @@ public:
 
 	virtual float Scatter(const luxrays::Ray &ray, const float u, const bool scatteredStart,
 		const bool transmittanceOnly, const luxrays::Spectrum &pathThroughput,
-		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission) const;
+		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission,
+		float *surfacePassThroughEvent) const;
 
 	// Material interface
 
@@ -71,7 +72,8 @@ public:
 	static float Scatter(const float u, const bool scatterAllowed, const float segmentLength,
 			const luxrays::Spectrum &sigmaA, const luxrays::Spectrum &sigmaS,
 			const luxrays::Spectrum &emission, const luxrays::Spectrum &throughput,
-			luxrays::Spectrum &segmentTransmittance, luxrays::Spectrum &segmentEmission);
+			luxrays::Spectrum &segmentTransmittance, luxrays::Spectrum &segmentEmission,
+			float *uNoScatter = nullptr);
 
 protected:
 	virtual luxrays::Spectrum SigmaA(const HitPoint &hitPoint) const;

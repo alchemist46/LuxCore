@@ -221,6 +221,19 @@ void BSDF::Init(
 	frame.SetFromZ(hitPoint.shadeN);
 }
 
+void BSDF::SetPassThroughEvent(SceneConstRef scene, const float passThroughEvent,
+		const PathVolumeInfo *volInfo) {
+	hitPoint.passThroughEvent = passThroughEvent;
+
+	volInfo->SetHitPointVolumes(hitPoint,
+		material->GetInteriorVolume(hitPoint, hitPoint.passThroughEvent),
+		material->GetExteriorVolume(hitPoint, hitPoint.passThroughEvent),
+		scene.HasDefaultWorldVolume() ?
+		VolumeConstPtr(&scene.GetDefaultWorldVolume()) :
+		VolumeConstPtr(nullptr)
+	);
+}
+
 void BSDF::MoveHitPoint(const Point &p, const Normal &n) {
 	hitPoint.p = p;
 	hitPoint.geometryN = n;

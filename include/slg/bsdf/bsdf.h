@@ -106,6 +106,10 @@ public:
 		VolumeConstRef volume, const float t, const float passThroughEvent);
 
 	void MoveHitPoint(const luxrays::Point &p, const luxrays::Normal &n);
+	// A new pass-through event for a surface hit point: the volumes of a
+	// material may depend on it (Mix), so they are chosen again
+	void SetPassThroughEvent(SceneConstRef scene, const float passThroughEvent,
+			const PathVolumeInfo *volInfo);
 	
 	bool IsEmpty() const { return (not material); }
 	bool IsLightSource() const { return material->IsLightSource(); }

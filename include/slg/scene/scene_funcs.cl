@@ -71,11 +71,14 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		// numbers come from the pass-through sequence of the shadow ray, as
 		// on the CPU)
 		float3 segmentTransmittance = WHITE;
+		// The pass-through event for the surface at the end of the segment
+		// (see Volume::Scatter())
+		float surfacePassThrough = passThrough;
 		const float t = Volume_Scatter(&mats[rayVolumeIndex], ray,
 				hit ? rayHit->t : ray->maxt,
 				passThrough, volInfo->scatteredStart, shadowRay,
 				pathThroughput, shadowRay ? &segmentTransmittance : connectionThroughput, &connectionEmission,
-				tmpHitPoint
+				&surfacePassThrough, tmpHitPoint
 				TEXTURES_PARAM);
 
 		if (shadowRay) {
@@ -120,6 +123,25 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 			volInfo->scatteredStart = true;
 
 			return false;
+		}
+
+		// A new pass-through event for the surface: the volumes of a material
+		// may depend on it (Mix), so they are chosen again (as
+		// BSDF::SetPassThroughEvent())
+		if (hit && (surfacePassThrough != passThrough)) {
+			bsdf->hitPoint.passThroughEvent = surfacePassThrough;
+			const uint matIndex = bsdf->materialIndex;
+			if (!mats[matIndex].constVolumes)
+				PathVolumeInfo_SetHitPointVolumes(
+						volInfo,
+						&bsdf->hitPoint,
+						Material_GetInteriorVolume(matIndex, &bsdf->hitPoint,
+							surfacePassThrough
+							MATERIALS_PARAM),
+						Material_GetExteriorVolume(matIndex, &bsdf->hitPoint,
+							surfacePassThrough
+							MATERIALS_PARAM)
+						MATERIALS_PARAM);
 		}
 	}
 

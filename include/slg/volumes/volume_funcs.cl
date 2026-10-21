@@ -47,7 +47,8 @@ OPENCL_FORCE_INLINE float HomogeneousVolume_SegmentScatter(const float u,
 		const bool scatterAllowed, const float segmentLength,
 		const float3 *sigmaA, const float3 *sigmaS, const float3 *emission,
 		const float3 throughput,
-		float3 *segmentTransmittance, float3 *segmentEmission) {
+		float3 *segmentTransmittance, float3 *segmentEmission,
+		float *uNoScatter) {
 	// This code must work also with segmentLength = INFINITY
 
 	bool scatter = false;
@@ -108,6 +109,14 @@ OPENCL_FORCE_INLINE float HomogeneousVolume_SegmentScatter(const float u,
 
 		scatter = (proposedScatterDistance < segmentLength);
 		scatterDistance = scatter ? proposedScatterDistance : segmentLength;
+
+		// u remapped to [0, 1) without a scatter event, as
+		// HomogeneousVolume::Scatter()
+		if (!scatter && uNoScatter) {
+			const float noScatterProb = exp(-segmentLength * channelSigmaS);
+			if (noScatterProb > 0.f)
+				*uNoScatter = clamp(1.f - (1.f - u) / noScatterProb, 0.f, .99999994f);
+		}
 
 		// Note: scatterDistance can not be infinity because otherwise there would
 		// have been a scatter event before.
@@ -174,7 +183,8 @@ OPENCL_FORCE_INLINE float ClearVolume_Scatter(__global const Volume *vol,
 		const float passThroughEvent,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const float3 pathThroughput, float3 *connectionThroughput,
-		float3 *connectionEmission, __global HitPoint *tmpHitPoint
+		float3 *connectionEmission, float *surfacePassThroughEvent,
+		__global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);
@@ -231,7 +241,8 @@ OPENCL_FORCE_INLINE float HomogeneousVolume_Scatter(__global const Volume *vol,
 		const float passThroughEvent,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const float3 pathThroughput, float3 *connectionThroughput,
-		float3 *connectionEmission, __global HitPoint *tmpHitPoint
+		float3 *connectionEmission, float *surfacePassThroughEvent,
+		__global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);
@@ -254,7 +265,7 @@ OPENCL_FORCE_INLINE float HomogeneousVolume_Scatter(__global const Volume *vol,
 	float3 segmentTransmittance, segmentEmission;
 	const float scatterDistance = HomogeneousVolume_SegmentScatter(passThroughEvent, scatterAllowed,
 			segmentLength, &sigmaA, &sigmaS, &emission, pathThroughput * (*connectionThroughput),
-			&segmentTransmittance, &segmentEmission);
+			&segmentTransmittance, &segmentEmission, surfacePassThroughEvent);
 
 	// I need to update first connectionEmission and than connectionThroughput
 	*connectionEmission += *connectionThroughput * emission;
@@ -294,7 +305,8 @@ OPENCL_FORCE_INLINE float HeterogeneousVolume_Scatter(__global const Volume *vol
 		const float passThroughEvent,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const float3 pathThroughput, float3 *connectionThroughput,
-		float3 *connectionEmission, __global HitPoint *tmpHitPoint
+		float3 *connectionEmission, float *surfacePassThroughEvent,
+		__global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	// I need a sequence of pseudo-random numbers starting form a floating point
 	// pseudo-random number
@@ -348,7 +360,7 @@ OPENCL_FORCE_INLINE float HeterogeneousVolume_Scatter(__global const Volume *vol
 		float3 segmentTransmittance, segmentEmission;
 		const float scatterDistance = HomogeneousVolume_SegmentScatter(Rnd_FloatValue(&seed), scatterAllowed,
 				currentStepSize, &sigmaA, &sigmaS, &emission, pathThroughput * (*connectionThroughput),
-				&segmentTransmittance, &segmentEmission);
+				&segmentTransmittance, &segmentEmission, NULL);
 
 		// I need to update first connectionEmission and than connectionThroughput
 		*connectionEmission += *connectionThroughput * emission;
@@ -370,23 +382,24 @@ OPENCL_HOT_FUNCTION float Volume_Scatter(__global const Volume *vol,
 		const float passThrough,
 		const bool scatteredStart, const bool transmittanceOnly,
 		const float3 pathThroughput, float3 *connectionThroughput,
-		float3 *connectionEmission, __global HitPoint *tmpHitPoint
+		float3 *connectionEmission, float *surfacePassThroughEvent,
+		__global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	switch (vol->type) {
 		case CLEAR_VOL:
 			return ClearVolume_Scatter(vol, ray, hitT,
 					passThrough, scatteredStart, transmittanceOnly,
-					pathThroughput, connectionThroughput, connectionEmission, tmpHitPoint
+					pathThroughput, connectionThroughput, connectionEmission, surfacePassThroughEvent, tmpHitPoint
 					TEXTURES_PARAM);
 		case HOMOGENEOUS_VOL:
 			return HomogeneousVolume_Scatter(vol, ray, hitT,
 					passThrough, scatteredStart, transmittanceOnly,
-					pathThroughput, connectionThroughput, connectionEmission, tmpHitPoint
+					pathThroughput, connectionThroughput, connectionEmission, surfacePassThroughEvent, tmpHitPoint
 					TEXTURES_PARAM);
 		case HETEROGENEOUS_VOL:
 			return HeterogeneousVolume_Scatter(vol, ray, hitT,
 					passThrough, scatteredStart, transmittanceOnly,
-					pathThroughput, connectionThroughput, connectionEmission, tmpHitPoint
+					pathThroughput, connectionThroughput, connectionEmission, surfacePassThroughEvent, tmpHitPoint
 					TEXTURES_PARAM);
 		default:
 			return -1.f;
