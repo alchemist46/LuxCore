@@ -258,9 +258,14 @@ void MetropolisSampler::NextSample(const vector<SampleResult> &sampleResults) {
 		film->AddSampleCount(threadIndex, pixelNormalizedCount, screenNormalizedCount);
 	}
 
-	// Calculate the sample result luminance
+	// Calculate the sample result luminance: of the results that reach the
+	// film only, so with addOnlyCuastics the chain is steered by the caustics
+	// it keeps, not by the connections it throws away
 	float newLuminance = 0.f;
 	for (vector<SampleResult>::const_iterator sr = sampleResults.begin(); sr != sampleResults.end(); ++sr) {
+		if (addOnlyCuastics && !(sr->HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr->isCaustic))
+			continue;
+
 		if (sr->HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED)) {
 			for (u_int i = 0; i < sr->radiance.Size(); ++i) {
 				const float luminance = sr->radiance[i].Y();

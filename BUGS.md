@@ -108,13 +108,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: OpenPBR thin film at 400 nm, compare with Cycles.
 - Notes: implementing the Belcour & Barla model would fix it.
 
-### Light tracing: Metropolis importance and the first-vertex connection
-- Found: 2026-10-16
-- Area: engine (light tracing)
-- Problem: with `path.hybridbackforward.enable`, the light-path Metropolis sampler computes its importance from all connections, including the non-caustic ones it discards (`metropolis.cpp:262` vs `:333`), and every light path connects its first vertex to the camera although that connection can never be caustic (`pathtracer.cpp:900`, `pathinfo.cpp:150`). Unbiased but inefficient.
-- Reproduce: hybrid back/forward on with a Metropolis light path sampler.
-- Notes: items L1 and L2 of the light-tracing block in Phase 2 of the plan.
-
 ### Caustics seen through a specular surface are missing with light tracing
 - Found: 2026-10-16
 - Area: engine (light tracing)

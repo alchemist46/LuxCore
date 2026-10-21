@@ -349,6 +349,9 @@ void BakeCPURenderThread::RenderConnectToEyeCallBack(const BakeMapInfo &mapInfo,
 		for (u_int i = 0; i < engine->currentSceneObjsToBake.size(); ++i) {
 			if (engine->currentSceneObjsToBake[i] == &bsdf.GetSceneObject()) {
 				SampleResult &sampleResult = PathTracer::AddLightSampleResult(sampleResults, engine->GetMapFilm());
+				// Only caustics are baked here (see the test above), and the
+				// light sampler adds only the caustic results
+				sampleResult.isCaustic = true;
 
 				SetSampleResultXY(mapInfo, bsdf.hitPoint, engine->GetMapFilm(), sampleResult);
 

@@ -42,6 +42,7 @@ void SampleResult::Init(const Film::FilmChannels *chnls, const u_int radianceGro
 	// lastPathVertex can not be really initialized here without knowing
 	// the max. path depth.
 	lastPathVertex = false;
+	isCaustic = false;
 }
 
 Spectrum SampleResult::GetSpectrum(const vector<RadianceChannelScale> &radianceChannelScales) const {

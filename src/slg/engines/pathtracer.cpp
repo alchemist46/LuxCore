@@ -1060,12 +1060,19 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 			// Try to connect the light path vertex with the eye
 			//--------------------------------------------------------------
 
-			scene.GetCamera().SampleLens(time, sampler.GetSample(6), sampler.GetSample(7),
-				&pathInfo.lensPoint);
-
 			if (ConnectToEyeCallBack){
+				scene.GetCamera().SampleLens(time, sampler.GetSample(6), sampler.GetSample(7),
+					&pathInfo.lensPoint);
+
 				ConnectToEyeCallBack(pathInfo, bsdf, light->GetID(), lightPathFlux, sampleResults);
-			} else {
+			} else if (!hybridBackForwardEnable ||
+					// The hybrid keeps only the caustic connections
+					// (LightPathInfo::IsCausticPath()): not the first vertex,
+					// nor a path that is no longer nearly specular
+					(pathInfo.IsSpecularPath() && (pathInfo.depth.depth > 0))) {
+				scene.GetCamera().SampleLens(time, sampler.GetSample(6), sampler.GetSample(7),
+					&pathInfo.lensPoint);
+
 				ConnectToEye(device, scene, film,
 						nextEventRay.time,
 						sampler.GetSample(sampleOffset + 1),
@@ -1094,13 +1101,10 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 
 			pathInfo.AddVertex(bsdf, bsdfEvent, hybridBackForwardGlossinessThreshold);
 
-			// If it isn't anymore a (nearly) specular path, I can stop
-			if (hybridBackForwardEnable && !pathInfo.IsSpecularPath() &&
-					// This condition is added to "stabilize" Metropolis sampler
-					// used in light tracing part of hybrid rendering. In this case
-					// I render also some not-caustic sample to make an "easy"
-					// computation of the avg. image luminance.
-					(pathInfo.depth.GetRRDepth() > 1))
+			// If it isn't anymore a (nearly) specular path, I can stop: no
+			// later connection can be caustic (the Metropolis sampler of the
+			// hybrid estimates its mean luminance from the caustics only)
+			if (hybridBackForwardEnable && !pathInfo.IsSpecularPath())
 				break;
 
 			// Russian Roulette
