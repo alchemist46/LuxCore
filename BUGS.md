@@ -66,13 +66,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: render a dark sRGB byte texture and compare with Cycles.
 - Notes: the gamma path always did it. Storing decoded byte images as half floats would fix it at twice the memory.
 
-### Image is one row off Cycles
-- Found: 2026-10-17
-- Area: engine (cameras)
-- Problem: the cameras flip the film row with `filmHeight - filmY - 1` while the pixel centres are at `j + 0.5`. A diffuse sphere at 64x64 reads 1.075 of Cycles unshifted and 1.001 shifted by one row.
-- Reproduce: `tests/test_openpbr_principled.py` (it aligns the two images first).
-- Notes: found during BlendLuxCore work, measured again 2026-10-19.
-
 ### PATHOCL halt bias with the subsurface material
 - Found: 2026-10-18
 - Area: engine (PATHOCL)
@@ -171,9 +164,9 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py PATHCPU cloth-denim "scene.materials.m.weft_kd=0 0 0" "scene.materials.m.warp_kd=0 0 0" "scene.materials.m.weft_ks=1 1 1" "scene.materials.m.warp_ks=1 1 1"` (PATHOCL the same: disk 0.865 against 0.862).
 - Notes: the Irawan-Marschner weave model is a fit, not a conserving BSDF; one scale cannot fix it (too dark head-on, too bright at grazing). A per-angle albedo normalization (a table of the directional albedo per preset, as the energy compensation of the microfacet materials) would. The diffuse part alone passes (cloth-diffuse 0.9999).
 
-### EnvironmentCamera TILEPATHOCL fails at the threshold
-- Found: 2026-10-15
+### OpenPBRSmoothMaterial unit tests sit at the pixel threshold
+- Found: 2026-10-21
 - Area: tests
-- Problem: the `EnvironmentCamera` TILEPATHOCL unit test is a known failure on the HIP device, at the comparison threshold.
-- Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device.
-- Notes: listed in [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md) as a known failure; the other one listed there (Cloth on the GPU) was fixed in `8b4b32b64`.
+- Problem: the noise alone puts 2.3-5.0% of the pixels of the `OpenPBRSmoothMaterial` images above the tolerance, around the 3% limit, so the test passes or fails by chance. The mean brightness always agrees within 0.1%.
+- Reproduce: render `test_OpenPBRSmoothMaterial_PATHCPU_SOBOL` (or the TILEPATHCPU/TILEPATHOCL variants) a few times; two runs of the old build read 2.51% and 2.32% against the reference, the new references' runs 3.2-5.0% against the shifted old ones.
+- Notes: the TILEPATHOCL reference was already re-rendered once for this (`14deaa16f`). A lower halt threshold for this scene, or an entry in `MAX_MEAN_DIFFERENCE_OVERRIDES`-style per-test pixel tolerance, would make it stable.

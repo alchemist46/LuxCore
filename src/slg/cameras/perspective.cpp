@@ -110,13 +110,13 @@ void PerspectiveCamera::InitCameraData() {
 void PerspectiveCamera::InitRay(Ray *ray, const float filmX, const float filmY) const {
 	Point Pras;
 	if (enableOculusRiftBarrel) {
-		OculusRiftBarrelPostprocess(filmX / filmWidth, (filmHeight - filmY - 1.f) / filmHeight,
+		OculusRiftBarrelPostprocess(filmX / filmWidth, (filmHeight - filmY) / filmHeight,
 				&Pras.x, &Pras.y);
 
 		Pras.x = Min(Pras.x * filmWidth, (float)(filmWidth - 1));
 		Pras.y = Min(Pras.y * filmHeight, (float)(filmHeight - 1));
 	} else
-		Pras = Point(filmX, filmHeight - filmY - 1.f, 0.f);
+		Pras = Point(filmX, filmHeight - filmY, 0.f);
 
 	const Point Pcamera = Point(camTrans.rasterToCamera * Pras);
 
@@ -149,7 +149,7 @@ bool PerspectiveCamera::GetSamplePosition(Ray *ray, float *x, float *y) const {
 	pO *= Inverse(camTrans.rasterToWorld);
 
 	*x = pO.x;
-	*y = filmHeight - 1 - pO.y;
+	*y = filmHeight - pO.y;
 
 	// Check if we are inside the image plane
 	if ((*x < filmSubRegion[0]) || (*x >= filmSubRegion[1] + 1) ||

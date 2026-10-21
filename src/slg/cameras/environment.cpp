@@ -119,7 +119,7 @@ bool EnvironmentCamera::GetSamplePosition(Ray *ray, float *x, float *y) const {
 	const Vector w(Inverse(camTrans.cameraToWorld) * ray->d);
 	const float cosTheta = w.y;
 	const float theta = acosf(Min(1.f, cosTheta));
-	*y = filmHeight - 1 - (theta * filmHeight * INV_PI);
+	*y = filmHeight - theta * filmHeight * INV_PI;
 	const float sinTheta = sqrtf(Clamp(1.f - cosTheta * cosTheta, 1e-5f, 1.f));
 
 	const float cosPhi = -w.z / sinTheta;
@@ -145,7 +145,7 @@ bool EnvironmentCamera::SampleLens(const float time, const float u1, const float
 void EnvironmentCamera::GetPDF(const Ray &eyeRay, const float eyeDistance,
 		const float filmX, const float filmY,
 		float *pdfW, float *fluxToRadianceFactor) const {
-	const float theta = M_PI * (filmHeight - filmY - 1.f) / filmHeight;
+	const float theta = M_PI * (filmHeight - filmY) / filmHeight;
 	const float cameraPdfW = 1.f / (2.f * M_PI * M_PI * sinf(theta));
 
 	if (pdfW)
@@ -185,7 +185,7 @@ void EnvironmentCamera::InitPixelArea() {
 }
 
 void EnvironmentCamera::InitRay(Ray *ray, const float filmX, const float filmY) const {
-	const float theta = M_PI * (filmHeight - filmY - 1.f) / filmHeight;
+	const float theta = M_PI * (filmHeight - filmY) / filmHeight;
 	const float phi = Radians((360.f - degrees) * .5f + degrees * filmX / filmWidth);
 
 	ray->Update(rayOrigin, Vector(-sinf(theta) * sinf(phi), cosf(theta), -sinf(theta) * cosf(phi)));

@@ -190,10 +190,10 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRayImpl(
 	float3 Pras;
 	if (cameraPersp->enableOculusRiftBarrel) {
 		float ssx, ssy;
-		Camera_OculusRiftBarrelPostprocess(filmX / filmWidth, (filmHeight - filmY - 1.f) / filmHeight, &ssx, &ssy);
+		Camera_OculusRiftBarrelPostprocess(filmX / filmWidth, (filmHeight - filmY) / filmHeight, &ssx, &ssy);
 		Pras = MAKE_FLOAT3(min(ssx * filmWidth, (float) (filmWidth - 1)), min(ssy * filmHeight, (float) (filmHeight - 1)), 0.f);
 	} else
-		Pras = MAKE_FLOAT3(filmX, filmHeight - filmY - 1.f, 0.f);
+		Pras = MAKE_FLOAT3(filmX, filmHeight - filmY, 0.f);
 
 	float3 rayOrig = Transform_ApplyPoint(rasterToCamera, Pras);
 	float3 rayDir = rayOrig;
@@ -280,7 +280,7 @@ OPENCL_FORCE_INLINE void OrthographicCamera_GenerateRay(
 		const float dofSampleX, const float dofSampleY) {
 	PathVolumeInfo_StartVolume(volInfo, camera->base.volumeIndex);
 
-	const float3 Pras = MAKE_FLOAT3(filmX, filmHeight - filmY - 1.f, 0.f);
+	const float3 Pras = MAKE_FLOAT3(filmX, filmHeight - filmY, 0.f);
 	float3 rayOrig = Transform_ApplyPoint(&camera->base.rasterToCamera, Pras);
 	float3 rayDir = MAKE_FLOAT3(0.f, 0.f, 1.f);
 
