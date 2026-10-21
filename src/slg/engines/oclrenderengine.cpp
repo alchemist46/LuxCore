@@ -209,7 +209,14 @@ OCLRenderEngine::OCLRenderEngine(RenderConfigRef rcfg,
 		DeviceDescription::Filter(DEVICE_TYPE_NATIVE, nativeDescs);
 		nativeDescs.erase(std::next(nativeDescs.begin()), nativeDescs.end());  // Keep only 1st
 
-		nativeRenderThreadCount = cfg.Get(GetDefaultProps()->Get("opencl.native.threads.count")).Get<u_int>();
+		// By default, every hardware thread but one per hardware device, for
+		// the thread that feeds it: on a 12-thread CPU with one GPU, as fast
+		// as all of them (the native threads add 2-4% to PATHOCL), and the
+		// feeder threads don't compete with them on smaller CPUs
+		if (cfg.IsDefined("opencl.native.threads.count"))
+			nativeRenderThreadCount = cfg.Get(GetDefaultProps()->Get("opencl.native.threads.count")).Get<u_int>();
+		else
+			nativeRenderThreadCount = (u_int)Max<int>(0, (int)GetHardwareThreadCount() - (int)oclRenderThreadCount);
 		if (nativeRenderThreadCount > 0)
 			selectedDeviceDescs.resize(selectedDeviceDescs.size() + nativeRenderThreadCount, nativeDescs[0]);
 	} else
