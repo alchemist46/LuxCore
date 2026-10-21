@@ -630,6 +630,9 @@ OPENCL_FORCE_INLINE void LightTree_LearnAddPick(
 		const float3 p, const float3 n, const bool hasNormal,
 		const float *boundsProb) {
 	const uint cell = LightTree_LearnCell(learn, p, n, hasNormal);
+	// A cell that has learned enough skips the atomics
+	if (learnCounts[cell] >= learn->stopCount)
+		return;
 	AtomicAdd(&learnCounts[cell], 1.f);
 
 	__global float* restrict sums = &learnBoundsSums[cell * learn->slotCount];
@@ -644,6 +647,7 @@ OPENCL_FORCE_INLINE void LightTree_LearnAddContribution(
 		__global const uint* restrict lightTreeLightIndex,
 		__global const LightTreeLearn* restrict learn,
 		__global float* restrict learnSums,
+		__global const float* restrict learnCounts,
 		const float3 p, const float3 n, const bool hasNormal,
 		const uint lightIndex, const float pickPdf, const float contribution) {
 	if (!(contribution > 0.f) || !(pickPdf > 0.f))
@@ -670,6 +674,10 @@ OPENCL_FORCE_INLINE void LightTree_LearnAddContribution(
 	}
 
 	const uint cell = LightTree_LearnCell(learn, p, n, hasNormal);
+	// As LightTree_LearnAddPick() (the picks still in flight when the cell
+	// stops add their contribution or not: it only steers the probabilities)
+	if (learnCounts[cell] >= learn->stopCount)
+		return;
 	AtomicAdd(&learnSums[cell * learn->slotCount + slot], contribution / pickPdf);
 }
 #endif

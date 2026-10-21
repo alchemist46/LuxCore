@@ -378,7 +378,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 				// The light tree learns what the light added at this vertex
 				if (lightTreeLearn && !BSDF_IsShadowCatcherOnlyInfiniteLights(bsdf MATERIALS_PARAM))
 					LightTree_LearnAddContribution(lightTreeNodes, lightTreeLightIndex,
-							lightTreeLearn, lightTreeLearnSums,
+							lightTreeLearn, lightTreeLearnSums, lightTreeLearnCounts,
 							VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf), !bsdf->isVolume,
 							taskDirectLight->illumInfo.lightIndex, taskDirectLight->illumInfo.pickPdf,
 							Spectrum_Y(lightRadiance));

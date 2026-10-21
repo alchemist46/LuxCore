@@ -98,5 +98,9 @@ typedef struct {
 	// The first distantCount slots are the distant lights, in their order;
 	// the other slots the nodes of the cut
 	unsigned int distantCount;
+	// The samples after which a cell stops learning: its weight has reached
+	// the largest one (the sums and the counts stay as they are, so its
+	// learned distribution stays too)
+	float stopCount;
 	unsigned int cutNodes[LIGHTTREE_MAX_SLOTS];
 } LightTreeLearn;
