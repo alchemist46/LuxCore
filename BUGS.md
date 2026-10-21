@@ -17,6 +17,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### Film serialization drops the object-ID lists
+- Found: 2026-10-21
+- Area: film
+- Problem: `Film::load` / `Film::save` (`src/slg/film/filmserialize.cpp:123-124, 233-234`) archive `maskMaterialIDs` and `byMaterialIDs` but not `maskObjectIDs` and `byObjectIDs`, so a film loaded from a `.flm` or `.rsm` has empty object-ID lists while its `OBJECT_ID_MASK` / `BY_OBJECT_ID` buffers are present. `Output()` then finds no matching id (`filmoutput.cpp:485-504`) and writes the buffer at index 0 for every requested id; `AddFilm` matches object IDs by list (`film.cpp:1236-1255`) and merges nothing for them. The same functions also archive `statsStartSampleTime` twice (`:126/128`, `:236/238`), harmless but part of the format.
+- Reproduce: a scene with two `OBJECT_ID_MASK` outputs with different ids, `periodicsave.resumerendering.period` set, then load the `.rsm` and write the outputs: both masks are the first one.
+- Notes: found while planning K5 (ROADMAP.md), which replaces this serialization with an EXR checkpoint; fix the two lines (and bump `BOOST_CLASS_VERSION(slg::Film)`, `film.h:651`) if K5 is far off.
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests
