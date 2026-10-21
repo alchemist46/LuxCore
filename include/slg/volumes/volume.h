@@ -61,8 +61,11 @@ public:
 
 	// Returns the ray t value of the scatter event. If (t <= 0.0) there was
 	// no scattering. In any case, it applies transmittance to connectionThroughput
-	// too.
+	// too. With transmittanceOnly (shadow rays), there is no scattering: the
+	// transmittance of the whole segment is applied (exact for the homogeneous
+	// volumes, per step for the heterogeneous ones).
 	virtual float Scatter(const luxrays::Ray &ray, const float u, const bool scatteredStart,
+		const bool transmittanceOnly,
 		luxrays::Spectrum *connectionThroughput, luxrays::Spectrum *connectionEmission) const = 0;
 
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexsreferencedTexs) const;

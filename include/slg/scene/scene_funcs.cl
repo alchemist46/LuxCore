@@ -30,7 +30,8 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		__global BSDF *bsdf,
 		float3 *connectionThroughput,  const float3 pathThroughput,
 		__global SampleResult *sampleResult,
-		const bool backTracing
+		const bool backTracing,
+		__global Seed *seedPassThroughEvent
 		MATERIALS_PARAM_DECL
 		) {
 	*connectionThroughput = WHITE;
@@ -65,12 +66,38 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		// between scattering events and pass-through events
 		float3 connectionEmission = BLACK;
 
+		// A shadow ray takes the transmittance of the segment, with the
+		// Russian roulette of Scene::Intersect() on a low one (the random
+		// numbers come from the pass-through sequence of the shadow ray, as
+		// on the CPU)
+		float3 segmentTransmittance = WHITE;
 		const float t = Volume_Scatter(&mats[rayVolumeIndex], ray,
 				hit ? rayHit->t : ray->maxt,
-				passThrough, volInfo->scatteredStart,
-				connectionThroughput, &connectionEmission,
+				passThrough, volInfo->scatteredStart, shadowRay,
+				shadowRay ? &segmentTransmittance : connectionThroughput, &connectionEmission,
 				tmpHitPoint
 				TEXTURES_PARAM);
+
+		if (shadowRay) {
+			const float rrProb = fmax(segmentTransmittance.x, fmax(segmentTransmittance.y, segmentTransmittance.z));
+			if (rrProb < .1f) {
+				bool blocked = (rrProb <= 0.f);
+				if (!blocked) {
+					Seed seed = *seedPassThroughEvent;
+					blocked = (Rnd_FloatValue(&seed) >= rrProb);
+					*seedPassThroughEvent = seed;
+				}
+
+				if (blocked) {
+					// Not a miss (see the scatter event below)
+					rayHit->meshIndex = 0xfffffffeu;
+					return false;
+				}
+
+				segmentTransmittance /= rrProb;
+			}
+			*connectionThroughput *= segmentTransmittance;
+		}
 
 		// Add the volume emitted light to the appropriate light group
 		if (!Spectrum_IsBlack(connectionEmission) && sampleResult)

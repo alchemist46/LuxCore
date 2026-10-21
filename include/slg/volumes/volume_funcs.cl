@@ -126,7 +126,8 @@ OPENCL_FORCE_INLINE float3 ClearVolume_SigmaT(__global const Volume *vol, __glob
 OPENCL_FORCE_INLINE float ClearVolume_Scatter(__global const Volume *vol,
 		__global Ray *ray, const float hitT,
 		const float passThroughEvent,
-		const bool scatteredStart, float3 *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		float3 *connectionThroughput,
 		float3 *connectionEmission, __global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
@@ -182,7 +183,8 @@ OPENCL_FORCE_INLINE float3 HomogeneousVolume_SigmaS(__global const Volume *vol, 
 OPENCL_FORCE_INLINE float HomogeneousVolume_Scatter(__global const Volume *vol,
 		__global Ray *ray, const float hitT,
 		const float passThroughEvent,
-		const bool scatteredStart, float3 *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		float3 *connectionThroughput,
 		float3 *connectionEmission, __global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
@@ -194,7 +196,7 @@ OPENCL_FORCE_INLINE float HomogeneousVolume_Scatter(__global const Volume *vol,
 	const float segmentLength = hitT - ray->mint;
 
 	// Check if I have to support multi-scattering
-	const bool scatterAllowed = (!scatteredStart || vol->volume.homogenous.multiScattering);
+	const bool scatterAllowed = !transmittanceOnly && (!scatteredStart || vol->volume.homogenous.multiScattering);
 	
 	const float3 sigmaA = HomogeneousVolume_SigmaA(vol, tmpHitPoint
 			TEXTURES_PARAM);
@@ -244,7 +246,8 @@ OPENCL_FORCE_INLINE float3 HeterogeneousVolume_SigmaT(__global const Volume *vol
 OPENCL_FORCE_INLINE float HeterogeneousVolume_Scatter(__global const Volume *vol,
 		__global Ray *ray, const float hitT,
 		const float passThroughEvent,
-		const bool scatteredStart, float3 *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		float3 *connectionThroughput,
 		float3 *connectionEmission, __global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	// I need a sequence of pseudo-random numbers starting form a floating point
@@ -271,7 +274,7 @@ OPENCL_FORCE_INLINE float HeterogeneousVolume_Scatter(__global const Volume *vol
 	const float currentStepSize = fmin(segmentLength / steps, maxStepsCount * stepSize);
 
 	// Check if I have to support multi-scattering
-	const bool scatterAllowed = (!scatteredStart || vol->volume.heterogenous.multiScattering);
+	const bool scatterAllowed = !transmittanceOnly && (!scatteredStart || vol->volume.heterogenous.multiScattering);
 
 	// Initialize tmpHitPoint
 	Volume_InitializeTmpHitPoint(tmpHitPoint, rayOrig, rayDir, passThroughEvent);
@@ -319,23 +322,24 @@ OPENCL_FORCE_INLINE float HeterogeneousVolume_Scatter(__global const Volume *vol
 OPENCL_HOT_FUNCTION float Volume_Scatter(__global const Volume *vol,
 		__global Ray *ray, const float hitT,
 		const float passThrough,
-		const bool scatteredStart, float3 *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		float3 *connectionThroughput,
 		float3 *connectionEmission, __global HitPoint *tmpHitPoint
 		TEXTURES_PARAM_DECL) {
 	switch (vol->type) {
 		case CLEAR_VOL:
 			return ClearVolume_Scatter(vol, ray, hitT,
-					passThrough, scatteredStart,
+					passThrough, scatteredStart, transmittanceOnly,
 					connectionThroughput, connectionEmission, tmpHitPoint
 					TEXTURES_PARAM);
 		case HOMOGENEOUS_VOL:
 			return HomogeneousVolume_Scatter(vol, ray, hitT,
-					passThrough, scatteredStart,
+					passThrough, scatteredStart, transmittanceOnly,
 					connectionThroughput, connectionEmission, tmpHitPoint
 					TEXTURES_PARAM);
 		case HETEROGENEOUS_VOL:
 			return HeterogeneousVolume_Scatter(vol, ray, hitT,
-					passThrough, scatteredStart,
+					passThrough, scatteredStart, transmittanceOnly,
 					connectionThroughput, connectionEmission, tmpHitPoint
 					TEXTURES_PARAM);
 		default:

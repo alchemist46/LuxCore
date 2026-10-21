@@ -107,12 +107,13 @@ Spectrum HomogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 }
 
 float HomogeneousVolume::Scatter(const Ray &ray, const float u,
-		const bool scatteredStart, Spectrum *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		Spectrum *connectionThroughput,
 		Spectrum *connectionEmission) const {
 	const float segmentLength = ray.maxt - ray.mint;
 
 	// Check if I have to support multi-scattering
-	const bool scatterAllowed = (!scatteredStart || multiScattering);
+	const bool scatterAllowed = !transmittanceOnly && (!scatteredStart || multiScattering);
 
 	// Point where to evaluate the volume
 	HitPoint hitPoint;

@@ -54,7 +54,8 @@ Spectrum HeterogeneousVolume::SigmaS(const HitPoint &hitPoint) const {
 }
 
 float HeterogeneousVolume::Scatter(const Ray &ray, const float u,
-		const bool scatteredStart, Spectrum *connectionThroughput,
+		const bool scatteredStart, const bool transmittanceOnly,
+		Spectrum *connectionThroughput,
 		Spectrum *connectionEmission) const {
 	// I need a sequence of pseudo-random numbers starting form a floating point
 	// pseudo-random number
@@ -73,7 +74,7 @@ float HeterogeneousVolume::Scatter(const Ray &ray, const float u,
 	const float currentStepSize = Min(segmentLength / steps, maxStepsCount * stepSize);
 
 	// Check if I have to support multi-scattering
-	const bool scatterAllowed = (!scatteredStart || multiScattering);
+	const bool scatterAllowed = !transmittanceOnly && (!scatteredStart || multiScattering);
 
 	// Point where to evaluate the volume
 	HitPoint hitPoint;

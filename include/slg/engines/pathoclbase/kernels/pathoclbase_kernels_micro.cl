@@ -367,7 +367,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			ray, rayHit, &taskTmp->tmpBsdf,
 			&connectionThroughput, WHITE,
 			NULL,
-			true
+			true, &taskDirectLight->seedPassThroughEvent
 			MATERIALS_PARAM
 			);
 	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
@@ -994,7 +994,7 @@ __kernel void AdvancePaths_MK_RT(
 					&rays[gid], &rayHits[gid], initBsdf,
 					&connectionThroughput, VLOAD3F(taskState->throughput.c),
 					sampleResult,
-					false
+					false, NULL
 					MATERIALS_PARAM
 					);
 			taskState->throughShadowTransparency = throughShadowTransparency;
