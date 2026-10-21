@@ -428,8 +428,11 @@ typedef struct {
 	// volumes are interiorVolumeIndex and exteriorVolumeIndex, the pass
 	// through transparency is black, the emitted radiance is the one of
 	// DefaultMaterial_GetEmittedRadiance() and, with constEmittedRadiance,
-	// it doesn't read the hit point
-	int constVolumes, noPassThroughTransparency, defaultEmittedRadiance, constEmittedRadiance;
+	// it doesn't read the hit point; nullPassThrough: a null material with
+	// no transparency, which lets every ray through (BSDF_Init() builds only
+	// what Scene_Intersect() reads)
+	int constVolumes, noPassThroughTransparency, defaultEmittedRadiance, constEmittedRadiance,
+			nullPassThrough;
 
 	union {
 		MatteParam matte;

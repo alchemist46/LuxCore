@@ -88,6 +88,48 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 	const float3 rayDir = VLOAD3F(&ray->d.x);
 	const float3 hitPointP = rayOrig + rayHit->t * rayDir;
 
+	const uint matIndex = sceneObjs[meshIndex].materialIndex;
+	if (mats[matIndex].nullPassThrough) {
+		// A null material that lets every ray through (a volume's shell):
+		// Scene_Intersect() continues the ray and reads only the side, the
+		// volumes and the material of the hit point, so the normals, UV,
+		// differentials, bump and frame are not built
+		__global HitPoint *hitPoint = &bsdf->hitPoint;
+		hitPoint->throughShadowTransparency = throughShadowTransparency;
+		hitPoint->passThroughEvent = passThroughEvent;
+		hitPoint->regularization = 0.f;
+		hitPoint->subsurface = HITPOINT_SSS_SURFACE;
+		VSTORE3F(hitPointP, &hitPoint->p.x);
+		VSTORE3F(-rayDir, &hitPoint->fixedDir.x);
+		hitPoint->objectID = sceneObjs[meshIndex].objectID;
+		const float3 geometryN = ExtMesh_GetGeometryNormal(&hitPoint->localToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
+		VSTORE3F(geometryN, &hitPoint->geometryN.x);
+		// As HitPoint_Init()
+		hitPoint->intoObject = (dot(rayDir, geometryN) < 0.f);
+		hitPoint->meshIndex = meshIndex;
+		hitPoint->triangleIndex = triangleIndex;
+		hitPoint->triangleBariCoord1 = rayHit->b1;
+		hitPoint->triangleBariCoord2 = rayHit->b2;
+
+		bsdf->sceneObjectIndex = meshIndex;
+		bsdf->materialIndex = matIndex;
+		PathVolumeInfo_SetHitPointVolumes(
+				volInfo,
+				hitPoint,
+				Material_GetInteriorVolume(matIndex, hitPoint,
+					passThroughEvent
+					MATERIALS_PARAM),
+				Material_GetExteriorVolume(matIndex, hitPoint,
+					passThroughEvent
+					MATERIALS_PARAM)
+				MATERIALS_PARAM);
+		const uint offset = lightIndexOffsetByMeshIndex[meshIndex];
+		bsdf->triangleLightSourceIndex = (offset == NULL_INDEX) ? NULL_INDEX : lightIndexByTriIndex[offset + triangleIndex];
+		bsdf->isVolume = false;
+
+		return;
+	}
+
 	HitPoint_Init(&bsdf->hitPoint, throughShadowTransparency,
 		meshIndex, triangleIndex,
 		hitPointP, -rayDir,
@@ -99,7 +141,6 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 	bsdf->sceneObjectIndex = meshIndex;
 
 	// Get the material
-	const uint matIndex = sceneObjs[meshIndex].materialIndex;
 	bsdf->materialIndex = matIndex;
 
 	//--------------------------------------------------------------------------
@@ -347,6 +388,8 @@ OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughTransparency(__global const BSDF *
 		MATERIALS_PARAM_DECL) {
 	if (mats[bsdf->materialIndex].noPassThroughTransparency)
 		return BLACK;
+	if (mats[bsdf->materialIndex].nullPassThrough)
+		return WHITE;
 
 	const float3 localFixedDir = Frame_ToLocal(&bsdf->frame, VLOAD3F(&bsdf->hitPoint.fixedDir.x));
 

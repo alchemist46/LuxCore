@@ -533,6 +533,8 @@ void CompiledScene::CompileMaterialOps() {
 		mat->noPassThroughTransparency = leaf &&
 				(mat->type != slg::ocl::NULLMAT) && (mat->type != slg::ocl::ARCHGLASS) &&
 				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
+		mat->nullPassThrough = (mat->type == slg::ocl::NULLMAT) &&
+				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
 		mat->defaultEmittedRadiance = leaf;
 		mat->constEmittedRadiance = leaf && ((mat->emitTexIndex == NULL_INDEX) ||
 				(texs[mat->emitTexIndex].type == slg::ocl::CONST_FLOAT) ||
