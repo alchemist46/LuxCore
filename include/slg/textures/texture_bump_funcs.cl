@@ -121,8 +121,8 @@ OPENCL_FORCE_INLINE float3 ScaleTexture_Bump(__global const HitPoint *hitPoint,
 		du2 = dot(n2, u) / nn2;
 		dv2 = dot(n2, v) / nn2;
 	} else {
-		du1 = 0.f;
-		dv1 = 0.f;		
+		du2 = 0.f;
+		dv2 = 0.f;
 	}
 
 	const float t1 = evalFloatTex1;
