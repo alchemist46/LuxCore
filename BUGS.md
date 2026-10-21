@@ -31,6 +31,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: PATHCPU, 128x128, 256 spp, sky2 at `dir = 0.3 -0.4 0.6`, matte floor `-4..4` at z = 0 and roof `y = 0..4` at z = 1, camera at `0 -3 6` looking at the origin; compare `visibilitymapcache.enable` 0 and 1.
 - Notes: an unbiased cache only changes the noise. Suspects: tiles with a zero visibility estimate getting a zero light pdf while the BSDF-sampled hits use another pdf in the MIS weight, or the pdf of a tile not matching the directions it samples. Not investigated.
 
+### WHITE_BALANCE changes the brightness with the temperature
+- Found: 2026-10-21
+- Area: film
+- Problem: the white point is normalized by the maximum of the blackbody RGB over 0-13000 K, not by its luminance, so the plugin also scales the exposure: on a white constant env. (0.90 without the plugin) it gives 0.94/1.44/2.47 at 4000 K, 1.21/1.26/1.19 at 6500 K, 2.14/1.89/1.39 at 9000 K (`reverse = true`, the default). Moving the temperature slider in Blender changes the brightness.
+- Reproduce: constant infinite light, TONEMAP_LINEAR scale 1, then WHITE_BALANCE at 4000, 6500 and 9000 K.
+- Notes: dividing the white point by its luminance would keep the brightness, but changes every existing render that uses the plugin (BlendLuxCore exports `normalize = true`).
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests
@@ -51,13 +58,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: PATHOCL renders 2.2% darker in red and 1.7% in green than PATHCPU.
 - Reproduce: `wcs.py --scene full` (gold fresnel-preset metal2, Cauchy-fresnel metal2, dispersive glass with a thin film, image-map matte, sun, sky2, a point light with a temperature, emission with a temperature), 2 seeds each, 256 spp.
 - Notes: the same in `rec709` and in the build before. A scene with only the glass, rough glass, Disney and sky2 agrees to 0.3%, so the gap is in one of the other elements. Not bisected yet. The Disney 0.1-0.2% gap was not re-measured after the Disney rebuild (the furnace agrees within 0.03%).
-
-### WHITE_BALANCE makes the image black with `normalize = false`
-- Found: 2026-10-15
-- Area: film
-- Problem: the default `normalize = false` gives a black image: the white point of `TemperatureToWhitePoint()` is not normalized (values in the tens of thousands), so the reverse scale is about 1e-5.
-- Reproduce: enable the WHITE_BALANCE image pipeline plugin without setting `normalize`.
-- Notes: the same in every build; BlendLuxCore always sets `normalize = true`. Either normalize by default or divide by the white point's luminance.
 
 ### Dark values of byte image maps are quantized after decoding
 - Found: 2026-10-17

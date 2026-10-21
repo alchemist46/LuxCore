@@ -763,7 +763,9 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "WHITE_BALANCE") {
 				const float temperature = Clamp(props.Get(Property(prefix + ".temperature")(6500.0)).Get<double>(), 1000.0, 40000.0);
 				const bool reverse = props.Get(Property(prefix + ".reverse")(true)).Get<bool>();
-				const bool normalize = props.Get(Property(prefix + ".normalize")(false)).Get<bool>();
+				// The white point is in the tens of thousands without the
+				// normalization, which makes the image black
+				const bool normalize = props.Get(Property(prefix + ".normalize")(true)).Get<bool>();
 
 				imagePipeline->AddPlugin(new WhiteBalance(temperature, reverse, normalize, workingColorSpace));
 			} else if (type == "BAKEMAP_MARGIN") {
