@@ -85,7 +85,6 @@ Tiers A-C of the speedup plan plus the structural leftovers of the plan. Today: 
 - **P4. Stochastic layered BSDF.** pbrt-v4 `LayeredBxDF` / Guo et al. 2018 as `layering = analytic | stochastic` on glossycoating and the OpenPBR coat; checked with the furnace and a geometric thin-shell reference at 1024 spp; on the GPU a loop in the material eval, within the stack budget. Addon: the layering mode on the node.
 - **ME. Energy leftovers of the standards pass.** Cloth (denim 0.942 in the baseline) and carpaint were made consistent but never compensated: furnace them again and decide per material. Half a day to measure.
 - **HA. Hair.** Chiang et al. 2016 BSDF (pbrt-v4 `HairBxDF`, MaterialX `chiang_hair_bsdf`); native curves on the CPU with Embree 4.4. HIPRT 3.1 has no curve primitive (tessellated ribbons, or an AABB list with a custom intersector as Cycles does): decide ribbons everywhere (parity) or curves on the CPU only.
-- **RD. Regularized glass and the path depth** `[verify]`. A 2026-10-18 note says a regularized glass vertex counts toward the glossy depth, not the specular one. The path-depth change of 2026-10-20 (glossy covers every reflection, refractions go to the transmission budget) probably made it moot: check `PathDepthInfo::IncDepths()` with a regularized event, and add a BUGS.md entry only if paths still end early.
 
 ### T5. Architecture: single-source kernels, build, safety, XPU
 
@@ -120,7 +119,7 @@ Tiers A-C of the speedup plan plus the structural leftovers of the plan. Today: 
 7. T2's E1-E3 and E4 (addon) as the Blender-facing track, interleaved as convenient.
 8. When the Linux machine is available: the LuxCoreDeps rebuild (K3, the O1 device modules, `cppstd=23` for K2 if ready), then O2 as the default with new references and the addon UI, and G9b in the same session. Re-run the G0 harness (`tests/benchmark/g0_run.sh`) at the end of Tier A and of Tier B and update the table in section 1.
 9. Quality, cheap first: V1-V4, L1-L3, BN, GM; then V5-V7, L4-L6, LT(a-b), P5 with MC, M1 (after Tier C), V8, PG, HW.
-10. Materials: RG before K1 reaches them; then SS, OP, ME, P4 (before any OpenPBR coat rework), HA. RD is a half-hour check at any time.
+10. Materials: RG before K1 reaches them; then SS, OP, ME, P4 (before any OpenPBR coat rework), HA.
 11. K1 runs as the long background track (textures next); K2 with the deps rebuild; X after K1.
 12. Features: F1 after A2, then F2; F3-F6 by adoption demand (F5 is the largest and the biggest lever).
 
