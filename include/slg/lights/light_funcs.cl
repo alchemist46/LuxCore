@@ -533,13 +533,21 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	const float distance = sqrt(distanceSquared);
 	sampleDir /= distance;
 	
-	// Build a temporary HitPoint
-	HitPoint_Init(tmpHitPoint, false,
-		meshIndex, triangleIndex,
-		samplePoint, -sampleDir,
-		b1, b2,
-		passThroughEvent
-		MATERIALS_PARAM);
+	// Build a temporary HitPoint. Without an emission map and with a constant
+	// emission, only the geometry normal and the side are read below: the
+	// normals, the UV and the differentials of HitPoint_Init() are skipped.
+	if ((triLight->triangle.imageMapIndex == NULL_INDEX) && mats[materialIndex].constEmittedRadiance) {
+		const float3 geometryN = ExtMesh_GetGeometryNormal(&tmpHitPoint->localToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
+		VSTORE3F(geometryN, &tmpHitPoint->geometryN.x);
+		// As HitPoint_Init() with fixedDir = -sampleDir
+		tmpHitPoint->intoObject = (dot(sampleDir, geometryN) < 0.f);
+	} else
+		HitPoint_Init(tmpHitPoint, false,
+			meshIndex, triangleIndex,
+			samplePoint, -sampleDir,
+			b1, b2,
+			passThroughEvent
+			MATERIALS_PARAM);
 	// Add bump?
 		// lightMaterial->Bump(&hitPoint, 1.f);
 

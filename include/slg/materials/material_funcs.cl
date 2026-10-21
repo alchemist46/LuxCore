@@ -267,6 +267,16 @@ OPENCL_HOT_FUNCTION float3 Material_GetEmittedRadiance(const uint matIndex,
 #endif
 
 	__global const Material* restrict startMat = &mats[matIndex];
+	// DefaultMaterial_GetEmittedRadiance() without the interpreter
+	if (startMat->defaultEmittedRadiance) {
+		const uint emitTexIndex = startMat->emitTexIndex;
+		return (emitTexIndex == NULL_INDEX) ?
+			BLACK :
+			(VLOAD3F(startMat->emittedFactor.c) *
+			(startMat->usePrimitiveArea ? oneOverPrimitiveArea : 1.f) *
+			clamp(Texture_GetSpectrumValue(emitTexIndex, hitPoint
+					TEXTURES_PARAM), BLACK, MAKE_FLOAT3(INFINITY, INFINITY, INFINITY)));
+	}
 	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
 
 	const uint evalOpStartIndex = startMat->evalGetEmittedRadianceOpStartIndex;

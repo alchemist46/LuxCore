@@ -426,8 +426,10 @@ typedef struct {
 	unsigned int evalSampleOpStartIndex, evalSampleOpLength;
 	// Shortcuts of the interpreter (CompiledScene::CompileMaterialOps()): the
 	// volumes are interiorVolumeIndex and exteriorVolumeIndex, the pass
-	// through transparency is black
-	int constVolumes, noPassThroughTransparency;
+	// through transparency is black, the emitted radiance is the one of
+	// DefaultMaterial_GetEmittedRadiance() and, with constEmittedRadiance,
+	// it doesn't read the hit point
+	int constVolumes, noPassThroughTransparency, defaultEmittedRadiance, constEmittedRadiance;
 
 	union {
 		MatteParam matte;
