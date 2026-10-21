@@ -28,6 +28,24 @@
 // The steps of a path vertex, called by AdvancePaths_MK_RT
 //------------------------------------------------------------------------------
 
+// The pass-through event of the next surface or volume a ray meets: the
+// sampler's value for the first one (stratified), then a sequence seeded by it
+// (as Scene::Intersect() on the CPU)
+OPENCL_FORCE_INLINE float AdvancePaths_NextPassThroughEvent(__global float *firstPassThroughEvent,
+		__global Seed *seedPassThroughEvent) {
+	const float first = *firstPassThroughEvent;
+	if (first >= 0.f) {
+		*firstPassThroughEvent = -1.f;
+		return first;
+	}
+
+	Seed seed = *seedPassThroughEvent;
+	const float passThroughEvent = Rnd_FloatValue(&seed);
+	*seedPassThroughEvent = seed;
+
+	return passThroughEvent;
+}
+
 #if defined(LUXRAYS_CUDA_DEVICE)
 // The members of the vertex BSDF that the next iteration reads when it doesn't
 // sample the BSDF: AdvancePaths_ShadowRayHit() (event types, shading normal),
@@ -288,6 +306,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		Seed seedPassThroughEvent;
 		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
 		taskState->seedPassThroughEvent = seedPassThroughEvent;
+		taskState->firstPassThroughEvent = passThroughEvent;
 
 		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 		taskState->throughShadowTransparency = false;
@@ -331,9 +350,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 
 	float3 connectionThroughput = WHITE;
 
-	Seed seedPassThroughEvent = taskDirectLight->seedPassThroughEvent;
-	const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-	taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
+	const float passThroughEvent = AdvancePaths_NextPassThroughEvent(
+			&taskDirectLight->firstPassThroughEvent, &taskDirectLight->seedPassThroughEvent);
 
 	int throughShadowTransparency = taskDirectLight->throughShadowTransparency;
 	// With the any-hit shadow rays (nothing in the scene can let a shadow ray
@@ -746,6 +764,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		Seed seedPassThroughEvent;
 		Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
 		taskDirectLight->seedPassThroughEvent = seedPassThroughEvent;
+		taskDirectLight->firstPassThroughEvent = passThroughEvent;
 
 		// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 		taskDirectLight->throughShadowTransparency = false;
@@ -942,9 +961,8 @@ __kernel void AdvancePaths_MK_RT(
 		if (taskConfig->film.hasChannelRayCount && !subsurfaceExit)
 			sampleResult->rayCount += 1;
 
-		Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
-		const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-		taskState->seedPassThroughEvent = seedPassThroughEvent;
+		const float passThroughEvent = AdvancePaths_NextPassThroughEvent(
+				&taskState->firstPassThroughEvent, &taskState->seedPassThroughEvent);
 
 		bool continueToTrace;
 #if defined(PARAM_ENABLE_SUBSURFACE)

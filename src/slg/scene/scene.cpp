@@ -743,11 +743,12 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 		SampleResult *sampleResult, const bool backTracing) const {
 	*connectionThroughput = Spectrum(1.f);
 
-	// I need a sequence of pseudo-random numbers starting form a floating point
-	// pseudo-random number
+	// The first pass-through event is the sample itself (stratified: it also
+	// picks the lobe of a Mix material), the next ones a sequence of
+	// pseudo-random numbers starting from it
 	TauswortheRandomGenerator rng(initialPassThrough);
 
-	float passThrough = rng.floatValue();
+	float passThrough = initialPassThrough;
 	const float originalMaxT = ray->maxt;
 
 	const bool fromLight = rayType & LIGHT_RAY;

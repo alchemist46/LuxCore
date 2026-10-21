@@ -154,6 +154,7 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 	Seed seedPassThroughEvent;
 	Rnd_InitFloat(passThroughEvent, &seedPassThroughEvent);
 	taskState->seedPassThroughEvent = seedPassThroughEvent;
+	taskState->firstPassThroughEvent = passThroughEvent;
 }
 
 //------------------------------------------------------------------------------

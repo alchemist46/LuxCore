@@ -114,7 +114,11 @@ typedef struct {
 typedef struct {
 	Spectrum throughput;
 
+	// The pass-through events of the vertex ray: the sampler's value for the
+	// first one (negative once used), then the sequence of seedPassThroughEvent
+	// (as Scene::Intersect())
 	Seed seedPassThroughEvent;
+	float firstPassThroughEvent;
 	
 	int albedoToDo, photonGICacheEnabledOnLastHit,
 			photonGICausticCacheUsed, photonGIShowIndirectPathMixUsed,
@@ -130,7 +134,9 @@ typedef struct {
 	// Used to store some intermediate result
 	DirectLightIlluminateInfo illumInfo;
 
+	// As GPUTaskState, for the shadow ray
 	Seed seedPassThroughEvent;
+	float firstPassThroughEvent;
 
 	DirectLightResult directLightResult;
 
