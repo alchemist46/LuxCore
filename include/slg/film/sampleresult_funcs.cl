@@ -18,15 +18,12 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
-OPENCL_FORCE_INLINE void SampleResult_ClearRadiance(__global SampleResult *sampleResult) {
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[0].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[1].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[2].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[3].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[4].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[5].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[6].c);
-	VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[7].c);
+// Only the radiance groups of the film: the others are never read (the film
+// has a buffer for each of its groups only)
+OPENCL_FORCE_INLINE void SampleResult_ClearRadiance(__constant const Film* restrict film,
+		__global SampleResult *sampleResult) {
+	for (uint i = 0; i < film->radianceGroupCount; ++i)
+		VSTORE3F(BLACK, sampleResult->radiancePerPixelNormalized[i].c);
 }
 
 //------------------------------------------------------------------------------
@@ -55,7 +52,7 @@ OPENCL_FORCE_INLINE void SampleResult_Init(__constant const Film* restrict film,
 		__global SampleResult *sampleResult) {
 	// Initialize only Spectrum fields
 
-	SampleResult_ClearRadiance(sampleResult);
+	SampleResult_ClearRadiance(film, sampleResult);
 
 	if (SampleResult_HasDirectChannels(film)) {
 		VSTORE3F(BLACK, sampleResult->directDiffuse.c);
@@ -81,7 +78,6 @@ OPENCL_FORCE_INLINE void SampleResult_Init(__constant const Film* restrict film,
 	sampleResult->rayCount = 0.f;
 	if (film->hasChannelIrradiance)
 		VSTORE3F(BLACK, sampleResult->irradiance.c);
-	VSTORE3F(BLACK, sampleResult->albedo.c);
 
 	sampleResult->firstPathVertexEvent = NONE;
 	sampleResult->firstPathVertex = true;

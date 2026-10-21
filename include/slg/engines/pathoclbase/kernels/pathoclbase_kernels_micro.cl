@@ -472,7 +472,7 @@ OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 // MK_SPLAT_SAMPLE)
 OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
-		__global GPUTask *task,
+		Seed *seed,
 		__global GPUTaskTmp *taskTmp,
 		__global GPUTaskDirectLight *taskDirectLight,
 		__global GPUTaskState *taskState,
@@ -712,11 +712,6 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 
 	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
 
-	// Read the seed
-	Seed seedValue = task->seed;
-	// This trick is required by SAMPLER_PARAM macro
-	Seed *seed = &seedValue;
-
 	PathState nextState;
 
 	// It will set eventually to true if the light is visible
@@ -782,9 +777,6 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 		// however, I have to check if this is the last path vertex
 		nextState = (sampleResult->lastPathVertex) ? MK_SPLAT_SAMPLE : MK_GENERATE_NEXT_VERTEX_RAY;
 	}
-
-	// Save the seed
-	task->seed = seedValue;
 
 	return nextState;
 }
@@ -872,6 +864,11 @@ __kernel void AdvancePaths_MK_RT(
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
 	__global EyePathInfo *pathInfo = &eyePathInfos[gid];
 	__constant const Scene* restrict scene = &taskConfig->scene;
+
+	// The seed of the sampler, read once and written once (Seed is used
+	// through a pointer by the SAMPLER_PARAM macro)
+	Seed seedValue = task->seed;
+	Seed *seed = &seedValue;
 
 	// Initialize image maps page pointer table
 	INIT_IMAGEMAPS_PAGES
@@ -1035,7 +1032,7 @@ __kernel void AdvancePaths_MK_RT(
 						;
 
 				pathState = AdvancePaths_HitObject(taskConfig,
-						task, taskTmp, &tasksDirectLight[gid], taskState, bsdf, pathInfo,
+						seed, taskTmp, &tasksDirectLight[gid], taskState, bsdf, pathInfo,
 						&directLightVolInfos[gid], &rays[gid], &rayHits[gid],
 						&rays[sampleNextVertexRayNow ? secondRayIndex : gid], sampleResult,
 						samplerSharedDataBuff, samplesBuff, samplesDataBuff, sampleResultsBuff,
@@ -1074,19 +1071,11 @@ __kernel void AdvancePaths_MK_RT(
 	}
 
 	if (pathState == MK_GENERATE_NEXT_VERTEX_RAY) {
-		// Read the seed
-		Seed seedValue = task->seed;
-		// This trick is required by SAMPLER_PARAM macro
-		Seed *seed = &seedValue;
-
 		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, bsdf, pathInfo,
 				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult,
 				&tasksSSSWalk[gid]
 				SAMPLER_PARAM
 				MATERIALS_PARAM);
-
-		// Save the seed
-		task->seed = seedValue;
 	}
 
 	if (shadowRayToTrace) {
@@ -1108,11 +1097,6 @@ __kernel void AdvancePaths_MK_RT(
 
 	if ((pathState == MK_SPLAT_SAMPLE) || (pathState == MK_NEXT_SAMPLE) ||
 			(pathState == MK_GENERATE_CAMERA_RAY)) {
-		// Read the seed
-		Seed seedValue = task->seed;
-		// This trick is required by SAMPLER_PARAM macro
-		Seed *seed = &seedValue;
-
 		if (pathState == MK_SPLAT_SAMPLE) {
 			__constant const Film* restrict film = &taskConfig->film;
 
@@ -1139,7 +1123,7 @@ __kernel void AdvancePaths_MK_RT(
 			filmRadianceGroupScale[7] = MAKE_FLOAT3(filmRadianceGroupScale7_R, filmRadianceGroupScale7_G, filmRadianceGroupScale7_B);
 
 			if (sampleResult->isHoldout) {
-				SampleResult_ClearRadiance(sampleResult);
+				SampleResult_ClearRadiance(film, sampleResult);
 				VSTORE3F(BLACK, sampleResult->albedo.c);
 			}
 
@@ -1206,9 +1190,6 @@ __kernel void AdvancePaths_MK_RT(
 		// regeneration is not used in this case
 #if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
 		if (pathState == MK_GENERATE_CAMERA_RAY) {
-			// Re-initialize the volume information
-			PathVolumeInfo_Init(&pathInfo->volume);
-
 			GenerateEyePath(taskConfig,
 					&tasksDirectLight[gid], taskState,
 					camera,
@@ -1222,12 +1203,10 @@ __kernel void AdvancePaths_MK_RT(
 			pathState = MK_RT_NEXT_VERTEX;
 		}
 #endif
-
-		// Save the seed
-		task->seed = seedValue;
 	}
 
-	// Save the state
+	// Save the seed and the state
+	task->seed = seedValue;
 	pathStates[gid] = pathState;
 }
 
