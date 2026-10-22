@@ -31,13 +31,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `wcs.py --scene full` (gold fresnel-preset metal2, Cauchy-fresnel metal2, dispersive glass with a thin film, image-map matte, sun, sky2, a point light with a temperature, emission with a temperature), 2 seeds each, 256 spp.
 - Notes: the same in `rec709` and in the build before. A scene with only the glass, rough glass, Disney and sky2 agrees to 0.3%, so the gap is in one of the other elements. Not bisected yet. The Disney 0.1-0.2% gap was not re-measured after the Disney rebuild (the furnace agrees within 0.03%).
 
-### Dark values of byte image maps are quantized after decoding
-- Found: 2026-10-17
-- Area: texture
-- Problem: byte image maps decoded by a gamma or an OCIO transform are stored back in bytes, already linear, so the dark values are quantized (sRGB 30/255 becomes 3/255 = 0.0118 instead of 0.013). Banding in dark gradients, up to 10% off Cycles on small channels.
-- Reproduce: render a dark sRGB byte texture and compare with Cycles.
-- Notes: the gamma path always did it. Storing decoded byte images as half floats would fix it at twice the memory.
-
 ### PATHOCL halt bias with the subsurface material
 - Found: 2026-10-18
 - Area: engine (PATHOCL)

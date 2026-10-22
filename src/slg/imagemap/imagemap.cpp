@@ -1354,6 +1354,30 @@ void ImageMap::ConvertToWorkingColorSpace(const ImageMapConfig &cfg) {
 	// A grey image stays grey: the rows of the matrices sum to 1
 	const bool isColor = (pixelStorage->GetChannelCount() >= 3);
 
+	// A byte image decoded to linear values is kept in half floats: in bytes
+	// the dark values would be quantized (sRGB 30/255 is 3/255 once linear).
+	// Only with the automatic storage: an explicit byte storage keeps its
+	// memory.
+	if ((pixelStorage->GetStorageType() == ImageMapStorage::BYTE) &&
+			(cfg.GetStorageType() == ImageMapStorage::AUTO)) {
+		bool decoded;
+		switch (cfg.colorSpaceCfg.colorSpaceType) {
+			case ColorSpaceConfig::LUXCORE_COLORSPACE:
+				decoded = (cfg.colorSpaceCfg.luxcore.gamma != 1.f) || (isColor && !wcs.IsRec709());
+				break;
+			case ColorSpaceConfig::OPENCOLORIO_COLORSPACE:
+				decoded = !IsOpenColorIODataColorSpace(cfg.colorSpaceCfg.ocio.configName,
+						cfg.colorSpaceCfg.ocio.colorSpaceName);
+				break;
+			default:
+				decoded = false;
+				break;
+		}
+
+		if (decoded)
+			ConvertStorage(ImageMapStorage::HALF, pixelStorage->GetChannelCount());
+	}
+
 	switch (cfg.colorSpaceCfg.colorSpaceType) {
 		case ColorSpaceConfig::NOP_COLORSPACE:
 			// The pixels are already in the working space
