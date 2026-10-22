@@ -2,14 +2,14 @@
 
 Bugs and issues found during a task that were not fixed right away. See "Keep the bug list" in [CLAUDE.md](CLAUDE.md) for the rules. Remove an entry when it is fixed.
 
-The first entries were collected on 2026-10-20 from "Known open issues" in [MODERNIZATION_PLAN.md](docs/history/MODERNIZATION_PLAN.md) (the "Found" date is the date given there) and from [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md); the plan has the full measurements. Entries the plan already marks as fixed are not listed. The open work items are in [ROADMAP.md](ROADMAP.md).
+The first entries were collected on 2026-10-20 from "Known open issues" in [MODERNIZATION_PLAN.md](docs/history/MODERNIZATION_PLAN.md) (the "Found" date is the date given there) and from [SPEEDUP_CHANGES.md](docs/history/SPEEDUP_CHANGES.md); the plan has the full measurements. Entries the plan already marks as fixed are not listed. The open work items are in [ROADMAP.md](ROADMAP.md). Bugs in the BlendLuxCore addon are in the addon's own `BUGS.md`.
 
 ## Entry format
 
 ```
 ### <short title>
 - Found: YYYY-MM-DD
-- Area: engine | material | texture | light | film | addon | build | tests | ...
+- Area: engine | material | texture | light | film | build | tests | ...
 - Problem: what happens, and what was expected
 - Reproduce: scene, engine, command, spp
 - Notes: cause, suspects, what was ruled out
