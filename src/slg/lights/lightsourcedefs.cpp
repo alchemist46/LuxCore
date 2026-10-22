@@ -238,11 +238,28 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 	intersectableLightSources.clear();
 	envLightSources.clear();
 	fill(lightTypeCount.begin(), lightTypeCount.end(), 0);
-	// To accelerate the light pointer to light index lookup
-	robin_hood::unordered_flat_map<
-		const LightSource *,
-		u_int
-	> light2indexLookupAccel;
+
+	// Build 2 tables to go from mesh index and triangle index to light index:
+	// the offset of each mesh in lightIndexByTriIndex and its size here, the
+	// light indices below
+	const u_int meshCount = scene.GetObjects().GetSize();
+	lightIndexOffsetByMeshIndex.resize(meshCount);
+	u_int lightTriCount = 0;
+	for (u_int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+		auto& so = scene.GetObjects().GetSceneObject(meshIndex);
+
+		if (so.GetMaterial().IsLightSource()) {
+			lightIndexOffsetByMeshIndex[meshIndex] = lightTriCount;
+			lightTriCount += so.GetExtMesh().GetTotalTriangleCount();
+		} else
+			lightIndexOffsetByMeshIndex[meshIndex] = NULL_INDEX;
+	}
+	lightIndexByTriIndex.assign(lightTriCount, NULL_INDEX);
+
+	// The mesh index of the last triangle light: the triangle lights of a mesh
+	// often follow each other
+	SceneObjectConstPtr lastSceneObject = nullptr;
+	u_int lastMeshIndex = NULL_INDEX;
 
 	u_int i = 0;
 	for (auto const &e : lightsByName) {
@@ -250,7 +267,6 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 
 		// Initialize the light source index
 		l.lightSceneIndex = i;
-		light2indexLookupAccel[&l] = i;
 
 		// Update the light group count
 		lightGroupCount = Max(lightGroupCount, l.GetID() + 1);
@@ -265,79 +281,30 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 		if (l.IsEnvironmental())
 			envLightSources.push_back(static_cast<EnvLightSourceRef>(l));
 
-		// Update the list of triangle lights
-		try {
-			auto& tl = dynamic_cast<TriangleLightRef>(l);
+		// Update the list of triangle lights and the light index of their
+		// triangle (the triangle light named
+		// EncodeTriangleLightNamePrefix(objectName) + triangleIndex)
+		if (l.GetType() == TYPE_TRIANGLE) {
+			auto& tl = static_cast<TriangleLightRef>(l);
 			intersectableLightSources.push_back(tl);
-			tl.meshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+
+			if (tl.sceneObject != lastSceneObject) {
+				lastSceneObject = tl.sceneObject;
+				lastMeshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+			}
+			tl.meshIndex = lastMeshIndex;
 			tl.solidAngleSampling = triangleLightSolidAngle;
-		} catch (std::bad_cast&) {}
+
+			const u_int offset = lightIndexOffsetByMeshIndex[tl.meshIndex];
+			if (offset != NULL_INDEX)
+				lightIndexByTriIndex[offset + tl.triangleIndex] = i;
+		}
 
 		++i;
 	}
 
 //	const double end1 = WallClockTime();
 //	SLG_LOG("Light step #1 preprocessing time: " << (end1 - start) << "secs");
-
-	for(u_int i = 0; i < lights.size(); ++i) {
-		try {
-			auto& tl = dynamic_cast<TriangleLightRef>(lights[i].get());
-			intersectableLightSources.push_back(tl);
-			tl.meshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
-			tl.solidAngleSampling = triangleLightSolidAngle;
-		} catch(std::bad_cast&) {}
-	}
-
-//	const double end2 = WallClockTime();
-//	SLG_LOG("Light step #2 preprocessing time: " << (end2 - end1) << "secs");
-
-	// Build 2 tables to go from mesh index and triangle index to light index
-	lightIndexOffsetByMeshIndex.resize(scene.GetObjects().GetSize());
-	lightIndexByTriIndex.clear();
-
-	// Step #1: initialize lightIndexOffsetByMeshIndex and set the lightIndexByTriIndex size
-
-	const u_int meshCount = scene.GetObjects().GetSize();
-	for (u_int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
-		auto& so = scene.GetObjects().GetSceneObject(meshIndex);
-		auto& mat = so.GetMaterial();
-		bool isLightSource = mat.IsLightSource();
-
-		if (so.GetMaterial().IsLightSource()) {
-			lightIndexOffsetByMeshIndex[meshIndex] = lightIndexByTriIndex.size();
-
-			auto& mesh = so.GetExtMesh();
-			lightIndexByTriIndex.resize(lightIndexByTriIndex.size() + mesh.GetTotalTriangleCount());
-		} else
-			lightIndexOffsetByMeshIndex[meshIndex] = NULL_INDEX;
-	}
-
-	// Step #2: initializelightIndexByTriIndex in parallel (to speed up the
-	// execution in case of large number of light sources)
-
-	#pragma omp parallel for
-	for (
-			// Visual C++ 2013 supports only OpenMP 2.5
-#if _OPENMP >= 200805
-			unsigned
-#endif
-			int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
-		auto& so = scene.GetObjects().GetSceneObject(meshIndex);
-
-		if (so.GetMaterial().IsLightSource()) {
-			auto& mesh = so.GetExtMesh();
-			const string prefix = Scene::EncodeTriangleLightNamePrefix(so.GetName());
-			for (u_int triIndex = 0; triIndex < mesh.GetTotalTriangleCount(); ++triIndex) {
-				const string lightName = prefix + ToString(triIndex);
-
-				lightIndexByTriIndex[lightIndexOffsetByMeshIndex[meshIndex] + triIndex] =
-						light2indexLookupAccel[&GetLightSource(lightName)];
-			}
-		}
-	}
-
-//	const double end3 = WallClockTime();
-//	SLG_LOG("Light step #3 preprocessing time: " << (end3 - end2) << "secs");
 
 	// I need to check all volume definitions for radiance group usage too
 	for (u_int i = 0; i < scene.GetMaterials().GetSize(); ++i) {
@@ -355,8 +322,8 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 	}
 	//SLG_LOG("Radiance group count: " << lightGroupCount);
 
-//	const double end4 = WallClockTime();
-//	SLG_LOG("Light step #4 preprocessing time: " << (end4 - end3) << "secs");
+//	const double end2 = WallClockTime();
+//	SLG_LOG("Light step #2 preprocessing time: " << (end2 - end1) << "secs");
 
 	// Build the light strategy
 	if (lights.size() > 1024) {
@@ -380,8 +347,8 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 		infiniteLightStrategy->Preprocess(scene, TASK_INFINITE_ONLY, useRTMode);
 	}
 
-//	const double end5 = WallClockTime();
-//	SLG_LOG("Light step #5 preprocessing time: " << (end5 - end4) << "secs");
+//	const double end3 = WallClockTime();
+//	SLG_LOG("Light step #3 preprocessing time: " << (end3 - end2) << "secs");
 
 //	const double endTotal = WallClockTime();
 //	SLG_LOG("Light total preprocessing time: " << (endTotal - start) << "secs");
