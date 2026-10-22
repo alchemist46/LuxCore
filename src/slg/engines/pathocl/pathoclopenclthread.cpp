@@ -92,10 +92,11 @@ void PathOCLOpenCLRenderThread::DrainPaths() {
 			offsetof(slg::ocl::SobolSamplerSharedData, drain), sizeof(u_int), &drain);
 
 	// The longest path: 2 iterations per vertex, plus the steps of its
-	// subsurface walks
+	// subsurface walks, up to SSS_MAX_BOUNCES (65536, subsurface_funcs.cl)
+	// each. The loop ends as soon as every task is done.
 	const u_int maxPathDepth = engine->pathTracer.maxPathDepth.depth;
 	const u_int maxIterations = 2 * maxPathDepth + 2 +
-			(engine->compiledScene->hasSubsurface ? maxPathDepth * 256 : 0);
+			(engine->compiledScene->hasSubsurface ? maxPathDepth * 65536 : 0);
 	const u_int checkIterations = 8;
 	vector<slg::ocl::pathoclbase::PathState> pathStates(taskCount);
 	for (u_int iterations = 0; iterations < maxIterations; iterations += checkIterations) {
