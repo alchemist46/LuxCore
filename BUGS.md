@@ -22,7 +22,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine, tests
 - Problem: SIGSEGV or SIGBUS in a CPU render thread in the middle of a render, roughly once every 20-160 tests (every 20-90 with `--filter OCL`). Each crashed test passes when re-run alone.
 - Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device; `--filter HaltEdit` (PATHCPU, 12 threads, RANDOM sampler, `simple` scene) crashed in 2 of 3 runs. Single `*_PATHOCL_METROPOLIS` tests on the HIP device (`GlassMaterial`, `ImageMapTexture`) crash on their own.
-- Notes: the frames look overwritten (float-like values in saved pointers). Not a stop-time use-after-free. With `opencl.native.threads.count = 0` 0 of 10 runs crashed, so the suspect is the native CPU threads that PATHOCL runs beside the GPU (Metropolis sampler); the GPU kernels are not involved. A `-fstack-protector-all` build passed 8 runs. Next step: a LuxCore-only ASan build (needs `libasan`/`libubsan` on the development machine).
+- Notes: the frames look overwritten (float-like values in saved pointers). Not a stop-time use-after-free. With `opencl.native.threads.count = 0` 0 of 10 runs crashed, so the suspect is the native CPU threads that PATHOCL runs beside the GPU (Metropolis sampler); the GPU kernels are not involved. A `-fstack-protector-all` build passed 8 runs. `HaltEdit_Threshold` re-creates the `FilmConvTest` in `Film::Parse()` while the threads render: no race with the render threads found by reading (2026-10-22). Next step: a LuxCore-only ASan build (MSVC has `/fsanitize=address` on Windows) (needs `libasan`/`libubsan` on the development machine).
 
 ### CPU/GPU gap of 2% on the working colour space test scene
 - Found: 2026-10-15
@@ -57,7 +57,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine (light tracing)
 - Problem: a floor caustic reflected in a mirror or seen through a window is produced by neither side: the eye path drops it as caustic and the light tracer connects only directly to the lens. Missing energy with light tracing on, unless PhotonGI's caustic cache is on too.
 - Reproduce: caustic on a floor, seen in a mirror, with `path.hybridbackforward.enable`.
-- Notes: MNEE covers part of it; the rest is a bidirectional connection, out of scope for the hybrid.
+- Notes: MNEE covers part of it; the rest is a bidirectional connection, out of scope for the hybrid. On PATHCPU the hybrid on and off agree on a floor caustic seen in a mirror and through a window (2026-10-22, 512 spp), so it is not reproduced there; PATHOCL not checked yet (the GPU was down).
 
 ### Direct light sampling is off for emissive meshes above 256 triangles
 - Found: 2026-10-16
