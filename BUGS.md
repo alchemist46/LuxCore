@@ -86,6 +86,62 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` (TILEPATHOCL, seed 1, aa 8, 320x240, HIP device) six times with the same build, then `compare`: 2 of 6 runs at HEAD `aa2fa98c1` had the other value.
 - Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change.
 
+### PhotonGI: the GPU drops light hits after the caustic cache fired
+- Found: 2026-10-22
+- Area: engine (PATHOCL), caches
+- Problem: `pgic_funcs.cl:50` tests `!isNearlyCaustic` where the CPU tests `!IsCausticPath()` (`isNearlyCaustic && depth > 1`, `photongicache.cpp:101`, `pathinfo.h:102`), so once `photonGICausticCacheUsed` is set at the first vertex the GPU adds no emission at a light hit after one diffuse bounce (the BSDF half of the direct light); the CPU does.
+- Reproduce: cornell-glass with `path.photongi.caustic.enabled = 1`, PATHCPU against PATHOCL means, 256 spp.
+- Notes: found by reading (ROADMAP CA1), magnitude not measured. Fix: `EyePathInfo_IsCausticPath()` (`pathinfo_funcs.cl:143-145`).
+
+### PhotonGI is not rebuilt on scene edits and its caustic update stops after one
+- Found: 2026-10-22
+- Area: engine, caches
+- Problem: the cache is built in `StartLockLess` only (`pathcpu.cpp:158-163`, `pathoclbase.cpp:522-535`), so it goes stale on geometry, light and material edits; `FinishUpdate()` sets `finishUpdateFlag` (`pgicupdate.cpp:91-100`) and nothing resets it, so after any edit the periodic caustic update never runs again (and `filmSPP - lastUpdateSpp` underflows after the film reset).
+- Reproduce: a PATHCPU session with the caustic cache and `updatespp = 8`; edit a light; render on.
+- Notes: ROADMAP CA1.
+
+### PhotonGI multi-GPU keeps the old caustic map
+- Found: 2026-10-22
+- Area: engine (PATHOCL), caches
+- Problem: `Update()` returns true to thread 0 only, so only the first device re-runs `InitPhotonGI()` and `SetKernelArgs()` (`pathoclopenclthread.cpp:341-346`); the other devices keep the previous caustic map and radius.
+- Reproduce: two OpenCL/HIP devices, the caustic cache with the periodic update.
+- Notes: ROADMAP CA1; not reproducible on this machine (one GPU).
+
+### PhotonGI persistent file and resume
+- Found: 2026-10-22
+- Area: engine, serialization
+- Problem: a `.pgi` file is loaded with no scene or parameter check and its stored params override the config's (`pgicserialize.cpp:31-86`); `samplerType`, `photon.time.*` and `finishUpdateFlag` are not serialized (uninitialized after a load, `photongicache.h:225-260`); the `.rsm` resume re-creates the update barrier with the saved thread count (`pgicserialize.cpp:99-119`), so a resume with another thread count desynchronizes the update.
+- Reproduce: render with `path.photongi.persistent.file`, change the lights, render again: the old cache is used.
+- Notes: ROADMAP CA1; see also K5.
+
+### A null PhotonGI indirect lookup ends the path
+- Found: 2026-10-22
+- Area: engine, caches
+- Problem: when the cache is enabled at a vertex but no radiance photon is within the radius, `GetIndirectRadiance()` returns null and the path still breaks (`pathtracer.cpp:714-718`, `pathoclbase_kernels_micro.cl:699-705`): lost energy where the visibility pass placed no entry, and wherever `path.regularization.enable` makes a mirror or a near-specular glossy surface eligible (the gate reads the regularized glossiness, `photongicache.cpp:70`; the caches are built without regularization).
+- Reproduce: a scene with the indirect cache and a mirror, regularization on; compare with the cache off.
+- Notes: ROADMAP CA1.
+
+### DLSC: BVH leak, stale radius and a pick floor on DLS-disabled lights
+- Found: 2026-10-22
+- Area: light
+- Problem: on an edit `Build()` allocates a new `DLSCBvh` without freeing the old (`dlscacheimpl.cpp:544`), the radius is not re-estimated (no longer 0 after the first build), an edit that removes every light keeps the stale cache (`:486-487`), and CAMERA_EDIT does not rebuild it although it depends on the camera (`scenepreprocess.cpp:95-103`); the 2.5% floor goes to every light, DLS-disabled and always-shadowed ones included (`:265-282, :361-362`), so DLS-disabled lights can be picked; one radical-inverse sequence serves every entry (`:246-326`), with a pass-0 division by zero (`:296`) and the luminance average divided by `pass` after `pass+1` samples (`:321`); the GPU shadow catchers that only see infinite lights take the DLSC branch (`pathoclbase_funcs.cl:309-318`) where the CPU uses the infinite-only strategy.
+- Reproduce: manylights with `lightstrategy.type = DLS_CACHE`, a light edit in a session.
+- Notes: ROADMAP CA2 retires the cache. The manylights non-determinism of the deterministic TILEPATHCPU setup (MODERNIZATION_PLAN "Verification") is probably this build.
+
+### ELVC: rebuilt on every preprocess, one per scene on the GPU, tile distributions lost from the file, sky2 transform, pdf 0 with no entry
+- Found: 2026-10-22
+- Area: light
+- Problem: `UpdateVisibilityMaps()` runs on every `Scene::Preprocess` whatever the edit flags (`scenepreprocess.cpp:106`), camera-only edits included; `CompileELVC` keeps one cache per scene and drops the others with a warning (`compilelights.cpp:417-425`); a persistent file skips `BuildTileDistributions()` (`envlightvisibilitycache.cpp:686-696`), so it samples uniformly within a tile; sky2 with a `.transformation` is binned in light-local lat-long (`:346`) while it samples in world lat-long (`sky2light.cpp:345, :430`), an efficiency loss; `Sample()` returns pdf 0 where no entry is near, so the env light gets no light sampling there (the comment promises a fallback to the map that does not exist); the DLSC build traces its env shadow rays before the ELVC is rebuilt.
+- Reproduce: a sky2 light with `visibilitymapcache.enable = 1` and a transform; an RTPATHCPU session with a camera edit (the rebuild time).
+- Notes: ROADMAP CA3.
+
+### The caches' eye-path tracer differs from the render's
+- Found: 2026-10-22
+- Area: engine, caches
+- Problem: `SceneVisibility<T>` (`scenevisibility.cpp:92-131`) has its own Russian roulette (depth 3, cap 0.5), 4 sampler dimensions per vertex and its own depth rules, uses `GetHardwareThreadCount()` threads whatever the engine's count, and camera times 0..1 for DLSC and ELVC (the shutter ignored), so the visibility particles of the three caches do not follow the render's depths, roulette, regularization or subsurface rules.
+- Reproduce: by reading; the particle placement differs from where the render's paths land.
+- Notes: deferred with K1 (ROADMAP CA, deferred).
+
 ### PATHOCL renders the sun 0.1% brighter than PATHCPU
 - Found: 2026-10-22
 - Area: light (sun), engine (PATHOCL)
