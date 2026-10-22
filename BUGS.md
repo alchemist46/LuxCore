@@ -17,13 +17,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
-### WHITE_BALANCE changes the brightness with the temperature
-- Found: 2026-10-21
-- Area: film
-- Problem: the white point is normalized by the maximum of the blackbody RGB over 0-13000 K, not by its luminance, so the plugin also scales the exposure: on a white constant env. (0.90 without the plugin) it gives 0.94/1.44/2.47 at 4000 K, 1.21/1.26/1.19 at 6500 K, 2.14/1.89/1.39 at 9000 K (`reverse = true`, the default). Moving the temperature slider in Blender changes the brightness.
-- Reproduce: constant infinite light, TONEMAP_LINEAR scale 1, then WHITE_BALANCE at 4000, 6500 and 9000 K.
-- Notes: dividing the white point by its luminance would keep the brightness, but changes every existing render that uses the plugin (BlendLuxCore exports `normalize = true`).
-
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests

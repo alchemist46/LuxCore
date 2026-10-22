@@ -35,6 +35,16 @@ WhiteBalance::WhiteBalance(const float temperature, const bool reverse, const bo
 		const WorkingColorSpace &workingColorSpace) {
 	// The white point in the space of the image
 	scale = workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, normalize));
+	// Normalized, the white point has luminance 1, so the plugin changes the
+	// colour and not the exposure: reversed, a light of the temperature
+	// becomes a white of the same luminance; otherwise a grey keeps its
+	// luminance. (TemperatureToWhitePoint() divides by the maximum over all
+	// the temperatures, which made the exposure follow the temperature.)
+	if (normalize) {
+		const float y = workingColorSpace.Y(scale);
+		if (y > 0.f)
+			scale /= y;
+	}
 	if (reverse)
 		scale = Spectrum(1.f) / scale;
 			
