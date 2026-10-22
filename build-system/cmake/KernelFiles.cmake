@@ -121,6 +121,7 @@ set(SLG_KERNELS
     include/slg/materials/materialdefs_funcs_archglass.cl
     include/slg/materials/materialdefs_funcs_carpaint.cl
     include/slg/materials/materialdefs_funcs_clearvol.cl
+    include/slg/materials/materialdefs_funcs_cloth_albedo.cl
     include/slg/materials/materialdefs_funcs_cloth.cl
     include/slg/materials/materialdefs_funcs_glass.cl
     include/slg/materials/materialdefs_funcs_glossy2.cl

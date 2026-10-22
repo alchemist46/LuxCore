@@ -134,6 +134,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_archglass <<
 			slg::ocl::KernelSource_materialdefs_funcs_carpaint <<
 			slg::ocl::KernelSource_materialdefs_funcs_clearvol <<
+			slg::ocl::KernelSource_materialdefs_funcs_cloth_albedo <<
 			slg::ocl::KernelSource_materialdefs_funcs_cloth <<
 			slg::ocl::KernelSource_materialdefs_funcs_disney <<
 			slg::ocl::KernelSource_materialdefs_funcs_glossy2 <<

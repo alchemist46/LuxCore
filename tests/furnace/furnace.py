@@ -234,6 +234,11 @@ def cases():
               "scene.materials.m.weft_kd = 1 1 1\nscene.materials.m.warp_kd = 1 1 1\n"
               "scene.materials.m.weft_ks = 0 0 0\nscene.materials.m.warp_ks = 0 0 0\n", 1.0))
     c.append(("cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n", None))
+    # The specular part alone: at most 1 (its energy conservation, see
+    # materialdefs_funcs_cloth_albedo.cl), dark head-on by construction
+    c.append(("cloth-specular", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n"
+              "scene.materials.m.weft_kd = 0 0 0\nscene.materials.m.warp_kd = 0 0 0\n"
+              "scene.materials.m.weft_ks = 1 1 1\nscene.materials.m.warp_ks = 1 1 1\n", None))
     for r in (0.2, 0.5, 1.0):
         c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.roughness = {r}\n", None))

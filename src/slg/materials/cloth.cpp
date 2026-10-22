@@ -19,6 +19,13 @@
 #include "luxrays/core/randomgen.h"
 #include "slg/materials/cloth.h"
 
+// The table of the energy conservation of the specular, shared with the
+// OpenCL kernels (see luxrays/devices/cpudevice_oclemul.h)
+namespace slg { namespace ocl { namespace {
+#include "luxrays/devices/cpudevice_oclemul.h"
+#include "slg/materials/materialdefs_funcs_cloth_albedo.cl"
+} } }
+
 using namespace std;
 using namespace luxrays;
 using namespace slg;
@@ -562,7 +569,8 @@ Spectrum ClothMaterial::Evaluate(const HitPoint &hitPoint,
 	const UV hitPountUV = hitPoint.GetUV(0);
 	const slg::ocl::Yarn *yarn = GetYarn(hitPountUV.u, hitPountUV.v, &uv, &umax, &scale);
 	
-	scale = scale * EvalSpecular(yarn, uv, umax, localLightDir, localEyeDir);
+	scale = scale * EvalSpecular(yarn, uv, umax, localLightDir, localEyeDir) *
+			SpecularConservation(localEyeDir);
 	
 	TextureConstPtr ks = yarn->yarn_type == slg::ocl::WARP ? Warp_Ks :  Weft_Ks;
 	TextureConstPtr kd = yarn->yarn_type == slg::ocl::WARP ? Warp_Kd :  Weft_Kd;
@@ -591,7 +599,8 @@ Spectrum ClothMaterial::Sample(const HitPoint &hitPoint,
 	// The same argument order as Evaluate(): EvalSpecular(light, eye)
 	const Vector &localLightDir = hitPoint.fromLight ? localFixedDir : *localSampledDir;
 	const Vector &localEyeDir = hitPoint.fromLight ? *localSampledDir : localFixedDir;
-	scale = scale * EvalSpecular(yarn, uv, umax, localLightDir, localEyeDir);
+	scale = scale * EvalSpecular(yarn, uv, umax, localLightDir, localEyeDir) *
+			SpecularConservation(localEyeDir);
 
 	TextureConstPtr ks = (yarn->yarn_type == slg::ocl::WARP ? Warp_Ks :  Weft_Ks);
 	TextureConstPtr kd = (yarn->yarn_type == slg::ocl::WARP ? Warp_Kd :  Weft_Kd);
@@ -673,6 +682,30 @@ PropertiesUPtr ClothMaterial::ToProperties(const ImageMapCache &imgMapCache, con
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;
+}
+
+float ClothMaterial::SpecularConservation(const Vector &localEyeDir) const {
+	return slg::ocl::ClothMaterial_SpecularConservation(Preset,
+			slg::ocl::make_float3(localEyeDir.x, localEyeDir.y, localEyeDir.z));
+}
+
+float ClothMaterial::SpecularAlbedo(const Vector &localEyeDir, const u_int samples, const u_int seed) const {
+	// As SetPreset(), at one eye direction: the light direction and the
+	// position in the weave tile at random
+	RandomGenerator random(seed);
+
+	double result = 0.0;
+	for (u_int i = 0; i < samples; ++i) {
+		const Vector wi = CosineSampleHemisphere(random.floatValue(), random.floatValue());
+
+		UV uv;
+		float umax, scale = 1.f;
+		const slg::ocl::Yarn *yarn = GetYarn(random.floatValue(), random.floatValue(), &uv, &umax, &scale);
+
+		result += EvalSpecular(yarn, uv, umax, wi, localEyeDir) * scale;
+	}
+
+	return static_cast<float>(result / samples) * specularNormalization;
 }
 
 void ClothMaterial::SetPreset() {

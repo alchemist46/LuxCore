@@ -43,12 +43,20 @@
 //
 // Usage: bsdftest [--filter <substring>] [--samples <n>] [--verbose] [--list] [--dump <n>]
 // The exit code is the number of failing cases (0 = all passed).
+//
+// bsdftest --cloth-albedo-table <file> [--samples <n>] instead writes the
+// table of the directional albedo of the cloth specular into the file
+// (include/slg/materials/materialdefs_funcs_cloth_albedo.cl, between its
+// GENERATED TABLE markers), n samples per entry (default 1M).
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <sstream>
+#include <thread>
 #include <memory>
 #include <random>
 #include <string>
@@ -58,6 +66,7 @@
 #include "luxrays/utils/properties.h"
 #include "slg/scene/scene.h"
 #include "slg/materials/material.h"
+#include "slg/materials/cloth.h"
 #include "slg/bsdf/hitpoint.h"
 
 using namespace std;
@@ -710,16 +719,112 @@ const float ALBEDO_TOLERANCE = 0.01f;
 
 } // namespace
 
+//------------------------------------------------------------------------------
+// The table of the cloth specular albedo (materialdefs_funcs_cloth_albedo.cl)
+//------------------------------------------------------------------------------
+
+int WriteClothAlbedoTable(const string &fileName, const u_int samples) {
+	// In the order of slg::ocl::ClothPreset
+	const char *presets[] = { "denim", "silk_shantung", "silk_charmeuse", "cotton_twill",
+		"wool_gabardine", "polyester_lining_cloth" };
+	const u_int presetCount = sizeof(presets) / sizeof(presets[0]);
+	const u_int muCount = 16;
+	const u_int phiCount = 32;
+
+	ifstream in(fileName, ios::binary);
+	if (!in) {
+		fprintf(stderr, "Can not read %s\n", fileName.c_str());
+		return 1;
+	}
+	stringstream buf;
+	buf << in.rdbuf();
+	in.close();
+	const string src = buf.str();
+	const string beginMarker = "// BEGIN GENERATED TABLE";
+	const string endMarker = "// END GENERATED TABLE";
+	const size_t begin = src.find(beginMarker);
+	const size_t end = src.find(endMarker);
+	if ((begin == string::npos) || (end == string::npos) || (end < begin)) {
+		fprintf(stderr, "No GENERATED TABLE markers in %s\n", fileName.c_str());
+		return 1;
+	}
+	const string nl = (src.find("\r\n") != string::npos) ? "\r\n" : "\n";
+
+	vector<float> table(presetCount * muCount * phiCount);
+	for (u_int p = 0; p < presetCount; ++p) {
+		auto props = make_unique<Properties>();
+		props->SetFromString(string("scene.camera.type = perspective\n"
+				"scene.materials.m.type = cloth\n"
+				"scene.materials.m.preset = ") + presets[p] + "\n");
+		auto scene = make_unique<Scene>();
+		scene->Parse(props);
+		const ClothMaterial &mat = dynamic_cast<const ClothMaterial &>(scene->GetMaterials().GetMaterial("m"));
+
+		// One thread per cosine row
+		vector<thread> threads;
+		for (u_int i = 0; i < muCount; ++i) {
+			threads.emplace_back([&, i]() {
+				const float mu = (i + .5f) / muCount;
+				for (u_int j = 0; j < phiCount; ++j) {
+					const float phi = (j + .5f) * (2.f * M_PI / phiCount);
+					table[(p * muCount + i) * phiCount + j] = mat.SpecularAlbedo(SphericalDir(mu, phi),
+							samples, 1 + (p * muCount + i) * phiCount + j);
+				}
+			});
+		}
+		for (auto &t : threads)
+			t.join();
+
+		float minE = 1e30f, maxE = 0.f;
+		for (u_int k = 0; k < muCount * phiCount; ++k) {
+			minE = min(minE, table[p * muCount * phiCount + k]);
+			maxE = max(maxE, table[p * muCount * phiCount + k]);
+		}
+		printf("%-24s albedo %.3f - %.3f\n", presets[p], minE, maxE);
+	}
+
+	string out = beginMarker + nl;
+	for (u_int p = 0; p < presetCount; ++p) {
+		out += "\t// " + string(presets[p]) + nl;
+		for (u_int i = 0; i < muCount; ++i) {
+			out += "\t";
+			for (u_int j = 0; j < phiCount; ++j) {
+				char v[32];
+				const bool last = (p == presetCount - 1) && (i == muCount - 1) && (j == phiCount - 1);
+				snprintf(v, sizeof(v), "%.4ff%s", table[(p * muCount + i) * phiCount + j], last ? "" : ",");
+				out += v;
+				if (j + 1 < phiCount)
+					out += " ";
+			}
+			out += nl;
+		}
+	}
+
+	ofstream outFile(fileName, ios::binary);
+	outFile << src.substr(0, begin) << out << src.substr(end);
+	if (!outFile) {
+		fprintf(stderr, "Can not write %s\n", fileName.c_str());
+		return 1;
+	}
+	printf("Written %s\n", fileName.c_str());
+
+	return 0;
+}
+
 int main(int argc, char *argv[]) {
-	string filter;
+	string filter, clothAlbedoTable;
 	u_int samples = 200000;
+	bool samplesSet = false;
 	bool verbose = false;
 	bool listOnly = false;
 	for (int i = 1; i < argc; ++i) {
 		if (!strcmp(argv[i], "--filter") && (i + 1 < argc))
 			filter = argv[++i];
-		else if (!strcmp(argv[i], "--samples") && (i + 1 < argc))
+		else if (!strcmp(argv[i], "--samples") && (i + 1 < argc)) {
 			samples = static_cast<u_int>(atoi(argv[++i]));
+			samplesSet = true;
+		} else if (!strcmp(argv[i], "--cloth-albedo-table") && (i + 1 < argc))
+			clothAlbedoTable = argv[++i];
 		else if (!strcmp(argv[i], "--verbose"))
 			verbose = true;
 		else if (!strcmp(argv[i], "--dump") && (i + 1 < argc))
@@ -727,12 +832,17 @@ int main(int argc, char *argv[]) {
 		else if (!strcmp(argv[i], "--list"))
 			listOnly = true;
 		else {
-			fprintf(stderr, "Usage: %s [--filter <substring>] [--samples <n>] [--verbose] [--list] [--dump <n>]\n", argv[0]);
+			fprintf(stderr, "Usage: %s [--filter <substring>] [--samples <n>] [--verbose] [--list] [--dump <n>]\n"
+					"       %s --cloth-albedo-table <file> [--samples <n>]\n", argv[0], argv[0]);
 			return 1;
 		}
 	}
 
 	luxcore::Init([](const char *) {});
+
+	if (!clothAlbedoTable.empty())
+		return WriteClothAlbedoTable(clothAlbedoTable, samplesSet ? samples : 1000000);
+
 
 	const vector<TestCase> cases = BuildTestCases();
 	const Config configs[] = {

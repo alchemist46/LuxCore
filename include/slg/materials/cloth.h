@@ -64,8 +64,17 @@ public:
 	const float GetRepeatV() const { return Repeat_V; }
     const float GetSpecularNormalization() const { return specularNormalization; }
 
+	// The directional albedo of the specular part (ks 1) at the eye direction,
+	// averaged over the light directions and the weave tile by Monte Carlo,
+	// without the energy conservation: the source of the table of
+	// materialdefs_funcs_cloth_albedo.cl
+	float SpecularAlbedo(const luxrays::Vector &localEyeDir, const u_int samples, const u_int seed) const;
+
 private:
 	void SetPreset();
+	// The factor of the specular part that keeps its albedo at most 1 (see
+	// materialdefs_funcs_cloth_albedo.cl)
+	float SpecularConservation(const luxrays::Vector &localEyeDir) const;
 
 	const slg::ocl::Yarn *GetYarn(const float u_i, const float v_i, luxrays::UV *uv, float *umax, float *scale) const;
 	void GetYarnUV(const slg::ocl::Yarn *yarn, const luxrays::Point &center, const luxrays::Point &xy, luxrays::UV *uv, float *umaxMod) const;
