@@ -37,8 +37,32 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 		const float b1, const float b2,
 		const float passThroughEvnt
 		MATERIALS_PARAM_DECL) {
+	// All the reads of the mesh come before the first store to the hit point,
+	// which could alias them: the triangle's vertex indices, normals and UVs
+	// read by the functions below are loaded once
 	Transform motionLocalToWorld;
 	ExtMesh_GetMotionLocal2World(time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
+
+	const uint objectID = sceneObjs[meshIndex].objectID;
+
+	// Interpolate face normal
+	const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triIndex EXTMESH_PARAM);
+	const float3 interpolatedN = ExtMesh_GetInterpolateNormal(&motionLocalToWorld, meshIndex, triIndex, b1, b2 EXTMESH_PARAM);
+	const float3 shadeN = interpolatedN;
+
+	// Interpolate UV coordinates
+	const float2 defaultUV = ExtMesh_GetInterpolateUV(meshIndex, triIndex, b1, b2, 0 EXTMESH_PARAM);
+
+	// Compute geometry differentials
+	float3 dndu, dndv, dpdu, dpdv;
+	ExtMesh_GetDifferentials(
+			&motionLocalToWorld,
+			meshIndex,
+			triIndex,
+			shadeN, 0,
+			&dpdu, &dpdv,
+			&dndu, &dndv
+			EXTMESH_PARAM);
 
 	hitPoint->time = time;
 	hitPoint->throughShadowTransparency = throughShadowTransp;
@@ -51,20 +75,14 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	VSTORE3F(pnt, &hitPoint->p.x);
 	VSTORE3F(fixedDir, &hitPoint->fixedDir.x);
 
-	hitPoint->objectID = sceneObjs[meshIndex].objectID;
+	hitPoint->objectID = objectID;
 
-	// Interpolate face normal
-	const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triIndex EXTMESH_PARAM);
 	VSTORE3F(geometryN,  &hitPoint->geometryN.x);
-	const float3 interpolatedN = ExtMesh_GetInterpolateNormal(&motionLocalToWorld, meshIndex, triIndex, b1, b2 EXTMESH_PARAM);
 	VSTORE3F(interpolatedN,  &hitPoint->interpolatedN.x);
-	const float3 shadeN = interpolatedN;
 	VSTORE3F(shadeN,  &hitPoint->shadeN.x);
 
 	hitPoint->intoObject = (dot(-fixedDir, geometryN) < 0.f);
 
-	// Interpolate UV coordinates
-	const float2 defaultUV = ExtMesh_GetInterpolateUV(meshIndex, triIndex, b1, b2, 0 EXTMESH_PARAM);
 	VSTORE2F(defaultUV, &hitPoint->defaultUV.u);
 
 	hitPoint->meshIndex = meshIndex;
@@ -72,16 +90,6 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	hitPoint->triangleBariCoord1 = b1;
 	hitPoint->triangleBariCoord2 = b2;
 
-	// Compute geometry differentials
-	float3 dndu, dndv, dpdu, dpdv;
-	ExtMesh_GetDifferentials(
-			&motionLocalToWorld,
-			meshIndex,
-			triIndex,
-			shadeN, 0,
-			&dpdu, &dpdv,
-			&dndu, &dndv
-			EXTMESH_PARAM);
 	VSTORE3F(dpdu, &hitPoint->dpdu.x);
 	VSTORE3F(dpdv, &hitPoint->dpdv.x);
 	VSTORE3F(dndu, &hitPoint->dndu.x);
