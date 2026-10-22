@@ -16,6 +16,7 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <algorithm>
 #include <memory>
 
 #include <boost/lexical_cast.hpp>
@@ -168,6 +169,32 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 	} else
 		workingColorSpace = WorkingColorSpace();
 
+	if (version >= 31) {
+		ar & maskObjectIDs;
+		ar & byObjectIDs;
+	} else {
+		// Older files have no object ID lists: rebuild them from the outputs,
+		// in the order AddChannel() registered them
+		maskObjectIDs.clear();
+		byObjectIDs.clear();
+		for (u_int i = 0; i < filmOutputs.GetCount(); ++i) {
+			const FilmOutputs::FilmOutputType type = filmOutputs.GetType(i);
+			if ((type != FilmOutputs::OBJECT_ID_MASK) && (type != FilmOutputs::BY_OBJECT_ID))
+				continue;
+
+			const u_int id = filmOutputs.GetProperties(i)->Get(Property("id")(255)).Get<u_int>();
+			vector<u_int> &ids = (type == FilmOutputs::OBJECT_ID_MASK) ? maskObjectIDs : byObjectIDs;
+			if (count(ids.begin(), ids.end(), id) == 0)
+				ids.push_back(id);
+		}
+
+		// Never more IDs than buffers (Output() indexes the buffers with them)
+		if (maskObjectIDs.size() > channel_OBJECT_ID_MASKs.size())
+			maskObjectIDs.resize(channel_OBJECT_ID_MASKs.size());
+		if (byObjectIDs.size() > channel_BY_OBJECT_IDs.size())
+			byObjectIDs.resize(channel_BY_OBJECT_IDs.size());
+	}
+
 	SetUpHW();
 }
 
@@ -265,6 +292,9 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 
 	const int workingColorSpaceType = workingColorSpace.GetType();
 	ar & workingColorSpaceType;
+
+	ar & maskObjectIDs;
+	ar & byObjectIDs;
 }
 
 namespace slg {

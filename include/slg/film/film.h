@@ -648,7 +648,7 @@ template<> void Film::GetOutput<u_int>(const FilmOutputs::FilmOutputType type, u
 
 }
 
-BOOST_CLASS_VERSION(slg::Film, 30)
+BOOST_CLASS_VERSION(slg::Film, 31)
 BOOST_CLASS_VERSION(slg::FilmSamplesCounts, 1)
 
 BOOST_CLASS_EXPORT_KEY(slg::Film)
