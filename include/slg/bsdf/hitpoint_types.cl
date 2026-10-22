@@ -42,7 +42,7 @@ typedef struct {
 
 	// Note: dpdu and dpdv are orthogonal to shading normal (i.e not geometry normal)
 	Vector dpdu, dpdv;
-	Normal dndu, dndv;
+	// dndu and dndv are computed when needed (see HitPoint_GetNormalDifferentials())
 
 	// Mesh information
 	unsigned int meshIndex;

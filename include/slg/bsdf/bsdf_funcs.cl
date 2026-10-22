@@ -234,8 +234,6 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 	CoordinateSystem(geometryN, &dpdu, &dpdv);
 	VSTORE3F(dpdu, &bsdf->hitPoint.dpdu.x);
 	VSTORE3F(dpdv, &bsdf->hitPoint.dpdv.x);
-	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &bsdf->hitPoint.dndu.x);
-	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &bsdf->hitPoint.dndv.x);
 
 	bsdf->hitPoint.meshIndex = NULL_INDEX;
 	bsdf->hitPoint.triangleIndex = NULL_INDEX;

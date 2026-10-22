@@ -112,11 +112,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderBlendTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -194,11 +194,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderCloudsTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -285,11 +285,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderDistortedNoiseTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -443,11 +443,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderMagicTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -555,11 +555,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderMarbleTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -673,11 +673,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderMusgraveTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -763,11 +763,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderNoiseTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -867,11 +867,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderStucciTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -1000,11 +1000,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderWoodTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
@@ -1103,11 +1103,11 @@ OPENCL_FORCE_NOT_INLINE void BlenderVoronoiTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance);
+					hitPoint, sampleDistance TEXTURES_PARAM);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
