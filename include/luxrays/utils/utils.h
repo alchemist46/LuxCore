@@ -22,6 +22,7 @@
 #ifndef _LUXRAYS_UTILS_H
 #define	_LUXRAYS_UTILS_H
 
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <iomanip>
@@ -126,7 +127,8 @@ inline double WallClockTime() {
 
 	return t.tv_sec + t.tv_usec / 1000000.0;
 #elif defined (WIN32)
-	return GetTickCount() / 1000.0;
+	// Not GetTickCount(): its resolution is ~16ms
+	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 #else
 #error "Unsupported Platform !!!"
 #endif
