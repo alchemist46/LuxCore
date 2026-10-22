@@ -64,7 +64,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine (PATHOCL)
 - Problem: each task estimates the mean image luminance (the Kelemen normalization) from its own large steps, and each chain starts at a uniform sample, not at one drawn proportionally to the luminance. Both bias short chains in opposite directions (simple scene, 150x100, one task per pixel, at the test halt: +0.9%; with a fixed exact luminance and 512K tasks the start-up alone is -20% at 267 spp).
 - Reproduce: `*_PATHOCL_METROPOLIS` tests; small films or few spp.
-- Notes: a global luminance estimate (a reduction over the tasks) and a resampled start (PSSMLT bootstrap) would remove both. Only matters when the chains are short.
+- Notes: a global luminance estimate (a reduction over the tasks) and a resampled start (PSSMLT bootstrap) would remove both. Only matters when the chains are short: a chain gets about spp x pixels / tasks samples, about 1000 for a 1080p render at 256 spp with the default 512K tasks (a small bias), 8 for the 150x100 test film. Decided 2026-10-22 to leave it as a known limitation (the GPU renders use Sobol by default, and the hybrid light tracing, PhotonGI's caustic cache and the light tree cover most of Metropolis' scenes). Workarounds for small films or previews: fewer tasks (`opencl.task.count`) for longer chains, or the CPU engines, whose few chains are long.
 
 ### BiDir darkens the silhouette of the furnace sphere
 - Found: 2026-10-22
