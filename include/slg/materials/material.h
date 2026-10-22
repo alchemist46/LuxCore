@@ -140,13 +140,15 @@ public:
 	// An eye path entering the material starts the subsurface random walk
 	// (see SubsurfaceMaterial and PathTracer::SubsurfaceRandomWalk()) in the
 	// medium of GetSubsurfaceWalkParams(): the multiple-scattering albedo, the
-	// mean free path per channel and the Henyey-Greenstein g.
+	// mean free path per channel, the Henyey-Greenstein g and the IOR of the
+	// medium over the exterior (the internal reflection at its boundary, 1
+	// for none).
 	// GetSubsurfaceWalkMaterial() is the material whose walk an eye path
 	// entering this one starts, reached through the glossy coating (the walk
 	// of its base, under the coating); nullptr when there is none.
 	virtual const Material *GetSubsurfaceWalkMaterial() const { return nullptr; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
-		luxrays::Spectrum *radius, float *anisotropy) const { }
+		luxrays::Spectrum *radius, float *anisotropy, float *eta) const { }
 	// At the entry of a walk, whether the DIFFUSE of GetEventTypes() can also
 	// be a diffuse lobe beside the walk: without one, the diffuse depth
 	// doesn't end the path there (the walk has the subsurface depth)

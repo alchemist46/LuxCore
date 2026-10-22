@@ -37,7 +37,10 @@
 //    and the distance stretched to match, combined with the classic
 //    Henyey-Greenstein sampling by MIS;
 //  - the similarity relation after the 9th bounce (Wrenninge, Villemin & Hery):
-//    isotropic scattering with the reduced coefficients.
+//    isotropic scattering with the reduced coefficients;
+//  - the dielectric boundary of relative IOR eta: a walk that reaches the
+//    surface is reflected back into the medium with the Fresnel reflectance
+//    of its direction (SSSWalk_InternalReflection()) and leaves otherwise.
 //
 // The walk is split in two pure functions per step so that the CPU (a loop
 // with a ray cast between them) and the GPU (one wavefront iteration per step,
@@ -50,7 +53,17 @@
 // The random numbers are inputs, so the caller decides where they come from.
 //------------------------------------------------------------------------------
 
-#define SSS_MAX_BOUNCES 256
+// The walks of a dense, nearly white medium are heavy-tailed (the walks
+// longer than n bounces go as 1 / sqrt(n)), so a hard limit loses energy:
+// 13% of a white sphere of radius 100 mean free paths at 256 bounces, 2% at
+// 4096. Past SSS_RR_BOUNCES bounces the walk goes on with the probability
+// b / (b + 1) at the bounce b (Russian roulette, times the throughput when it
+// is below 1): it reaches n bounces with the probability SSS_RR_BOUNCES / n,
+// so a long walk costs some SSS_RR_BOUNCES more bounces on average and its
+// weight grows only linearly. The energy lost is then that of the walks
+// longer than SSS_MAX_BOUNCES (tilepathoclthread.cpp has its value).
+#define SSS_RR_BOUNCES 256
+#define SSS_MAX_BOUNCES 65536
 #define SSS_SIMILARITY_LEVEL 9
 #define SSS_THROUGHPUT_EPSILON 1e-6f
 
@@ -77,7 +90,11 @@ typedef struct {
 	float guidedFraction, backwardFraction;
 	float forwardPdfFactor, backwardPdfFactor, forwardStretching, backwardStretching;
 	float oppositeDistance;
-	int bounce, haveOpposite;
+	// The IOR of the medium over the exterior (1: no boundary reflection)
+	float eta;
+	// The step starts on the surface, after an internal reflection: no
+	// scattering at its origin, and the ray skips the surface
+	int bounce, haveOpposite, fromSurface;
 } SSSWalk;
 
 #if defined(SLG_OPENCL_KERNEL)
@@ -179,9 +196,10 @@ OPENCL_FORCE_INLINE float SSS_Channel(const float3 v, const int c) {
 
 // Starts a walk at the entry point P (outward normal N) into the direction D,
 // with the color (multiple-scattering albedo), the radius (mean free path per
-// channel) and the anisotropy. False when the medium can't be walked.
+// channel), the anisotropy and the IOR of the medium over the exterior. False
+// when the medium can't be walked.
 OPENCL_FORCE_INLINE bool SSSWalk_Init(SSSWalk *w, const float3 P, const float3 N, const float3 D,
-		const float3 color, const float3 radius, const float anisotropy) {
+		const float3 color, const float3 radius, const float anisotropy, const float eta) {
 	const float g = clamp(anisotropy, -.9f, .9f);
 	float3 alpha = MAKE_FLOAT3(SSS_SingleScatteringAlbedo(color.x, g),
 			SSS_SingleScatteringAlbedo(color.y, g), SSS_SingleScatteringAlbedo(color.z, g));
@@ -214,6 +232,8 @@ OPENCL_FORCE_INLINE bool SSSWalk_Init(SSSWalk *w, const float3 P, const float3 N
 	w->bounce = 0;
 	w->haveOpposite = 0;
 	w->oppositeDistance = 0.f;
+	w->eta = eta;
+	w->fromSurface = 0;
 
 	return true;
 }
@@ -227,7 +247,9 @@ OPENCL_FORCE_INLINE void SSSWalk_PrepareStep(SSSWalk *w, const float uChannel, c
 	const bool similar = (w->bounce > SSS_SIMILARITY_LEVEL);
 	const float g = similar ? 0.f : w->anisotropy;
 	const float3 sigmaT = similar ? w->sigmaTStar : w->sigmaT;
-	w->guidedFraction = similar ? .75f : w->guidedFractionOrg;
+	// After an internal reflection the direction is the reflected one: only
+	// the distance is sampled, without guiding
+	w->guidedFraction = w->fromSurface ? 0.f : (similar ? .75f : w->guidedFractionOrg);
 
 	// The color channel, in proportion to throughput * single-scattering albedo
 	// (the albedo of the medium, also after the similarity relation, as Cycles)
@@ -245,8 +267,9 @@ OPENCL_FORCE_INLINE void SSSWalk_PrepareStep(SSSWalk *w, const float uChannel, c
 	w->backwardPdfFactor = 0.f;
 	w->backwardStretching = 1.f;
 
-	// The first step goes into the entry direction: classic distance sampling
-	if (w->bounce > 0) {
+	// The first step goes into the entry direction, the step after an
+	// internal reflection into the reflected one: classic distance sampling
+	if ((w->bounce > 0) && !w->fromSurface) {
 		const bool guided = (uGuide < w->guidedFraction);
 
 		// Guiding away from the entry surface, toward the opposite interface
@@ -306,8 +329,13 @@ OPENCL_FORCE_INLINE float3 SSS_DistancePdf(const float3 sigmaT, const float t, c
 // Finishes the step with the result of tracing (w->P, w->D) up to w->tmax:
 // hit tells whether the surface of the walked object was hit, at the distance
 // hitT. SSSWALK_EXIT: w->P is the exit point (on the surface) and
-// w->throughput the weight of the walk.
-OPENCL_FORCE_INLINE int SSSWalk_FinishStep(SSSWalk *w, const bool hitSurface, const float hitT) {
+// w->throughput the weight of the walk. uSurvive is the random number of the
+// Russian roulette of the long walks.
+OPENCL_FORCE_INLINE int SSSWalk_FinishStep(SSSWalk *w, const bool hitSurface, const float hitT,
+		const float uSurvive) {
+	// The ray of the step has been traced
+	w->fromSurface = 0;
+
 	const bool similar = (w->bounce > SSS_SIMILARITY_LEVEL);
 	const float3 sigmaT = similar ? w->sigmaTStar : w->sigmaT;
 	const float3 sigmaS = similar ? w->sigmaSStar : w->sigmaS;
@@ -355,9 +383,57 @@ OPENCL_FORCE_INLINE int SSSWalk_FinishStep(SSSWalk *w, const bool hitSurface, co
 	++w->bounce;
 	if (hit)
 		return SSSWALK_EXIT;
-	if ((fmax(w->throughput.x, fmax(w->throughput.y, w->throughput.z)) < SSS_THROUGHPUT_EPSILON) ||
-			(w->bounce >= SSS_MAX_BOUNCES))
+	if (fmax(w->throughput.x, fmax(w->throughput.y, w->throughput.z)) < SSS_THROUGHPUT_EPSILON)
 		return SSSWALK_END;
+	if (w->bounce >= SSS_RR_BOUNCES) {
+		if (w->bounce >= SSS_MAX_BOUNCES)
+			return SSSWALK_END;
+		const float survival = (w->bounce / (w->bounce + 1.f)) *
+				fmin(1.f, fmax(w->throughput.x, fmax(w->throughput.y, w->throughput.z)));
+		if (uSurvive >= survival)
+			return SSSWALK_END;
+		w->throughput /= survival;
+	}
 
 	return SSSWALK_CONTINUE;
+}
+
+// The dielectric Fresnel reflectance of the medium of relative IOR eta (over
+// the exterior) seen from inside, at the cosine cosI: 1 at the total internal
+// reflection
+OPENCL_FORCE_INLINE float SSS_InternalFresnel(const float cosI, const float eta) {
+	const float sinT2 = eta * eta * fmax(0.f, 1.f - cosI * cosI);
+	if (sinT2 >= 1.f)
+		return 1.f;
+	const float cosT = sqrt(1.f - sinT2);
+	const float rs = (eta * cosI - cosT) / (eta * cosI + cosT);
+	const float rp = (cosI - eta * cosT) / (cosI + eta * cosT);
+
+	return .5f * (rs * rs + rp * rp);
+}
+
+// At the exit point of SSSWALK_EXIT, with the surface normal N there (either
+// side) and a random number: true when the walk is reflected back into the
+// medium, with the probability of the Fresnel reflectance of its direction
+// (the throughput doesn't change: the walk leaves with the probability of
+// the transmittance). w->D is then the reflected direction and the walk goes
+// on from w->P with SSSWalk_PrepareStep().
+OPENCL_FORCE_INLINE bool SSSWalk_InternalReflection(SSSWalk *w, const float3 N, const float u) {
+	if (w->eta == 1.f)
+		return false;
+
+	// The normal on the side the walk leaves to
+	const float cosN = dot(w->D, N);
+	const float3 n = (cosN > 0.f) ? N : -N;
+	const float cosI = fabs(cosN);
+	if (!(cosI > 0.f))
+		return false;
+
+	if (u >= SSS_InternalFresnel(cosI, w->eta))
+		return false;
+
+	w->D = w->D - (2.f * cosI) * n;
+	w->fromSurface = 1;
+
+	return true;
 }

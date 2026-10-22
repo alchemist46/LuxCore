@@ -243,9 +243,16 @@ Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
 	Spectrum specM = SchlickBSDF_CoatingF(fromLight, p.color, p.ax, p.ay, fixedDir, sampledDir);
 	Spectrum specD = SchlickBSDF_CoatingF(fromLight, p.F0d, p.ax, p.ay, fixedDir, sampledDir);
 	if (p.filmThickness > 0.f) {
-		const Spectrum filmColor = CalcFilmColor(eyeDir, p.filmThickness, p.filmIor, workingColorSpace);
-		const Spectrum specMFilm = specM * filmColor;
-		const Spectrum specDFilm = specD * filmColor;
+		// The film over the dielectric (the IOR of its mean F0) and over the
+		// metal (the complex IOR of its F0, white at the edge as Schlick's)
+		const float sqrtF0d = sqrtf(Clamp((p.F0d.c[0] + p.F0d.c[1] + p.F0d.c[2]) / 3.f, 0.f, .99f));
+		const float iorD = (1.f + sqrtF0d) / (1.f - sqrtF0d);
+		Spectrum etaM, kM;
+		FilmConductorIOR(workingColorSpace.ToRec709(p.color), Spectrum(1.f), &etaM, &kM);
+		const Spectrum specMFilm = specM * CalcFilmColorConductor(eyeDir, p.filmThickness, p.filmIor,
+				1.f, etaM, kM, workingColorSpace);
+		const Spectrum specDFilm = specD * CalcFilmColor(eyeDir, p.filmThickness, p.filmIor,
+				1.f, iorD, workingColorSpace);
 		specM = Lerp(p.filmAmount, specM, specMFilm);
 		specD = Lerp(p.filmAmount, specD, specDFilm);
 	}

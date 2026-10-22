@@ -28,6 +28,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 PathInfo::PathInfo() : lastBSDFEvent(SPECULAR), // SPECULAR is required to avoid MIS
+		wavelength(0.f), dispersionTinted(false),
 		isNearlyS(false), isNearlySD(false), isNearlySDS(false) {
 }
 
@@ -87,6 +88,9 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 
 	// Update last path vertex information
 	lastBSDFEvent = event;
+
+	// The path has the colour of its wavelength after a dispersive vertex
+	dispersionTinted = dispersionTinted || (event & DISPERSED);
 
 	//--------------------------------------------------------------------------
 	// EyePathInfo::AddVertex()
@@ -160,6 +164,9 @@ void LightPathInfo::AddVertex(const BSDF &bsdf, const BSDFEvent event,
 
 	// Update last path vertex information
 	lastBSDFEvent = event;
+
+	// The path has the colour of its wavelength after a dispersive vertex
+	dispersionTinted = dispersionTinted || (event & DISPERSED);
 }
 
 bool LightPathInfo::IsCausticPath(const BSDFEvent event,

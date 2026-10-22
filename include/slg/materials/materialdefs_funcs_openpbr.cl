@@ -112,18 +112,25 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 	b->subsurfaceMode = hitPoint->subsurface;
 	b->regularization = hitPoint->regularization;
 	b->wavelengthU = hitPoint->passThroughEvent;
+	b->wavelength = hitPoint->wavelength;
+	b->dispersionTinted = hitPoint->dispersionTinted;
 
 	OpenPBR_Init(b);
 }
 
 // The medium of the subsurface random walk at the entry point
 OPENCL_FORCE_INLINE void OpenPBRMaterial_GetWalkParams(__global const Material* restrict material,
-		__global const HitPoint *hitPoint, float3 *color, float3 *radius, float *anisotropy
+		__global const HitPoint *hitPoint, float3 *color, float3 *radius, float *anisotropy, float *eta
 		TEXTURES_PARAM_DECL) {
 	*color = Spectrum_Clamp(OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM));
 	*radius = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_RADIUS, hitPoint TEXTURES_PARAM) *
 			OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint TEXTURES_PARAM);
 	*anisotropy = clamp(OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_ANISOTROPY, hitPoint TEXTURES_PARAM), -.9f, .9f);
+	*eta = OpenPBR_WalkEta(OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM),
+			OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_WEIGHT, hitPoint TEXTURES_PARAM),
+			ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM),
+			OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_WEIGHT, hitPoint TEXTURES_PARAM),
+			OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_IOR, hitPoint TEXTURES_PARAM));
 }
 
 OPENCL_FORCE_INLINE void OpenPBRMaterial_Albedo(__global const Material* restrict material,
@@ -179,8 +186,8 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Evaluate(__global const Material* restr
 
 	BSDFEvent event;
 	float directPdfW;
-	const float3 result = OpenPBR_Evaluate(&b, lightDir, eyeDir, false,
-			&event, &directPdfW, NULL);
+	const float3 result = OpenPBR_Disperse(&b, OpenPBR_Evaluate(&b, lightDir, eyeDir, false,
+			&event, &directPdfW, NULL), &event);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
 	}
@@ -207,8 +214,8 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Sample(__global const Material* restric
 	float3 sampledDir;
 	float pdfW;
 	BSDFEvent event;
-	const float3 result = OpenPBR_Sample(&b, fixedDir, u0, u1, passThroughEvent, false,
-			&sampledDir, &pdfW, &event);
+	const float3 result = OpenPBR_Disperse(&b, OpenPBR_Sample(&b, fixedDir, u0, u1, passThroughEvent, false,
+			&sampledDir, &pdfW, &event), &event);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}

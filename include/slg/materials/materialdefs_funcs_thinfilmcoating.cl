@@ -138,26 +138,22 @@ __constant float CIE_Z_reduced[] = {
 };
 
 //---------------------------------------------------------------------------------
-// ColorSystem
+// Spectrum to RGB
 //---------------------------------------------------------------------------------
 
+// XYZ to Linear Rec.709 with the equal-energy white: a flat reflectance
+// spectrum gives a neutral colour of the same value
 __constant float ThinFilmCoating_XYZToRGB[3][3] = {
-	{
-		2.868713378906250f,
-		-1.423546671867371f,
-		-0.445165514945984f,
-	},
-	{
-		-1.132583618164062f,
-		2.095324993133545f,
-		0.037260532379150f,
-	},
-	{
-		0.061925172805786f,
-		-0.216627478599548f,
-		1.154703855514526f,
-	},
+	{ 2.689655172413794f, -1.275862068965517f, -0.413793103448276f },
+	{ -1.022108172127912f, 1.978286616660087f, 0.043821555467825f },
+	{ 0.061224489795918f, -0.224489795918367f, 1.163265306122448f },
 };
+
+// The sums of the reduced CIE tables: X, Y and Z divided by them are 1 for a
+// flat spectrum of value 1
+#define THINFILM_CIE_X_SUM 10.678131428547200f
+#define THINFILM_CIE_Y_SUM 10.683555383588102f
+#define THINFILM_CIE_Z_SUM 10.679285937881216f
 
 OPENCL_FORCE_INLINE float3 ThinFilmCoating_ConvertXYZToRGB(const float3 xyzColor) {
 	return MAKE_FLOAT3(
@@ -167,147 +163,209 @@ OPENCL_FORCE_INLINE float3 ThinFilmCoating_ConvertXYZToRGB(const float3 xyzColor
 	);
 }
 
-OPENCL_FORCE_INLINE bool LowGamut(const float3 color) {
-    return color.x < 0.f || color.y < 0.f || color.z < 0.f;
+//---------------------------------------------------------------------------------
+// Complex numbers (x the real part, y the imaginary one)
+//---------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float2 ThinFilm_CMul(const float2 a, const float2 b) {
+	return MAKE_FLOAT2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-OPENCL_FORCE_INLINE float3 ThinFilmCoating_Constrain(const float3 xyz, const float3 rgb) {
-	const float xRed = 0.63f;
-	const float yRed = 0.34f;
-	const float xGreen = 0.31f;
-	const float yGreen = 0.595f;
-	const float xBlue = 0.155f;
-	const float yBlue = 0.07f;
-	// const float xWhite = 1.f / 3.f;
-	// const float yWhite = 1.f / 3.f;
-	// const float luminance = 1.f;
-	
-	// Is the contribution of one of the primaries negative?
-	if (!LowGamut(rgb)) {
-		return rgb;
-	}
-		
-	// Compute the xyY color coordinates
-	const float YComp = xyz.y;
-	if (!(YComp > 0.f)) {
-		return TO_FLOAT3(0.f);
-	}
-	float xComp = xyz.x / (xyz.x + xyz.y + xyz.z);
-	float yComp = xyz.y / (xyz.x + xyz.y + xyz.z);
+OPENCL_FORCE_INLINE float2 ThinFilm_CDiv(const float2 a, const float2 b) {
+	const float d = b.x * b.x + b.y * b.y;
+	return MAKE_FLOAT2((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}
 
-	// Define the Blue to Red (BR) line equation
-	const float aBR = (yRed - yBlue) / (xRed - xBlue);
-	const float bBR = yBlue - (aBR * xBlue);
+// The square root with a non-negative imaginary part: the wave that decays
+// into an absorbing medium, or the evanescent one past the critical angle
+OPENCL_FORCE_INLINE float2 ThinFilm_CSqrt(const float2 z) {
+	const float r = sqrt(z.x * z.x + z.y * z.y);
+	const float re = sqrt(fmax(0.f, .5f * (r + z.x)));
+	const float im = sqrt(fmax(0.f, .5f * (r - z.x)));
+	// The principal root has the sign of z.y in its imaginary part: with
+	// z.y < 0 the root with Im >= 0 is its negation
+	return (z.y < 0.f) ? MAKE_FLOAT2(-re, im) : MAKE_FLOAT2(re, im);
+}
 
-	// Define the Blue to Green (BG) line equation
-	const float aBG = (yGreen - yBlue) / (xGreen - xBlue);
-	const float bBG = yBlue - (aBG * xBlue);
-
-	// Define the Green to Red (GR) line equation
-	const float aGR = (yRed - yGreen) / (xRed - xGreen);
-	const float bGR = yGreen - (aGR * xGreen);
-
-	// Color below the (BR) line
-	if (yComp < (aBR * xComp + bBR)) {
-		// Compute the orthogonal to (BR) through the color coordinates
-		const float aOrtho = -1.f / aBR;
-		const float bOrtho = -aOrtho * xComp + yComp;
-
-		// Compute the intersection point with (BR)
-		xComp = (bOrtho - bBR) / (aBR - aOrtho);
-		yComp = aBR * xComp + bBR;
-
-		// If the computed point is not on the gamut limits, clamp to a primary
-		if (xComp < xBlue) {
-			xComp = xBlue;
-			yComp = yBlue;
-		} else if (xComp > xRed) {
-			xComp = xRed;
-			yComp = yRed;
-		}
-	// Color over the (BG) line
-	} else if (yComp > (aBG * xComp + bBG)) {
-		// Compute the orthogonal to (BG) through the color coordinates
-		const float aOrtho = -1.f / aBG;
-		const float bOrtho = -aOrtho * xComp + yComp;
-
-		// Compute the intersection point with (BG)
-		xComp = (bOrtho - bBG) / (aBG - aOrtho);
-		yComp = aBG * xComp + bBG;
-
-		// If the computed point is not on the gamut limits, clamp to a primary
-		if (xComp < xBlue) {
-			xComp = xBlue;
-			yComp = yBlue;
-		} else if (xComp > xGreen) {
-			xComp = xGreen;
-			yComp = yGreen;
-		}
-	// Color over the (GR) line
-	} else if (yComp > (aGR * xComp + bGR)) {
-		// Compute the orthogonal to (GR) through the color coordinates
-		const float aOrtho = -1.f / aGR;
-		const float bOrtho = -aOrtho * xComp + yComp;
-
-		// Compute the intersection point with (GR)
-		xComp = (bOrtho - bGR) / (aGR - aOrtho);
-		yComp = aGR * xComp + bGR;
-
-		// If the computed point is not on the gamut limits, clamp to a primary
-		if (xComp < xGreen) {
-			xComp = xGreen;
-			yComp = yGreen;
-		} else if (xComp > xRed) {
-			xComp = xRed;
-			yComp = yRed;
-		}
-	}
-
-	// Recompute the XYZ color from the xyY values
-	float3 disp = MAKE_FLOAT3(
-		(xComp * YComp) / yComp,
-		YComp,
-		(1.f - xComp - yComp) * YComp / yComp
-	);
-
-	// Convert to RGB
-	return ThinFilmCoating_ConvertXYZToRGB(disp);
+OPENCL_FORCE_INLINE float ThinFilm_CNorm(const float2 z) {
+	return z.x * z.x + z.y * z.y;
 }
 
 //---------------------------------------------------------------------------------
+// Thin film interference
+//
+// A film of thickness d (nm) and real IOR n1 between the medium of the
+// incident light (real IOR n0) and a substrate of complex IOR N2 = n2 + i k2:
+// the amplitudes r = (r01 + r12 e^(i phi)) / (1 + r01 r12 e^(i phi)) of the s
+// and p polarizations, with phi = 4 pi n1 d cos(theta1) / lambda, and the
+// Airy reflectance R = (|r_s|^2 + |r_p|^2) / 2 over the visible spectrum
+// (Belcour and Barla 2017, without their Fourier approximation). The
+// substrate IOR does not change with the wavelength.
+//
+// CalcFilmColor() is that reflectance divided by the Fresnel reflectance of
+// the bare interface: the factor the materials multiply their Fresnel term
+// with, in the working colour space. A film with the IOR of the incident
+// medium, or of zero thickness, gives 1.
+//---------------------------------------------------------------------------------
 
-OPENCL_FORCE_NOT_INLINE float3 CalcFilmColor(const float3 localFixedDir, const float filmThickness, const float filmIOR) {
-	// Prevent wrong values if the ratio between IOR and thickness is too high
-	if (filmThickness * (filmIOR - .4f) > 2000.f)
-		return TO_FLOAT3(.5f);
-		
-	// 24 wavelengths seem to do the job. Any less and artifacts begin to appear at thickness around 2000 nm
-	// Using 34 now so I can use integers for the wavelengths, and 720 - 380 = 340.
+// Past the optical path where 34 wavelengths resolve the fringes, the film
+// is incoherent: the sum of the two interfaces' intensities
+#define THINFILM_MAX_COHERENT_OPD 4000.f
+
+OPENCL_FORCE_INLINE float ThinFilm_IncoherentR(const float R01, const float R12) {
+	const float d = 1.f - R01 * R12;
+	return (d > 0.f) ? ((R01 + R12 - 2.f * R01 * R12) / d) : 1.f;
+}
+
+// The Fresnel amplitude of the s or p polarization between a real IOR side
+// (q1 = n1 cos1, a1 = n1) and a complex one (q2 = N2 cos2, N2^2)
+OPENCL_FORCE_INLINE float2 ThinFilm_Rs(const float q1, const float2 q2) {
+	return ThinFilm_CDiv(MAKE_FLOAT2(q1 - q2.x, -q2.y), MAKE_FLOAT2(q1 + q2.x, q2.y));
+}
+
+OPENCL_FORCE_INLINE float2 ThinFilm_Rp(const float n1, const float cos1, const float2 N2Sqr, const float2 q2) {
+	// (N2^2 cos1 - n1 q2) / (N2^2 cos1 + n1 q2)
+	const float2 a = MAKE_FLOAT2(N2Sqr.x * cos1, N2Sqr.y * cos1);
+	const float2 b = MAKE_FLOAT2(n1 * q2.x, n1 * q2.y);
+	return ThinFilm_CDiv(MAKE_FLOAT2(a.x - b.x, a.y - b.y), MAKE_FLOAT2(a.x + b.x, a.y + b.y));
+}
+
+// The film reflectance of a substrate of complex IOR (eta2, k2) over the
+// wavelengths, as XYZ, and the bare interface's Fresnel reflectance. False at
+// the total internal reflection into the film.
+OPENCL_FORCE_NOT_INLINE bool ThinFilm_Reflectance(const float cos0, const float filmThickness,
+		const float n0, const float n1, const float eta2, const float k2,
+		float3 *xyz, float *bareR) {
+	const float sin0Sqr = fmax(0.f, 1.f - cos0 * cos0);
+
+	// N2^2 and q2 = N2 cos(theta2) = sqrt(N2^2 - n0^2 sin0^2)
+	const float2 N2Sqr = MAKE_FLOAT2(eta2 * eta2 - k2 * k2, 2.f * eta2 * k2);
+	const float2 q2 = ThinFilm_CSqrt(MAKE_FLOAT2(N2Sqr.x - n0 * n0 * sin0Sqr, N2Sqr.y));
+
+	// The bare interface n0 | N2
+	*bareR = .5f * (ThinFilm_CNorm(ThinFilm_Rs(n0 * cos0, q2)) +
+			ThinFilm_CNorm(ThinFilm_Rp(n0, cos0, N2Sqr, q2)));
+
+	const float cos1Sqr = 1.f - Sqr(n0 / n1) * sin0Sqr;
+	if (cos1Sqr <= 0.f)
+		return false;
+	const float cos1 = sqrt(cos1Sqr);
+
+	// The interfaces n0 | n1 and n1 | N2
+	const float rs01 = (n0 * cos0 - n1 * cos1) / (n0 * cos0 + n1 * cos1);
+	const float rp01 = (n1 * cos0 - n0 * cos1) / (n1 * cos0 + n0 * cos1);
+	const float2 rs12 = ThinFilm_Rs(n1 * cos1, q2);
+	const float2 rp12 = ThinFilm_Rp(n1, cos1, N2Sqr, q2);
+
+	const float opd = 2.f * n1 * filmThickness * cos1;
+	if (opd > THINFILM_MAX_COHERENT_OPD) {
+		const float R = .5f * (ThinFilm_IncoherentR(rs01 * rs01, ThinFilm_CNorm(rs12)) +
+				ThinFilm_IncoherentR(rp01 * rp01, ThinFilm_CNorm(rp12)));
+		*xyz = TO_FLOAT3(R);
+		return true;
+	}
+
 	const uint NUM_WAVELENGTHS = 34;
 	const uint MIN_WAVELENGTH = 380;
-	//const uint MAX_WAVELENGTH = 720;
-	const uint WAVELENGTH_STEP = 10;  // (MAX_WAVELENGTH - MIN_WAVELENGTH) / (NUM_WAVELENGTHS - 1);
-	
-	const float sinTheta = SinTheta(localFixedDir);
-	const float s = sqrt(fmax(0.f, Sqr(filmIOR) - Sqr(sinTheta)));
+	const uint WAVELENGTH_STEP = 10;
 
-	float3 xyzColor = MAKE_FLOAT3(0.f, 0.f, 0.f);
-
+	float3 xyzSum = MAKE_FLOAT3(0.f, 0.f, 0.f);
 	for (uint i = 0; i < NUM_WAVELENGTHS; ++i) {
-		const uint waveLength = WAVELENGTH_STEP * i + MIN_WAVELENGTH;
-		
-		const float pd = (4.f * M_PI_F * filmThickness / (float)waveLength) * s + M_PI_F;
-		const float intensity = Sqr(cos(pd));
-		
-		xyzColor.x += intensity * CIE_X_reduced[i];
-		xyzColor.y += intensity * CIE_Y_reduced[i];
-		xyzColor.z += intensity * CIE_Z_reduced[i];
+		const float waveLength = (float)(WAVELENGTH_STEP * i + MIN_WAVELENGTH);
+		const float phi = 2.f * M_PI_F * opd / waveLength;
+		const float2 e = MAKE_FLOAT2(cos(phi), sin(phi));
+
+		// s polarization
+		const float2 se = ThinFilm_CMul(rs12, e);
+		const float Rs = ThinFilm_CNorm(MAKE_FLOAT2(rs01 + se.x, se.y)) /
+				ThinFilm_CNorm(MAKE_FLOAT2(1.f + rs01 * se.x, rs01 * se.y));
+		// p polarization
+		const float2 pe = ThinFilm_CMul(rp12, e);
+		const float Rp = ThinFilm_CNorm(MAKE_FLOAT2(rp01 + pe.x, pe.y)) /
+				ThinFilm_CNorm(MAKE_FLOAT2(1.f + rp01 * pe.x, rp01 * pe.y));
+
+		const float R = .5f * (Rs + Rp);
+		xyzSum.x += R * CIE_X_reduced[i];
+		xyzSum.y += R * CIE_Y_reduced[i];
+		xyzSum.z += R * CIE_Z_reduced[i];
 	}
-	
-	const float Y_sum = 10.683556556701660f;
-	const float3 normalizedXYZ = xyzColor / Y_sum;
-	
-	float3 rgb = ThinFilmCoating_ConvertXYZToRGB(normalizedXYZ);
-	return WorkingColorSpace_FromRec709(ThinFilmCoating_Constrain(normalizedXYZ, rgb));
+
+	*xyz = MAKE_FLOAT3(xyzSum.x / THINFILM_CIE_X_SUM, xyzSum.y / THINFILM_CIE_Y_SUM,
+			xyzSum.z / THINFILM_CIE_Z_SUM);
+	return true;
+}
+
+// The film factor (Linear Rec.709) of one substrate IOR
+OPENCL_FORCE_INLINE float3 ThinFilm_Factor(const float cos0, const float filmThickness,
+		const float n0, const float n1, const float eta2, const float k2) {
+	float3 xyz;
+	float bareR;
+	const bool filmReached = ThinFilm_Reflectance(cos0, filmThickness, n0, n1, eta2, k2, &xyz, &bareR);
+	if (!(bareR > 1e-6f))
+		return WHITE;
+	// At the total internal reflection into the film the interface reflects
+	// everything
+	if (!filmReached)
+		return TO_FLOAT3(1.f / bareR);
+
+	return fmax(ThinFilmCoating_ConvertXYZToRGB(xyz), BLACK) / bareR;
+}
+
+// A dielectric substrate: iorIncident the IOR on the side of localFixedDir,
+// iorSubstrate the one of the other side
+OPENCL_FORCE_NOT_INLINE float3 CalcFilmColor(const float3 localFixedDir, const float filmThickness,
+		const float filmIOR, const float iorIncident, const float iorSubstrate) {
+	if (!(filmThickness > 0.f))
+		return WHITE;
+
+	return WorkingColorSpace_FromRec709(ThinFilm_Factor(fabs(localFixedDir.z), filmThickness,
+			iorIncident, filmIOR, iorSubstrate, 0.f));
+}
+
+// A conductor substrate of complex IOR (eta, k) per Linear Rec.709 channel
+OPENCL_FORCE_NOT_INLINE float3 CalcFilmColorConductor(const float3 localFixedDir, const float filmThickness,
+		const float filmIOR, const float iorIncident, const float3 eta, const float3 k) {
+	if (!(filmThickness > 0.f))
+		return WHITE;
+
+	const float cos0 = fabs(localFixedDir.z);
+	const float r = ThinFilm_Factor(cos0, filmThickness, iorIncident, filmIOR, eta.x, k.x).x;
+	const float g = ThinFilm_Factor(cos0, filmThickness, iorIncident, filmIOR, eta.y, k.y).y;
+	const float b = ThinFilm_Factor(cos0, filmThickness, iorIncident, filmIOR, eta.z, k.z).z;
+
+	return WorkingColorSpace_FromRec709(MAKE_FLOAT3(r, g, b));
+}
+
+// The factor of the transmission of an interface of bare Fresnel reflectance
+// bareR with the film factor filmColor: a lossless film transmits what it does
+// not reflect, (1 - bareR filmColor) / (1 - bareR)
+OPENCL_FORCE_INLINE float3 ThinFilm_TransmissionScale(const float bareR, const float3 filmColor) {
+	if (!(bareR < 1.f))
+		return WHITE;
+	return fmax((WHITE - bareR * filmColor) / (1.f - bareR), BLACK);
+}
+
+// The complex IOR of a conductor of normal reflectance f0 and edge tint g per
+// channel (Gulbrandsen 2014), for the film over the metals of the artistic
+// models
+OPENCL_FORCE_INLINE void ThinFilm_ConductorIORChannel(const float f0, const float edgeTint,
+		float *eta, float *k) {
+	const float r = clamp(f0, 0.f, .99f);
+	const float g = clamp(edgeTint, 0.f, 1.f);
+	const float sqrtR = sqrt(r);
+	const float n = g * (1.f - r) / (1.f + r) + (1.f - g) * (1.f + sqrtR) / (1.f - sqrtR);
+	*eta = n;
+	*k = sqrt(fmax(0.f, (r * Sqr(n + 1.f) - Sqr(n - 1.f)) / (1.f - r)));
+}
+
+OPENCL_FORCE_INLINE void ThinFilm_ConductorIOR(const float3 f0, const float3 edgeTint,
+		float3 *eta, float3 *k) {
+	// No address of a vector component in OpenCL C
+	float er, eg, eb, kr, kg, kb;
+	ThinFilm_ConductorIORChannel(f0.x, edgeTint.x, &er, &kr);
+	ThinFilm_ConductorIORChannel(f0.y, edgeTint.y, &eg, &kg);
+	ThinFilm_ConductorIORChannel(f0.z, edgeTint.z, &eb, &kb);
+	*eta = MAKE_FLOAT3(er, eg, eb);
+	*k = MAKE_FLOAT3(kr, kg, kb);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

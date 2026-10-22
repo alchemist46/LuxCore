@@ -125,6 +125,9 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 		// times). However this is detrimental for the Metropolis sampler.
 		const float timeSample = rndGen->floatValue();
 		const float time = scene.GetCamera().GenerateRayTime(timeSample);
+		// The same for the wavelength of the dispersion: the merges mix the
+		// light paths of the pass
+		const float wavelength = PathInfo::Wavelength(rndGen->floatValue());
 
 		//----------------------------------------------------------------------
 		// Trace all light paths
@@ -138,7 +141,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 					&lensPoints[samplerIndex]))
 				continue;
 
-			if (!TraceLightPath(time, sampler, camera, //lensPoints[samplerIndex],
+			if (!TraceLightPath(time, wavelength, sampler, camera, //lensPoints[samplerIndex],
 					lightPathsVertices[samplerIndex], samplesResults[samplerIndex]))
 				continue;
 		}
@@ -171,6 +174,8 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 
 			eyeVertex.bsdf.hitPoint.fixedDir = -eyeRay.d;
 			eyeVertex.throughput = Spectrum(1.f);
+			eyeVertex.wavelength = wavelength;
+			eyeVertex.dispersionTinted = false;
 			float cameraPdfW;
 			scene.GetCamera().GetPDF(eyeRay, 0.f, eyeSampleResult.filmX, eyeSampleResult.filmY, &cameraPdfW, nullptr);
 			eyeVertex.dVCM = MIS(1.f / cameraPdfW);
@@ -217,6 +222,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				eyeVertex.throughput *= connectionThroughput;
 
 				// Something was hit
+				eyeVertex.SetDispersion();
 				if (eyeSampleResult.firstPathVertex) {
 					eyeSampleResult.alpha = 1.f;
 					eyeSampleResult.depth = eyeRayHit.t;

@@ -33,7 +33,9 @@ using namespace slg;
 //    for a given direction (a BSSRDF, not a BSDF), so Evaluate() and the light
 //    sampling see the coating only.
 //  HITPOINT_SSS_EXIT: the exit point of a walk, a Lambertian transmission
-//    (albedo 1) out of the object, as Cycles.
+//    (albedo 1) out of the object, as Cycles. The walk reaches it with the
+//    probability of the transmittance of the coating's interface: the rest is
+//    reflected back into the medium (SSSWalk_InternalReflection()).
 //  HITPOINT_SSS_SURFACE (everything else): the coating over a Lambertian base
 //    of albedo color with the reciprocal albedo scaling of Glossy2.
 // The coating is the Glossy2 one: GGX (alpha = roughness^2) with the Schlick
@@ -70,10 +72,12 @@ void SubsurfaceMaterial::GetReflection(const HitPoint &hitPoint, float *alpha, f
 }
 
 void SubsurfaceMaterial::GetSubsurfaceWalkParams(const HitPoint &hitPoint, Spectrum *col,
-		Spectrum *rad, float *g) const {
+		Spectrum *rad, float *g, float *eta) const {
 	*col = color->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	*rad = (radius->GetSpectrumValue(hitPoint) * scale->GetFloatValue(hitPoint)).Clamp(0.f, INFINITY);
 	*g = Clamp(anisotropy->GetFloatValue(hitPoint), -.9f, .9f);
+	// The IOR of the coating (none at 1 or below)
+	*eta = Max(ior->GetFloatValue(hitPoint), 1.f);
 }
 
 namespace {

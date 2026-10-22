@@ -106,6 +106,9 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	// Update last path vertex information
 	pathInfo->lastBSDFEvent = event;
 
+	// The path has the colour of its wavelength after a dispersive vertex
+	pathInfo->dispersionTinted = pathInfo->dispersionTinted || (event & DISPERSED);
+
 	//--------------------------------------------------------------------------
 	// EyePathInfo::AddVertex()
 	//--------------------------------------------------------------------------

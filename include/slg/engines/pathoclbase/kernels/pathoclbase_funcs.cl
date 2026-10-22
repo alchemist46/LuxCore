@@ -113,6 +113,10 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 	const uint eyeSampleSize = taskConfig->pathTracer.eyeSampleSize;
 	const float timeSample = Sampler_GetSample(taskConfig, IDX_EYE_TIME(eyeSampleSize) SAMPLER_PARAM);
 
+	// One wavelength for the dispersion of the whole path (PathInfo::Wavelength())
+	pathInfo->wavelength = 380.f + 400.f * Sampler_GetSample(taskConfig, IDX_WAVELENGTH(eyeSampleSize) SAMPLER_PARAM);
+	pathInfo->dispersionTinted = 0;
+
 	const float dofSampleX = Sampler_GetSample(taskConfig, IDX_DOF_X(eyeSampleSize) SAMPLER_PARAM);
 	const float dofSampleY = Sampler_GetSample(taskConfig, IDX_DOF_Y(eyeSampleSize) SAMPLER_PARAM);
 

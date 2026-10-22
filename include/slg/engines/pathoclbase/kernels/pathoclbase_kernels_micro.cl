@@ -88,7 +88,7 @@ OPENCL_FORCE_INLINE void AdvancePaths_SubsurfaceWalkRay(__global GPUTaskSSSWalk 
 
 	VSTORE3F(walk->P, &ray->o.x);
 	VSTORE3F(walk->D, &ray->d.x);
-	ray->mint = (walk->bounce == 0) ? MachineEpsilon_E_Float3(walk->P) : 0.f;
+	ray->mint = ((walk->bounce == 0) || walk->fromSurface) ? MachineEpsilon_E_Float3(walk->P) : 0.f;
 	ray->maxt = walk->tmax;
 	ray->flags = RAY_FLAGS_NONE;
 }
@@ -104,9 +104,9 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 	__global const HitPoint *hitPoint = &bsdf->hitPoint;
 
 	float3 color, radius;
-	float anisotropy;
+	float anisotropy, eta;
 	if (material->type == OPENPBR)
-		OpenPBRMaterial_GetWalkParams(material, hitPoint, &color, &radius, &anisotropy TEXTURES_PARAM);
+		OpenPBRMaterial_GetWalkParams(material, hitPoint, &color, &radius, &anisotropy, &eta TEXTURES_PARAM);
 	else {
 		color = Spectrum_Clamp(Texture_GetSpectrumValue(material->subsurface.colorTexIndex,
 				hitPoint TEXTURES_PARAM));
@@ -114,6 +114,8 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 				Texture_GetFloatValue(material->subsurface.scaleTexIndex, hitPoint TEXTURES_PARAM);
 		anisotropy = clamp(Texture_GetFloatValue(material->subsurface.anisotropyTexIndex,
 				hitPoint TEXTURES_PARAM), -.9f, .9f);
+		// The IOR of the coating (none at 1 or below, see subsurface.cpp)
+		eta = fmax(Texture_GetFloatValue(material->subsurface.iorTexIndex, hitPoint TEXTURES_PARAM), 1.f);
 	}
 
 	// The outward normals at the entry: the side of the eye
@@ -130,7 +132,7 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 	SSSWalk walk;
 	if (!SSSWalk_Init(&walk, BSDF_GetRayOrigin(bsdf, sampledDir), shadeN, sampledDir,
 			color, MAKE_FLOAT3(fmax(radius.x, 0.f), fmax(radius.y, 0.f), fmax(radius.z, 0.f)),
-			anisotropy))
+			anisotropy, eta))
 		return false;
 
 	// Decorrelated from the other users of the same sample
@@ -150,8 +152,9 @@ OPENCL_FORCE_INLINE bool AdvancePaths_StartSubsurfaceWalk(__global const BSDF *b
 }
 
 // The trace result of a step of the walk: the next state is MK_RT_SSS_WALK
-// (the next step), MK_RT_NEXT_VERTEX with *exitHit (the exit point is the next
-// vertex) or MK_SPLAT_SAMPLE (the walk ended inside)
+// (the next step), MK_RT_NEXT_VERTEX with *exitHit (the walk reached the
+// surface: the exit vertex applies the internal reflection, then the weight
+// of the walk) or MK_SPLAT_SAMPLE (the walk ended inside)
 OPENCL_FORCE_INLINE PathState AdvancePaths_SubsurfaceWalkStep(__global GPUTaskSSSWalk *taskWalk,
 		__global GPUTaskState *taskState, __global Ray *ray, __global const RayHit *rayHit,
 		bool *exitHit) {
@@ -174,7 +177,10 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_SubsurfaceWalkStep(__global GPUTaskSS
 	}
 
 	SSSWalk walk = taskWalk->walk;
-	const int result = SSSWalk_FinishStep(&walk, hitObject, rayHit->t);
+	Seed seed = taskWalk->seed;
+	const float uSurvive = Rnd_FloatValue(&seed);
+	taskWalk->seed = seed;
+	const int result = SSSWalk_FinishStep(&walk, hitObject, rayHit->t, uSurvive);
 	if (result == SSSWALK_CONTINUE) {
 		AdvancePaths_SubsurfaceWalkRay(taskWalk, &walk, ray);
 		return MK_RT_SSS_WALK;
@@ -184,7 +190,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_SubsurfaceWalkStep(__global GPUTaskSS
 		if (!(weightSum > 0.f) || !(weightSum < INFINITY))
 			return MK_SPLAT_SAMPLE;
 
-		VSTORE3F(weight * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+		taskWalk->walk = walk;
 		*exitHit = true;
 		return MK_RT_NEXT_VERTEX;
 	} else
@@ -972,7 +978,22 @@ __kernel void AdvancePaths_MK_RT(
 			BSDF_Init(initBsdf, false, &rays[gid], &rayHits[gid], passThroughEvent,
 					&pathInfo->volume MATERIALS_PARAM);
 			initBsdf->hitPoint.subsurface = HITPOINT_SSS_EXIT;
-			continueToTrace = false;
+
+			// Reflected back into the medium by the boundary (the walk goes
+			// on), or out with the weight of the walk
+			__global GPUTaskSSSWalk *taskWalk = &tasksSSSWalk[gid];
+			SSSWalk walk = taskWalk->walk;
+			Seed seed = taskWalk->seed;
+			const float uReflect = Rnd_FloatValue(&seed);
+			taskWalk->seed = seed;
+			if (SSSWalk_InternalReflection(&walk, VLOAD3F(&initBsdf->hitPoint.geometryN.x), uReflect)) {
+				AdvancePaths_SubsurfaceWalkRay(taskWalk, &walk, &rays[gid]);
+				pathState = MK_RT_SSS_WALK;
+				continueToTrace = true;
+			} else {
+				VSTORE3F(walk.throughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
+				continueToTrace = false;
+			}
 		} else
 #endif
 		{
@@ -1012,6 +1033,8 @@ __kernel void AdvancePaths_MK_RT(
 				// Path regularization: after the first non-specular bounce the
 				// GGX lobes of the vertex get a roughness floor and its delta
 				// lobes become rough (see HitPoint::regularization)
+				bsdf->hitPoint.wavelength = pathInfo->wavelength;
+				bsdf->hitPoint.dispersionTinted = pathInfo->dispersionTinted;
 				bsdf->hitPoint.regularization = ((taskConfig->pathTracer.regularization > 0.f) && pathInfo->anyNonSpecularBounce) ?
 					taskConfig->pathTracer.regularization : 0.f;
 				BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf

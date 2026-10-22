@@ -158,8 +158,10 @@ void HashGrid::Process(const BiDirVMCPURenderThread *thread,
 			eyeVertex.dVM * BiDirVMCPURenderThread::MIS(eyeBsdfRevPdfW);
 		const float misWeight = 1.f / (weightLight + 1.f + weightCamera);
 
-		radiance[lightVertex->lightID] += (thread->vmNormalization * misWeight) *
-				eyeVertex.throughput * eyeBsdfEval * lightVertex->throughput;
+		// (the merge evaluates only the BSDF of the eye vertex)
+		radiance[lightVertex->lightID] += thread->DispersionOnce(eyeVertex, eyeEvent, *lightVertex, NONE,
+				(thread->vmNormalization * misWeight) *
+				eyeVertex.throughput * eyeBsdfEval * lightVertex->throughput);
 
 		// Statistics
 		/*if (eyeVertex.bsdf.IsVolume()) {

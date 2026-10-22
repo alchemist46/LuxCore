@@ -171,9 +171,15 @@ OPENCL_FORCE_INLINE float3 DisneyMaterial_EvaluateLayers(const DisneyLobes *p,
 	float3 specM = SchlickBSDF_CoatingF(p->color, p->ax, p->ay, eyeDir, lightDir);
 	float3 specD = SchlickBSDF_CoatingF(p->F0d, p->ax, p->ay, eyeDir, lightDir);
 	if (p->filmThickness > 0.f) {
-		const float3 filmColor = CalcFilmColor(eyeDir, p->filmThickness, p->filmIor);
-		specM = mix(specM, specM * filmColor, p->filmAmount);
-		specD = mix(specD, specD * filmColor, p->filmAmount);
+		// The film over the dielectric and over the metal (see disney.cpp)
+		const float sqrtF0d = sqrt(clamp((p->F0d.x + p->F0d.y + p->F0d.z) / 3.f, 0.f, .99f));
+		const float iorD = (1.f + sqrtF0d) / (1.f - sqrtF0d);
+		float3 etaM, kM;
+		ThinFilm_ConductorIOR(WorkingColorSpace_ToRec709(p->color), WHITE, &etaM, &kM);
+		const float3 filmM = CalcFilmColorConductor(eyeDir, p->filmThickness, p->filmIor, 1.f, etaM, kM);
+		const float3 filmD = CalcFilmColor(eyeDir, p->filmThickness, p->filmIor, 1.f, iorD);
+		specM = mix(specM, specM * filmM, p->filmAmount);
+		specD = mix(specD, specD * filmD, p->filmAmount);
 	}
 
 	// The diffuse lobe under the dielectric specular

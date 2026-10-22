@@ -51,11 +51,28 @@ public:
 
 	bool UseRR(const u_int rrDepth) const;
 
+	// The wavelength of the dispersion (see BSDFEvent DISPERSED) to the hit
+	// point of a new vertex
+	void SetDispersion(HitPoint &hitPoint) const {
+		hitPoint.wavelength = wavelength;
+		hitPoint.dispersionTinted = dispersionTinted;
+	}
+
 	PathDepthInfo depth;
 	PathVolumeInfo volume;
 
 	// Last path vertex information
 	BSDFEvent lastBSDFEvent;
+
+	// The wavelength (nm) of the dispersion of all the vertices of the path
+	// (0: none, the materials pick one per vertex) and whether the path has
+	// its colour (after the first dispersive refraction)
+	float wavelength;
+	bool dispersionTinted;
+
+	// The wavelength of the random number u (uniform in the visible range,
+	// as the colours of the dispersive materials)
+	static float Wavelength(const float u) { return 380.f + 400.f * u; }
 
 	static bool IsNearlySpecular(const BSDFEvent event, const float glossiness, const float glossinessThreshold);
 	static bool CanBeNearlySpecular(const BSDF &bsdf, const float glossinessThreshold);

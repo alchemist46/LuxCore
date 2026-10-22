@@ -29,6 +29,8 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	hitPoint->passThroughEvent = passThroughEvnt;
 	hitPoint->regularization = 0.f;
 	hitPoint->subsurface = HITPOINT_SSS_SURFACE;
+	hitPoint->wavelength = 0.f;
+	hitPoint->dispersionTinted = 0;
 
 	VSTORE3F(pnt, &hitPoint->p.x);
 	VSTORE3F(fixedDir, &hitPoint->fixedDir.x);
@@ -103,6 +105,8 @@ OPENCL_FORCE_INLINE void HitPoint_InitDefault(__global HitPoint *hitPoint) {
 	hitPoint->exteriorIorTexIndex = NULL_INDEX;
 	hitPoint->regularization = 0.f;
 	hitPoint->subsurface = HITPOINT_SSS_SURFACE;
+	hitPoint->wavelength = 0.f;
+	hitPoint->dispersionTinted = 0;
 }
 
 OPENCL_FORCE_INLINE void HitPoint_GetFrame(__global const HitPoint *hitPoint, Frame *frame) {

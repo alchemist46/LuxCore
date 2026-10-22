@@ -129,10 +129,15 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.subsurfaceMode = hitPoint.subsurface;
 	b.regularization = hitPoint.regularization;
 	b.wavelengthU = hitPoint.passThroughEvent;
+	b.wavelength = hitPoint.wavelength;
+	b.dispersionTinted = hitPoint.dispersionTinted;
 	b.lumWeights = slg::ocl::ToFloat3(workingColorSpace.GetLuminanceWeights());
 	const float (&m)[3][3] = workingColorSpace.GetFromRec709Matrix();
 	for (u_int i = 0; i < 3; ++i)
 		b.fromRec709[i] = slg::ocl::make_float3(m[i][0], m[i][1], m[i][2]);
+	const float (&mt)[3][3] = workingColorSpace.GetToRec709Matrix();
+	for (u_int i = 0; i < 3; ++i)
+		b.toRec709[i] = slg::ocl::make_float3(mt[i][0], mt[i][1], mt[i][2]);
 
 	slg::ocl::OpenPBR_Init(&b);
 }
@@ -301,8 +306,9 @@ Spectrum OpenPBRMaterial::Evaluate(const HitPoint &hitPoint,
 	slg::ocl::OpenPBRBSDF b;
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 
-	return ToSpectrum(slg::ocl::OpenPBR_Evaluate(&b, slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
-			hitPoint.fromLight, event, directPdfW, reversePdfW));
+	return ToSpectrum(slg::ocl::OpenPBR_Disperse(&b, slg::ocl::OpenPBR_Evaluate(&b,
+			slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
+			hitPoint.fromLight, event, directPdfW, reversePdfW), event));
 }
 
 Spectrum OpenPBRMaterial::Sample(const HitPoint &hitPoint,
@@ -313,8 +319,9 @@ Spectrum OpenPBRMaterial::Sample(const HitPoint &hitPoint,
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 
 	slg::ocl::float3 sampledDir;
-	const Spectrum result = ToSpectrum(slg::ocl::OpenPBR_Sample(&b, slg::ocl::ToFloat3(localFixedDir),
-			u0, u1, passThroughEvent, hitPoint.fromLight, &sampledDir, pdfW, event));
+	const Spectrum result = ToSpectrum(slg::ocl::OpenPBR_Disperse(&b, slg::ocl::OpenPBR_Sample(&b,
+			slg::ocl::ToFloat3(localFixedDir), u0, u1, passThroughEvent, hitPoint.fromLight,
+			&sampledDir, pdfW, event), event));
 	if (result.Black())
 		return Spectrum();
 
@@ -348,11 +355,14 @@ bool OpenPBRMaterial::GetRefractionIors(const HitPoint &hitPoint, float *nc, flo
 }
 
 void OpenPBRMaterial::GetSubsurfaceWalkParams(const HitPoint &hitPoint, Spectrum *color,
-		Spectrum *radius, float *anisotropy) const {
+		Spectrum *radius, float *anisotropy, float *eta) const {
 	*color = GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint).Clamp(0.f, 1.f);
 	*radius = (GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint) *
 			GetFloat(slg::ocl::OPENPBR_SUBSURFACE_RADIUS, hitPoint)).Clamp(0.f, INFINITY);
 	*anisotropy = Clamp(GetFloat(slg::ocl::OPENPBR_SUBSURFACE_ANISOTROPY, hitPoint), -.9f, .9f);
+	*eta = slg::ocl::OpenPBR_WalkEta(GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint),
+			GetFloat(slg::ocl::OPENPBR_SPECULAR_WEIGHT, hitPoint), ExtractExteriorIors(hitPoint, nullptr),
+			GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint), GetFloat(slg::ocl::OPENPBR_COAT_IOR, hitPoint));
 }
 
 void OpenPBRMaterial::AddReferencedTextures(std::unordered_set<const Texture *> &referencedTexs) const {

@@ -127,6 +127,13 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_EvaluateRough(__global const HitPo
 		result = (fabs(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
 			kt * (1.f - F) * RoughGlassMaterial_MSScale(multiscattering, u, v, eyeDir, ntc);
+		if (localFilmThickness > 0.f) {
+			// The film of the microfacet, seen from the light side (see
+			// roughglass.cpp)
+			const float3 filmColor = CalcFilmColor(MAKE_FLOAT3(0.f, 0.f, cosThetaOH), localFilmThickness, localFilmIor,
+					entering ? nc : nt, entering ? nt : nc);
+			result *= ThinFilm_TransmissionScale(F, filmColor);
+		}
 
 		*event = GLOSSY | TRANSMIT;
 	} else {
@@ -157,8 +164,12 @@ OPENCL_FORCE_INLINE float3 RoughGlassMaterial_EvaluateRough(__global const HitPo
 
 		result = (D * G / (4.f * cosThetaI)) * kr * F * RoughGlassMaterial_MSScale(multiscattering, u, v, eyeDir, ntc);
 		
-		if (localFilmThickness > 0.f)
-			result *= CalcFilmColor(eyeDir, localFilmThickness, localFilmIor);
+		if (localFilmThickness > 0.f) {
+			// The film of the microfacet, where F is evaluated too
+			const bool outside = (CosTheta(eyeDir) > 0.f);
+			result *= CalcFilmColor(MAKE_FLOAT3(0.f, 0.f, cosThetaH), localFilmThickness, localFilmIor,
+					outside ? nc : nt, outside ? nt : nc);
+		}
 
 		*event = GLOSSY | REFLECT;
 	}

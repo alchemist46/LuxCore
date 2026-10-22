@@ -81,6 +81,11 @@ typedef struct HitPoint_t {
 	// Random-walk subsurface scattering (see SubsurfaceMaterial): the role of
 	// the vertex, HITPOINT_SSS_SURFACE unless the eye path tracer sets it
 	int subsurface;
+	// The dispersion (see BSDFEvent DISPERSED): the wavelength (nm) of the
+	// path, one for all its vertices, or 0 (the material picks one per vertex)
+	// when the engine has none, and whether the path already has its colour
+	float wavelength;
+	bool dispersionTinted;
 
 	// Used when hitting a surface
 	//

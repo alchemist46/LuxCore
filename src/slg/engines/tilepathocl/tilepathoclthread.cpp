@@ -125,12 +125,14 @@ void TilePathOCLRenderThread::RenderTileWork(const TileWork &tileWork,
 	}
 
 	// A step of a subsurface random walk takes an iteration too, and a walk can
-	// take up to SSS_MAX_BOUNCES of them: the kernels run until every task is
-	// done, checked from the path states every few iterations
+	// take up to SSS_MAX_BOUNCES (65536, subsurface_funcs.cl) of them, a few
+	// hundred in practice (the Russian roulette of the long walks): the kernels
+	// run until every task is done, checked from the path states every few
+	// iterations
 	if (engine->compiledScene->hasSubsurface) {
 		vector<slg::ocl::pathoclbase::PathState> pathStates(engine->taskCount);
 		// The walk steps of the deepest path that can still be in flight
-		const u_int maxExtraIterations = engine->pathTracer.maxPathDepth.depth * 256;
+		const u_int maxExtraIterations = engine->pathTracer.maxPathDepth.depth * 65536;
 		const u_int checkIterations = 16;
 		for (u_int extraIterations = 0; extraIterations < maxExtraIterations; extraIterations += checkIterations) {
 			intersectionDevice.EnqueueReadBuffer(pathStatesBuff, CL_TRUE,

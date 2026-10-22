@@ -36,7 +36,7 @@ namespace slg {
 // Bidirectional path tracing CPU render engine
 //------------------------------------------------------------------------------
 
-typedef struct {
+typedef struct PathVertexVM {
 	BSDF bsdf;
 	BSDFEvent bsdfEvent;
 	luxrays::Spectrum throughput;
@@ -50,6 +50,18 @@ typedef struct {
 
 	// Volume rendering information
 	PathVolumeInfo volInfo;
+
+	// The dispersion (see BSDFEvent DISPERSED): the wavelength of the sample,
+	// shared by its eye and light paths, and whether the path up to this
+	// vertex has its colour
+	float wavelength;
+	bool dispersionTinted;
+
+	// To the hit point of a new vertex
+	void SetDispersion() {
+		bsdf.hitPoint.wavelength = wavelength;
+		bsdf.hitPoint.dispersionTinted = dispersionTinted;
+	}
 } PathVertexVM;
 
 class BiDirCPURenderEngine;
@@ -63,8 +75,12 @@ public:
 
 protected:
 	// Used to offset Sampler data
-	static const u_int sampleBootSize = 13;
-	static const u_int sampleBootSizeVM = 12; // I'm using the same time for all rays in a single pass (so I need one less random variable)
+	// The 14th sample: the wavelength of the dispersion
+	static const u_int sampleBootSize = 14;
+	// BiDirVM uses the same time and wavelength for all rays in a single pass
+	// (12 and 13 are unused there), with the same light path offsets as
+	// TraceLightPath()
+	static const u_int sampleBootSizeVM = sampleBootSize;
 	static const u_int sampleLightStepSize = 5;
 	static const u_int sampleEyeStepSize = 10;
 
@@ -103,7 +119,14 @@ protected:
 		const PathVertexVM &BiDirVertex, const float u0,
 		const luxrays::Point &lensPoint, std::vector<SampleResult> &sampleResults) const;
 
-	bool TraceLightPath(const float time,
+	// The radiance of a connection of eyeVertex and lightVertex (the events of
+	// the BSDF evaluations of its ends) with the colour of the dispersion at
+	// most once
+	luxrays::Spectrum DispersionOnce(const PathVertexVM &eyeVertex, const BSDFEvent eyeEvent,
+		const PathVertexVM &lightVertex, const BSDFEvent lightEvent,
+		const luxrays::Spectrum &radiance) const;
+
+	bool TraceLightPath(const float time, const float wavelength,
 		const SamplerUPtr& sampler,
 		CameraConstRef camera,
 		std::vector<PathVertexVM> &lightPathVertices,

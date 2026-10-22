@@ -52,27 +52,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: white furnace with a rough glass sphere, BIDIRCPU against PATHCPU.
 - Notes: not the interface's compensation. The `fromLight` branches of `Sample()` have not been derived against the adjoint BSDF. Leaving the Russian roulette out of the MIS weights (2026-10-22) did not change it: 0.969/0.974/0.961 for rough glass, OpenPBR glass and half glass at alpha 0.5 (256 spp).
 
-### Dispersion draws one wavelength per vertex
-- Found: 2026-10-19
-- Area: material
-- Problem: a photon keeps its wavelength along the path; here every vertex draws its own, so a vertex is the average of its wavelengths. Exact for one interface, not along a chain of interfaces. Smooth dispersive glass passes the furnace (0.997); OpenPBR rough glass at roughness 0.3 reads 1.5-2% low near the total internal reflection. The glass material does the same (its -1.3%).
-- Reproduce: furnace with dispersive rough glass at roughness 0.3.
-- Notes: tinting the reflection too multiplies independent colours (relative std 0.07 -> 0.50). The fix is a wavelength per path: a sampler dimension kept in the path state of every engine and passed to the materials through the hit point, applied once at the first dispersive vertex.
-
-### OpenPBR subsurface is up to 10% brighter than Cycles
-- Found: 2026-10-19
-- Area: material
-- Problem: skin-like color (0.8, 0.5, 0.4), radius (1, 0.2, 0.1) x 0.2 reads 1.02/1.10/1.10 of Cycles' Principled BSDF. Without the specular layer 1.02-1.05; a white medium 1.003.
-- Reproduce: `tests/test_openpbr_principled.py`-style comparison against Cycles.
-- Notes: Cycles' walk exits through the rough dielectric (Fresnel, some light goes back into the medium), OpenPBR's exits diffusely.
-
-### OpenPBR thin film differs from Cycles
-- Found: 2026-10-19
-- Area: material
-- Problem: the thin film is `CalcFilmColor()`, LuxCore's old model, not Cycles' (Belcour & Barla 2017, with the conductor phase shift). 400 nm on a dark dielectric reads 1.22/0.87/0.89 of Cycles; on a metal the interference color is another one (magenta against yellow-green).
-- Reproduce: OpenPBR thin film at 400 nm, compare with Cycles.
-- Notes: implementing the Belcour & Barla model would fix it.
-
 ### Caustics seen through a specular surface are missing with light tracing
 - Found: 2026-10-16
 - Area: engine (light tracing)
@@ -114,3 +93,17 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: in the white furnace the pixels on the outline of the sphere read 0.6-0.7 with BIDIRCPU, whatever the material (matte too), and the image mean is 0.973 against 0.9999 with PATHCPU; the inner disk is right (0.999). The "mu < .2" band of `tests/furnace/furnace.py` shows it (0.40 for matte).
 - Reproduce: a white matte sphere under a constant white environment, orthographic camera, 48x48, no pixel filter, BIDIRCPU 512 spp: the first and the last pixel on the sphere of the centre row and column read 0.6.
 - Notes: in the build before the camera row fix (b22905df5) the dark ring was one row off (row 0 on top, the third last row at the bottom); now it is symmetric. Suspects: the light-traced connections to the camera at grazing angles. Not investigated.
+
+### TILEPATHOCL may wait long for the subsurface walks
+- Found: 2026-10-22
+- Area: engine (TILEPATHOCL)
+- Problem (suspected, not measured): a random walk now goes on past 256 bounces with a Russian roulette, up to 65536 (`subsurface_funcs.cl`), so in a dense, nearly white medium the longest walk of a tile pass can take thousands of iterations, and TILEPATHOCL runs the kernels until every task of the pass is done. The PATHOCL subsurface halt bias (above) may grow as well.
+- Reproduce: a white subsurface sphere with a radius of 0.01 of its size, TILEPATHOCL: the time per pass against the build before.
+- Notes: a walk reaches n bounces with the probability 256 / n past 256. The hard limit of 256 lost 13% of a white sphere of radius 100 mean free paths, 4096 lost 2%. Not measured on the GPU (it was down).
+
+### GPU unit test references are stale after the 2026-10-22 material fixes
+- Found: 2026-10-22
+- Area: tests
+- Problem: the per-path dispersion wavelength, the subsurface internal reflection and walk roulette, and the OpenPBR thin film change the images of `SubsurfaceMaterial`, `OpenPBRSubsurfaceMaterial`, `OpenPBRCoatMaterial` and `SceneEditRendering` (and maybe others). The CPU references were re-rendered with the fix; the PATHOCL and TILEPATHOCL ones were not, because the GPU was down (hipMalloc returned 719).
+- Reproduce: `pyunittests/unittests.py --filter OCL` on a working GPU.
+- Notes: once the GPU is back, run the OCL tests, check that only these tests fail and by a similar margin as on the CPU (3.6%, 1.7%, 4.2%, 0.03% mean), then re-render them with `--update-references`. The GPU side of the fixes is untested as well.

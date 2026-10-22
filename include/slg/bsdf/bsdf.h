@@ -171,7 +171,7 @@ public:
 	// Material::HasDiffuseBesideSubsurfaceWalk()
 	bool HasDiffuseBesideSubsurfaceWalk() const;
 	void GetSubsurfaceWalkParams(luxrays::Spectrum *color, luxrays::Spectrum *radius,
-		float *anisotropy) const;
+		float *anisotropy, float *eta) const;
 
 	luxrays::Spectrum GetPassThroughTransparency(const bool backTracing) const;
 	const luxrays::Spectrum &GetPassThroughShadowTransparency() const { return material->GetPassThroughShadowTransparency(); }

@@ -70,6 +70,10 @@ public:
 	TexRef GetFilmThickness() const { return filmThickness; }
 	TexRef GetFilmIOR() const { return filmIor; }
 
+	// The colour of the dispersion of the wavelength (nm) in the working colour
+	// space: its average over the visible range (380-780 nm) is white
+	static luxrays::Spectrum WaveLengthColor(const float waveLength, const WorkingColorSpace &workingColorSpace);
+
 	static luxrays::Spectrum EvalSpecularReflection(const HitPoint &hitPoint,
 			const luxrays::Vector &localFixedDir,
 			const luxrays::Spectrum &kr, const float nc, const float nt,
@@ -77,10 +81,10 @@ public:
 			const float localFilmThickness, const float localFilmIor,
 			const WorkingColorSpace &workingColorSpace);
 	static luxrays::Spectrum EvalSpecularTransmission(const HitPoint &hitPoint,
-			const luxrays::Vector &localFixedDir, const float u0,
-			const luxrays::Spectrum &kt,
-			const float nc, const float nt, const float cauchyB,
+			const luxrays::Vector &localFixedDir, const luxrays::Spectrum &kt,
+			const float nc, const float nt,
 			luxrays::Vector *localSampledDir,
+			const float localFilmThickness, const float localFilmIor,
 			const WorkingColorSpace &workingColorSpace);
 
 private:

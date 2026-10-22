@@ -139,38 +139,26 @@ OPENCL_FORCE_INLINE float3 GlassMaterial_EvalSpecularReflection(__global const H
 	const float3 result = kr * FresnelCauchy_Evaluate(ntc, costheta);
 	
 	if (localFilmThickness > 0.f) {
-		const float3 filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+		// The film is on the exterior face of the interface
+		const bool entering = (costheta > 0.f);
+		const float3 filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor,
+				entering ? nc : nt, entering ? nt : nc);
 		return result * filmColor;
 	}
 	return result;
 }
 
 OPENCL_FORCE_INLINE float3 GlassMaterial_EvalSpecularTransmission(__global const HitPoint *hitPoint,
-		const float3 localFixedDir, const float u0,
-		const float3 kt, const float nc, const float nt, const float cauchyB,
-		float3 *sampledDir) {
+		const float3 localFixedDir, const float3 kt, const float nc, const float nt,
+		float3 *sampledDir, const float localFilmThickness, const float localFilmIor) {
 	if (Spectrum_IsBlack(kt))
 		return BLACK;
 
 	// Compute transmitted ray direction
-	float3 lkt;
-	float lnt;
-	if (cauchyB > 0.f) {
-		// Select the wavelength to sample
-		const float waveLength = mix(380.f, 780.f, u0);
-
-		lnt = GlassMaterial_WaveLength2IOR(waveLength, nt, cauchyB);
-
-		lkt = kt * WorkingColorSpace_FromRec709(GlassMaterial_WaveLength2RGB(waveLength));
-	} else {
-		lnt = nt;
-		lkt = kt;
-	}
-
-	const float ntc = lnt / nc;
+	const float ntc = nt / nc;
 	const float costheta = CosTheta(localFixedDir);
 	const bool entering = (costheta > 0.f);
-	const float eta = entering ? (nc / lnt) : ntc;
+	const float eta = entering ? (nc / nt) : ntc;
 	const float eta2 = eta * eta;
 	const float sini2 = SinTheta2(localFixedDir);
 	const float sint2 = eta2 * sini2;
@@ -190,7 +178,15 @@ OPENCL_FORCE_INLINE float3 GlassMaterial_EvalSpecularTransmission(__global const
 //		ce = (1.f - FresnelTexture::CauchyEvaluate(ntc, costheta)) * fabsf(localFixedDir.z / absCosSampledDir);
 //	}
 
-	return lkt * ce;
+	if (localFilmThickness > 0.f) {
+		// A lossless film transmits what it does not reflect (the same from
+		// both sides)
+		const float3 filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor,
+				entering ? nc : nt, entering ? nt : nc);
+		return kt * ce * ThinFilm_TransmissionScale(FresnelCauchy_Evaluate(ntc, costheta), filmColor);
+	}
+
+	return kt * ce;
 }
 
 // Path regularization (HitPoint::regularization > 0): the glass is a rough
@@ -276,18 +272,31 @@ OPENCL_FORCE_INLINE void GlassMaterial_Sample(__global const Material* restrict 
 
 	const float cauchyB = (material->glass.cauchyBTex != NULL_INDEX) ? Texture_GetFloatValue(material->glass.cauchyBTex, hitPoint TEXTURES_PARAM) : -1.f;
 
-	float3 transLocalSampledDir; 
-	const float3 trans = GlassMaterial_EvalSpecularTransmission(hitPoint, fixedDir, u0,
-			kt, nc, nt, cauchyB, &transLocalSampledDir);
-	
 	const float localFilmThickness = (material->glass.filmThicknessTexIndex != NULL_INDEX) 
 									 ? Texture_GetFloatValue(material->glass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && material->glass.filmIorTexIndex != NULL_INDEX) 
 							   ? Texture_GetFloatValue(material->glass.filmIorTexIndex, hitPoint TEXTURES_PARAM) : 1.f;
-	
+
+	// The dispersion (see GlassMaterial::Sample()): the IOR at the wavelength
+	// of the path for the reflection and the refraction alike, and the colour
+	// of the wavelength on both, once per path
+	const bool dispersed = (cauchyB > 0.f);
+	float lnt = nt;
+	float3 dispersionColor = WHITE;
+	if (dispersed) {
+		const float waveLength = (hitPoint->wavelength > 0.f) ? hitPoint->wavelength : mix(380.f, 780.f, u0);
+		lnt = GlassMaterial_WaveLength2IOR(waveLength, nt, cauchyB);
+		if (!hitPoint->dispersionTinted)
+			dispersionColor = WorkingColorSpace_FromRec709(GlassMaterial_WaveLength2RGB(waveLength));
+	}
+
+	float3 transLocalSampledDir;
+	const float3 trans = GlassMaterial_EvalSpecularTransmission(hitPoint, fixedDir,
+			kt * dispersionColor, nc, lnt, &transLocalSampledDir, localFilmThickness, localFilmIor);
+
 	float3 reflLocalSampledDir;
 	const float3 refl = GlassMaterial_EvalSpecularReflection(hitPoint, fixedDir,
-			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
+			kr * dispersionColor, nc, lnt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
 
 	// Decide to transmit or reflect
 	float threshold;
@@ -320,7 +329,7 @@ OPENCL_FORCE_INLINE void GlassMaterial_Sample(__global const Material* restrict 
 
 		sampledDir = transLocalSampledDir;
 
-		event = SPECULAR | TRANSMIT;
+		event = SPECULAR | TRANSMIT | (dispersed ? DISPERSED : NONE);
 		pdfW = threshold;
 	
 		result = trans;
@@ -329,7 +338,7 @@ OPENCL_FORCE_INLINE void GlassMaterial_Sample(__global const Material* restrict 
 
 		sampledDir = reflLocalSampledDir;
 
-		event = SPECULAR | REFLECT;
+		event = SPECULAR | REFLECT | (dispersed ? DISPERSED : NONE);
 		pdfW = 1.f - threshold;
 		
 		result = refl;

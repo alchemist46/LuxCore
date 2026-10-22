@@ -71,8 +71,12 @@
 //                (transmission.dispersionscale, dispersionabbenumber) moves
 //                the IOR of the interface to the wavelength of the vertex,
 //                which tints the refraction
-//  The thin film (thinfilm.weight, thickness in micrometres, ior) tints the
-//  base specular and the metal with CalcFilmColor().
+//  The thin film (thinfilm.weight, thickness in micrometres, ior) is the
+//  Airy reflectance of CalcFilmColor() over the dielectric (the base
+//  specular and the translucent interface, which transmits what the film
+//  doesn't reflect) and of CalcFilmColorConductor() over the metal (its
+//  complex IOR from base.color and specular.color, Gulbrandsen 2014), at the
+//  microfacet; the diffuse below gets what the filmed specular leaves.
 //
 // Every GGX lobe is energy compensated (microfacet_energy_tables.cl), the
 // specular alphas are alpha = specular.roughness^2 split by
@@ -155,8 +159,13 @@ typedef struct {
 	// The path regularization of the hit point (HitPoint::regularization)
 	float regularization;
 	// A random number of the hit point (HitPoint::passThroughEvent): the
-	// wavelength of the dispersion
+	// wavelength of the dispersion without one of the path
 	float wavelengthU;
+	// The wavelength (nm) of the dispersion of the path, 0 for none, and
+	// whether the path already has its colour (HitPoint::wavelength,
+	// dispersionTinted)
+	float wavelength;
+	int dispersionTinted;
 
 	// Derived by OpenPBR_Init()
 	// base.weight base.color: the diffuse albedo and the F0 of the metal
@@ -174,8 +183,14 @@ typedef struct {
 	// wavelength of the dispersion), and the luminances of its reflection and
 	// transmission tints
 	float etaT, transYR, transYT;
-	// The colour of the wavelength of the dispersion (white without)
+	// The colour of the wavelength of the dispersion (white without) of the
+	// refraction, without a wavelength of the path
 	float3 dispersionColor;
+	// With a wavelength of the path: whether the dispersion is active (the
+	// BSDF depends on the wavelength), and the colour of the whole BSDF
+	// value, white if the path already has it (OpenPBR_Disperse())
+	int dispersed;
+	float3 dispersionTint;
 	// Whether the base specular lobes (metal, dielectric, translucent) and the
 	// coat are smooth enough to be delta lobes, and whether every lobe of the
 	// hit point is a delta (OpenPBR_SampleDelta())
@@ -188,6 +203,11 @@ typedef struct {
 	// The F82-tint Fresnel of the metal: F(mu) = F0 + (1 - F0) (1 - mu)^5 -
 	// b mu (1 - mu)^6, and its hemispherical average
 	float3 metalB, metalFavg;
+	// The thin film's IOR relative to the medium above the base (the
+	// exterior, or the coat where coated) and the complex IOR of the metal
+	// below it (Linear Rec.709)
+	float thinFilmEta;
+	float3 thinFilmMetalEta, thinFilmMetalK;
 
 #if defined(LUXRAYS_CPU_DEVICE)
 	// The luminance weights of the working colour space and the rows of the
@@ -195,6 +215,7 @@ typedef struct {
 	// color_funcs.cl)
 	float3 lumWeights;
 	float3 fromRec709[3];
+	float3 toRec709[3];
 #endif
 } OpenPBRBSDF;
 
@@ -206,16 +227,56 @@ typedef struct {
 #define OpenPBR_Y(b, c) fmax(0.f, Spectrum_Y(c))
 #endif
 
-// The thin film interference colour of the eye direction in the working
-// colour space
-OPENCL_FORCE_INLINE float3 OpenPBR_FilmColor(const OpenPBRBSDF *b, const float3 eyeDir) {
-	const float3 c = CalcFilmColor(eyeDir, 1000.f * b->thinFilmThickness, b->thinFilmIor);
+// The IOR of the base dielectric over the medium above it (the exterior, or
+// the coat where coated), specular.weight modulating its F0, as OpenPBR_Init():
+// the boundary of the subsurface walk
+OPENCL_FORCE_INLINE float OpenPBR_WalkEta(const float specularIor, const float specularWeight,
+		const float exteriorIor, const float coatWeight, const float coatIor) {
+	const float invExteriorIor = 1.f / exteriorIor;
+	const float ior = specularIor * (invExteriorIor + coatWeight * (1.f / coatIor - invExteriorIor));
+	const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
+	const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
+	const float sqrtF0 = sqrt(clamp(specularWeight * r0 * r0, 0.f, .99f));
+
+	return (1.f + sqrtF0) / (1.f - sqrtF0);
+}
+
+OPENCL_FORCE_INLINE bool OpenPBR_HasThinFilm(const OpenPBRBSDF *b) {
+	return (b->thinFilmWeight > 0.f) && (b->thinFilmThickness > 0.f);
+}
+
+// A film factor of CalcFilmColor*() in the working colour space, with
+// thinfilm.weight applied
+OPENCL_FORCE_INLINE float3 OpenPBR_FilmWeight(const OpenPBRBSDF *b, const float3 c) {
 #if defined(LUXRAYS_CPU_DEVICE)
 	// Rec.709 on the CPU: WorkingColorSpace_FromRec709() is the identity there
-	return MAKE_FLOAT3(dot(b->fromRec709[0], c), dot(b->fromRec709[1], c), dot(b->fromRec709[2], c));
+	const float3 w = MAKE_FLOAT3(dot(b->fromRec709[0], c), dot(b->fromRec709[1], c), dot(b->fromRec709[2], c));
 #else
-	return c;
+	const float3 w = c;
 #endif
+	return WHITE + b->thinFilmWeight * (w - WHITE);
+}
+
+// The thin film factor over a dielectric of relative IOR eta (the other side
+// over the side of the direction) for the direction at the cosine mu: the
+// film is on the outer face
+OPENCL_FORCE_INLINE float3 OpenPBR_FilmDielectric(const OpenPBRBSDF *b, const float mu, const float eta) {
+	if (!OpenPBR_HasThinFilm(b))
+		return WHITE;
+
+	const float n0 = (eta < 1.f) ? (1.f / eta) : 1.f;
+	const float n2 = (eta < 1.f) ? 1.f : eta;
+	return OpenPBR_FilmWeight(b, CalcFilmColor(MAKE_FLOAT3(0.f, 0.f, mu), 1000.f * b->thinFilmThickness,
+			b->thinFilmEta, n0, n2));
+}
+
+// The thin film factor over the metal for the direction at the cosine mu
+OPENCL_FORCE_INLINE float3 OpenPBR_FilmMetal(const OpenPBRBSDF *b, const float mu) {
+	if (!OpenPBR_HasThinFilm(b))
+		return WHITE;
+
+	return OpenPBR_FilmWeight(b, CalcFilmColorConductor(MAKE_FLOAT3(0.f, 0.f, mu), 1000.f * b->thinFilmThickness,
+			b->thinFilmEta, 1.f, b->thinFilmMetalEta, b->thinFilmMetalK));
 }
 
 // The hemispherical average of the dielectric Fresnel reflectance for the
@@ -358,24 +419,40 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	// transmission.dispersionscale, for the whole interface (a thin wall
 	// doesn't refract), so that each wavelength conserves the energy. The
 	// refraction takes the colour of the wavelength, the reflection stays
-	// white. The wavelength is one per vertex, not one per path (as the glass
-	// material), so this is an approximation: tinting the reflection too
-	// keeps every channel exact but multiplies independent colours along the
-	// internal reflections (the furnace of a rough sphere: relative std 0.07
-	// -> 0.50); white, a rough glass reads 1.5% low near the total internal
-	// reflection, where the reflected fraction depends on the wavelength.
+	// white. With the wavelength of the path, the path takes the colour of
+	// its wavelength once, at its first vertex where the dispersion is active:
+	// the whole BSDF value (the reflection depends on the wavelength too),
+	// which keeps every channel exact. Without one (the caches), the
+	// wavelength is one per vertex, an approximation: tinting the reflection
+	// too keeps every channel exact but multiplies independent colours along
+	// the internal reflections (the furnace of a rough sphere: relative std
+	// 0.07 -> 0.50); white, a rough glass reads 1.5% low near the total
+	// internal reflection, where the reflected fraction depends on the
+	// wavelength.
 	b->dispersionColor = WHITE;
+	b->dispersed = 0;
+	b->dispersionTint = WHITE;
 	// (an Abbe number of 0 or less is no dispersion: no data)
 	if ((b->transmissionWeight > 0.f) && !b->thinWalled && (b->transmissionDispersionScale > 0.f) &&
 			(b->transmissionDispersionAbbe > 0.f)) {
-		// The hit point's random number, decorrelated from its other uses
-		// (the lobe selection)
-		const float u = b->wavelengthU * 4093.f;
-		const float lambda = 380.f + 400.f * (u - floor(u));
+		float lambda;
+		if (b->wavelength > 0.f)
+			lambda = b->wavelength;
+		else {
+			// The hit point's random number, decorrelated from its other uses
+			// (the lobe selection)
+			const float u = b->wavelengthU * 4093.f;
+			lambda = 380.f + 400.f * (u - floor(u));
+		}
 		const float abbe = b->transmissionDispersionAbbe / b->transmissionDispersionScale;
 		const float iorL = b->specularIor + (b->specularIor - 1.f) / abbe * (523640.f / (lambda * lambda) - 1.5168f);
 		b->etaT = OpenPBR_TranslucentEta(b, fmax(iorL, 1e-3f) * invExteriorIor);
-		b->dispersionColor = OpenPBR_WaveLengthColor(b, lambda);
+		if (b->wavelength > 0.f) {
+			b->dispersed = 1;
+			if (!b->dispersionTinted)
+				b->dispersionTint = OpenPBR_WaveLengthColor(b, lambda);
+		} else
+			b->dispersionColor = OpenPBR_WaveLengthColor(b, lambda);
 	}
 
 	// Only delta lobes: a smooth metal or glass (no opaque dielectric, whose
@@ -397,6 +474,19 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	const float3 schlickBar = F0 + (WHITE - F0) * .462664f;
 	b->metalB = schlickBar * (WHITE - b->specularColor) * (1.f / .0566527f);
 	b->metalFavg = Spectrum_Clamp(b->specularWeight * (F0 + (WHITE - F0) * (1.f / 21.f) - b->metalB * (1.f / 126.f)));
+
+	if (OpenPBR_HasThinFilm(b)) {
+		b->thinFilmEta = b->thinFilmIor * (invExteriorIor + b->coatWeight * (1.f / b->coatIor - invExteriorIor));
+#if defined(LUXRAYS_CPU_DEVICE)
+		const float3 s = b->specularColor;
+		const float3 f0 = MAKE_FLOAT3(dot(b->toRec709[0], F0), dot(b->toRec709[1], F0), dot(b->toRec709[2], F0));
+		const float3 tint = MAKE_FLOAT3(dot(b->toRec709[0], s), dot(b->toRec709[1], s), dot(b->toRec709[2], s));
+#else
+		const float3 f0 = WorkingColorSpace_ToRec709(F0);
+		const float3 tint = WorkingColorSpace_ToRec709(b->specularColor);
+#endif
+		ThinFilm_ConductorIOR(f0, tint, &b->thinFilmMetalEta, &b->thinFilmMetalK);
+	}
 }
 
 // The metal Fresnel at the cosine mu between a direction and the microfacet
@@ -496,7 +586,7 @@ OPENCL_FORCE_INLINE float OpenPBR_TranslucentReflectProb(const OpenPBRBSDF *b, c
 // seen from the eye (as Cycles), so the white interface conserves the
 // energy.
 OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateTranslucent(const OpenPBRBSDF *b,
-		const float3 lightDir, const float3 eyeDir, const float eta, const float3 film) {
+		const float3 lightDir, const float3 eyeDir, const float eta) {
 	const float muE = eyeDir.z;
 	const float av = OpenPBR_ViewAlpha(b->ax, b->ay, eyeDir);
 	const float E = b->thinWalled ? GGXEnergy_E(av, av, muE, false) : GGXEnergy_GlassE(av, av, muE, eta);
@@ -513,8 +603,10 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateTranslucent(const OpenPBRBSDF *b,
 		const float F = FresnelCauchy_Evaluate(eta, cosEH);
 		const float spec = Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, l, eyeDir) /
 				(4.f * muE) * msScale;
+		const float3 film = OpenPBR_FilmDielectric(b, cosEH, eta);
 
-		return transmit ? ((spec * (1.f - F)) * b->transmissionColor) : ((spec * F) * b->specularColor * film);
+		return transmit ? ((spec * (1.f - F)) * b->transmissionColor * ThinFilm_TransmissionScale(F, film)) :
+				((spec * F) * b->specularColor * film);
 	}
 
 	// The refraction: the generalized half vector of eta = eta_light / eta_eye
@@ -534,9 +626,11 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateTranslucent(const OpenPBRBSDF *b,
 		return BLACK;
 
 	const float F = FresnelCauchy_Evaluate(eta, cosEH);
+	const float3 filmT = OpenPBR_HasThinFilm(b) ?
+		ThinFilm_TransmissionScale(F, OpenPBR_FilmDielectric(b, cosEH, eta)) : WHITE;
 
 	return ((-cosLH) * cosEH * Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, lightDir, eyeDir) /
-			(muE * lengthSquared) * (1.f - F) * msScale) * b->transmissionColor * b->dispersionColor;
+			(muE * lengthSquared) * (1.f - F) * msScale) * b->transmissionColor * b->dispersionColor * filmT;
 }
 
 // The pdf of sampling sampledDir from fixedDir (above the surface) with the
@@ -626,10 +720,6 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 	float3 Espec;
 	*baseE = OpenPBR_BaseAlbedo(b, muE, av, msScale, &Espec);
 
-	float3 film = WHITE;
-	if ((b->thinFilmWeight > 0.f) && (b->thinFilmThickness > 0.f))
-		film = WHITE + b->thinFilmWeight * (OpenPBR_FilmColor(b, eyeDir) - WHITE);
-
 	const bool specLobes = (b->specDelta != 0) == delta;
 	float3 result = BLACK;
 	if (reflect) {
@@ -644,12 +734,13 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 					GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.y),
 					GGXEnergy_ReflectScale(E, Eavg, b->metalFavg.z));
 
-			result += (m * spec) * OpenPBR_MetalFresnel(b, cosEH) * ms * film;
+			result += (m * spec) * OpenPBR_MetalFresnel(b, cosEH) * ms * OpenPBR_FilmMetal(b, cosEH);
 		}
 		const float opaque = 1.f - b->transmissionWeight;
 		if ((m < 1.f) && (opaque > 0.f)) {
 			const float3 specular = (b->dielectricSpec && (spec > 0.f)) ?
-				((spec * FresnelCauchy_Evaluate(b->eta, cosEH) * msScale) * b->specularColor * film) : BLACK;
+				((spec * FresnelCauchy_Evaluate(b->eta, cosEH) * msScale) * b->specularColor *
+				OpenPBR_FilmDielectric(b, cosEH, b->eta)) : BLACK;
 			float3 diffuse = BLACK;
 			if (!delta) {
 				// EON is Lambertian at roughness 0 (E = 1, no multiple scattering)
@@ -662,15 +753,18 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 					diffuse += (b->subsurfaceWeight * (b->thinWalled ? .5f : 1.f) * M_1_PI_F * muL) * b->subsurfaceColor;
 			}
 
-			result += ((1.f - m) * opaque) * (specular + (WHITE - Espec) * diffuse);
+			// The diffuse gets what the specular (with the film) leaves
+			const float3 EspecFilm = OpenPBR_HasThinFilm(b) ? (Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
+			result += ((1.f - m) * opaque) * (specular + Spectrum_Clamp(WHITE - EspecFilm) * diffuse);
 		}
 	} else if (!delta && b->thinWalled && (b->subsurfaceWeight > 0.f) && (b->transmissionWeight < 1.f)) {
+		const float3 EspecFilm = OpenPBR_HasThinFilm(b) ? (Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
 		result += ((1.f - m) * (1.f - b->transmissionWeight) * b->subsurfaceWeight * .5f * M_1_PI_F * (-muL)) *
-				(WHITE - Espec) * b->subsurfaceColor;
+				Spectrum_Clamp(WHITE - EspecFilm) * b->subsurfaceColor;
 	}
 
 	if ((m < 1.f) && (b->transmissionWeight > 0.f) && specLobes)
-		result += ((1.f - m) * b->transmissionWeight) * OpenPBR_EvaluateTranslucent(b, lightDir, eyeDir, etaEye, film);
+		result += ((1.f - m) * b->transmissionWeight) * OpenPBR_EvaluateTranslucent(b, lightDir, eyeDir, etaEye);
 
 	return result;
 }
@@ -896,19 +990,17 @@ OPENCL_FORCE_INLINE float3 OpenPBR_SampleDelta(const OpenPBRBSDF *b,
 	// The relative IOR of the other side over the fixed one
 	const float eta = (b->thinWalled || outside) ? b->etaT : (1.f / b->etaT);
 
-	float3 film = WHITE;
-	if ((b->thinFilmWeight > 0.f) && (b->thinFilmThickness > 0.f))
-		film = WHITE + b->thinFilmWeight * (OpenPBR_FilmColor(b, MAKE_FLOAT3(0.f, 0.f, mu)) - WHITE);
+	const float3 filmD = OpenPBR_FilmDielectric(b, mu, eta);
 
 	// The reflection: the coat, then what it leaves of the metal and of the
 	// translucent interface's reflection
 	const float FT = (m < 1.f) ? FresnelCauchy_Evaluate(eta, mu) : 1.f;
 	float3 baseR = BLACK;
 	if (m > 0.f)
-		baseR += m * OpenPBR_MetalFresnel(b, mu);
+		baseR += m * OpenPBR_MetalFresnel(b, mu) * OpenPBR_FilmMetal(b, mu);
 	if (m < 1.f)
-		baseR += ((1.f - m) * FT) * b->specularColor;
-	float3 reflect = OpenPBR_DeltaBelowCoat(b, mu) * baseR * film;
+		baseR += ((1.f - m) * FT) * b->specularColor * filmD;
+	float3 reflect = OpenPBR_DeltaBelowCoat(b, mu) * baseR;
 	if (b->coatWeight > 0.f)
 		reflect += TO_FLOAT3(b->coatWeight * FresnelCauchy_Evaluate(b->coatEta, mu));
 
@@ -936,7 +1028,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_SampleDelta(const OpenPBRBSDF *b,
 		}
 		// Without the scale for now
 		transmit = ((1.f - m) * (1.f - FT)) * OpenPBR_DeltaBelowCoat(b, muE) *
-				b->transmissionColor * b->dispersionColor;
+				b->transmissionColor * b->dispersionColor * ThinFilm_TransmissionScale(FT, filmD);
 	}
 
 	const float yR = OpenPBR_Y(b, reflect);
@@ -965,6 +1057,17 @@ OPENCL_FORCE_INLINE float3 OpenPBR_SampleDelta(const OpenPBRBSDF *b,
 //------------------------------------------------------------------------------
 // The material interface (local directions in the shading frame)
 //------------------------------------------------------------------------------
+
+// The colour of the dispersion of the path on a value of OpenPBR_Evaluate()
+// or OpenPBR_Sample(), with the event DISPERSED where the dispersion is
+// active (see OpenPBRBSDF::dispersed)
+OPENCL_FORCE_INLINE float3 OpenPBR_Disperse(const OpenPBRBSDF *b, const float3 result, BSDFEvent *event) {
+	if (!b->dispersed)
+		return result;
+
+	*event |= DISPERSED;
+	return result * b->dispersionTint;
+}
 
 OPENCL_FORCE_INLINE float3 OpenPBR_Albedo(const OpenPBRBSDF *b) {
 	const float3 opaque = b->albedo + b->subsurfaceWeight * (b->subsurfaceColor - b->albedo);

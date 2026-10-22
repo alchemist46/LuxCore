@@ -31,6 +31,11 @@ typedef enum {
 	// The entry into a random-walk subsurface material (with DIFFUSE |
 	// TRANSMIT): the path continues with the walk, not with a ray
 	SUBSURFACE = 32,
+	// A scattering by a dispersive interface (its reflection or refraction)
+	// at the wavelength of the path (HitPoint::wavelength), tinted by its
+	// colour unless the path already was (HitPoint::dispersionTinted): the
+	// path is tinted from now on
+	DISPERSED = 64,
 
 	ALL_TYPES = DIFFUSE | GLOSSY | SPECULAR,
 	ALL_REFLECT = REFLECT | ALL_TYPES,

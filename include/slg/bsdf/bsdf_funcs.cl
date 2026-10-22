@@ -99,6 +99,8 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 		hitPoint->passThroughEvent = passThroughEvent;
 		hitPoint->regularization = 0.f;
 		hitPoint->subsurface = HITPOINT_SSS_SURFACE;
+		hitPoint->wavelength = 0.f;
+		hitPoint->dispersionTinted = 0;
 		VSTORE3F(hitPointP, &hitPoint->p.x);
 		VSTORE3F(-rayDir, &hitPoint->fixedDir.x);
 		hitPoint->objectID = sceneObjs[meshIndex].objectID;
@@ -195,6 +197,8 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 	bsdf->hitPoint.passThroughEvent = passThroughEvent;
 	bsdf->hitPoint.regularization = 0.f;
 	bsdf->hitPoint.subsurface = HITPOINT_SSS_SURFACE;
+	bsdf->hitPoint.wavelength = 0.f;
+	bsdf->hitPoint.dispersionTinted = 0;
 
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);

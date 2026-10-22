@@ -430,8 +430,8 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 		const float time, const float passThrough, const PathVolumeInfo &volInfo,
 		BSDF &bsdf, Spectrum &pathThroughput) const {
 	Spectrum color, radius;
-	float anisotropy;
-	bsdf.GetSubsurfaceWalkParams(&color, &radius, &anisotropy);
+	float anisotropy, eta;
+	bsdf.GetSubsurfaceWalkParams(&color, &radius, &anisotropy, &eta);
 
 	// The outward normals at the entry: the side of the eye
 	const Normal geometryN = (Dot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.geometryN) > 0.f) ?
@@ -446,7 +446,7 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 	if (!ocl::SSSWalk_Init(&walk, ocl::make_float3(entryP.x, entryP.y, entryP.z),
 			ocl::make_float3(shadeN.x, shadeN.y, shadeN.z),
 			ocl::make_float3(sampledDir.x, sampledDir.y, sampledDir.z),
-			ocl::ToFloat3(color), ocl::ToFloat3(radius), anisotropy))
+			ocl::ToFloat3(color), ocl::ToFloat3(radius), anisotropy, eta))
 		return false;
 
 	// Decorrelated from the other users of the same sample
@@ -468,7 +468,7 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 		// through the other objects
 		const Point o(walk.P.x, walk.P.y, walk.P.z);
 		Ray ray(o, Vector(walk.D.x, walk.D.y, walk.D.z), 0.f, walk.tmax, time);
-		ray.mint = (walk.bounce == 0) ? MachineEpsilon::E(o) : 0.f;
+		ray.mint = ((walk.bounce == 0) || walk.fromSurface) ? MachineEpsilon::E(o) : 0.f;
 		RayHit rayHit;
 		bool hitObject = false;
 		while (device.TraceRay(&ray, &rayHit)) {
@@ -481,18 +481,24 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 				break;
 		}
 
-		const int result = ocl::SSSWalk_FinishStep(&walk, hitObject, rayHit.t);
+		const int result = ocl::SSSWalk_FinishStep(&walk, hitObject, rayHit.t, rng.floatValue());
 		if (result == SSSWALK_END)
 			return false;
 		if (result == SSSWALK_EXIT) {
 			const Spectrum weight(walk.throughput.x, walk.throughput.y, walk.throughput.z);
 			if (weight.Black() || weight.IsNaN() || weight.IsInf())
 				return false;
-			pathThroughput *= weight;
 
 			// The exit vertex
 			bsdf.Init(false, false, scene, ray, rayHit, passThrough, &volInfo);
 			bsdf.hitPoint.subsurface = HITPOINT_SSS_EXIT;
+
+			// Reflected back into the medium by the boundary, or out
+			const Normal &n = bsdf.hitPoint.geometryN;
+			if (ocl::SSSWalk_InternalReflection(&walk, ocl::make_float3(n.x, n.y, n.z), rng.floatValue()))
+				continue;
+
+			pathThroughput *= weight;
 
 			return true;
 		}
@@ -512,6 +518,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 	// This is used by light strategy
 	pathInfo.lastShadeN = Normal(eyeRay.d);
+
+	// One wavelength for the dispersion of the whole path
+	pathInfo.wavelength = PathInfo::Wavelength(sampler.GetSample(IDX_WAVELENGTH(eyeSampleSize)));
 
 	SampleResult &sampleResult = sampleResults[0];
 	bool photonGIShowIndirectPathMixUsed = false;
@@ -584,6 +593,8 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		}
 
 		// Something was hit
+
+		pathInfo.SetDispersion(bsdf.hitPoint);
 
 		if (albedoToDo && bsdf.IsAlbedoEndPoint(albedoSpecularSetting, albedoSpecularGlossinessThreshold)) {
 			sampleResult.albedo = pathThroughput * bsdf.Albedo();
@@ -1016,6 +1027,8 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 		assert (!lightPathFlux.IsNaN() && !lightPathFlux.IsInf());
 
 		LightPathInfo pathInfo;
+		// One wavelength for the dispersion of the whole path
+		pathInfo.wavelength = PathInfo::Wavelength(sampler.GetSample(9));
 
 		/*
 		// Sample a point on the camera lens
@@ -1054,6 +1067,7 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 
 			// Something was hit
 
+			pathInfo.SetDispersion(bsdf.hitPoint);
 			lightPathFlux *= connectionThroughput;
 
 			//--------------------------------------------------------------
@@ -1320,10 +1334,10 @@ void PathTracer::ParseOptions(
 	eyeSampleSize = 
 		eyeSampleBootSize + // The pixel position
 		(maxPathDepth.depth + 1) * eyeSampleStepSize + // For each path vertex
-		EYE_SAMPLE_TAIL_SIZE; // The camera time and lens position
+		EYE_SAMPLE_TAIL_SIZE; // The wavelength, the camera time and lens position
 	
-	// Update light sample size
-	lightSampleBootSize = 9;
+	// Update light sample size (the 10th: the wavelength of the dispersion)
+	lightSampleBootSize = 10;
 	lightSampleStepSize = 7;
 	lightSampleSize = 
 		lightSampleBootSize + // To generate eye ray

@@ -290,11 +290,11 @@ bool BSDF::HasDiffuseBesideSubsurfaceWalk() const {
 	return material->HasDiffuseBesideSubsurfaceWalk();
 }
 
-void BSDF::GetSubsurfaceWalkParams(Spectrum *color, Spectrum *radius, float *anisotropy) const {
+void BSDF::GetSubsurfaceWalkParams(Spectrum *color, Spectrum *radius, float *anisotropy, float *eta) const {
 	const Material *walkMaterial = material->GetSubsurfaceWalkMaterial();
 	assert (walkMaterial);
 
-	walkMaterial->GetSubsurfaceWalkParams(hitPoint, color, radius, anisotropy);
+	walkMaterial->GetSubsurfaceWalkParams(hitPoint, color, radius, anisotropy, eta);
 }
 
 Spectrum BSDF::Albedo() const {

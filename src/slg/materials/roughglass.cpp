@@ -126,6 +126,13 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 			kt * (1.f - F) * msScale;
 		if (hitPoint.fromLight)
 			result *= eta * eta;
+		if (localFilmThickness > 0.f) {
+			// The film of the microfacet, seen from the light side: a lossless
+			// film transmits what it does not reflect (the same from both sides)
+			const Spectrum filmColor = CalcFilmColor(Vector(0.f, 0.f, cosThetaOH), localFilmThickness, localFilmIor,
+					entering ? nc : nt, entering ? nt : nc, workingColorSpace);
+			result *= FilmTransmissionScale(F, filmColor);
+		}
 
 		*event = GLOSSY | TRANSMIT;
 
@@ -161,7 +168,10 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 		*event = GLOSSY | REFLECT;
 		
 		if (localFilmThickness > 0.f) {
-			return result * CalcFilmColor(localEyeDir, localFilmThickness, localFilmIor, workingColorSpace);
+			// The film of the microfacet, where F is evaluated too
+			const bool outside = (CosTheta(localEyeDir) > 0.f);
+			return result * CalcFilmColor(Vector(0.f, 0.f, cosThetaH), localFilmThickness, localFilmIor,
+					outside ? nc : nt, outside ? nt : nc, workingColorSpace);
 		}
 		return result;
 	}

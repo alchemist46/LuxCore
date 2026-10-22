@@ -68,7 +68,7 @@ public:
 	// The base lobe of an entry is the walk only
 	virtual bool HasDiffuseBesideSubsurfaceWalk() const { return false; }
 	virtual void GetSubsurfaceWalkParams(const HitPoint &hitPoint, luxrays::Spectrum *color,
-		luxrays::Spectrum *radius, float *anisotropy) const;
+		luxrays::Spectrum *radius, float *anisotropy, float *eta) const;
 
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexs) const;
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex);

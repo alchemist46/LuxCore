@@ -118,6 +118,10 @@ static Spectrum WaveLength2RGB(const float waveLength) {
 	return result * normFactor;
 }
 
+Spectrum GlassMaterial::WaveLengthColor(const float waveLength, const WorkingColorSpace &workingColorSpace) {
+	return workingColorSpace.FromRec709(WaveLength2RGB(waveLength));
+}
+
 static float WaveLength2IOR(const float waveLength, const float IOR, const float B) {
 	// Cauchy's equation for relationship between the refractive index and wavelength
 	// note: Cauchy's lambda is expressed in micrometers while waveLength is in nanometers
@@ -154,38 +158,27 @@ Spectrum GlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 	const Spectrum result = kr * FresnelTexture::CauchyEvaluate(ntc, cosTheta);
 
 	if (localFilmThickness > 0.f) {
-		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor, workingColorSpace);
+		// The film is on the exterior face of the interface
+		const bool entering = (cosTheta > 0.f);
+		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor,
+				entering ? nc : nt, entering ? nt : nc, workingColorSpace);
 		return result * filmColor;
 	}
 	return result;
 }
 
 Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
-		const Vector &localFixedDir, const float u0,
-		const Spectrum &kt, const float nc, const float nt, const float cauchyB,
-		Vector *localSampledDir, const WorkingColorSpace &workingColorSpace) {
+		const Vector &localFixedDir, const Spectrum &kt, const float nc, const float nt,
+		Vector *localSampledDir, const float localFilmThickness, const float localFilmIor,
+		const WorkingColorSpace &workingColorSpace) {
 	if (kt.Black())
 		return Spectrum();
 
 	// Compute transmitted ray direction
-	Spectrum lkt;
-	float lnt;
-	if (cauchyB > 0.f) {
-		// Select the wavelength to sample
-		const float waveLength = Lerp(u0, 380.f, 780.f);
-
-		lnt = WaveLength2IOR(waveLength, nt, cauchyB);
-
-		lkt = kt * workingColorSpace.FromRec709(WaveLength2RGB(waveLength));
-	} else {
-		lnt = nt;
-		lkt = kt;
-	}
-
-	const float ntc = lnt / nc;
+	const float ntc = nt / nc;
 	const float cosTheta = CosTheta(localFixedDir);
 	const bool entering = (cosTheta > 0.f);
-	const float eta = entering ? (nc / lnt) : ntc;
+	const float eta = entering ? (nc / nt) : ntc;
 	const float eta2 = eta * eta;
 	const float sini2 = SinTheta2(localFixedDir);
 	const float sint2 = eta2 * sini2;
@@ -205,7 +198,15 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 		ce = (1.f - FresnelTexture::CauchyEvaluate(ntc, cosTheta)) * fabsf(CosTheta(localFixedDir) / absCosSampledDir);
 	}
 
-	return lkt * ce;
+	if (localFilmThickness > 0.f) {
+		// A lossless film transmits what it does not reflect (the same from
+		// both sides)
+		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor,
+				entering ? nc : nt, entering ? nt : nc, workingColorSpace);
+		return kt * ce * FilmTransmissionScale(FresnelTexture::CauchyEvaluate(ntc, cosTheta), filmColor);
+	}
+
+	return kt * ce;
 }
 
 bool GlassMaterial::GetRefractionIors(const HitPoint &hitPoint, float *nc, float *nt) const {
@@ -233,15 +234,31 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 
 	const float cauchyBValue = cauchyB ? cauchyB->GetFloatValue(hitPoint) : 0.f;
 
-	Vector transLocalSampledDir; 
-	const Spectrum trans = EvalSpecularTransmission(hitPoint, localFixedDir, u0,
-			kt, nc, nt, cauchyBValue, &transLocalSampledDir, workingColorSpace);
-	
 	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
+
+	// The dispersion: the IOR at the wavelength of the path (or of this
+	// vertex without one) for the reflection and the refraction alike, so
+	// that they conserve the energy at that wavelength, and the colour of
+	// the wavelength on both, once per path (see BSDFEvent DISPERSED)
+	const bool dispersed = (cauchyBValue > 0.f);
+	float lnt = nt;
+	Spectrum dispersionColor(1.f);
+	if (dispersed) {
+		const float waveLength = (hitPoint.wavelength > 0.f) ? hitPoint.wavelength : Lerp(u0, 380.f, 780.f);
+		lnt = WaveLength2IOR(waveLength, nt, cauchyBValue);
+		if (!hitPoint.dispersionTinted)
+			dispersionColor = WaveLengthColor(waveLength, workingColorSpace);
+	}
+
+	Vector transLocalSampledDir;
+	const Spectrum trans = EvalSpecularTransmission(hitPoint, localFixedDir,
+			kt * dispersionColor, nc, lnt, &transLocalSampledDir, localFilmThickness, localFilmIor,
+			workingColorSpace);
+
 	Vector reflLocalSampledDir;
 	const Spectrum refl = EvalSpecularReflection(hitPoint, localFixedDir,
-			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor, workingColorSpace);
+			kr * dispersionColor, nc, lnt, &reflLocalSampledDir, localFilmThickness, localFilmIor, workingColorSpace);
 
 	// Decide to transmit or reflect
 	float threshold;
@@ -270,7 +287,7 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 
 		*localSampledDir = transLocalSampledDir;
 
-		*event = SPECULAR | TRANSMIT;
+		*event = SPECULAR | TRANSMIT | (dispersed ? DISPERSED : NONE);
 		*pdfW = threshold;
 	
 		result = trans;
@@ -279,9 +296,9 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 
 		*localSampledDir = reflLocalSampledDir;
 
-		*event = SPECULAR | REFLECT;
+		*event = SPECULAR | REFLECT | (dispersed ? DISPERSED : NONE);
 		*pdfW = 1.f - threshold;
-		
+
 		result = refl;
 	}
 	

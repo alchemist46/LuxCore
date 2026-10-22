@@ -72,5 +72,9 @@ typedef struct {
 	// Random-walk subsurface scattering (see SubsurfaceMaterial): the role of
 	// the vertex, HITPOINT_SSS_SURFACE unless the eye path tracer sets it
 	int subsurface;
+	// The dispersion (see HitPoint::wavelength): the wavelength (nm) of the
+	// path or 0, and whether the path already has its colour
+	float wavelength;
+	int dispersionTinted;
 } HitPoint;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

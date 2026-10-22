@@ -88,6 +88,12 @@ def cases():
     c.append(("glass-disp", "scene.materials.m.type = glass\nscene.materials.m.kr = 1 1 1\n"
               "scene.materials.m.kt = 1 1 1\nscene.materials.m.interiorior = 1.5\n"
               "scene.materials.m.cauchyb = 0.01\n", 1.0))
+    # The thin film on the glasses (nm): the interference moves the light
+    # between the reflection and the transmission, it doesn't absorb
+    film = "scene.materials.m.filmthickness = 400\nscene.materials.m.filmior = 1.33\n"
+    for mat, extra in (("glass", ""), ("archglass", ""), ("roughglass", rough(0.2))):
+        c.append((f"{mat}-film", f"scene.materials.m.type = {mat}\nscene.materials.m.kr = 1 1 1\n"
+                  "scene.materials.m.kt = 1 1 1\nscene.materials.m.interiorior = 1.5\n" + film + extra, 1.0))
     # A white scattering interior (multiscattering) behind a delta glass and a
     # null boundary: both lossless
     for mat in ("glass", "null"):
@@ -181,13 +187,18 @@ def cases():
     c.append(("openpbr-smooth-coat", "scene.materials.m.type = openpbr\n"
               "scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
               "scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = 0\n", 1.0))
-    # The OpenPBR dispersion (Abbe number 20): smooth and rough glass. The
-    # wavelength is one per vertex: the rough sphere reads 1.5-2% low near the
-    # total internal reflection (see materialdefs_funcs_openpbr_bsdf.cl)
-    for r, expected in ((0.0, 1.0), (0.3, None)):
+    # The OpenPBR dispersion (Abbe number 20): smooth and rough glass, one
+    # wavelength per path
+    for r in (0.0, 0.3):
         c.append((f"openpbr-dispersion-r{r}", "scene.materials.m.type = openpbr\n"
                   "scene.materials.m.transmission.weight = 1\nscene.materials.m.transmission.dispersionscale = 1\n"
-                  f"scene.materials.m.specular.roughness = {r}\n", expected))
+                  f"scene.materials.m.specular.roughness = {r}\n", 1.0))
+    # The OpenPBR thin film (um) on the glass, smooth and rough
+    for r in (0.0, 0.3):
+        c.append((f"openpbr-film-r{r}", "scene.materials.m.type = openpbr\n"
+                  "scene.materials.m.transmission.weight = 1\nscene.materials.m.thinfilm.weight = 1\n"
+                  "scene.materials.m.thinfilm.thickness = 0.4\nscene.materials.m.thinfilm.ior = 1.33\n"
+                  f"scene.materials.m.specular.roughness = {r}\n", 1.0))
     # The OpenPBR glass with its interior volume: clear, and white scattering
     for scatter in (0, 1):
         c.append((f"openpbr-glass-depth-s{scatter}", "scene.materials.m.type = openpbr\n"

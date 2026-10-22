@@ -83,7 +83,9 @@ public:
 			const WorkingColorSpace &workingColorSpace);
 	static luxrays::Spectrum EvalSpecularTransmission(const HitPoint &hitPoint,
 			const luxrays::Vector &localFixedDir, const luxrays::Spectrum &kt,
-			 const float nc, const float nt, luxrays::Vector *localSampledDir);
+			const float nc, const float nt, luxrays::Vector *localSampledDir,
+			const float localFilmThickness, const float localFilmIor,
+			const WorkingColorSpace &workingColorSpace);
 
 	// The reflectance of a thin non-absorbing slab with the single interface
 	// reflectance F, the light bouncing between its two interfaces summed up:

@@ -32,6 +32,8 @@ typedef enum {
 	// The entry into a random-walk subsurface material (with DIFFUSE |
 	// TRANSMIT): the path continues with the walk, not with a ray
 	SUBSURFACE = 32,
+	// A dispersive scattering (see bsdfevents.h)
+	DISPERSED = 64,
 
 	ALL_TYPES = DIFFUSE | GLOSSY | SPECULAR,
 	ALL_REFLECT = REFLECT | ALL_TYPES,

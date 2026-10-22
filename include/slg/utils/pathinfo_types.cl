@@ -40,5 +40,10 @@ typedef struct {
 	int isNearlyCaustic;
 	// Specular, Specular+ Diffuse and Specular+ Diffuse Specular+ paths
 	int isNearlyS, isNearlySD, isNearlySDS;
+
+	// The dispersion (see PathInfo::wavelength): the wavelength (nm) of the
+	// path and whether it has its colour
+	float wavelength;
+	int dispersionTinted;
 } EyePathInfo;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

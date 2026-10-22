@@ -25,8 +25,9 @@
 // the same dimensions. The quality of the Sobol dimensions falls as their
 // index grows, so the decisions with the most variance come first: the pixel
 // position, then the path vertices (BSDF direction, light pick and light
-// point, pass-throughs, Russian roulette), then the camera time and lens
-// position, which are constant in most scenes, at the end.
+// point, pass-throughs, Russian roulette), then the wavelength of the
+// dispersion, the camera time and lens position, which are constant in most
+// scenes, at the end.
 //
 // The eye sample vector is EYE_SAMPLE_BOOT_SIZE +
 // (maxPathDepth + 1) * VERTEX_SAMPLE_SIZE + EYE_SAMPLE_TAIL_SIZE floats
@@ -50,7 +51,8 @@
 #define VERTEX_SAMPLE_SIZE 9
 
 // Relative to the end of the eye sample vector (eyeSampleSize)
-#define EYE_SAMPLE_TAIL_SIZE 3
+#define EYE_SAMPLE_TAIL_SIZE 4
+#define IDX_WAVELENGTH(eyeSampleSize) ((eyeSampleSize) - 4)
 #define IDX_EYE_TIME(eyeSampleSize) ((eyeSampleSize) - 3)
 #define IDX_DOF_X(eyeSampleSize) ((eyeSampleSize) - 2)
 #define IDX_DOF_Y(eyeSampleSize) ((eyeSampleSize) - 1)

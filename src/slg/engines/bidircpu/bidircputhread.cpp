@@ -31,6 +31,7 @@
 #include "slg/engines/bidircpu/bidircpu.h"
 #include "slg/cameras/camera.h"
 #include "slg/lights/light.h"
+#include "slg/materials/glass.h"
 
 using namespace std;
 using namespace luxrays;
@@ -240,6 +241,26 @@ SampleResult &BiDirCPURenderThread::AddResult(vector<SampleResult> &sampleResult
 	return sampleResult;
 }
 
+Spectrum BiDirCPURenderThread::DispersionOnce(const PathVertexVM &eyeVertex, const BSDFEvent eyeEvent,
+		const PathVertexVM &lightVertex, const BSDFEvent lightEvent, const Spectrum &radiance) const {
+	// Each side has the colour of the wavelength once, from the refractions
+	// of its path or from its end of the connection (eyeEvent, lightEvent)
+	const bool eyeTinted = eyeVertex.dispersionTinted || (eyeEvent & DISPERSED);
+	const bool lightTinted = lightVertex.dispersionTinted || (lightEvent & DISPERSED);
+	if (!eyeTinted || !lightTinted)
+		return radiance;
+
+	// Both: the path needs it once (a channel the colour doesn't have is
+	// already 0)
+	const Spectrum c = GlassMaterial::WaveLengthColor(eyeVertex.wavelength,
+			((BiDirCPURenderEngine *)renderEngine)->renderConfig.GetScene().GetWorkingColorSpace());
+	Spectrum result;
+	for (u_int i = 0; i < COLOR_SAMPLES; ++i)
+		result.c[i] = (c.c[i] > 0.f) ? (radiance.c[i] / c.c[i]) : 0.f;
+
+	return result;
+}
+
 void BiDirCPURenderThread::ConnectVertices(const float time,
 		const PathVertexVM &eyeVertex, const PathVertexVM &lightVertex,
 		SampleResult &eyeSampleResult, const float u0) const {
@@ -320,8 +341,9 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 
 				const float misWeight = 1.f / (lightWeight + 1.f + eyeWeight);
 
-				eyeSampleResult.radiance[lightVertex.lightID] += (misWeight * geometryTerm) * eyeVertex.throughput * eyeBsdfEval *
-						connectionThroughput * lightBsdfEval * lightVertex.throughput;
+				eyeSampleResult.radiance[lightVertex.lightID] += DispersionOnce(eyeVertex, eyeEvent, lightVertex, lightEvent,
+						(misWeight * geometryTerm) * eyeVertex.throughput * eyeBsdfEval *
+						connectionThroughput * lightBsdfEval * lightVertex.throughput);
 			}
 		}
 	}
@@ -589,7 +611,7 @@ void BiDirCPURenderThread::DirectHitLight(
 	}
 }
 
-bool BiDirCPURenderThread::TraceLightPath(const float time,
+bool BiDirCPURenderThread::TraceLightPath(const float time, const float wavelength,
 		const SamplerUPtr& sampler, CameraConstRef camera,
 		vector<PathVertexVM> &lightPathVertices,
 		vector<SampleResult> &sampleResults) const {
@@ -607,6 +629,8 @@ bool BiDirCPURenderThread::TraceLightPath(const float time,
 	// Initialize the light path
 	PathVertexVM lightVertex;
 	lightVertex.lightID = light->GetID();
+	lightVertex.wavelength = wavelength;
+	lightVertex.dispersionTinted = false;
 	
 	float lightEmitPdfW, lightDirectPdfW, cosThetaAtLight;
 	Ray lightRay;
@@ -659,6 +683,7 @@ bool BiDirCPURenderThread::TraceLightPath(const float time,
 					break;
 
 				// Update the new light vertex
+				lightVertex.SetDispersion();
 				lightVertex.throughput *= connectionThroughput;
 		
 				// Infinite lights use MIS based on solid angle instead of area
@@ -717,6 +742,9 @@ bool BiDirCPURenderThread::Bounce(const float time, const SamplerUPtr& sampler,
 			&bsdfPdfW, &cosSampledDir, &event);
 	if (bsdfSample.Black())
 		return false;
+
+	// The path has the colour of its wavelength after a dispersive vertex
+	pathVertex->dispersionTinted = pathVertex->dispersionTinted || (event & DISPERSED);
 
 	float bsdfRevPdfW;
 	if (event & SPECULAR)
@@ -836,6 +864,8 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 
 		const float timeSample = sampler->GetSample(12);
 		const float time = scene.GetCamera().GenerateRayTime(timeSample);
+		// One wavelength of the dispersion for the eye and the light path
+		const float wavelength = PathInfo::Wavelength(sampler->GetSample(13));
 
 		/*
 		// Sample a point on the camera lens
@@ -853,7 +883,7 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 		// Trace light path
 		//----------------------------------------------------------------------
 
-		const bool validLightPath = TraceLightPath(time, sampler, camera, lightPathVertices, sampleResults);
+		const bool validLightPath = TraceLightPath(time, wavelength, sampler, camera, lightPathVertices, sampleResults);
 		assert (SampleResult::IsAllValid(sampleResults));
 
 		if (validLightPath) {
@@ -874,6 +904,8 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 			// Required by MIS weights update
 			eyeVertex.bsdf.hitPoint.fixedDir = -eyeRay.d;
 			eyeVertex.throughput = Spectrum(1.f);
+			eyeVertex.wavelength = wavelength;
+			eyeVertex.dispersionTinted = false;
 			float cameraPdfW;
 			scene.GetCamera().GetPDF(eyeRay, 0.f, eyeSampleResult.filmX, eyeSampleResult.filmY, &cameraPdfW, nullptr);
 			eyeVertex.dVCM = MIS(1.f / cameraPdfW);
@@ -936,6 +968,8 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				eyeVertex.throughput *= connectionThroughput;
 
 				// Something was hit
+
+				eyeVertex.SetDispersion();
 
 				if (albedoToDo && eyeVertex.bsdf.IsAlbedoEndPoint(engine->albedoSpecularSetting,
 						engine->albedoSpecularGlossinessThreshold)) {
