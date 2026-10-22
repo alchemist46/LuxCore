@@ -36,10 +36,8 @@ CompiledScene::CompiledScene(SceneConstRef scn, const PathTracer *pt) : scene(sc
 	maxMemPageSize = numeric_limits<size_t>::max();
 
 	lightsDistribution.clear();
-	
-	EditActionList editActions;
-	editActions.AddAllAction();
-	Recompile(editActions);
+
+	// Compiled by Compile(), after SetMaxMemPageSize() and EnableCode()
 }
 
 CompiledScene::~CompiledScene() {
