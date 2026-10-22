@@ -93,3 +93,10 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem (suspected, not measured): a random walk now goes on past 256 bounces with a Russian roulette, up to 65536 (`subsurface_funcs.cl`), so in a dense, nearly white medium the longest walk of a tile pass can take thousands of iterations, and TILEPATHOCL runs the kernels until every task of the pass is done. The PATHOCL subsurface halt bias (above) may grow as well.
 - Reproduce: a white subsurface sphere with a radius of 0.01 of its size, TILEPATHOCL: the time per pass against the build before.
 - Notes: a walk reaches n bounces with the probability 256 / n past 256. The hard limit of 256 lost 13% of a white sphere of radius 100 mean free paths, 4096 lost 2%. Not measured on the GPU (it was down).
+
+### One pixel of luxball-hdr-vol differs between TILEPATHOCL runs at a fixed seed
+- Found: 2026-10-22
+- Area: engine
+- Problem: two runs of the same build should differ by at most 1e-6 per value (the atomic adds of the film), but pixel (x 143, y 101) of luxball-hdr-vol comes out with one of two values that differ by 1.5e-2 (relative); the rest of the image is identical.
+- Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` (TILEPATHOCL, seed 1, aa 8, 320x240, HIP device) six times with the same build, then `compare`: 2 of 6 runs at HEAD `aa2fa98c1` had the other value.
+- Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change.

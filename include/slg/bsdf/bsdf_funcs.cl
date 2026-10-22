@@ -80,9 +80,7 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 		) {
 	const uint meshIndex = rayHit->meshIndex;
 	const uint triangleIndex = rayHit->triangleIndex;
-
-	// Initialized local to world object space transformation
-	ExtMesh_GetLocal2World(ray->time, meshIndex, triangleIndex, &bsdf->hitPoint.localToWorld EXTMESH_PARAM);
+	const float time = ray->time;
 
 	const float3 rayOrig = VLOAD3F(&ray->o.x);
 	const float3 rayDir = VLOAD3F(&ray->d.x);
@@ -95,6 +93,7 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 		// volumes and the material of the hit point, so the normals, UV,
 		// differentials, bump and frame are not built
 		__global HitPoint *hitPoint = &bsdf->hitPoint;
+		hitPoint->time = time;
 		hitPoint->throughShadowTransparency = throughShadowTransparency;
 		hitPoint->passThroughEvent = passThroughEvent;
 		hitPoint->regularization = 0.f;
@@ -104,7 +103,9 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 		VSTORE3F(hitPointP, &hitPoint->p.x);
 		VSTORE3F(-rayDir, &hitPoint->fixedDir.x);
 		hitPoint->objectID = sceneObjs[meshIndex].objectID;
-		const float3 geometryN = ExtMesh_GetGeometryNormal(&hitPoint->localToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
+		Transform motionLocalToWorld;
+		ExtMesh_GetMotionLocal2World(time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
+		const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
 		VSTORE3F(geometryN, &hitPoint->geometryN.x);
 		// As HitPoint_Init()
 		hitPoint->intoObject = (dot(rayDir, geometryN) < 0.f);
@@ -133,7 +134,7 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 	}
 
 	HitPoint_Init(&bsdf->hitPoint, throughShadowTransparency,
-		meshIndex, triangleIndex,
+		meshIndex, triangleIndex, time,
 		hitPointP, -rayDir,
 		rayHit->b1, rayHit->b2,
 		passThroughEvent
@@ -209,9 +210,9 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 	VSTORE3F(geometryN, &bsdf->hitPoint.fixedDir.x);
 
 	bsdf->sceneObjectIndex = NULL_INDEX;
-	// Both matrices: the BSDF may be a private variable, so nothing of a
-	// previous hit is left in it
-	Transform_Init(&bsdf->hitPoint.localToWorld);
+	// No mesh (meshIndex below): the local to world transformation is the
+	// identity
+	bsdf->hitPoint.time = ray->time;
 	bsdf->materialIndex = volumeIndex;
 
 	VSTORE3F(geometryN, &bsdf->hitPoint.geometryN.x);

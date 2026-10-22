@@ -216,6 +216,32 @@ OPENCL_FORCE_INLINE Matrix4x4 Matrix4x4_Mul_Private(const Matrix4x4 *a, const Ma
 	return r;
 }
 
+// a in private memory, b in global memory
+OPENCL_FORCE_INLINE Matrix4x4 Matrix4x4_Mul_PrivateGlobal(const Matrix4x4 *a, __global const Matrix4x4 *b) {
+	Matrix4x4 r;
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j)
+			r.m[i][j] = a->m[i][0] * b->m[0][j] +
+				a->m[i][1] * b->m[1][j] +
+				a->m[i][2] * b->m[2][j] +
+				a->m[i][3] * b->m[3][j];
+
+	return r;
+}
+
+// a in global memory, b in private memory
+OPENCL_FORCE_INLINE Matrix4x4 Matrix4x4_Mul_GlobalPrivate(__global const Matrix4x4 *a, const Matrix4x4 *b) {
+	Matrix4x4 r;
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j)
+			r.m[i][j] = a->m[i][0] * b->m[0][j] +
+				a->m[i][1] * b->m[1][j] +
+				a->m[i][2] * b->m[2][j] +
+				a->m[i][3] * b->m[3][j];
+
+	return r;
+}
+
 //------------------------------------------------------------------------------
 // Matrix4x4_Translate
 //------------------------------------------------------------------------------

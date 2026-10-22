@@ -56,6 +56,14 @@ CASES = {
     "bump": ("scenes/bump/bump.cfg", "",
              "scene.textures.bumpmap.file = scenes/bump/normal2.png\n"
              "scene.textures.bumpmap.mapping.uvscale = 3 -3"),
+    # The local to world transformation of the hit point: motion blur,
+    # instances (also as triangle lights) and the local 3D mappings
+    "motionmesh": ("scenes/luxball/luxball-hdr-motionmesh-multi.cfg", "", ""),
+    "instances": ("scenes/bigmonkey/bigmonkey-instances.cfg", "", ""),
+    "lightinstances": ("scenes/lightinstances/render.cfg", "", ""),
+    "localmapping": ("scenes/bigmonkey/bigmonkey-proctex.cfg", "", ""),
+    "randommapping": ("scenes/randomizedmapping/cube.cfg", "", ""),
+    "triplanar-bump": ("scenes/luxball/texball-triplanar-bump.cfg", "", ""),
 }
 
 PROPS = """

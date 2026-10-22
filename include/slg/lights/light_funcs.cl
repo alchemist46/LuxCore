@@ -469,8 +469,10 @@ OPENCL_FORCE_INLINE float TriangleLight_GetDirectPdfW(__global const LightSource
 		const float distance, const float cosAtLight
 		MATERIALS_PARAM_DECL) {
 	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
+		Transform motionLocalToWorld;
+		ExtMesh_GetMotionLocal2World(hitPoint->time, triLight->triangle.meshIndex, &motionLocalToWorld EXTMESH_PARAM);
 		float3 p0, p1, p2;
-		ExtMesh_GetTriangleVertices(&hitPoint->localToWorld,
+		ExtMesh_GetTriangleVertices(&motionLocalToWorld,
 				triLight->triangle.meshIndex, triLight->triangle.triangleIndex,
 				&p0, &p1, &p2 EXTMESH_PARAM);
 		const float solidAngle = SphericalTriangle_SolidAngle(p0, p1, p2, refPoint);
@@ -500,7 +502,8 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	const uint materialIndex = sceneObjs[meshIndex].materialIndex;
 
 	// Initialized local to world object space transformation
-	ExtMesh_GetLocal2World(time, meshIndex, triangleIndex, &tmpHitPoint->localToWorld EXTMESH_PARAM);
+	Transform motionLocalToWorld;
+	ExtMesh_GetMotionLocal2World(time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
 
 	const float3 hitPointP = VLOAD3F(&bsdf->hitPoint.p.x);
 	float b0, b1, b2;
@@ -510,7 +513,7 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	float solidAnglePdfW = 0.f;
 	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
 		float3 p0, p1, p2;
-		ExtMesh_GetTriangleVertices(&tmpHitPoint->localToWorld, meshIndex, triangleIndex,
+		ExtMesh_GetTriangleVertices(&motionLocalToWorld, meshIndex, triangleIndex,
 				&p0, &p1, &p2 EXTMESH_PARAM);
 		if (SphericalTriangle_UseSolidAngle(SphericalTriangle_SolidAngle(p0, p1, p2, hitPointP))) {
 			float s, t;
@@ -522,7 +525,7 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 		}
 	}
 	if (solidAnglePdfW == 0.f)
-		ExtMesh_Sample(&tmpHitPoint->localToWorld,
+		ExtMesh_Sample(&motionLocalToWorld,
 				meshIndex, triangleIndex,
 				u0, u1,
 				&samplePoint, &b0, &b1, &b2
@@ -537,13 +540,13 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	// emission, only the geometry normal and the side are read below: the
 	// normals, the UV and the differentials of HitPoint_Init() are skipped.
 	if ((triLight->triangle.imageMapIndex == NULL_INDEX) && mats[materialIndex].constEmittedRadiance) {
-		const float3 geometryN = ExtMesh_GetGeometryNormal(&tmpHitPoint->localToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
+		const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
 		VSTORE3F(geometryN, &tmpHitPoint->geometryN.x);
 		// As HitPoint_Init() with fixedDir = -sampleDir
 		tmpHitPoint->intoObject = (dot(sampleDir, geometryN) < 0.f);
 	} else
 		HitPoint_Init(tmpHitPoint, false,
-			meshIndex, triangleIndex,
+			meshIndex, triangleIndex, time,
 			samplePoint, -sampleDir,
 			b1, b2,
 			passThroughEvent

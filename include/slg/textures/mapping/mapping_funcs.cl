@@ -196,15 +196,18 @@ OPENCL_FORCE_INLINE float3 GlobalMapping3D_Map(__global const TextureMapping3D *
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float3 LocalMapping3D_Map(__global const TextureMapping3D *mapping,
-		__global const HitPoint *hitPoint, float3 *shadeN) {
+		__global const HitPoint *hitPoint, float3 *shadeN TEXTURES_PARAM_DECL) {
+	Transform localToWorld;
+	HitPoint_GetLocalToWorld(hitPoint, &localToWorld EXTMESH_PARAM);
+
 	if (shadeN) {
-		const Matrix4x4 mInv = Matrix4x4_Mul(&hitPoint->localToWorld.m, &mapping->worldToLocal.mInv);
+		const Matrix4x4 mInv = Matrix4x4_Mul_PrivateGlobal(&localToWorld.m, &mapping->worldToLocal.mInv);
 		
 		const float3 sn = VLOAD3F(&hitPoint->shadeN.x);
 		*shadeN = normalize(Matrix4x4_ApplyNormal_Private(&mInv, sn));
 	}
 
-	const Matrix4x4 m = Matrix4x4_Mul(&mapping->worldToLocal.m, &hitPoint->localToWorld.mInv);
+	const Matrix4x4 m = Matrix4x4_Mul_GlobalPrivate(&mapping->worldToLocal.m, &localToWorld.mInv);
 
 	const float3 p = VLOAD3F(&hitPoint->p.x);
 	return Matrix4x4_ApplyPoint_Private(&m, p);
@@ -216,14 +219,17 @@ OPENCL_FORCE_INLINE float3 LocalMapping3D_Map(__global const TextureMapping3D *m
 
 OPENCL_FORCE_INLINE float3 LocalRandomMapping3D_Map(__global const TextureMapping3D *mapping,
 		__global const HitPoint *hitPoint, float3 *shadeN TEXTURES_PARAM_DECL) {
+	Transform localToWorld;
+	HitPoint_GetLocalToWorld(hitPoint, &localToWorld EXTMESH_PARAM);
+
 	if (shadeN) {
-		const Matrix4x4 mInv = Matrix4x4_Mul(&hitPoint->localToWorld.m, &mapping->worldToLocal.mInv);
+		const Matrix4x4 mInv = Matrix4x4_Mul_PrivateGlobal(&localToWorld.m, &mapping->worldToLocal.mInv);
 		
 		const float3 sn = VLOAD3F(&hitPoint->shadeN.x);
 		*shadeN = normalize(Matrix4x4_ApplyNormal_Private(&mInv, sn));
 	}
 
-	Matrix4x4 m = Matrix4x4_Mul(&mapping->worldToLocal.m, &hitPoint->localToWorld.mInv);
+	Matrix4x4 m = Matrix4x4_Mul_GlobalPrivate(&mapping->worldToLocal.m, &localToWorld.mInv);
 
 	// Select random parameters
 	uint seed;
@@ -293,7 +299,7 @@ OPENCL_HOT_FUNCTION float3 TextureMapping3D_Map(__global const TextureMapping3D 
 		case GLOBALMAPPING3D:
 			return GlobalMapping3D_Map(mapping, hitPoint, shadeN);
 		case LOCALMAPPING3D:
-			return LocalMapping3D_Map(mapping, hitPoint, shadeN);
+			return LocalMapping3D_Map(mapping, hitPoint, shadeN TEXTURES_PARAM);
 		case LOCALRANDOMMAPPING3D:
 			return LocalRandomMapping3D_Map(mapping, hitPoint, shadeN TEXTURES_PARAM);
 		default:

@@ -18,8 +18,50 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// The functions below take the local to world transformation of the motion
+// blurred meshes (TYPE_EXT_TRIANGLE_MOTION) as motionLocalToWorld, a private
+// variable filled by ExtMesh_GetMotionLocal2World() and not read for the other
+// meshes: the instances read the transformation of their mesh description and
+// the TYPE_EXT_TRIANGLE meshes are already in world coordinates.
+
+OPENCL_FORCE_INLINE float3 ExtMesh_LocalToWorldPoint(__global const ExtMesh* restrict meshDesc,
+		const Transform* restrict motionLocalToWorld, const float3 p) {
+	switch (meshDesc->type) {
+		case TYPE_EXT_TRIANGLE_INSTANCE:
+			return Transform_ApplyPoint(&meshDesc->instance.trans, p);
+		case TYPE_EXT_TRIANGLE_MOTION:
+			return Transform_ApplyPoint_Private(motionLocalToWorld, p);
+		default:
+			return p;
+	}
+}
+
+OPENCL_FORCE_INLINE float3 ExtMesh_LocalToWorldVector(__global const ExtMesh* restrict meshDesc,
+		const Transform* restrict motionLocalToWorld, const float3 v) {
+	switch (meshDesc->type) {
+		case TYPE_EXT_TRIANGLE_INSTANCE:
+			return Transform_ApplyVector(&meshDesc->instance.trans, v);
+		case TYPE_EXT_TRIANGLE_MOTION:
+			return Transform_ApplyVector_Private(motionLocalToWorld, v);
+		default:
+			return v;
+	}
+}
+
+OPENCL_FORCE_INLINE float3 ExtMesh_LocalToWorldNormal(__global const ExtMesh* restrict meshDesc,
+		const Transform* restrict motionLocalToWorld, const float3 n) {
+	switch (meshDesc->type) {
+		case TYPE_EXT_TRIANGLE_INSTANCE:
+			return Transform_ApplyNormal(&meshDesc->instance.trans, n);
+		case TYPE_EXT_TRIANGLE_MOTION:
+			return Transform_ApplyNormal_Private(motionLocalToWorld, n);
+		default:
+			return n;
+	}
+}
+
 OPENCL_FORCE_INLINE float3 ExtMesh_GetGeometryNormal(
-		__global const Transform* restrict localToWorld,
+		const Transform* restrict motionLocalToWorld,
 		const uint meshIndex, const uint triangleIndex
 		EXTMESH_PARAM_DECL) {
 	__global const ExtMesh* restrict meshDesc = &meshDescs[meshIndex];
@@ -36,13 +78,13 @@ OPENCL_FORCE_INLINE float3 ExtMesh_GetGeometryNormal(
 		}
 		case TYPE_EXT_TRIANGLE_INSTANCE: {
 			// Transform to global coordinates
-			geometryN = (meshDesc->instance.transSwapsHandedness ? -1.f : 1.f) * normalize(Transform_ApplyNormal(localToWorld, geometryN));
+			geometryN = (meshDesc->instance.transSwapsHandedness ? -1.f : 1.f) * normalize(ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, geometryN));
 			break;
 		}
 		case TYPE_EXT_TRIANGLE_MOTION: {
-			const bool swapsHandedness = Transform_SwapsHandedness(localToWorld); 
+			const bool swapsHandedness = Transform_SwapsHandedness_Private(motionLocalToWorld); 
 			// Transform to global coordinates
-			geometryN = (swapsHandedness ? -1.f : 1.f) * normalize(Transform_ApplyNormal(localToWorld, geometryN));
+			geometryN = (swapsHandedness ? -1.f : 1.f) * normalize(ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, geometryN));
 			break;
 		}
 	}
@@ -51,7 +93,7 @@ OPENCL_FORCE_INLINE float3 ExtMesh_GetGeometryNormal(
 }
 
 OPENCL_FORCE_INLINE float3 ExtMesh_GetInterpolateNormal(
-		__global const Transform* restrict localToWorld,
+		const Transform* restrict motionLocalToWorld,
 		const uint meshIndex, const uint triangleIndex,
 		const float b1, const float b2
 		EXTMESH_PARAM_DECL) {
@@ -77,18 +119,18 @@ OPENCL_FORCE_INLINE float3 ExtMesh_GetInterpolateNormal(
 			}
 			case TYPE_EXT_TRIANGLE_INSTANCE: {
 				// Transform to global coordinates
-				interpolatedN = (meshDesc->instance.transSwapsHandedness ? -1.f : 1.f) * normalize(Transform_ApplyNormal(localToWorld, interpolatedN));
+				interpolatedN = (meshDesc->instance.transSwapsHandedness ? -1.f : 1.f) * normalize(ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, interpolatedN));
 				break;
 			}
 			case TYPE_EXT_TRIANGLE_MOTION: {
-				const bool swapsHandedness = Transform_SwapsHandedness(localToWorld); 
+				const bool swapsHandedness = Transform_SwapsHandedness_Private(motionLocalToWorld); 
 				// Transform to global coordinates
-				interpolatedN = (swapsHandedness ? -1.f : 1.f) * normalize(Transform_ApplyNormal(localToWorld, interpolatedN));
+				interpolatedN = (swapsHandedness ? -1.f : 1.f) * normalize(ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, interpolatedN));
 				break;
 			}
 		}
 	} else
-		interpolatedN = ExtMesh_GetGeometryNormal(localToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
+		interpolatedN = ExtMesh_GetGeometryNormal(motionLocalToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
 
 	return interpolatedN;
 }
@@ -195,7 +237,7 @@ OPENCL_FORCE_INLINE float ExtMesh_GetTriAOV(
 }
 
 OPENCL_FORCE_INLINE void ExtMesh_GetDifferentials(
-		__global const Transform* restrict localToWorld,
+		const Transform* restrict motionLocalToWorld,
 		const uint meshIndex,
 		const uint triangleIndex,
 		float3 shadeNormal,
@@ -252,11 +294,9 @@ OPENCL_FORCE_INLINE void ExtMesh_GetDifferentials(
 		float3 dp2 = p1 - p2;
 
 		// dp1 and dp2 are already in world coordinates for TYPE_EXT_TRIANGLE
-		if (meshDesc->type != TYPE_EXT_TRIANGLE) {
-			// Transform to global coordinates
-			dp1 = Transform_ApplyVector(localToWorld, dp1);
-			dp2 = Transform_ApplyVector(localToWorld, dp2);
-		}
+		// Transform to global coordinates
+		dp1 = ExtMesh_LocalToWorldVector(meshDesc, motionLocalToWorld, dp1);
+		dp2 = ExtMesh_LocalToWorldVector(meshDesc, motionLocalToWorld, dp2);
 
 		//------------------------------------------------------------------
 		// Compute dpdu and dpdv
@@ -285,11 +325,9 @@ OPENCL_FORCE_INLINE void ExtMesh_GetDifferentials(
 			*dndv = (-du2 * dn1 + du1 * dn2) * invdet;
 			
 			// dndu and dndv are already in world coordinates for TYPE_EXT_TRIANGLE
-			if (meshDesc->type != TYPE_EXT_TRIANGLE) {
-				// Transform to global coordinates
-				*dndu = Transform_ApplyNormal(localToWorld, *dndu);
-				*dndv = Transform_ApplyNormal(localToWorld, *dndv);
-			}
+			// Transform to global coordinates
+			*dndu = ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, *dndu);
+			*dndv = ExtMesh_LocalToWorldNormal(meshDesc, motionLocalToWorld, *dndv);
 		} else {
 			*dndu = ZERO;
 			*dndv = ZERO;
@@ -298,7 +336,7 @@ OPENCL_FORCE_INLINE void ExtMesh_GetDifferentials(
 }
 
 OPENCL_FORCE_INLINE void ExtMesh_Sample(
-		__global const Transform* restrict localToWorld,
+		const Transform* restrict motionLocalToWorld,
 		const uint meshIndex, const uint triangleIndex,
 		const float u0, const float u1,
 		float3 *samplePoint, float *b0, float *b1, float *b2
@@ -317,15 +355,13 @@ OPENCL_FORCE_INLINE void ExtMesh_Sample(
 			b0, b1, b2);
 
 	// samplePoint is already in world coordinates for TYPE_EXT_TRIANGLE
-	if (meshDesc->type != TYPE_EXT_TRIANGLE) {
-		// Transform to global coordinates
-		*samplePoint = Transform_ApplyPoint(localToWorld, *samplePoint);
-	}
+	// Transform to global coordinates
+	*samplePoint = ExtMesh_LocalToWorldPoint(meshDesc, motionLocalToWorld, *samplePoint);
 }
 
 // The vertices of a triangle in world coordinates
 OPENCL_FORCE_INLINE void ExtMesh_GetTriangleVertices(
-		__global const Transform* restrict localToWorld,
+		const Transform* restrict motionLocalToWorld,
 		const uint meshIndex, const uint triangleIndex,
 		float3 *p0, float3 *p1, float3 *p2
 		EXTMESH_PARAM_DECL) {
@@ -338,16 +374,14 @@ OPENCL_FORCE_INLINE void ExtMesh_GetTriangleVertices(
 	*p2 = VLOAD3F(&triVerts[tri->v[2]].x);
 
 	// The vertices are already in world coordinates for TYPE_EXT_TRIANGLE
-	if (meshDesc->type != TYPE_EXT_TRIANGLE) {
-		*p0 = Transform_ApplyPoint(localToWorld, *p0);
-		*p1 = Transform_ApplyPoint(localToWorld, *p1);
-		*p2 = Transform_ApplyPoint(localToWorld, *p2);
-	}
+	*p0 = ExtMesh_LocalToWorldPoint(meshDesc, motionLocalToWorld, *p0);
+	*p1 = ExtMesh_LocalToWorldPoint(meshDesc, motionLocalToWorld, *p1);
+	*p2 = ExtMesh_LocalToWorldPoint(meshDesc, motionLocalToWorld, *p2);
 }
 
 OPENCL_FORCE_INLINE void ExtMesh_GetLocal2World(const float time,
 		const uint meshIndex, const uint triangleIndex,
-		__global Transform *local2World
+		Transform *local2World
 		EXTMESH_PARAM_DECL) {
 	// Initialized world to local object space transformation
 	__global const ExtMesh* restrict meshDesc = &meshDescs[meshIndex];
@@ -371,7 +405,26 @@ OPENCL_FORCE_INLINE void ExtMesh_GetLocal2World(const float time,
 			break;
 		}
 		default:
+			Transform_Init_Private(local2World);
 			break;
+	}
+}
+
+// The motionLocalToWorld of the functions above: filled only for a motion
+// blurred mesh
+OPENCL_FORCE_INLINE void ExtMesh_GetMotionLocal2World(const float time,
+		const uint meshIndex, Transform *motionLocalToWorld
+		EXTMESH_PARAM_DECL) {
+	__global const ExtMesh* restrict meshDesc = &meshDescs[meshIndex];
+
+	if (meshDesc->type == TYPE_EXT_TRIANGLE_MOTION) {
+		Matrix4x4 m;
+
+		MotionSystem_Sample(&meshDesc->motion.motionSystem, time, interpolatedTransforms, &m);
+		motionLocalToWorld->mInv = m;
+
+		MotionSystem_SampleInverse(&meshDesc->motion.motionSystem, time, interpolatedTransforms, &m);
+		motionLocalToWorld->m = m;
 	}
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

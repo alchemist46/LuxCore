@@ -18,13 +18,29 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// The local to world transformation of the mesh of a hit point, the identity
+// without a mesh (a volume scatter point)
+OPENCL_FORCE_INLINE void HitPoint_GetLocalToWorld(__global const HitPoint *hitPoint,
+		Transform *localToWorld
+		EXTMESH_PARAM_DECL) {
+	const uint meshIndex = hitPoint->meshIndex;
+	if (meshIndex == NULL_INDEX)
+		Transform_Init_Private(localToWorld);
+	else
+		ExtMesh_GetLocal2World(hitPoint->time, meshIndex, hitPoint->triangleIndex, localToWorld EXTMESH_PARAM);
+}
+
 // Used when hitting a surface
 OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool throughShadowTransp,
-		const uint meshIndex, const uint triIndex,
+		const uint meshIndex, const uint triIndex, const float time,
 		const float3 pnt, const float3 fixedDir,
 		const float b1, const float b2,
 		const float passThroughEvnt
 		MATERIALS_PARAM_DECL) {
+	Transform motionLocalToWorld;
+	ExtMesh_GetMotionLocal2World(time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
+
+	hitPoint->time = time;
 	hitPoint->throughShadowTransparency = throughShadowTransp;
 	hitPoint->passThroughEvent = passThroughEvnt;
 	hitPoint->regularization = 0.f;
@@ -38,9 +54,9 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	hitPoint->objectID = sceneObjs[meshIndex].objectID;
 
 	// Interpolate face normal
-	const float3 geometryN = ExtMesh_GetGeometryNormal(&hitPoint->localToWorld, meshIndex, triIndex EXTMESH_PARAM);
+	const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triIndex EXTMESH_PARAM);
 	VSTORE3F(geometryN,  &hitPoint->geometryN.x);
-	const float3 interpolatedN = ExtMesh_GetInterpolateNormal(&hitPoint->localToWorld, meshIndex, triIndex, b1, b2 EXTMESH_PARAM);
+	const float3 interpolatedN = ExtMesh_GetInterpolateNormal(&motionLocalToWorld, meshIndex, triIndex, b1, b2 EXTMESH_PARAM);
 	VSTORE3F(interpolatedN,  &hitPoint->interpolatedN.x);
 	const float3 shadeN = interpolatedN;
 	VSTORE3F(shadeN,  &hitPoint->shadeN.x);
@@ -59,7 +75,7 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	// Compute geometry differentials
 	float3 dndu, dndv, dpdu, dpdv;
 	ExtMesh_GetDifferentials(
-			&hitPoint->localToWorld,
+			&motionLocalToWorld,
 			meshIndex,
 			triIndex,
 			shadeN, 0,
@@ -97,7 +113,7 @@ OPENCL_FORCE_INLINE void HitPoint_InitDefault(__global HitPoint *hitPoint) {
 	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dndu.x);
 	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dndv.x);
 
-	Transform_Init(&hitPoint->localToWorld);
+	hitPoint->time = 0.f;
 
 	hitPoint->interiorVolumeIndex = NULL_INDEX;
 	hitPoint->exteriorVolumeIndex = NULL_INDEX;
