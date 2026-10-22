@@ -17,13 +17,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
-### The env. light visibility cache darkens the image
-- Found: 2026-10-21
-- Area: light
-- Problem: with `visibilitymapcache.enable = 1` the image is darker than without the cache, and more so with coarser tiles in Y: a floor half under a roof, lit by sky2, reads 1670 (red, rows 0-63) without the cache, 1647 (-1.4%) with the automatic 32x32 tiles, 1623 (-2.8%) with `map.tilewidth = map.tileheight = 32` (32x16 tiles). PATHCPU and PATHOCL agree once the GPU tile count fix is in. Two seeds differ by 0.02%, so it is a bias, not noise.
-- Reproduce: PATHCPU, 128x128, 256 spp, sky2 at `dir = 0.3 -0.4 0.6`, matte floor `-4..4` at z = 0 and roof `y = 0..4` at z = 1, camera at `0 -3 6` looking at the origin; compare `visibilitymapcache.enable` 0 and 1.
-- Notes: an unbiased cache only changes the noise. Suspects: tiles with a zero visibility estimate getting a zero light pdf while the BSDF-sampled hits use another pdf in the MIS weight, or the pdf of a tile not matching the directions it samples. Not investigated.
-
 ### WHITE_BALANCE changes the brightness with the temperature
 - Found: 2026-10-21
 - Area: film

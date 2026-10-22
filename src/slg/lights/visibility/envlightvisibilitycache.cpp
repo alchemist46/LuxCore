@@ -481,7 +481,7 @@ void EnvLightVisibilityCache::BuildCacheEntry(
 
 		float luminanceMaxVal = 0.f;
 		for (u_int i = 0; i < mapPixelCount; ++i)
-			luminanceMaxVal = Max(visibilityMaxVal, luminanceMapStorageScaled.GetFloat(i));
+			luminanceMaxVal = Max(luminanceMaxVal, luminanceMapStorageScaled.GetFloat(i));
 
 		const float invLuminanceMaxVal = 1.f / luminanceMaxVal;
 		for (u_int i = 0; i < mapPixelCount; ++i) {

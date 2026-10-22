@@ -360,7 +360,7 @@ OPENCL_FORCE_INLINE float Distribution1D_Pdf(__global const float* restrict dist
 	const uint offset = Distribution1D_Offset(distribution1D, u);
 
 	if (du)
-		*du = u * count - cdf[offset];
+		*du = u * count - offset;
 	
 	return func[offset];
 }

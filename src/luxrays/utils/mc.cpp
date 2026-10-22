@@ -419,7 +419,7 @@ float Distribution1D::Pdf(float u, float *du) const {
 	const u_int offset = Offset(u);
 
 	if (du)
-		*du = u * count - cdf[offset];
+		*du = u * count - offset;
 	
 	return func[offset];
 }
