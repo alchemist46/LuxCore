@@ -148,13 +148,8 @@ void HashGrid::Process(const BiDirVMCPURenderThread *thread,
 		if (!eyeVertex.bsdf.IsVolume())
 			eyeBsdfEval /= AbsDot(lightVertex->bsdf.hitPoint.fixedDir, eyeVertex.bsdf.hitPoint.geometryN);
 
-		BiDirVMCPURenderEngine *engine = (BiDirVMCPURenderEngine *)thread->renderEngine;
-		if (eyeVertex.depth >= engine->rrDepth) {
-			// Russian Roulette
-			const float prob = RenderEngine::RussianRouletteProb(eyeBsdfEval, engine->rrImportanceCap);
-			eyeBsdfPdfW *= prob;
-			eyeBsdfRevPdfW *= prob; // Note: SmallVCM uses light prob here
-		}
+		// No Russian roulette in the MIS weights, see
+		// BiDirCPURenderThread::ConnectVertices()
 
 		// MIS weights
 		const float weightLight = lightVertex->dVCM * thread->misVcWeightFactor +

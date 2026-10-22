@@ -48,7 +48,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 ### Dense scattering media behind a delta glass read wrong in the furnace
 - Found: 2026-10-18 (the sigma_s 1 loss, fixed 2026-10-21); this part 2026-10-21
 - Area: material, engine (volumes)
-- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) and BIDIRCPU 3% high at sigma_s 1 before the fix: not re-measured.
+- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) before the fix: not re-measured. BIDIRCPU reads 1.059 at sigma_s 1 and 1.145 at sigma_s 4 (2026-10-22, 256 spp).
 - Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s4 spp=1024` (and PATHOCL).
 - Notes: the sigma_s 1 loss (0.630) was the correlation of the volume's scatter decision with the glass lobe choice (both read the same pass-through event), fixed by remapping the event for the surface. The CPU and GPU disagree at sigma_s 4 in opposite directions, so it is not a shared estimator bias; the fireflies come from long internal paths with the lobe probability clamped to [0.25, 0.75].
 
@@ -57,7 +57,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine (BIDIRCPU), material
 - Problem: BiDir is 2-4% low on rough glass and on the OpenPBR glass alike (OpenPBR 0.990/0.973/0.966 at alpha 0.2/0.5/1, half glass over a white base 0.955). The path engines read 0.997/0.992 at alpha 0.5/1.
 - Reproduce: white furnace with a rough glass sphere, BIDIRCPU against PATHCPU.
-- Notes: not the interface's compensation. The `fromLight` branches of `Sample()` have not been derived against the adjoint BSDF.
+- Notes: not the interface's compensation. The `fromLight` branches of `Sample()` have not been derived against the adjoint BSDF. Leaving the Russian roulette out of the MIS weights (2026-10-22) did not change it: 0.969/0.974/0.961 for rough glass, OpenPBR glass and half glass at alpha 0.5 (256 spp).
 
 ### Dispersion draws one wavelength per vertex
 - Found: 2026-10-19
@@ -86,13 +86,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: a floor caustic reflected in a mirror or seen through a window is produced by neither side: the eye path drops it as caustic and the light tracer connects only directly to the lens. Missing energy with light tracing on, unless PhotonGI's caustic cache is on too.
 - Reproduce: caustic on a floor, seen in a mirror, with `path.hybridbackforward.enable`.
 - Notes: MNEE covers part of it; the rest is a bidirectional connection, out of scope for the hybrid.
-
-### BiDir Russian roulette factor is inconsistent in the MIS weights
-- Found: 2026-10-17
-- Area: engine (BIDIRCPU)
-- Problem: the BiDir engines compute the Russian-roulette factor of their MIS weights from `bsdfEval` (f cos) while the path continues with a factor from the sample weight (f cos / pdf), the inconsistency fixed in the path engines.
-- Reproduce: not checked against a BSDF-only reference yet.
-- Notes: needs a BSDF-only reference render to see whether the image is biased.
 
 ### Direct light sampling is off for emissive meshes above 256 triangles
 - Found: 2026-10-16
@@ -128,3 +121,10 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: the noise alone puts 2.3-5.0% of the pixels of the `OpenPBRSmoothMaterial` images above the tolerance, around the 3% limit, so the test passes or fails by chance. The mean brightness always agrees within 0.1%.
 - Reproduce: render `test_OpenPBRSmoothMaterial_PATHCPU_SOBOL` (or the TILEPATHCPU/TILEPATHOCL variants) a few times; two runs of the old build read 2.51% and 2.32% against the reference, the new references' runs 3.2-5.0% against the shifted old ones.
 - Notes: the TILEPATHOCL reference was already re-rendered once for this (`14deaa16f`). A lower halt threshold for this scene, or an entry in `MAX_MEAN_DIFFERENCE_OVERRIDES`-style per-test pixel tolerance, would make it stable.
+
+### BiDir darkens the silhouette of the furnace sphere
+- Found: 2026-10-22
+- Area: engine (BIDIRCPU)
+- Problem: in the white furnace the pixels on the outline of the sphere read 0.6-0.7 with BIDIRCPU, whatever the material (matte too), and the image mean is 0.973 against 0.9999 with PATHCPU; the inner disk is right (0.999). The "mu < .2" band of `tests/furnace/furnace.py` shows it (0.40 for matte).
+- Reproduce: a white matte sphere under a constant white environment, orthographic camera, 48x48, no pixel filter, BIDIRCPU 512 spp: the first and the last pixel on the sphere of the centre row and column read 0.6.
+- Notes: in the build before the camera row fix (b22905df5) the dark ring was one row off (row 0 on top, the third last row at the bottom); now it is symmetric. Suspects: the light-traced connections to the camera at grazing angles. Not investigated.

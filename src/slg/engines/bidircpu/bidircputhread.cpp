@@ -304,20 +304,10 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 					&connectionThroughput)) {
 				// Nothing was hit, the light path vertex is visible
 
-				if (eyeVertex.depth >= engine->rrDepth) {
-					// Russian Roulette
-					const float prob = RenderEngine::RussianRouletteProb(eyeBsdfEval, engine->rrImportanceCap);
-					eyeBsdfPdfW *= prob;
-					eyeBsdfRevPdfW *= prob;
-				}
-
-				if (lightVertex.depth >= engine->rrDepth) {
-					// Russian Roulette
-					const float prob = RenderEngine::RussianRouletteProb(lightBsdfEval, engine->rrImportanceCap);
-					lightBsdfPdfW *= prob;
-					lightBsdfRevPdfW *= prob;
-				}
-
+				// The MIS weights leave the Russian roulette out: the probability of the
+				// other direction (and the depth of the other subpath) is not known here,
+				// and weights that sum to 1 need no true pdfs (Bounce() leaves it out of
+				// dVC and dVM too)
 				// Convert pdfs to area pdfs
 				const float eyeBsdfPdfA = PdfWtoA(eyeBsdfPdfW, p2pDistance, cosThetaAtLight);
 				const float lightBsdfPdfA = PdfWtoA(lightBsdfPdfW,  p2pDistance, cosThetaAtCamera);
@@ -412,11 +402,7 @@ void BiDirCPURenderThread::ConnectToEye(const float time,
 					&connectionThroughput)) {
 				// Nothing was hit, the light path vertex is visible
 
-				if (lightVertex.depth >= engine->rrDepth) {
-					// Russian Roulette
-					const float prob = RenderEngine::RussianRouletteProb(bsdfEval, engine->rrImportanceCap);
-					bsdfRevPdfW *= prob;
-				}
+				// No Russian roulette in the MIS weights, see ConnectVertices()
 
 				const float cosToCamera = Dot(lightVertex.bsdf.hitPoint.shadeN, -eyeDir);
 				float cameraPdfW, fluxToRadianceFactor;
@@ -503,13 +489,7 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 						// sampled with BSDF
 						bsdfPdfW *= (light->IsEnvironmental() || light->IsIntersectable()) ? 1.f : 0.f;
 
-						// The +1 is there to account the current path vertex used for DL
-						if (eyeVertex.depth + 1 >= engine->rrDepth) {
-							// Russian Roulette
-							const float prob = RenderEngine::RussianRouletteProb(bsdfEval, engine->rrImportanceCap);
-							bsdfPdfW *= prob;
-							bsdfRevPdfW *= prob;
-						}
+						// No Russian roulette in the MIS weights, see ConnectVertices()
 
 						const float cosThetaToLight = AbsDot(shadowRay.d, eyeVertex.bsdf.hitPoint.shadeN);
 						const float directLightSamplingPdfW = directPdfW * lightPickPdf;
