@@ -277,6 +277,60 @@ OPENCL_FORCE_INLINE void Film_AddSampleResultColor(const uint x, const uint y,
 		Film_AddIfValidWeightedPixel4(usePixelAtomics, &filmAvgShadingNormal[index4], &sampleResult->shadingNormal.x, weight);
 }
 
+// The depth word of a pixel while a sample writes the depth-tested channels:
+// a NaN, never a depth
+#define FILM_DEPTH_LOCKED 0xffffffffu
+// The tries of a sample to get the lock of a pixel (a lock is held for a few
+// hundred cycles)
+#define FILM_DEPTH_MAX_SPIN (1u << 20)
+
+OPENCL_FORCE_INLINE uint Film_HashFloats(uint h, __global const float *v, const uint count) {
+	for (uint i = 0; i < count; ++i)
+		h = (h ^ as_uint(v[i])) * 16777619u;
+
+	return h;
+}
+
+// A hash of the depth-tested channels the film has (FNV-1a), to break the
+// exact depth ties by the content of the samples instead of their order. The
+// IDs are left out: the default material and object IDs are random at each
+// scene load, and a sample without an object ID does not write it.
+OPENCL_FORCE_INLINE uint Film_DepthTestedHash(__constant const Film* restrict film,
+		__global const float *position, __global const float *geometryNormal,
+		__global const float *shadingNormal, __global const float *uv) {
+	uint h = 2166136261u;
+	if (film->hasChannelPosition)
+		h = Film_HashFloats(h, position, 3);
+	if (film->hasChannelGeometryNormal)
+		h = Film_HashFloats(h, geometryNormal, 3);
+	if (film->hasChannelShadingNormal)
+		h = Film_HashFloats(h, shadingNormal, 3);
+	if (film->hasChannelUV)
+		h = Film_HashFloats(h, uv, 2);
+
+	return h;
+}
+
+OPENCL_FORCE_INLINE void Film_WriteDepthTested(const uint index1, const uint index2, const uint index3,
+		__global SampleResult *sampleResult
+		FILM_PARAM_DECL) {
+	if (film->hasChannelPosition)
+		Film_SetPixel3(&filmPosition[index3], &sampleResult->position.x);
+	if (film->hasChannelGeometryNormal)
+		Film_SetPixel3(&filmGeometryNormal[index3], &sampleResult->geometryNormal.x);
+	if (film->hasChannelShadingNormal)
+		Film_SetPixel3(&filmShadingNormal[index3], &sampleResult->shadingNormal.x);
+	if (film->hasChannelMaterialID)
+		filmMaterialID[index1] = sampleResult->materialID;
+	if (film->hasChannelUV)
+		Film_SetPixel2(&filmUV[index2], &sampleResult->uv.u);
+	if (film->hasChannelObjectID) {
+		const uint objectID = sampleResult->objectID;
+		if (objectID != NULL_INDEX)
+			filmObjectID[index1] = sampleResult->objectID;
+	}
+}
+
 OPENCL_FORCE_INLINE void Film_AddSampleResultData(const uint x, const uint y,
 		__global SampleResult *sampleResult
 		FILM_PARAM_DECL) {
@@ -286,25 +340,59 @@ OPENCL_FORCE_INLINE void Film_AddSampleResultData(const uint x, const uint y,
 	const uint index2 = index1 * 2;
 	const uint index3 = index1 * 3;
 
-	bool depthWrite = true;
-	if (film->hasChannelDepth)
-		depthWrite = Film_MinPixel(usePixelAtomics, &filmDepth[index1], sampleResult->depth);
+	if (!film->hasChannelDepth) {
+		Film_WriteDepthTested(index1, index2, index3, sampleResult FILM_PARAM);
+	} else {
+		// The depth test: the nearest sample writes the depth-tested
+		// channels, an exact tie goes to the smaller hash (ties are common
+		// behind pass-through surfaces), so the result does not depend on the
+		// order of the samples. With the pixel atomics the depth word is the
+		// lock of the pixel while the test reads and the sample writes the
+		// channels.
+		const float depth = sampleResult->depth;
+		__global uint *dst = (__global uint *)&filmDepth[index1];
 
-	if (depthWrite) {
-		if (film->hasChannelPosition)
-			Film_SetPixel3(&filmPosition[index3], &sampleResult->position.x);
-		if (film->hasChannelGeometryNormal)
-			Film_SetPixel3(&filmGeometryNormal[index3], &sampleResult->geometryNormal.x);
-		if (film->hasChannelShadingNormal)
-			Film_SetPixel3(&filmShadingNormal[index3], &sampleResult->shadingNormal.x);
-		if (film->hasChannelMaterialID)
-			filmMaterialID[index1] = sampleResult->materialID;
-		if (film->hasChannelUV)
-			Film_SetPixel2(&filmUV[index2], &sampleResult->uv.u);
-		if (film->hasChannelObjectID) {
-			const uint objectID = sampleResult->objectID;
-			if (objectID != NULL_INDEX)
-				filmObjectID[index1] = sampleResult->objectID;
+		// The lanes of a wavefront run in lockstep: a lane spinning on the
+		// lock of a lane of its own wavefront must not keep that lane from
+		// releasing it. So the compare-and-swap is the only gate, the
+		// critical section is in its branch and every lane reaches the end of
+		// the iteration (no continue, no inner loop). The spin is bounded: a
+		// sample that can't get the pixel gives up instead of hanging the GPU.
+		bool done = false;
+		for (uint spin = 0; !done && (spin < FILM_DEPTH_MAX_SPIN); ++spin) {
+			const uint oldDepthBits = *((__global volatile uint *)dst);
+			const bool locked = (oldDepthBits == FILM_DEPTH_LOCKED);
+			const float oldDepth = as_float(oldDepthBits);
+			const bool tie = (depth == oldDepth) && (oldDepth != INFINITY);
+
+			if (!locked && !(depth < oldDepth) && !tie)
+				done = true;
+			else if (!locked && (!usePixelAtomics ||
+					(atomic_cmpxchg(dst, oldDepthBits, FILM_DEPTH_LOCKED) == oldDepthBits))) {
+				bool write = true;
+				if (tie) {
+					const uint sampleHash = Film_DepthTestedHash(film, &sampleResult->position.x,
+							&sampleResult->geometryNormal.x, &sampleResult->shadingNormal.x,
+							&sampleResult->uv.u);
+					const uint storedHash = Film_DepthTestedHash(film, &filmPosition[index3],
+							&filmGeometryNormal[index3], &filmShadingNormal[index3], &filmUV[index2]);
+					write = (sampleHash < storedHash);
+				}
+
+				if (write)
+					Film_WriteDepthTested(index1, index2, index3, sampleResult FILM_PARAM);
+
+				// Release the pixel with the new depth, or the old one if the
+				// sample lost the tie
+				const uint newDepthBits = write ? as_uint(depth) : oldDepthBits;
+				if (usePixelAtomics) {
+					GlobalMemFence();
+					atomic_cmpxchg(dst, FILM_DEPTH_LOCKED, newDepthBits);
+				} else
+					*dst = newDepthBits;
+
+				done = true;
+			}
 		}
 	}
 

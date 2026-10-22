@@ -407,6 +407,13 @@ public:
 	void AtomicAddSampleResultData(const u_int x, const u_int y,
 		const SampleResult &sampleResult) const;
 
+	// The depth-tested channels (POSITION, the normals, MATERIAL_ID, UV,
+	// OBJECT_ID) of AddSampleResultData() and AtomicAddSampleResultData()
+	void AddSampleResultDepthTestedData(const u_int x, const u_int y,
+		const SampleResult &sampleResult, const bool atomic) const;
+	u_int DepthTestedHash(const SampleResult &sampleResult, const float *position,
+		const float *geometryNormal, const float *shadingNormal, const float *uv) const;
+
 	void ReadHWBuffer_IMAGEPIPELINE(const u_int index);
 	void WriteHWBuffer_IMAGEPIPELINE(const u_int index);
 

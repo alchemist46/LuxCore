@@ -19,6 +19,8 @@
 #include <limits>
 #include <algorithm>
 #include <exception>
+#include <atomic>
+#include <cstring>
 
 #include <boost/lexical_cast.hpp>
 
@@ -34,6 +36,135 @@ using namespace slg;
 //------------------------------------------------------------------------------
 // Film add sample related methods
 //------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// Depth-tested channels
+//------------------------------------------------------------------------------
+
+// The depth word of a pixel while a sample writes the depth-tested channels:
+// a NaN, never a depth (as FILM_DEPTH_LOCKED in film_funcs.cl)
+static constexpr u_int depthLocked = 0xffffffffu;
+
+static u_int HashFloats(u_int h, const float *v, const u_int count) {
+	for (u_int i = 0; i < count; ++i) {
+		u_int bits;
+		memcpy(&bits, &v[i], sizeof(u_int));
+		h = (h ^ bits) * 16777619u;
+	}
+
+	return h;
+}
+
+// A hash of the depth-tested channels of the sample (FNV-1a), to break the
+// exact depth ties by the content of the samples instead of their order. The
+// IDs are left out: the default material and object IDs are random at each
+// scene load, and a sample without an object ID does not write it.
+u_int Film::DepthTestedHash(const SampleResult &sampleResult, const float *position,
+		const float *geometryNormal, const float *shadingNormal, const float *uv) const {
+	u_int h = 2166136261u;
+	if (channel_POSITION && sampleResult.HasChannel(POSITION))
+		h = HashFloats(h, position, 3);
+	if (channel_GEOMETRY_NORMAL && sampleResult.HasChannel(GEOMETRY_NORMAL))
+		h = HashFloats(h, geometryNormal, 3);
+	if (channel_SHADING_NORMAL && sampleResult.HasChannel(SHADING_NORMAL))
+		h = HashFloats(h, shadingNormal, 3);
+	if (channel_UV && sampleResult.HasChannel(UV))
+		h = HashFloats(h, uv, 2);
+
+	return h;
+}
+
+// The nearest sample writes the depth-tested channels, an exact tie goes to
+// the smaller hash (ties are common behind pass-through surfaces), so the
+// result does not depend on the order of the samples. With atomic the depth
+// word is the lock of the pixel while the test reads and the sample writes
+// the channels (the threads of the CPU engines splat into the same pixels).
+void Film::AddSampleResultDepthTestedData(const u_int x, const u_int y,
+		const SampleResult &sampleResult, const bool atomic) const {
+	bool depthWrite = true;
+	bool locked = false;
+	u_int oldDepthBits = 0;
+
+	// Faster than HasChannel(DEPTH)
+	if (channel_DEPTH && sampleResult.HasChannel(DEPTH)) {
+		const float depth = sampleResult.depth;
+		float *dst = channel_DEPTH->GetPixel(x, y);
+		atomic_ref<u_int> dstBits(*reinterpret_cast<u_int *>(dst));
+
+		for (;;) {
+			oldDepthBits = atomic ? dstBits.load(memory_order_relaxed) : *reinterpret_cast<u_int *>(dst);
+			if (oldDepthBits == depthLocked)
+				continue;
+
+			float oldDepth;
+			memcpy(&oldDepth, &oldDepthBits, sizeof(float));
+			const bool tie = (depth == oldDepth) && (oldDepth != numeric_limits<float>::infinity());
+			if (!(depth < oldDepth) && !tie) {
+				depthWrite = false;
+				break;
+			}
+
+			if (atomic) {
+				u_int expected = oldDepthBits;
+				if (!dstBits.compare_exchange_weak(expected, depthLocked, memory_order_acquire, memory_order_relaxed))
+					continue;
+				locked = true;
+			}
+
+			if (tie) {
+				const u_int sampleHash = DepthTestedHash(sampleResult, &sampleResult.position.x,
+						&sampleResult.geometryNormal.x, &sampleResult.shadingNormal.x,
+						&sampleResult.uv.u);
+				const u_int storedHash = DepthTestedHash(sampleResult,
+						channel_POSITION ? channel_POSITION->GetPixel(x, y) : nullptr,
+						channel_GEOMETRY_NORMAL ? channel_GEOMETRY_NORMAL->GetPixel(x, y) : nullptr,
+						channel_SHADING_NORMAL ? channel_SHADING_NORMAL->GetPixel(x, y) : nullptr,
+						channel_UV ? channel_UV->GetPixel(x, y) : nullptr);
+				depthWrite = (sampleHash < storedHash);
+			}
+
+			if (depthWrite && !atomic)
+				*dst = depth;
+			break;
+		}
+	}
+
+	if (depthWrite) {
+		// Faster than HasChannel(POSITION)
+		if (channel_POSITION && sampleResult.HasChannel(POSITION))
+			channel_POSITION->SetPixel(x, y, &sampleResult.position.x);
+
+		// Faster than HasChannel(GEOMETRY_NORMAL)
+		if (channel_GEOMETRY_NORMAL && sampleResult.HasChannel(GEOMETRY_NORMAL))
+			channel_GEOMETRY_NORMAL->SetPixel(x, y, &sampleResult.geometryNormal.x);
+
+		// Faster than HasChannel(SHADING_NORMAL)
+		if (channel_SHADING_NORMAL && sampleResult.HasChannel(SHADING_NORMAL))
+			channel_SHADING_NORMAL->SetPixel(x, y, &sampleResult.shadingNormal.x);
+
+		// Faster than HasChannel(MATERIAL_ID)
+		if (channel_MATERIAL_ID && sampleResult.HasChannel(MATERIAL_ID))
+			channel_MATERIAL_ID->SetPixel(x, y, &sampleResult.materialID);
+
+		// Faster than HasChannel(UV)
+		if (channel_UV && sampleResult.HasChannel(UV))
+			channel_UV->SetPixel(x, y, &sampleResult.uv.u);
+
+		// Faster than HasChannel(OBJECT_ID)
+		if (channel_OBJECT_ID && sampleResult.HasChannel(OBJECT_ID) &&
+				(sampleResult.objectID != std::numeric_limits<u_int>::max()))
+			channel_OBJECT_ID->SetPixel(x, y, &sampleResult.objectID);
+	}
+
+	if (locked) {
+		// Release the pixel with the new depth, or the old one if the sample
+		// lost the tie
+		u_int newDepthBits;
+		memcpy(&newDepthBits, &sampleResult.depth, sizeof(u_int));
+		atomic_ref<u_int>(*reinterpret_cast<u_int *>(channel_DEPTH->GetPixel(x, y))).store(
+				depthWrite ? newDepthBits : oldDepthBits, memory_order_release);
+	}
+}
 
 //------------------------------------------------------------------------------
 // Normal method versions
@@ -221,38 +352,7 @@ void Film::AddSampleResultColor(const u_int x, const u_int y,
 
 void Film::AddSampleResultData(const u_int x, const u_int y,
 		const SampleResult &sampleResult)  {
-	bool depthWrite = true;
-
-	// Faster than HasChannel(DEPTH)
-	if (channel_DEPTH && sampleResult.HasChannel(DEPTH))
-		depthWrite = channel_DEPTH->MinPixel(x, y, &sampleResult.depth);
-
-	if (depthWrite) {
-	// Faster than HasChannel(POSITION)
-	if (channel_POSITION && sampleResult.HasChannel(POSITION))
-		channel_POSITION->SetPixel(x, y, &sampleResult.position.x);
-
-	// Faster than HasChannel(GEOMETRY_NORMAL)
-	if (channel_GEOMETRY_NORMAL && sampleResult.HasChannel(GEOMETRY_NORMAL))
-		channel_GEOMETRY_NORMAL->SetPixel(x, y, &sampleResult.geometryNormal.x);
-
-	// Faster than HasChannel(SHADING_NORMAL)
-	if (channel_SHADING_NORMAL && sampleResult.HasChannel(SHADING_NORMAL))
-		channel_SHADING_NORMAL->SetPixel(x, y, &sampleResult.shadingNormal.x);
-
-		// Faster than HasChannel(MATERIAL_ID)
-		if (channel_MATERIAL_ID && sampleResult.HasChannel(MATERIAL_ID))
-			channel_MATERIAL_ID->SetPixel(x, y, &sampleResult.materialID);
-
-		// Faster than HasChannel(UV)
-		if (channel_UV && sampleResult.HasChannel(UV))
-			channel_UV->SetPixel(x, y, &sampleResult.uv.u);
-
-		// Faster than HasChannel(OBJECT_ID)
-		if (channel_OBJECT_ID && sampleResult.HasChannel(OBJECT_ID) &&
-				(sampleResult.objectID != std::numeric_limits<u_int>::max()))
-			channel_OBJECT_ID->SetPixel(x, y, &sampleResult.objectID);
-	}
+	AddSampleResultDepthTestedData(x, y, sampleResult, false);
 
 	if (channel_RAYCOUNT && sampleResult.HasChannel(RAYCOUNT))
 		channel_RAYCOUNT->AddPixel(x, y, &sampleResult.rayCount);
@@ -448,38 +548,7 @@ void Film::AtomicAddSampleResultColor(const u_int x, const u_int y,
 
 void Film::AtomicAddSampleResultData(const u_int x, const u_int y,
 		const SampleResult &sampleResult) const {
-	bool depthWrite = true;
-
-	// Faster than HasChannel(DEPTH)
-	if (channel_DEPTH && sampleResult.HasChannel(DEPTH))
-		depthWrite = channel_DEPTH->AtomicMinPixel(x, y, &sampleResult.depth);
-
-	if (depthWrite) {
-		// Faster than HasChannel(POSITION)
-		if (channel_POSITION && sampleResult.HasChannel(POSITION))
-			channel_POSITION->SetPixel(x, y, &sampleResult.position.x);
-
-		// Faster than HasChannel(GEOMETRY_NORMAL)
-		if (channel_GEOMETRY_NORMAL && sampleResult.HasChannel(GEOMETRY_NORMAL))
-			channel_GEOMETRY_NORMAL->SetPixel(x, y, &sampleResult.geometryNormal.x);
-
-		// Faster than HasChannel(SHADING_NORMAL)
-		if (channel_SHADING_NORMAL && sampleResult.HasChannel(SHADING_NORMAL))
-			channel_SHADING_NORMAL->SetPixel(x, y, &sampleResult.shadingNormal.x);
-
-		// Faster than HasChannel(MATERIAL_ID)
-		if (channel_MATERIAL_ID && sampleResult.HasChannel(MATERIAL_ID))
-			channel_MATERIAL_ID->SetPixel(x, y, &sampleResult.materialID);
-
-		// Faster than HasChannel(UV)
-		if (channel_UV && sampleResult.HasChannel(UV))
-			channel_UV->SetPixel(x, y, &sampleResult.uv.u);
-
-		// Faster than HasChannel(OBJECT_ID)
-		if (channel_OBJECT_ID && sampleResult.HasChannel(OBJECT_ID) &&
-				(sampleResult.objectID != std::numeric_limits<u_int>::max()))
-			channel_OBJECT_ID->SetPixel(x, y, &sampleResult.objectID);
-	}
+	AddSampleResultDepthTestedData(x, y, sampleResult, true);
 
 	if (channel_RAYCOUNT && sampleResult.HasChannel(RAYCOUNT))
 		channel_RAYCOUNT->AtomicAddPixel(x, y, &sampleResult.rayCount);

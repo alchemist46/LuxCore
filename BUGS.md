@@ -73,12 +73,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `*_PATHOCL_METROPOLIS` tests; small films or few spp.
 - Notes: a global luminance estimate (a reduction over the tasks) and a resampled start (PSSMLT bootstrap) would remove both. Only matters when the chains are short.
 
-### GPU AOV problems: SHADING_NORMAL not deterministic, NaN in DIRECT_DIFFUSE_REFLECT
+### GPU DIRECT_DIFFUSE_REFLECT output is wrong on TILEPATHOCL
 - Found: 2026-10-15 (G7 step 4 AOV check; the plan gives no exact date)
 - Area: film (AOV), engine (OpenCL/HIP)
-- Problem: on the GPU the SHADING_NORMAL output is not deterministic: the sample that wins the depth test overwrites the pixel, and with depth ties (pass-through surfaces, volumes) the winner depends on the timing (2 to 10 pixels of transparencyball at 160x120 differ between two runs of the same build). The same check shows a NaN in DIRECT_DIFFUSE_REFLECT on the Cornell box (TILEPATHOCL, both builds), not looked into.
-- Reproduce: transparencyball at 160x120, SHADING_NORMAL AOV, two runs; Cornell box with TILEPATHOCL and DIRECT_DIFFUSE_REFLECT.
-- Notes: the NaN has not been investigated.
+- Problem: on TILEPATHOCL the DIRECT_DIFFUSE_REFLECT output changes between two runs at a fixed seed in nearly every pixel (14080 of 19200 at 160x120, Cornell box and transparencyball), while DIRECT_DIFFUSE and RGB are identical; its mean (0.0867 on the Cornell box) is above the one of DIRECT_DIFFUSE (0.0853), of which it is a part. The G7 check also saw a NaN in it on the Cornell box; the 2026-10-22 runs had none. TILEPATHCPU gives the same output in every run.
+- Reproduce: Cornell box 160x120, TILEPATHOCL (one pass, aa 8, seed 1), outputs DIRECT_DIFFUSE and DIRECT_DIFFUSE_REFLECT, two runs.
+- Notes: not investigated. The depth-tested outputs (SHADING_NORMAL and the others) were made deterministic on 2026-10-22.
 
 ### BiDir darkens the silhouette of the furnace sphere
 - Found: 2026-10-22

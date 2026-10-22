@@ -61,6 +61,18 @@ OPENCL_FORCE_INLINE bool AtomicMin(__global float *val, const float val2) {
 	return true;
 }
 
+// Makes the global memory writes of the thread visible before its next ones
+// (the release of a lock)
+OPENCL_FORCE_INLINE void GlobalMemFence() {
+#if defined(LUXRAYS_OPENCL_DEVICE)
+	mem_fence(CLK_GLOBAL_MEM_FENCE);
+#elif defined (LUXRAYS_CUDA_DEVICE)
+	__threadfence();
+#else
+#error "Error in GlobalMemFence() definition"
+#endif
+}
+
 OPENCL_FORCE_INLINE uint AtomicAddMod(__global uint *val, const uint delta, const uint mod) {
 	uint oldVal, newVal;
 
