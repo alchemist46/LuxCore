@@ -115,13 +115,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py PATHCPU cloth-denim "scene.materials.m.weft_kd=0 0 0" "scene.materials.m.warp_kd=0 0 0" "scene.materials.m.weft_ks=1 1 1" "scene.materials.m.warp_ks=1 1 1"` (PATHOCL the same: disk 0.865 against 0.862).
 - Notes: the Irawan-Marschner weave model is a fit, not a conserving BSDF; one scale cannot fix it (too dark head-on, too bright at grazing). A per-angle albedo normalization (a table of the directional albedo per preset, as the energy compensation of the microfacet materials) would. The diffuse part alone passes (cloth-diffuse 0.9999).
 
-### OpenPBRSmoothMaterial unit tests sit at the pixel threshold
-- Found: 2026-10-21
-- Area: tests
-- Problem: the noise alone puts 2.3-5.0% of the pixels of the `OpenPBRSmoothMaterial` images above the tolerance, around the 3% limit, so the test passes or fails by chance. The mean brightness always agrees within 0.1%.
-- Reproduce: render `test_OpenPBRSmoothMaterial_PATHCPU_SOBOL` (or the TILEPATHCPU/TILEPATHOCL variants) a few times; two runs of the old build read 2.51% and 2.32% against the reference, the new references' runs 3.2-5.0% against the shifted old ones.
-- Notes: the TILEPATHOCL reference was already re-rendered once for this (`14deaa16f`). A lower halt threshold for this scene, or an entry in `MAX_MEAN_DIFFERENCE_OVERRIDES`-style per-test pixel tolerance, would make it stable.
-
 ### BiDir darkens the silhouette of the furnace sphere
 - Found: 2026-10-22
 - Area: engine (BIDIRCPU)

@@ -176,6 +176,15 @@ MAX_MEAN_DIFFERENCE = 0.015
 MAX_MEAN_DIFFERENCE_OVERRIDES = {
 }
 
+# Tests with a larger, known, pixel noise (image name: maximum). The smooth
+# OpenPBR scene: its noise alone puts 2.3-5.0% of the pixels above the
+# tolerance (the mean agrees within 0.1%), so 3% passed or failed by chance.
+MAX_DIFFERENT_PIXELS_OVERRIDES = {
+	"OpenPBRSmoothMaterial_" + engineSampler + ".png": 0.08 for engineSampler in [
+		"BIDIRCPU_METROPOLIS", "BIDIRCPU_SOBOL", "PATHCPU_METROPOLIS", "PATHCPU_SOBOL",
+		"PATHOCL_METROPOLIS", "PATHOCL_SOBOL", "TILEPATHCPU_TILEPATHSAMPLER", "TILEPATHOCL_TILEPATHSAMPLER"]
+}
+
 # Set by the --strict command line option: fail if a reference is missing
 # (instead of copying the current result as reference)
 FAIL_ON_MISSING_REFERENCE = False
@@ -184,7 +193,8 @@ FAIL_ON_MISSING_REFERENCE = False
 UPDATE_REFERENCES = False
 
 # Returns (same image, fraction of different pixels, relative mean difference)
-def CompareImageNoisy(a, b, maxMeanDifference = MAX_MEAN_DIFFERENCE):
+def CompareImageNoisy(a, b, maxMeanDifference = MAX_MEAN_DIFFERENCE,
+		maxDifferentPixels = MAX_DIFFERENT_PIXELS):
 	if a.size != b.size:
 		return False, 1.0, 1.0
 
@@ -205,7 +215,7 @@ def CompareImageNoisy(a, b, maxMeanDifference = MAX_MEAN_DIFFERENCE):
 	meanB = sum(ImageStat.Stat(b).mean) / 3.0
 	meanDiff = abs(meanA - meanB) / max(meanB, 8.0)
 
-	sameImage = (diffFraction <= MAX_DIFFERENT_PIXELS) and (meanDiff <= maxMeanDifference)
+	sameImage = (diffFraction <= maxDifferentPixels) and (meanDiff <= maxMeanDifference)
 	return sameImage, diffFraction, meanDiff
 
 def CompareImageFiles(testCase, resultImageName, refImageName):
@@ -216,7 +226,9 @@ def CompareImageFiles(testCase, resultImageName, refImageName):
 		refImage = Image.open(refImageName)
 
 		maxMeanDifference = MAX_MEAN_DIFFERENCE_OVERRIDES.get(os.path.basename(refImageName), MAX_MEAN_DIFFERENCE)
-		(sameImage, diffFraction, meanDiff) = CompareImageNoisy(resultImage, refImage, maxMeanDifference)
+		maxDifferentPixels = MAX_DIFFERENT_PIXELS_OVERRIDES.get(os.path.basename(refImageName), MAX_DIFFERENT_PIXELS)
+		(sameImage, diffFraction, meanDiff) = CompareImageNoisy(resultImage, refImage, maxMeanDifference,
+				maxDifferentPixels)
 
 		if not sameImage:
 			# Save the differences
@@ -227,7 +239,7 @@ def CompareImageFiles(testCase, resultImageName, refImageName):
 
 			testCase.fail("%s differs from %s (%.2f%% of the pixels differ, the maximum is %.2f%%; "
 					"the mean brightness differs %.2f%%, the maximum is %.2f%%)" % (
-					refImageName, resultImageName, 100.0 * diffFraction, 100.0 * MAX_DIFFERENT_PIXELS,
+					refImageName, resultImageName, 100.0 * diffFraction, 100.0 * maxDifferentPixels,
 					100.0 * meanDiff, 100.0 * maxMeanDifference))
 	elif FAIL_ON_MISSING_REFERENCE:
 		testCase.fail("Missing reference image \"" + refImageName + "\"")
