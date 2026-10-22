@@ -260,8 +260,7 @@ OPENCL_FORCE_NOT_INLINE void Texture_EvalOpGenericBumpOffsetU(
 		__global float *evalStack,
 		uint *evalStackOffset,
 		__global const HitPoint *hitPoint,
-		const float sampleDistance
-		TEXTURES_PARAM_DECL) {
+		const float sampleDistance) {
 	const float3 origP = VLOAD3F(&hitPoint->p.x);
 	const float3 origShadeN = VLOAD3F(&hitPoint->shadeN.x);
 	const float2 origUV = VLOAD2F(&hitPoint->defaultUV.u);
@@ -276,8 +275,7 @@ OPENCL_FORCE_NOT_INLINE void Texture_EvalOpGenericBumpOffsetU(
 	// Update HitPoint
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
 	const float3 dpdu = VLOAD3F(&hitPointTmp->dpdu.x);
-	float3 dndu, dndv;
-	HitPoint_GetNormalDifferentials(hitPoint, &dndu, &dndv EXTMESH_PARAM);
+	const float3 dndu = VLOAD3F(&hitPoint->dndu.x);
 	// Shift hitPointTmp.du in the u direction and calculate value
 	const float uu = sampleDistance / length(dpdu);
 	VSTORE3F(origP + uu * dpdu, &hitPointTmp->p.x);
@@ -290,8 +288,7 @@ OPENCL_FORCE_NOT_INLINE void Texture_EvalOpGenericBumpOffsetV(
 		__global float *evalStack,
 		uint *evalStackOffset,
 		__global const HitPoint *hitPoint,
-		const float sampleDistance
-		TEXTURES_PARAM_DECL) {
+		const float sampleDistance) {
 	// -1 is for result of EVAL_BUMP_GENERIC_OFFSET_U
 	const float3 origP = EvalStack_ReadFloat3(-8 - 1);
 	const float3 origShadeN = EvalStack_ReadFloat3(-5 - 1);
@@ -300,8 +297,7 @@ OPENCL_FORCE_NOT_INLINE void Texture_EvalOpGenericBumpOffsetV(
 	// Update HitPoint
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
 	const float3 dpdv = VLOAD3F(&hitPointTmp->dpdv.x);
-	float3 dndu, dndv;
-	HitPoint_GetNormalDifferentials(hitPoint, &dndu, &dndv EXTMESH_PARAM);
+	const float3 dndv = VLOAD3F(&hitPoint->dndv.x);
 	// Shift hitPointTmp.dv in the v direction and calculate value
 	const float vv = sampleDistance / length(dpdv);
 	VSTORE3F(origP + vv * dpdv, &hitPointTmp->p.x);

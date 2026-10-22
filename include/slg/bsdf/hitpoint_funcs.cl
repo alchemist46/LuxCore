@@ -73,33 +73,19 @@ OPENCL_FORCE_INLINE void HitPoint_Init(__global HitPoint *hitPoint, const bool t
 	hitPoint->triangleBariCoord2 = b2;
 
 	// Compute geometry differentials
-	float3 dpdu, dpdv;
+	float3 dndu, dndv, dpdu, dpdv;
 	ExtMesh_GetDifferentials(
 			&motionLocalToWorld,
 			meshIndex,
 			triIndex,
 			shadeN, 0,
-			&dpdu, &dpdv
+			&dpdu, &dpdv,
+			&dndu, &dndv
 			EXTMESH_PARAM);
 	VSTORE3F(dpdu, &hitPoint->dpdu.x);
 	VSTORE3F(dpdv, &hitPoint->dpdv.x);
-}
-
-// The derivatives of the interpolated normal along u and v, zero without a
-// mesh
-OPENCL_FORCE_INLINE void HitPoint_GetNormalDifferentials(__global const HitPoint *hitPoint,
-		float3 *dndu, float3 *dndv
-		EXTMESH_PARAM_DECL) {
-	const uint meshIndex = hitPoint->meshIndex;
-	if (meshIndex == NULL_INDEX) {
-		*dndu = ZERO;
-		*dndv = ZERO;
-	} else {
-		Transform motionLocalToWorld;
-		ExtMesh_GetMotionLocal2World(hitPoint->time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
-		ExtMesh_GetNormalDifferentials(&motionLocalToWorld, meshIndex, hitPoint->triangleIndex, 0,
-				dndu, dndv EXTMESH_PARAM);
-	}
+	VSTORE3F(dndu, &hitPoint->dndu.x);
+	VSTORE3F(dndv, &hitPoint->dndv.x);
 }
 
 // Initialize all fields
@@ -124,6 +110,8 @@ OPENCL_FORCE_INLINE void HitPoint_InitDefault(__global HitPoint *hitPoint) {
 	
 	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dpdu.x);
 	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dpdv.x);
+	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dndu.x);
+	VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 0.f), &hitPoint->dndv.x);
 
 	hitPoint->time = 0.f;
 

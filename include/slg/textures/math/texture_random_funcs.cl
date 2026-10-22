@@ -56,11 +56,11 @@ OPENCL_FORCE_NOT_INLINE void RandomTexture_EvalOp(
 		}
 		case EVAL_BUMP_GENERIC_OFFSET_U:
 			Texture_EvalOpGenericBumpOffsetU(evalStack, evalStackOffset,
-					hitPoint, sampleDistance TEXTURES_PARAM);
+					hitPoint, sampleDistance);
 			break;
 		case EVAL_BUMP_GENERIC_OFFSET_V:
 			Texture_EvalOpGenericBumpOffsetV(evalStack, evalStackOffset,
-					hitPoint, sampleDistance TEXTURES_PARAM);
+					hitPoint, sampleDistance);
 			break;
 		case EVAL_BUMP:
 			Texture_EvalOpGenericBump(evalStack, evalStackOffset,
