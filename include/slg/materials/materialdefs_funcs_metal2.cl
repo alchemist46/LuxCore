@@ -133,8 +133,7 @@ OPENCL_FORCE_INLINE void Metal2Material_Evaluate(__global const Material* restri
 			&nVal, &kVal
 			MATERIALS_PARAM);
 
-	const float3 F = FresnelGeneral_Evaluate(nVal, kVal, cosWH);
-	Spectrum_Clamp(F);
+	const float3 F = Spectrum_Clamp(FresnelGeneral_Evaluate(nVal, kVal, cosWH));
 
 	const float G = Microfacet_G(u, v, lightDir, eyeDir);
 
@@ -192,8 +191,7 @@ OPENCL_FORCE_INLINE void Metal2Material_Sample(__global const Material* restrict
 			&nVal, &kVal
 			MATERIALS_PARAM);
 
-	const float3 F = FresnelGeneral_Evaluate(nVal, kVal, cosWH);
-	Spectrum_Clamp(F);
+	const float3 F = Spectrum_Clamp(FresnelGeneral_Evaluate(nVal, kVal, cosWH));
 
 	// f * |cos(sampled)| / pdf
 	float factor = d * G / (4.f * pdfW);

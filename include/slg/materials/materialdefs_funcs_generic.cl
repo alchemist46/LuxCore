@@ -446,33 +446,33 @@ OPENCL_FORCE_INLINE float FrDiel2(const float cosi, const float cost, const floa
 	return (Rparl * Rparl + Rperp * Rperp) * .5f;
 }
 
-OPENCL_FORCE_INLINE float3 FrFull(const float cosi, const float3 cost, const float3 eta, const float3 k) {
-	const float3 tmp = (eta * eta + k * k) * (cosi * cosi) + (cost * cost);
-	const float3 Rparl2 = (tmp - (2.f * cosi * cost) * eta) /
-		(tmp + (2.f * cosi * cost) * eta);
-	const float3 tmp_f = (eta * eta + k * k) * (cost * cost) + (cosi * cosi);
-	const float3 Rperp2 = (tmp_f - (2.f * cosi * cost) * eta) /
-		(tmp_f + (2.f * cosi * cost) * eta);
-	return (Rparl2 + Rperp2) * .5f;
+// The unpolarized reflectance of the interface to a medium of complex IOR
+// eta + i k (relative to the incident one) at the cosine cosi > 0, exact (as
+// pbrt-v3's FrConductor(); FresnelTexture::FrConductor() is the same code)
+OPENCL_FORCE_INLINE float FrConductor(const float cosi, const float eta, const float k) {
+	const float cos2 = cosi * cosi;
+	const float sin2 = 1.f - cos2;
+	const float t0 = eta * eta - k * k - sin2;
+	const float a2PlusB2 = sqrt(fmax(0.f, t0 * t0 + 4.f * eta * eta * k * k));
+	const float t1 = a2PlusB2 + cos2;
+	const float a = sqrt(fmax(0.f, .5f * (a2PlusB2 + t0)));
+	const float t2 = 2.f * cosi * a;
+	const float rs = (t1 - t2) / fmax(t1 + t2, 1e-20f);
+	const float t3 = cos2 * a2PlusB2 + sin2 * sin2;
+	const float t4 = t2 * sin2;
+	const float rp = rs * (t3 - t4) / fmax(t3 + t4, 1e-20f);
+
+	return .5f * (rp + rs);
 }
 
+// From the other side (cosi < 0) the relative IOR is 1 / (eta + i k)
 OPENCL_FORCE_INLINE float3 FresnelGeneral_Evaluate(const float3 eta, const float3 k, const float cosi) {
-	float3 sint2 = TO_FLOAT3(fmax(0.f, 1.f - cosi * cosi));
-	if (cosi > 0.f)
-		sint2 /= eta * eta;
-	else
-		sint2 *= eta * eta;
-	sint2 = Spectrum_Clamp(sint2);
+	const float c = fmin(fabs(cosi), 1.f);
+	const float3 d2 = (cosi > 0.f) ? WHITE : (eta * eta + k * k);
+	const float3 e = eta / d2;
+	const float3 kk = k / d2;
 
-	const float3 cost2 = 1.f - sint2;
-	if (cosi > 0.f) {
-		const float3 a = 2.f * k * k * sint2;
-		return FrFull(cosi, Spectrum_Sqrt((cost2 + Spectrum_Sqrt(cost2 * cost2 + a * a)) / 2.f), eta, k);
-	} else {
-		const float3 a = 2.f * k * k * sint2;
-		const float3 d2 = eta * eta + k * k;
-		return FrFull(-cosi, Spectrum_Sqrt((cost2 + Spectrum_Sqrt(cost2 * cost2 + a * a)) / 2.f), eta / d2, -k / d2);
-	}
+	return MAKE_FLOAT3(FrConductor(c, e.x, kk.x), FrConductor(c, e.y, kk.y), FrConductor(c, e.z, kk.z));
 }
 
 OPENCL_FORCE_INLINE float FresnelCauchy_Evaluate(const float eta, const float cosi) {

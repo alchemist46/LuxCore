@@ -82,14 +82,24 @@ float FresnelTexture::FrDiel2(const float cosi, const float cost,
 //	return (Rparl2 + Rperp2) * .5f;
 //}
 
-Spectrum FresnelTexture::FrFull(const float cosi, const Spectrum &cost, const Spectrum &eta, const Spectrum &k) {
-	const Spectrum tmp = (eta * eta + k * k) * (cosi * cosi) + (cost * cost);
-	const Spectrum Rparl2 = (tmp - (2.f * cosi * cost) * eta) /
-		(tmp + (2.f * cosi * cost) * eta);
-	const Spectrum tmp_f = (eta * eta + k * k) * (cost * cost) + Spectrum(cosi * cosi);
-	const Spectrum Rperp2 = (tmp_f - (2.f * cosi * cost) * eta) /
-		(tmp_f + (2.f * cosi * cost) * eta);
-	return (Rparl2 + Rperp2) * .5f;
+// The unpolarized reflectance of the interface to a medium of complex IOR
+// eta + i k (relative to the incident one) at the cosine cosi > 0, exact (as
+// pbrt-v3's FrConductor(); FresnelGeneral_Evaluate() in
+// materialdefs_funcs_generic.cl is the same code)
+float FresnelTexture::FrConductor(const float cosi, const float eta, const float k) {
+	const float cos2 = cosi * cosi;
+	const float sin2 = 1.f - cos2;
+	const float t0 = eta * eta - k * k - sin2;
+	const float a2PlusB2 = sqrtf(Max(0.f, t0 * t0 + 4.f * eta * eta * k * k));
+	const float t1 = a2PlusB2 + cos2;
+	const float a = sqrtf(Max(0.f, .5f * (a2PlusB2 + t0)));
+	const float t2 = 2.f * cosi * a;
+	const float rs = (t1 - t2) / Max(t1 + t2, 1e-20f);
+	const float t3 = cos2 * a2PlusB2 + sin2 * sin2;
+	const float t4 = t2 * sin2;
+	const float rp = rs * (t3 - t4) / Max(t3 + t4, 1e-20f);
+
+	return .5f * (rp + rs);
 }
 
 Spectrum FresnelTexture::SchlickEvaluate(const Spectrum &normalIncidence, const float cosi) {
@@ -97,23 +107,21 @@ Spectrum FresnelTexture::SchlickEvaluate(const Spectrum &normalIncidence, const 
 		powf(1.f - cosi, 5.f);
 }
 
+// From the other side (cosi < 0) the relative IOR is 1 / (eta + i k)
 Spectrum FresnelTexture::GeneralEvaluate(const Spectrum &eta, const Spectrum &k, const float cosi) {
-	Spectrum sint2(Max(0.f, 1.f - cosi * cosi));
-	if (cosi > 0.f)
-		sint2 /= eta * eta;
-	else
-		sint2 *= eta * eta;
-	sint2 = sint2.Clamp();
+	const float c = Min(fabsf(cosi), 1.f);
 
-	const Spectrum cost2 = (Spectrum(1.f) - sint2);
-	if (cosi > 0.f) {
-		const Spectrum a(2.f * k * k * sint2);
-		return FrFull(cosi, Sqrt((cost2 + Sqrt(cost2 * cost2 + a * a)) / 2.f), eta, k);
-	} else {
-		const Spectrum a(2.f * k * k * sint2);
-		const Spectrum d2 = eta * eta + k * k;
-		return FrFull(-cosi, Sqrt((cost2 + Sqrt(cost2 * cost2 + a * a)) / 2.f), eta / d2, -k / d2);
+	Spectrum result;
+	for (u_int i = 0; i < COLOR_SAMPLES; ++i) {
+		if (cosi > 0.f)
+			result.c[i] = FrConductor(c, eta.c[i], k.c[i]);
+		else {
+			const float d2 = eta.c[i] * eta.c[i] + k.c[i] * k.c[i];
+			result.c[i] = FrConductor(c, eta.c[i] / d2, k.c[i] / d2);
+		}
 	}
+
+	return result;
 }
 
 float FresnelTexture::CauchyEvaluate(const float eta, const float cosi) {

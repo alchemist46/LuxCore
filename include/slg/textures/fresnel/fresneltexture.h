@@ -47,8 +47,7 @@ public:
 	static float CauchyEvaluate(const float eta, const float cosi);
 
 private:
-	static luxrays::Spectrum FrFull(const float cosi, const luxrays::Spectrum &cost,
-			const luxrays::Spectrum &eta, const luxrays::Spectrum &k);
+	static float FrConductor(const float cosi, const float eta, const float k);
 	static float FrDiel2(const float cosi, const float cost,
 			const float eta);
 };
