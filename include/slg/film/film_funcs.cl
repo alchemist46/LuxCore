@@ -544,6 +544,15 @@ void Film_AddSample(
 // Film_Clear Kernel
 //------------------------------------------------------------------------------
 
+OPENCL_FORCE_INLINE void Film_ClearPixel4(__global float *channel, const size_t gid) {
+	if (channel) {
+		channel[gid * 4] = 0.f;
+		channel[gid * 4 + 1] = 0.f;
+		channel[gid * 4 + 2] = 0.f;
+		channel[gid * 4 + 3] = 0.f;
+	}
+}
+
 __kernel void Film_Clear(
 	const int dummy // This dummy variable is required by KERNEL_ARGS_FILM macro
 	KERNEL_ARGS_FILM) {
@@ -613,7 +622,19 @@ __kernel void Film_Clear(
 		filmDirectGlossy[gid * 4 + 2] = 0.f;
 		filmDirectGlossy[gid * 4 + 3] = 0.f;
 	}
-	
+
+	// The reflected and transmitted parts of the direct and indirect channels
+	Film_ClearPixel4(filmDirectDiffuseReflect, gid);
+	Film_ClearPixel4(filmDirectDiffuseTransmit, gid);
+	Film_ClearPixel4(filmDirectGlossyReflect, gid);
+	Film_ClearPixel4(filmDirectGlossyTransmit, gid);
+	Film_ClearPixel4(filmIndirectDiffuseReflect, gid);
+	Film_ClearPixel4(filmIndirectDiffuseTransmit, gid);
+	Film_ClearPixel4(filmIndirectGlossyReflect, gid);
+	Film_ClearPixel4(filmIndirectGlossyTransmit, gid);
+	Film_ClearPixel4(filmIndirectSpecularReflect, gid);
+	Film_ClearPixel4(filmIndirectSpecularTransmit, gid);
+
 	if (filmEmission) {
 		filmEmission[gid * 4] = 0.f;
 		filmEmission[gid * 4 + 1] = 0.f;
