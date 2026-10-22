@@ -161,7 +161,7 @@ private:
 		ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(Mesh);
 
 		auto vertCount = vertices.Count();
-		auto triCount = vertices.Count();
+		auto triCount = tris.Count();
 
 		ar & vertCount;
 		for (u_int i = 0; i < vertCount; ++i)

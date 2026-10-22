@@ -1792,8 +1792,8 @@ PropertiesUPtr ImageMap::ToProperties(const string &prefix, const bool includeBl
 	props <<
 			// The image is internally stored always in NOP_COLORSPACE
 			Property(prefix + ".colorspace")("nop") <<
-			Property(prefix + ".storage")(ImageMapStorage::StorageType2String(pixelStorage->GetStorageType()));
-			Property(prefix + ".wrap")(ImageMapStorage::WrapType2String(pixelStorage->GetWrapType()));
+			Property(prefix + ".storage")(ImageMapStorage::StorageType2String(pixelStorage->GetStorageType())) <<
+			Property(prefix + ".wrap")(ImageMapStorage::WrapType2String(pixelStorage->GetWrapType())) <<
 			Property(prefix + ".filter")(ImageMapStorage::FilterType2String(pixelStorage->GetFilterType()));
 
 	if (includeBlobImg)

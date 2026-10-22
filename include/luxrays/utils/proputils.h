@@ -73,7 +73,8 @@ void load(Archive &ar, luxrays::Property &prop, const unsigned int version) {
 	std::string s;
 	ar & s;
 
-	prop.FromString(s);
+	// FromString() is static: it returns the parsed property
+	prop = luxrays::Property::FromString(s);
 }
 
 }

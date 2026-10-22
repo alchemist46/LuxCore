@@ -24,13 +24,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `pyunittests/unittests.py --filter OCL` on the HIP device; `--filter HaltEdit` (PATHCPU, 12 threads, RANDOM sampler, `simple` scene) crashed in 2 of 3 runs. Single `*_PATHOCL_METROPOLIS` tests on the HIP device (`GlassMaterial`, `ImageMapTexture`) crash on their own.
 - Notes: the frames look overwritten (float-like values in saved pointers). Not a stop-time use-after-free. With `opencl.native.threads.count = 0` 0 of 10 runs crashed, so the suspect is the native CPU threads that PATHOCL runs beside the GPU (Metropolis sampler); the GPU kernels are not involved. A `-fstack-protector-all` build passed 8 runs. Next step: a LuxCore-only ASan build (needs `libasan`/`libubsan` on the development machine).
 
-### Scene serialization crashes (.bcf, .rsm, .bsc)
-- Found: 2026-10-15
-- Area: engine
-- Problem: `.bcf` and `.rsm` serialization of scenes with instances crashes (`observer_ptr<TriangleMesh>` of `InstanceTriangleMesh`). `RenderConfig::serialize()` is empty, so `.rsm` files never contained the configuration and the scene. `Scene.Save()` of `.bsc` segfaults in `ExtMeshCache::GetRealFileName()` (from `SceneObject::ToProperties()`) for any scene with a mesh object, and loading a `.bsc` with an image map fails with `class version St10unique_ptrIN3slg8ImageMapE...`.
-- Reproduce: save any scene with a mesh object as `.bsc`; save a scene with instances as `.bcf`.
-- Notes: the same in the build before the working colour space. The cache saves its image maps through another pointer type than it loads them with. The serialization hook of the working colour space could not be tested because of this.
-
 ### CPU/GPU gap of 2% on the working colour space test scene
 - Found: 2026-10-15
 - Area: engine, material

@@ -53,13 +53,11 @@ template<class Archive> void ExtMeshCache::save(Archive &ar, const u_int version
 	ar & size;
 
 	for (u_int i = 0; i < size; ++i) {
-		auto& obj = meshes.objs[i];
-		auto ptr = obj.get();
-		ExtMeshUPtr m{dynamic_cast<ExtMesh *>(ptr)};
+		const ExtMesh *m = dynamic_cast<const ExtMesh *>(meshes.objs[i].get());
 		SDL_LOG("Saving serialized mesh: " << m->GetName());
 
-		// Save the mesh
-		ar & m;
+		// Save the mesh, as the ExtMeshUPtr load() reads, kept by the cache
+		SaveAsUniquePtr(ar, *m);
 	}
 
 	ar & deleteMeshData;

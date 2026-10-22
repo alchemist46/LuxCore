@@ -2050,7 +2050,21 @@ static py::tuple RenderConfig_LoadResumeFile(const py::str &fileNameStr) {
 	  const std::string&, RenderStateImplRPtr&, FilmImplUPtr&
   >(fileName, startState, startFilm);
 
-  return py::make_tuple(config, startState, startFilm);
+  // The unique pointers are moved: Python takes them over
+  return py::make_tuple(std::move(config), startState, std::move(startFilm));
+}
+
+// A session resumed from RenderConfig.LoadResumeFile(): its film, bound to
+// Python as the base Film, is a standalone one
+static std::unique_ptr<luxcore::detail::RenderSessionImpl> RenderSession_CreateResumed(
+		luxcore::detail::RenderConfigImpl &config, RenderStateImplRPtr &startState,
+		luxcore::detail::FilmImpl &startFilm) {
+	auto *standaloneFilm = dynamic_cast<luxcore::detail::FilmImplStandalone *>(&startFilm);
+	if (!standaloneFilm)
+		throw std::runtime_error("RenderSession: the start film of a resumed rendering must be a standalone film");
+
+	return luxcore::detail::RenderSessionImpl::Create<luxcore::detail::RenderConfigImpl &,
+			RenderStateImplRPtr &, luxcore::detail::FilmImplStandalone &>(config, startState, *standaloneFilm);
 }
 
 static std::unique_ptr<luxcore::detail::RenderConfigImpl>
@@ -2627,6 +2641,7 @@ PYBIND11_MODULE(pyluxcore, m) {
     .def("Save", &luxcore::detail::RenderConfigImpl::Save)
     .def("Export", &luxcore::detail::RenderConfigImpl::Export)
     .def_static("LoadResumeFile", &RenderConfig_LoadResumeFile)
+    .def_static("LoadFile", &RenderConfig_LoadFile)
     .def_static("GetDefaultProperties", &luxcore::detail::RenderConfigImpl::GetDefaultProperties)
   ;
 
@@ -2656,9 +2671,7 @@ PYBIND11_MODULE(pyluxcore, m) {
 	)
 
 	.def(
-		py::init<>(&RenderSessionImpl::Create
-			<RenderConfigImpl&, RenderStateImplRPtr&, FilmImplStandalone& >
-		),
+		py::init<>(&RenderSession_CreateResumed),
 		py::keep_alive<1, 2>()
 	)
 	//TODO

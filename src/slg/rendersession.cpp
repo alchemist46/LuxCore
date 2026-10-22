@@ -279,8 +279,10 @@ void RenderSession::CheckPeriodicSave(const bool force) {
 static size_t SaveRsmFile(RenderSession *renderSession, const std::string &fileName) {
 	SerializationOutputFile sof(fileName);
 
-	// Save the render configuration and the scene
-	sof.GetArchive() << renderSession->renderConfig;
+	// Save the render configuration and the scene, as the unique_ptr
+	// RenderConfigImpl reads back (the object itself has nothing, see
+	// RenderConfig::save_construct_data())
+	SaveAsUniquePtr(sof.GetArchive(), renderSession->renderConfig);
 
 	// Save the render state
 	auto renderState = renderSession->GetRenderState();

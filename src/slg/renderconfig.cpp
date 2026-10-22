@@ -576,7 +576,9 @@ void RenderConfig::SaveSerialized(
 	renderConfig.saveAdditionalCfg.Clear();
 	renderConfig.saveAdditionalCfg.Set(additionalCfg);
 
-	sof.GetArchive() << renderConfig;
+	// Saved as the unique_ptr LoadSerialized() reads: the configuration and
+	// the scene are in save_construct_data(), the object itself has nothing
+	SaveAsUniquePtr(sof.GetArchive(), renderConfig);
 
 	renderConfig.saveAdditionalCfg.Clear();
 
@@ -632,6 +634,11 @@ void slg::RenderConfig::load_construct_data(
 
 	decltype(sceneRef) sref;  // Load reference as a pointer
 	ar >> sref;
+
+	// A configuration with an external scene saved it through sceneRef only:
+	// the loaded copy is owned by the new configuration
+	if (!sptr)
+		sptr.reset(sref);
 
     // invoke inplace constructor to initialize instance of RenderConfig
 	::new(t) RenderConfig(std::move(cfg), *sref, std::move(sptr));  // NB: this is a placement new

@@ -62,6 +62,21 @@ typedef boost::archive::binary_iarchive LuxInputArchive;
 typedef boost::archive::text_oarchive LuxOutputArchiveText;
 typedef boost::archive::text_iarchive LuxInputArchiveText;
 
+// Saves an object that something else owns as the std::unique_ptr<T> its
+// loader reads (a unique_ptr has its own class information in the archive,
+// so neither the object nor a raw pointer to it can be read back that way),
+// without the temporary unique_ptr deleting it
+template <class Archive, class T> void SaveAsUniquePtr(Archive &ar, const T &obj) {
+	std::unique_ptr<T> ptr(const_cast<T *>(&obj));
+	try {
+		ar << ptr;
+	} catch (...) {
+		ptr.release();
+		throw;
+	}
+	ptr.release();
+}
+
 class SerializationOutputFile {
 public:
 	SerializationOutputFile(const std::string &fileName);

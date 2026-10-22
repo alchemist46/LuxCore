@@ -41,6 +41,8 @@ template void ImageMapResizePolicy::serialize(LuxInputArchiveText &ar, const u_i
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::ImageMapResizeNonePolicy)
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::ImageMapResizeFixedPolicy)
+BOOST_CLASS_EXPORT_IMPLEMENT(slg::ImageMapResizeMinMemPolicy)
+BOOST_CLASS_EXPORT_IMPLEMENT(slg::ImageMapResizeMipMapMemPolicy)
 
 //------------------------------------------------------------------------------
 // ImageMapCache
@@ -75,6 +77,7 @@ template<class Archive> void ImageMapCache::load(Archive &ar, const u_int versio
 	ar & s;
 	mapNames.resize(s);
 	maps.resize(s);
+	resizePolicyToApply.resize(s);
 
 	for (u_int i = 0; i < maps.size(); ++i) {
 		// Load the name
@@ -86,15 +89,18 @@ template<class Archive> void ImageMapCache::load(Archive &ar, const u_int versio
 		ar & rpta;
 		resizePolicyToApply[i] = rpta;
 
-		// Load the ImageMap
-		ImageMapUPtr im;
+		// Load the ImageMap (saved as the shared pointer of maps)
+		ImageMapSPtr im;
 		ar & im;
-		maps[i] = std::move(im);
+		maps[i] = im;
 
-		// The image is internally store always with a 1.0 gamma
-		const std::string key = GetCacheKey(name, ImageMapConfig(1.f,
+		// The image is stored already converted, in NOP_COLORSPACE: the key
+		// of the configuration ImageMap::ToProperties() writes for it
+		ImageMapConfig imgCfg(1.f,
 				im->GetStorage().GetStorageType(), im->GetStorage().GetWrapType(),
-				ImageMapStorage::ChannelSelectionType::DEFAULT));
+				ImageMapStorage::ChannelSelectionType::DEFAULT);
+		imgCfg.colorSpaceCfg = ColorSpaceConfig::defaultNopConfig;
+		const std::string key = GetCacheKey(name, imgCfg);
 		mapByKey.insert(make_pair(key, std::ref(*im)));	
 	}
 
