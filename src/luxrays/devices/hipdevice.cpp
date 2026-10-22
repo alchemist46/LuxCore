@@ -165,6 +165,20 @@ HIPDevice::~HIPDevice() {
 		PopThreadCurrentDevice();
 	}
 
+	if (textures.size() > 0) {
+		PushThreadCurrentDevice();
+
+		for (auto &t : textures) {
+			hipDestroyTextureObject((hipTextureObject_t)t.first);
+			if (t.second.pointTexObj)
+				hipDestroyTextureObject(t.second.pointTexObj);
+			hipFreeArray(t.second.array);
+		}
+		textures.clear();
+
+		PopThreadCurrentDevice();
+	}
+
 	if (loadedModules.size() > 0) {
 		PushThreadCurrentDevice();
 
@@ -858,6 +872,123 @@ void HIPDevice::FreeBuffer(HardwareDeviceBuffer **buff) {
 		delete *buff;
 		*buff = nullptr;
 	}
+}
+
+//------------------------------------------------------------------------------
+// Textures for the texture hardware
+//------------------------------------------------------------------------------
+
+unsigned long long HIPDevice::CreateTexture2D(const void *pixels,
+		const u_int width, const u_int height,
+		const u_int channelCount, const u_int channelSize,
+		const bool linearFilter, const TextureAddressMode addressMode,
+		const float borderValue, const string &desc,
+		unsigned long long *pointTextureObject) {
+	assert ((channelCount >= 1) && (channelCount <= 4));
+	assert ((channelSize == 1) || (channelSize == 2) || (channelSize == 4));
+
+	// HIP arrays have no 3 channel formats
+	const u_int arrayChannelCount = (channelCount == 3) ? 4 : channelCount;
+	const size_t texelSize = channelSize * channelCount;
+	const size_t arrayTexelSize = channelSize * arrayChannelCount;
+
+	hipChannelFormatDesc formatDesc;
+	const int bits = (int)channelSize * 8;
+	formatDesc.x = bits;
+	formatDesc.y = (arrayChannelCount > 1) ? bits : 0;
+	formatDesc.z = (arrayChannelCount > 2) ? bits : 0;
+	formatDesc.w = (arrayChannelCount > 3) ? bits : 0;
+	formatDesc.f = (channelSize == 1) ? hipChannelFormatKindUnsigned : hipChannelFormatKindFloat;
+
+	hipArray_t array = nullptr;
+	if (hipMallocArray(&array, &formatDesc, width, height, hipArrayDefault) != hipSuccess) {
+		LR_LOG(deviceContext, "[Device " << GetName() << "] Unable to allocate a " << width << "x" << height <<
+				" texture, the image map is read without the texture hardware: " << desc);
+		return 0;
+	}
+
+	if (arrayChannelCount == channelCount) {
+		CHECK_HIP_ERROR(hipMemcpy2DToArray(array, 0, 0, pixels, width * texelSize,
+				width * texelSize, height, hipMemcpyHostToDevice));
+	} else {
+		// Pad the RGB texels to RGBA (the alpha is not read)
+		vector<unsigned char> padded((size_t)width * height * arrayTexelSize, 0);
+		const unsigned char *src = (const unsigned char *)pixels;
+		for (size_t i = 0; i < (size_t)width * height; ++i)
+			memcpy(&padded[i * arrayTexelSize], &src[i * texelSize], texelSize);
+
+		CHECK_HIP_ERROR(hipMemcpy2DToArray(array, 0, 0, &padded[0], width * arrayTexelSize,
+				width * arrayTexelSize, height, hipMemcpyHostToDevice));
+	}
+
+	hipResourceDesc resDesc;
+	memset(&resDesc, 0, sizeof(resDesc));
+	resDesc.resType = hipResourceTypeArray;
+	resDesc.res.array.array = array;
+
+	hipTextureDesc texDesc;
+	memset(&texDesc, 0, sizeof(texDesc));
+	hipTextureAddressMode mode;
+	switch (addressMode) {
+		case TEXTURE_WRAP:
+			mode = hipAddressModeWrap;
+			break;
+		case TEXTURE_CLAMP:
+			mode = hipAddressModeClamp;
+			break;
+		case TEXTURE_BORDER:
+		default:
+			mode = hipAddressModeBorder;
+			break;
+	}
+	texDesc.addressMode[0] = mode;
+	texDesc.addressMode[1] = mode;
+	texDesc.addressMode[2] = mode;
+	texDesc.filterMode = linearFilter ? hipFilterModeLinear : hipFilterModePoint;
+	texDesc.readMode = (channelSize == 1) ? hipReadModeNormalizedFloat : hipReadModeElementType;
+	for (u_int i = 0; i < 4; ++i)
+		texDesc.borderColor[i] = borderValue;
+	texDesc.normalizedCoords = 1;
+
+	hipTextureObject_t texObj = nullptr;
+	if (hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr) != hipSuccess) {
+		LR_LOG(deviceContext, "[Device " << GetName() << "] Unable to create a texture object, the image map is "
+				"read without the texture hardware: " << desc);
+		CHECK_HIP_ERROR(hipFreeArray(array));
+		return 0;
+	}
+
+	hipTextureObject_t pointTexObj = nullptr;
+	if (linearFilter) {
+		texDesc.filterMode = hipFilterModePoint;
+		if (hipCreateTextureObject(&pointTexObj, &resDesc, &texDesc, nullptr) != hipSuccess) {
+			LR_LOG(deviceContext, "[Device " << GetName() << "] Unable to create a texture object, the image map is "
+					"read without the texture hardware: " << desc);
+			CHECK_HIP_ERROR(hipDestroyTextureObject(texObj));
+			CHECK_HIP_ERROR(hipFreeArray(array));
+			return 0;
+		}
+	}
+	*pointTextureObject = (unsigned long long)(pointTexObj ? pointTexObj : texObj);
+
+	const size_t size = (size_t)width * height * arrayTexelSize;
+	AllocMemory(size);
+	textures[(unsigned long long)texObj] = { array, size, pointTexObj };
+
+	return (unsigned long long)texObj;
+}
+
+void HIPDevice::FreeTexture2D(const unsigned long long textureObject) {
+	auto it = textures.find(textureObject);
+	if (it == textures.end())
+		return;
+
+	CHECK_HIP_ERROR(hipDestroyTextureObject((hipTextureObject_t)textureObject));
+	if (it->second.pointTexObj)
+		CHECK_HIP_ERROR(hipDestroyTextureObject(it->second.pointTexObj));
+	CHECK_HIP_ERROR(hipFreeArray(it->second.array));
+	FreeMemory(it->second.size);
+	textures.erase(it);
 }
 
 #endif

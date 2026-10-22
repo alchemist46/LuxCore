@@ -220,6 +220,7 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	intersectionDevice.FreeBuffer(&lightIndexOffsetByMeshIndexBuff);
 	intersectionDevice.FreeBuffer(&lightIndexByTriIndexBuff);
 	intersectionDevice.FreeBuffer(&imageMapDescsBuff);
+	FreeImageMapTextures();
 
 	for (u_int i = 0; i < imageMapsBuff.size(); ++i)
 		intersectionDevice.FreeBuffer(&imageMapsBuff[i]);

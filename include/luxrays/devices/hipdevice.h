@@ -248,6 +248,25 @@ public:
 	// trace kernel), so it can be used with SetKernelArg()/EnqueueKernel()
 	HardwareDeviceKernelUPtr GetKernel(hipFunction_t function, const std::string &kernelName);
 
+	// A 2D texture object for the texture hardware, reading a copy of the
+	// pixels in a HIP array with normalized coordinates. The pixels are rows
+	// of width texels without padding, each of channelCount channels of
+	// channelSize bytes: 1 (read as unsigned normalized), 2 (half) or 4
+	// (float); 3 channels are padded to 4. A BORDER address mode reads
+	// borderValue outside the image (black on AMD whatever the value: the
+	// WrapWhite unit tests). *pointTextureObject is a second texture
+	// object on the same array with point sampling (the same object without
+	// the linear filter). Returns 0 if the texture can't be created (i.e. an
+	// image larger than the hardware supports).
+	enum TextureAddressMode { TEXTURE_WRAP, TEXTURE_CLAMP, TEXTURE_BORDER };
+	unsigned long long CreateTexture2D(const void *pixels,
+			const u_int width, const u_int height,
+			const u_int channelCount, const u_int channelSize,
+			const bool linearFilter, const TextureAddressMode addressMode,
+			const float borderValue, const std::string &desc,
+			unsigned long long *pointTextureObject);
+	void FreeTexture2D(const unsigned long long textureObject);
+
 	friend class Context;
 
 protected:
@@ -281,6 +300,15 @@ protected:
 	std::unordered_map<std::string, KernelTime> kernelTimes;
 	std::vector<KernelLaunchEvents> pendingLaunchEvents;
 	std::vector<hipEvent_t> freeEvents;
+
+	// The textures of CreateTexture2D(): their array, its size and the
+	// point sampling texture object if it is a different one
+	struct Texture2D {
+		hipArray_t array;
+		size_t size;
+		hipTextureObject_t pointTexObj;
+	};
+	std::unordered_map<unsigned long long, Texture2D> textures;
 };
 
 }

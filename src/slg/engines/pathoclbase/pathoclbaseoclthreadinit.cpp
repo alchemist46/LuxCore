@@ -27,6 +27,7 @@
 #include "luxrays/core/geometry/transform.h"
 #include "luxrays/utils/ocl.h"
 #include "luxrays/devices/ocldevice.h"
+#include "luxrays/devices/hipdevice.h"
 #include "luxrays/kernels/kernels.h"
 
 #include "slg/slg.h"
@@ -356,18 +357,112 @@ void PathOCLBaseOCLRenderThread::InitPhotonGI() {
 	}
 }
 
+// On a HIP device, the lookups of the image maps use the texture hardware: two
+// texture objects per image map (filtered and single texels), in the device's
+// copy of the image map descriptions. The density grids index their pixels
+// directly and keep them, and so do the image maps with a white wrap: the
+// border colour of a texture object reads black on AMD (the WrapWhite unit
+// tests). LUXRAYS_HIP_TEXTURES=0 reads every image map without the texture
+// hardware.
+void PathOCLBaseOCLRenderThread::CreateImageMapTextures(vector<slg::ocl::ImageMap> &imageMapDescs) {
+#if !defined(LUXRAYS_DISABLE_HIP)
+	HIPDevice *hipDevice = dynamic_cast<HIPDevice *>(&intersectionDevice);
+	if (!hipDevice)
+		return;
+
+	const char *enable = getenv("LUXRAYS_HIP_TEXTURES");
+	if (enable && (string(enable) == "0"))
+		return;
+
+	CompiledScene *cscene = renderEngine->compiledScene;
+
+	vector<bool> densityGrid(imageMapDescs.size(), false);
+	for (auto &tex : cscene->texs) {
+		if (tex.type == slg::ocl::DENSITYGRID_TEX)
+			densityGrid[tex.densityGrid.imageMapIndex] = true;
+	}
+
+	for (u_int i = 0; i < imageMapDescs.size(); ++i) {
+		slg::ocl::ImageMap &im = imageMapDescs[i];
+		if (densityGrid[i] || (im.wrapType == slg::ocl::WRAP_WHITE))
+			continue;
+
+		u_int channelSize;
+		switch (im.storageType) {
+			case slg::ocl::BYTE:
+				channelSize = 1;
+				break;
+			case slg::ocl::HALF:
+				channelSize = 2;
+				break;
+			case slg::ocl::FLOAT:
+			default:
+				channelSize = 4;
+				break;
+		}
+
+		HIPDevice::TextureAddressMode addressMode;
+		switch (im.wrapType) {
+			case slg::ocl::WRAP_REPEAT:
+				addressMode = HIPDevice::TEXTURE_WRAP;
+				break;
+			case slg::ocl::WRAP_CLAMP:
+				addressMode = HIPDevice::TEXTURE_CLAMP;
+				break;
+			case slg::ocl::WRAP_BLACK:
+			default:
+				addressMode = HIPDevice::TEXTURE_BORDER;
+				break;
+		}
+
+		im.textureObject = hipDevice->CreateTexture2D(
+				&cscene->imageMapMemBlocks[im.pageIndex][im.pixelsIndex],
+				im.width, im.height, im.channelCount, channelSize,
+				im.filterType == slg::ocl::FILTER_LINEAR, addressMode, 0.f,
+				"ImageMap", &im.texelTextureObject);
+		if (im.textureObject)
+			imageMapTextures.push_back(im.textureObject);
+	}
+
+	if (imageMapTextures.size() > 0)
+		SLG_LOG("[PathOCLBaseRenderThread::" << threadIndex << "] Image maps read with the texture hardware: " <<
+				imageMapTextures.size() << "/" << imageMapDescs.size());
+#endif
+}
+
+void PathOCLBaseOCLRenderThread::FreeImageMapTextures() {
+#if !defined(LUXRAYS_DISABLE_HIP)
+	if (imageMapTextures.size() == 0)
+		return;
+
+	HIPDevice *hipDevice = dynamic_cast<HIPDevice *>(&intersectionDevice);
+	for (auto t : imageMapTextures)
+		hipDevice->FreeTexture2D(t);
+	imageMapTextures.clear();
+#endif
+}
+
 void PathOCLBaseOCLRenderThread::InitImageMaps() {
 	CompiledScene *cscene = renderEngine->compiledScene;
 
+	FreeImageMapTextures();
+
 	if (cscene->imageMapDescs.size() > 0) {
+		vector<slg::ocl::ImageMap> imageMapDescs = cscene->imageMapDescs;
+		CreateImageMapTextures(imageMapDescs);
+
 		intersectionDevice.AllocBufferRO(&imageMapDescsBuff,
-				&cscene->imageMapDescs[0],
-				sizeof(slg::ocl::ImageMap) * cscene->imageMapDescs.size(), "ImageMap descriptions");
+				&imageMapDescs[0],
+				sizeof(slg::ocl::ImageMap) * imageMapDescs.size(), "ImageMap descriptions");
+
+		// The pixels are not needed when every image map has its textures
+		const bool needPixels = (imageMapTextures.size() < imageMapDescs.size());
+		const size_t pageCount = needPixels ? cscene->imageMapMemBlocks.size() : 0;
 
 		// Free unused pages
-		for (u_int i = cscene->imageMapMemBlocks.size(); i < imageMapsBuff.size(); ++i)
+		for (u_int i = pageCount; i < imageMapsBuff.size(); ++i)
 			intersectionDevice.FreeBuffer(&imageMapsBuff[i]);
-		imageMapsBuff.resize(cscene->imageMapMemBlocks.size(), NULL);
+		imageMapsBuff.resize(pageCount, NULL);
 
 		const BufferType memTypeFlags = renderEngine->ctx->GetUseOutOfCoreBuffers() ?
 			((BufferType)(BUFFER_TYPE_READ_ONLY | BUFFER_TYPE_OUT_OF_CORE)) :

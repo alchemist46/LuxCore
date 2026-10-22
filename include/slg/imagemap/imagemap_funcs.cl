@@ -373,18 +373,60 @@ OPENCL_FORCE_INLINE float3 ImageMap_GetTexel_SpectrumAt(
 		ImageMap_GetTexel_SpectrumValue(storageType, pixels, channelCount, index);
 }
 
+#if defined(LUXRAYS_HIP_DEVICE)
+// The lookups of an image map with texture objects (see
+// PathOCLBaseOCLRenderThread::CreateImageMapTextures()): the texture hardware
+// does the wrap and the filter of the software lookups, with the same texel
+// centres, and returns the byte channels normalized
+OPENCL_FORCE_INLINE float4 ImageMap_GetTexture(__global const ImageMap *imageMap,
+		const float u, const float v) {
+	return tex2D<float4>((hipTextureObject_t)imageMap->textureObject, u, v);
+}
+
+// The texel (s, t), wrapped as ImageMap_GetTexel_Coords(): the point sampling
+// object at the texel centre
+OPENCL_FORCE_INLINE float4 ImageMap_GetTextureTexel(__global const ImageMap *imageMap,
+		const int s, const int t) {
+	return tex2D<float4>((hipTextureObject_t)imageMap->texelTextureObject,
+			(s + .5f) / imageMap->width, (t + .5f) / imageMap->height);
+}
+#endif
+
+// ImageMap_GetTexel_Float() and ImageMap_GetTexel_Spectrum() of an image map,
+// with the texture hardware when it has texture objects
+OPENCL_FORCE_INLINE float ImageMap_GetTexelFloat(__global const ImageMap *imageMap,
+		__global const void *pixels, const int s, const int t) {
+#if defined(LUXRAYS_HIP_DEVICE)
+	if (imageMap->textureObject) {
+		const float4 c = ImageMap_GetTextureTexel(imageMap, s, t);
+		return (imageMap->channelCount < 3) ? c.x : Spectrum_Y(MAKE_FLOAT3(c.x, c.y, c.z));
+	}
+#endif
+
+	return ImageMap_GetTexel_Float(imageMap->storageType, pixels, imageMap->width, imageMap->height,
+			imageMap->channelCount, imageMap->wrapType, s, t);
+}
+
+OPENCL_FORCE_INLINE float3 ImageMap_GetTexelSpectrum(__global const ImageMap *imageMap,
+		__global const void *pixels, const int s, const int t) {
+#if defined(LUXRAYS_HIP_DEVICE)
+	if (imageMap->textureObject) {
+		const float4 c = ImageMap_GetTextureTexel(imageMap, s, t);
+		return (imageMap->channelCount < 3) ? TO_FLOAT3(c.x) : MAKE_FLOAT3(c.x, c.y, c.z);
+	}
+#endif
+
+	return ImageMap_GetTexel_Spectrum(imageMap->storageType, pixels, imageMap->width, imageMap->height,
+			imageMap->channelCount, imageMap->wrapType, s, t);
+}
+
 OPENCL_FORCE_NOT_INLINE float ImageMapStorage_GetFloat(__global const ImageMap *imageMap,
 		const uint s0, const uint t0 
 		IMAGEMAPS_PARAM_DECL) {
 	__global const void *pixels = ImageMap_GetPixelsAddress(
 		imageMapBuff, imageMap->pageIndex, imageMap->pixelsIndex);
-	const ImageMapStorageType storageType = imageMap->storageType;
-	const uint channelCount = imageMap->channelCount;
-	const uint width = imageMap->width;
-	const uint height = imageMap->height;
-	const ImageWrapType wrapType = imageMap->wrapType;
 
-	return ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0, t0);	
+	return ImageMap_GetTexelFloat(imageMap, pixels, s0, t0);
 }
 
 OPENCL_FORCE_NOT_INLINE float3 ImageMapStorage_GetSpectrum(__global const ImageMap *imageMap,
@@ -392,18 +434,22 @@ OPENCL_FORCE_NOT_INLINE float3 ImageMapStorage_GetSpectrum(__global const ImageM
 		IMAGEMAPS_PARAM_DECL) {
 	__global const void *pixels = ImageMap_GetPixelsAddress(
 		imageMapBuff, imageMap->pageIndex, imageMap->pixelsIndex);
-	const ImageMapStorageType storageType = imageMap->storageType;
-	const uint channelCount = imageMap->channelCount;
-	const uint width = imageMap->width;
-	const uint height = imageMap->height;
-	const ImageWrapType wrapType = imageMap->wrapType;
 
-	return ImageMap_GetTexel_Spectrum(storageType, pixels, width, height, channelCount, wrapType, s0, t0);	
+	return ImageMap_GetTexelSpectrum(imageMap, pixels, s0, t0);
 }
 
 OPENCL_FORCE_NOT_INLINE float ImageMap_GetFloat(__global const ImageMap *imageMap,
 		const float u, const float v
 		IMAGEMAPS_PARAM_DECL) {
+#if defined(LUXRAYS_HIP_DEVICE)
+	if (imageMap->textureObject) {
+		const float4 c = ImageMap_GetTexture(imageMap, u, v);
+		// As ImageMap_GetTexel_FloatValue(): the luminance of a colour (it
+		// is linear, so it commutes with the filter)
+		return (imageMap->channelCount < 3) ? c.x : Spectrum_Y(MAKE_FLOAT3(c.x, c.y, c.z));
+	}
+#endif
+
 	__global const void *pixels = ImageMap_GetPixelsAddress(
 		imageMapBuff, imageMap->pageIndex, imageMap->pixelsIndex);
 	const ImageMapStorageType storageType = imageMap->storageType;
@@ -459,6 +505,14 @@ OPENCL_FORCE_NOT_INLINE float ImageMap_GetFloat(__global const ImageMap *imageMa
 OPENCL_FORCE_NOT_INLINE float3 ImageMap_GetSpectrum(__global const ImageMap *imageMap,
 		const float u, const float v
 		IMAGEMAPS_PARAM_DECL) {
+#if defined(LUXRAYS_HIP_DEVICE)
+	if (imageMap->textureObject) {
+		const float4 c = ImageMap_GetTexture(imageMap, u, v);
+		// As ImageMap_GetTexel_SpectrumValue()
+		return (imageMap->channelCount < 3) ? TO_FLOAT3(c.x) : MAKE_FLOAT3(c.x, c.y, c.z);
+	}
+#endif
+
 	__global const void *pixels = ImageMap_GetPixelsAddress(
 		imageMapBuff, imageMap->pageIndex, imageMap->pixelsIndex);
 	const ImageMapStorageType storageType = imageMap->storageType;
@@ -516,11 +570,8 @@ OPENCL_FORCE_NOT_INLINE float2 ImageMap_GetDuv(__global const ImageMap *imageMap
 		IMAGEMAPS_PARAM_DECL) {
 	__global const void *pixels = ImageMap_GetPixelsAddress(
 		imageMapBuff, imageMap->pageIndex, imageMap->pixelsIndex);
-	const ImageMapStorageType storageType = imageMap->storageType;
-	const uint channelCount = imageMap->channelCount;
 	const uint width = imageMap->width;
 	const uint height = imageMap->height;
-	const ImageWrapType wrapType = imageMap->wrapType;
 
 	const float s = u * width;
 	const float t = v * height;
@@ -549,10 +600,10 @@ OPENCL_FORCE_NOT_INLINE float2 ImageMap_GetDuv(__global const ImageMap *imageMap
 	}
 
 	float2 duv;
-	duv.x = mix(ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s1, it) - ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0, it),
-		ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s1, it + 1) - ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, s0, it + 1), at) * width;
-	duv.y = mix(ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, is, t1) - ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, is, t0),
-		ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, is + 1, t1) - ImageMap_GetTexel_Float(storageType, pixels, width, height, channelCount, wrapType, is + 1, t0), as) * height;
+	duv.x = mix(ImageMap_GetTexelFloat(imageMap, pixels, s1, it) - ImageMap_GetTexelFloat(imageMap, pixels, s0, it),
+		ImageMap_GetTexelFloat(imageMap, pixels, s1, it + 1) - ImageMap_GetTexelFloat(imageMap, pixels, s0, it + 1), at) * width;
+	duv.y = mix(ImageMap_GetTexelFloat(imageMap, pixels, is, t1) - ImageMap_GetTexelFloat(imageMap, pixels, is, t0),
+		ImageMap_GetTexelFloat(imageMap, pixels, is + 1, t1) - ImageMap_GetTexelFloat(imageMap, pixels, is + 1, t0), as) * height;
 
 	return duv;
 }

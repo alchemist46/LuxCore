@@ -91,6 +91,11 @@ thipModuleGetFunction *hipModuleGetFunction;
 thipModuleGetGlobal *hipModuleGetGlobal;
 thipFuncGetAttribute *hipFuncGetAttribute;
 thipModuleLaunchKernel *hipModuleLaunchKernel;
+thipMallocArray *hipMallocArray;
+thipFreeArray *hipFreeArray;
+thipMemcpy2DToArray *hipMemcpy2DToArray;
+thipCreateTextureObject *hipCreateTextureObject;
+thipDestroyTextureObject *hipDestroyTextureObject;
 
 thiprtcGetErrorString *hiprtcGetErrorString;
 thiprtcVersion *hiprtcVersion;
@@ -230,6 +235,11 @@ void HipInit() {
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleGetGlobal);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipFuncGetAttribute);
 	HIPEW_LIBRARY_FIND(hipLib.lib, hipModuleLaunchKernel);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipMallocArray);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipFreeArray);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipMemcpy2DToArray);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipCreateTextureObject);
+	HIPEW_LIBRARY_FIND(hipLib.lib, hipDestroyTextureObject);
 
 	hipLib.result = missingSymbol ? HIPEW_ERROR_MISSING_SYMBOL : HIPEW_SUCCESS;
 }

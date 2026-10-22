@@ -151,6 +151,8 @@ void BackgroundImgPlugin::ApplyHW(Film &film, const u_int index) {
 		imgMapDesc.height = GetFilmImageMap().GetHeight();
 		imgMapDesc.pageIndex = 0;
 		imgMapDesc.pixelsIndex = 0;
+		imgMapDesc.textureObject = 0;
+		imgMapDesc.texelTextureObject = 0;
 		imgMapDesc.storageType = (slg::ocl::ImageMapStorageType)GetFilmImageMap().GetStorage().GetStorageType();
 
 		// Allocate OpenCL buffers

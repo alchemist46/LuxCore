@@ -172,6 +172,8 @@ protected:
 	void InitCamera();
 	void InitGeometry();
 	void InitImageMaps();
+	void CreateImageMapTextures(std::vector<slg::ocl::ImageMap> &imageMapDescs);
+	void FreeImageMapTextures();
 	void InitTextures();
 	void InitMaterials();
 	void InitSceneObjects();
@@ -275,6 +277,8 @@ protected:
 	luxrays::HardwareDeviceBuffer *lightIndexByTriIndexBuff;
 	luxrays::HardwareDeviceBuffer *imageMapDescsBuff;
 	std::vector<luxrays::HardwareDeviceBuffer *> imageMapsBuff;
+	// The HIP texture objects of the image maps (see CreateImageMapTextures())
+	std::vector<unsigned long long> imageMapTextures;
 	luxrays::HardwareDeviceBuffer *pgicRadiancePhotonsBuff;
 	luxrays::HardwareDeviceBuffer *pgicRadiancePhotonsValuesBuff;
 	luxrays::HardwareDeviceBuffer *pgicRadiancePhotonsBVHNodesBuff;

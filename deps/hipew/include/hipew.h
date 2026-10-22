@@ -79,6 +79,100 @@ typedef enum hipMemoryAdvise {
 
 #define hipMemAttachGlobal 0x01
 
+typedef enum hipMemcpyKind {
+	hipMemcpyHostToHost = 0,
+	hipMemcpyHostToDevice = 1,
+	hipMemcpyDeviceToHost = 2,
+	hipMemcpyDeviceToDevice = 3,
+	hipMemcpyDefault = 4
+} hipMemcpyKind;
+
+// Arrays and texture objects (driver_types.h and texture_types.h)
+typedef struct hipArray *hipArray_t;
+typedef struct hipMipmappedArray *hipMipmappedArray_t;
+typedef struct __hip_texture *hipTextureObject_t;
+
+#define hipArrayDefault 0x00
+
+typedef enum hipChannelFormatKind {
+	hipChannelFormatKindSigned = 0,
+	hipChannelFormatKindUnsigned = 1,
+	hipChannelFormatKindFloat = 2,
+	hipChannelFormatKindNone = 3
+} hipChannelFormatKind;
+
+typedef struct hipChannelFormatDesc {
+	int x;
+	int y;
+	int z;
+	int w;
+	enum hipChannelFormatKind f;
+} hipChannelFormatDesc;
+
+typedef enum hipResourceType {
+	hipResourceTypeArray = 0x00,
+	hipResourceTypeMipmappedArray = 0x01,
+	hipResourceTypeLinear = 0x02,
+	hipResourceTypePitch2D = 0x03
+} hipResourceType;
+
+typedef struct hipResourceDesc {
+	enum hipResourceType resType;
+	union {
+		struct {
+			hipArray_t array;
+		} array;
+		struct {
+			hipMipmappedArray_t mipmap;
+		} mipmap;
+		struct {
+			void *devPtr;
+			struct hipChannelFormatDesc desc;
+			size_t sizeInBytes;
+		} linear;
+		struct {
+			void *devPtr;
+			struct hipChannelFormatDesc desc;
+			size_t width;
+			size_t height;
+			size_t pitchInBytes;
+		} pitch2D;
+	} res;
+} hipResourceDesc;
+
+typedef enum hipTextureAddressMode {
+	hipAddressModeWrap = 0,
+	hipAddressModeClamp = 1,
+	hipAddressModeMirror = 2,
+	hipAddressModeBorder = 3
+} hipTextureAddressMode;
+
+typedef enum hipTextureFilterMode {
+	hipFilterModePoint = 0,
+	hipFilterModeLinear = 1
+} hipTextureFilterMode;
+
+typedef enum hipTextureReadMode {
+	hipReadModeElementType = 0,
+	hipReadModeNormalizedFloat = 1
+} hipTextureReadMode;
+
+typedef struct hipTextureDesc {
+	enum hipTextureAddressMode addressMode[3];
+	enum hipTextureFilterMode filterMode;
+	enum hipTextureReadMode readMode;
+	int sRGB;
+	float borderColor[4];
+	int normalizedCoords;
+	unsigned int maxAnisotropy;
+	enum hipTextureFilterMode mipmapFilterMode;
+	float mipmapLevelBias;
+	float minMipmapLevelClamp;
+	float maxMipmapLevelClamp;
+} hipTextureDesc;
+
+struct hipResourceViewDesc;
+
 // hipDeviceProp_t is a large struct whose layout is versioned through the
 // hipGetDevicePropertiesR0600() entry point. Only the fields LuxCore needs are
 // read, at their R0600 offsets.
@@ -157,6 +251,15 @@ typedef hipError_t HIPAPI thipModuleLaunchKernel(hipFunction_t f,
 	unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
 	unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
 	unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams, void **extra);
+typedef hipError_t HIPAPI thipMallocArray(hipArray_t *array, const hipChannelFormatDesc *desc,
+	size_t width, size_t height, unsigned int flags);
+typedef hipError_t HIPAPI thipFreeArray(hipArray_t array);
+typedef hipError_t HIPAPI thipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset,
+	const void *src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
+typedef hipError_t HIPAPI thipCreateTextureObject(hipTextureObject_t *pTexObject,
+	const hipResourceDesc *pResDesc, const hipTextureDesc *pTexDesc,
+	const struct hipResourceViewDesc *pResViewDesc);
+typedef hipError_t HIPAPI thipDestroyTextureObject(hipTextureObject_t textureObject);
 
 extern thipGetErrorName *hipGetErrorName;
 extern thipGetErrorString *hipGetErrorString;
@@ -197,6 +300,11 @@ extern thipModuleGetFunction *hipModuleGetFunction;
 extern thipModuleGetGlobal *hipModuleGetGlobal;
 extern thipFuncGetAttribute *hipFuncGetAttribute;
 extern thipModuleLaunchKernel *hipModuleLaunchKernel;
+extern thipMallocArray *hipMallocArray;
+extern thipFreeArray *hipFreeArray;
+extern thipMemcpy2DToArray *hipMemcpy2DToArray;
+extern thipCreateTextureObject *hipCreateTextureObject;
+extern thipDestroyTextureObject *hipDestroyTextureObject;
 
 //------------------------------------------------------------------------------
 // hiprtc functions

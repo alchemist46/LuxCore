@@ -70,6 +70,9 @@ void CompiledScene::AddToImageMapMem(slg::ocl::ImageMap &im, const void *data, c
 
 	im.pageIndex = page;
 	im.pixelsIndex = start;
+	// Set by the HIP render threads (see PathOCLBaseOCLRenderThread::InitImageMaps())
+	im.textureObject = 0;
+	im.texelTextureObject = 0;
 }
 
 u_int CompiledScene::CompileImageMap(ImageMapConstRef im) {
