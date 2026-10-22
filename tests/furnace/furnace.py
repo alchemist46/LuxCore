@@ -424,6 +424,15 @@ opencl.devices.select = {opts['devices']}
 opencl.native.threads.count = 0
 opencl.task.count = 4096
 """)
+    if opts["engine"].startswith("TILEPATH"):
+        # One pass of aa x aa samples per pixel
+        aa = max(1, round(math.sqrt(opts["spp"])))
+        cp.SetFromString(f"""
+sampler.type = TILEPATHSAMPLER
+tilepath.sampling.aa.size = {aa}
+tile.multipass.enable = 0
+tilepath.multipass.enable = 0
+""")
     for k, v in opts["kv"]:
         (sp if k.startswith("scene.") else cp).Set(pyluxcore.Property(k, v))
 

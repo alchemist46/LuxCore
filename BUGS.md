@@ -80,13 +80,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: a white matte sphere under a constant white environment, orthographic camera, 48x48, no pixel filter, BIDIRCPU 512 spp: the first and the last pixel on the sphere of the centre row and column read 0.6.
 - Notes: in the build before the camera row fix (b22905df5) the dark ring was one row off (row 0 on top, the third last row at the bottom); now it is symmetric. Suspects: the light-traced connections to the camera at grazing angles. Not investigated.
 
-### TILEPATHOCL may wait long for the subsurface walks
+### TILEPATHOCL is slow with dense, nearly white subsurface media
 - Found: 2026-10-22
 - Area: engine (TILEPATHOCL)
-- Problem (suspected, not measured): a random walk now goes on past 256 bounces with a Russian roulette, up to 65536 (`subsurface_funcs.cl`), so in a dense, nearly white medium the longest walk of a tile pass can take thousands of iterations, and TILEPATHOCL runs the kernels until every task of the pass is done. The PATHOCL subsurface halt bias (above) may grow as well.
-- Reproduce: a white subsurface sphere with a radius of 0.01 of its size, TILEPATHOCL: the time per pass against the build before.
-- Notes: a walk reaches n bounces with the probability 256 / n past 256. The hard limit of 256 lost 13% of a white sphere of radius 100 mean free paths, 4096 lost 2%. Not measured on the GPU (it was down).
-
+- Problem: a random walk goes on past 256 bounces with a Russian roulette, up to 65536 (`subsurface_funcs.cl`), and TILEPATHOCL runs the trace and `MK_RT` kernels of a tile pass until its last task is done, one walk step per iteration (about 0.37 ms each with 4096 tasks, launch-bound): the longest walk of the pass sets its time. Measured 2026-10-22 (furnace, 96x96, 256 spp, TILEPATHOCL against the old hard limit of 256 bounces): a white sphere of mean free path 0.01 of its radius takes 24 s instead of 1 s (it read 0.864 with the limit, 0.997 now), mean free path 1.0 6 s instead of 1 s, albedo 0.95 10 s instead of 1 s (0.922 with the limit, 0.962 now). Albedo 0.8 and below, and the coloured and coated cases, take the same time. PATHOCL is barely affected (4 s for the densest), since its tasks start new samples independently.
+- Reproduce: `tests/furnace/furnace.py TILEPATHOCL subsurface-rad0.01 spp=256` against `PATHOCL`.
+- Notes: the energy the limit lost is real (4% at albedo 0.95), so the fix is to take several walk steps per kernel launch rather than to shorten the walks: that needs the ray traversal inside `MK_RT` (HIPRT can traverse from any kernel) instead of the separate trace kernel. A TILEPATHOCL-only steeper roulette (survival (b / (b + 1))^2, reaching n bounces with (256 / n)^2) would shorten the tail at the cost of noise in the densest media; not tried.
 ### One pixel of luxball-hdr-vol differs between TILEPATHOCL runs at a fixed seed
 - Found: 2026-10-22
 - Area: engine
