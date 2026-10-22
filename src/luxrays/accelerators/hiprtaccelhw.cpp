@@ -45,7 +45,8 @@ class HiprtKernel : public HardwareIntersectionKernel {
 public:
 	HiprtKernel(HardwareIntersectionDevice &dev, const HiprtAccel &hiprtAccel) :
 			HardwareIntersectionKernel(dev), hipDevice(nullptr),
-			hiprtCtx(nullptr), mergedGeometry(nullptr), scene(nullptr),
+			hiprtCtx(nullptr), buildFlags(hiprtBuildFlagBitPreferHighQualityBuild),
+			mergedGeometry(nullptr), scene(nullptr),
 			mergedTrianglesBuff(nullptr), instanceMeshesBuff(nullptr),
 			tmpBuff(nullptr), rayTimeOffset(0.f), stackBuffer{},
 			kernelModule(nullptr) {
@@ -57,6 +58,19 @@ public:
 		hiprtCtx = hipDevice->GetHIPRTContext();
 		if (!hiprtCtx)
 			throw runtime_error("No HIPRT context in HiprtKernel::HiprtKernel()");
+
+		// The BVH quality: a high quality BVH is faster to trace and slower to
+		// build
+		const string builderType = device.GetContext().GetConfig().Get(
+				Property("accelerator.hiprt.builder.type")("HIGH_QUALITY")).Get<string>();
+		if (builderType == "HIGH_QUALITY")
+			buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
+		else if (builderType == "BALANCED")
+			buildFlags = hiprtBuildFlagBitPreferBalancedBuild;
+		else if (builderType == "FAST")
+			buildFlags = hiprtBuildFlagBitPreferFastBuild;
+		else
+			throw runtime_error("Unknown HIPRT builder type in HiprtKernel::HiprtKernel(): " + builderType);
 
 		// Building the acceleration structures and loading the kernel require
 		// the device to be current
@@ -111,10 +125,10 @@ private:
 		triangleMesh.triangleStride = sizeof(Triangle);
 
 		hiprtBuildOptions buildOptions;
-		buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
+		buildOptions.buildFlags = buildFlags;
 		size_t tmpSize;
 		CHECK_HIPRT_ERROR(hiprtGetGeometryBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
-		if (!FitsInFreeMemory(tmpSize)) {
+		if ((buildFlags == hiprtBuildFlagBitPreferHighQualityBuild) && !FitsInFreeMemory(tmpSize)) {
 			LR_LOG(device.GetContext(), "Not enough free memory for a high quality HIPRT build of " << triCount <<
 					" triangles (" << ToMemString(tmpSize) << " of temporary memory): using a balanced build");
 
@@ -274,9 +288,11 @@ private:
 		return geometry;
 	}
 
-	// The high quality build (with spatial splits) traces rays ~15% faster
-	// than the balanced one but its temporary memory is ~17 times larger
-	// (~1.5KB per triangle instead of ~90 bytes): i.e. 11GB for 8M triangles.
+	// The high quality build (with spatial splits) traces rays faster than
+	// the balanced one (up to 4% less time per sample on the PATHOCL test
+	// scenes, 2026-10) but takes 4 times longer (~100 ms for 1.25M triangles)
+	// and its temporary memory is ~17 times larger (~1.5KB per triangle
+	// instead of ~90 bytes): i.e. 11GB for 8M triangles.
 	// It is used only if the temporary memory (and the BVH, ~25% of it before
 	// the compaction) fits in the free memory, with a margin for the other
 	// applications and the render buffers allocated later.
@@ -429,10 +445,10 @@ private:
 			buildInput.frameType = hiprtFrameTypeMatrix;
 
 			hiprtBuildOptions buildOptions;
-			buildOptions.buildFlags = hiprtBuildFlagBitPreferHighQualityBuild;
+			buildOptions.buildFlags = buildFlags;
 			size_t tmpSize;
 			CHECK_HIPRT_ERROR(hiprtGetSceneBuildTemporaryBufferSize(hiprtCtx, buildInput, buildOptions, tmpSize));
-			if (!FitsInFreeMemory(tmpSize)) {
+			if ((buildFlags == hiprtBuildFlagBitPreferHighQualityBuild) && !FitsInFreeMemory(tmpSize)) {
 				LR_LOG(device.GetContext(), "Not enough free memory for a high quality HIPRT build of " << instances.size() <<
 						" instances (" << ToMemString(tmpSize) << " of temporary memory): using a balanced build");
 
@@ -566,6 +582,8 @@ private:
 
 	HIPIntersectionDevice *hipDevice;
 	hiprtContext hiprtCtx;
+	// accelerator.hiprt.builder.type
+	hiprtBuildFlags buildFlags;
 
 	// All the geometries built
 	vector<hiprtGeometry> geometries;

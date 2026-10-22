@@ -448,6 +448,11 @@ PropertiesUPtr RenderConfig::ToProperties(const Properties &cfg) {
 	// the real time engines, where the scene is edited while rendering
 	const string engineType = cfg.Get(Property("renderengine.type")(PathCPURenderEngine::GetObjectTag())).Get<string>();
 	props << cfg.Get(Property("accelerator.embree.dynamic")(boost::starts_with(engineType, "RTPATH")));
+	// HIPRT accelerator: a balanced BVH for the real time engines, where each
+	// transform edit rebuilds it (4 times faster to build, up to 4% slower to
+	// trace)
+	props << cfg.Get(Property("accelerator.hiprt.builder.type")(
+			boost::starts_with(engineType, "RTPATH") ? "BALANCED" : "HIGH_QUALITY"));
 	// (M)BVH accelerator
 	props << cfg.Get(Property("accelerator.bvh.builder.type")("EMBREE_BINNED_SAH"));
 	props << cfg.Get(Property("accelerator.bvh.treetype")(4));
