@@ -19,6 +19,7 @@
 #include "slg/lights/strategies/logpower.h"
 #include "luxrays/utils/properties.h"
 #include "slg/scene/scene.h"
+#include "slg/lights/trianglelight.h"
 #include <memory>
 
 using namespace std;
@@ -54,7 +55,8 @@ void LightStrategyLogPower::Preprocess(SceneConstRef scene, const LightStrategyT
 			}
 			case TASK_ILLUMINATE: {
 				if (l.IsDirectLightSamplingEnabled()){
-					lightPower.push_back(power);
+					// A quad of two triangle lights is one light
+					lightPower.push_back(logf(1.f + GetIlluminatePower(scene, l)) * l.GetImportance());
 				} else
 					lightPower.push_back(0.f);
 				break;

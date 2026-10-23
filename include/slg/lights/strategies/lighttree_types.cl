@@ -31,6 +31,9 @@
 // All the lights of the node emit the same in every direction (point and
 // sphere lights): their contribution has no outgoing cosine
 #define LIGHTTREE_NODE_ISOTROPIC 8u
+// A triangle leaf of a quad light (see slg::TriangleLight::quadLight): its
+// vertices are the corners c, c + ex and c + ey of the parallelogram
+#define LIGHTTREE_NODE_QUAD 16u
 
 // A node of the tree. The nodes are stored depth first: the first child of an
 // interior node is the next node.

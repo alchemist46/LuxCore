@@ -471,6 +471,7 @@ PropertiesUPtr RenderConfig::ToProperties(const Properties &cfg) {
 	// LightStrategy
 	props << *LightStrategy::ToProperties(cfg);
 	props << cfg.Get(Property("lightstrategy.trianglelight.solidangle")(false));
+	props << cfg.Get(Property("lightstrategy.trianglelight.quad")(true));
 
 	// RenderEngine (includes PixelFilter and Sampler where applicable)
 	props << *RenderEngine::ToProperties(cfg);

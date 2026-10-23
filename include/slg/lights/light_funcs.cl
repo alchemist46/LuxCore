@@ -468,6 +468,25 @@ OPENCL_FORCE_INLINE float TriangleLight_GetDirectPdfW(__global const LightSource
 		__global const HitPoint *hitPoint, const float3 refPoint,
 		const float distance, const float cosAtLight
 		MATERIALS_PARAM_DECL) {
+	if (triLight->triangle.quadLightIndex != NULL_INDEX) {
+		// A triangle of a quad: the pdf of the quad
+		Transform motionLocalToWorld;
+		ExtMesh_GetMotionLocal2World(hitPoint->time, triLight->triangle.meshIndex, &motionLocalToWorld EXTMESH_PARAM);
+		float3 p0, p1, p2;
+		ExtMesh_GetTriangleVertices(&motionLocalToWorld,
+				triLight->triangle.meshIndex, triLight->triangle.quadTriangleIndex,
+				&p0, &p1, &p2 EXTMESH_PARAM);
+		float3 c, ex, ey;
+		QuadLight_GetEdges(p0, p1, p2, triLight->triangle.quadCorner, &c, &ex, &ey);
+
+		const float solidAnglePdfW = QuadLight_SolidAnglePdf(c, ex, ey, refPoint);
+		if (solidAnglePdfW > 0.f)
+			return solidAnglePdfW;
+
+		const float quadArea = length(cross(ex, ey));
+		return (quadArea > 0.f) ? PdfAtoW(1.f / quadArea, distance, cosAtLight) : 0.f;
+	}
+
 	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
 		Transform motionLocalToWorld;
 		ExtMesh_GetMotionLocal2World(hitPoint->time, triLight->triangle.meshIndex, &motionLocalToWorld EXTMESH_PARAM);
@@ -490,7 +509,11 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 		__global Ray *shadowRay, float *directPdfW
 		MATERIALS_PARAM_DECL) {
 	// A safety check to avoid NaN/Inf
-	if ((triLight->triangle.invTriangleArea == 0.f) || (triLight->triangle.invMeshArea == 0.f))
+	if ((triLight->triangle.invTriangleArea == 0.f) || (triLight->triangle.invMeshArea == 0.f) ||
+			// The second triangle of a quad is sampled by the first one: a
+			// strategy that picks it anyway (a floor of its distribution)
+			// must not count it twice
+			((triLight->triangle.quadLightIndex != NULL_INDEX) && (triLight->triangle.quadLightIndex != triLight->lightSceneIndex)))
 		return BLACK;
 
 	//--------------------------------------------------------------------------
@@ -511,7 +534,29 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	// Solid angle sampling (not for the lights with an emission map: their
 	// pdf has no cosine)
 	float solidAnglePdfW = 0.f;
-	if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
+	// The triangle of the sample point and the inverse of the area it is
+	// sampled on
+	uint sampleTriangleIndex = triangleIndex;
+	float invSampleArea = triLight->triangle.invTriangleArea;
+	// The first triangle of a quad samples the whole quad from a 2D sample
+	const bool quad = (triLight->triangle.quadLightIndex == triLight->lightSceneIndex);
+	if (quad) {
+		float3 p0, p1, p2;
+		ExtMesh_GetTriangleVertices(&motionLocalToWorld, meshIndex, triangleIndex,
+				&p0, &p1, &p2 EXTMESH_PARAM);
+		float3 c, ex, ey;
+		QuadLight_GetEdges(p0, p1, p2, triLight->triangle.quadCorner, &c, &ex, &ey);
+		const float quadArea = length(cross(ex, ey));
+		if (!(quadArea > 0.f))
+			return BLACK;
+		invSampleArea = 1.f / quadArea;
+
+		float u, v;
+		solidAnglePdfW = QuadLight_Sample(c, ex, ey, hitPointP, u0, u1, &samplePoint, &u, &v);
+		if (QuadLight_GetTriangle(u, v, triLight->triangle.quadCorner, triLight->triangle.quadPartnerCorner, &b1, &b2))
+			sampleTriangleIndex = triLight->triangle.quadPartnerTriangleIndex;
+		b0 = 1.f - b1 - b2;
+	} else if (triLight->triangle.solidAngleSampling && (triLight->triangle.imageMapIndex == NULL_INDEX)) {
 		float3 p0, p1, p2;
 		ExtMesh_GetTriangleVertices(&motionLocalToWorld, meshIndex, triangleIndex,
 				&p0, &p1, &p2 EXTMESH_PARAM);
@@ -524,7 +569,7 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 				return BLACK;
 		}
 	}
-	if (solidAnglePdfW == 0.f)
+	if ((solidAnglePdfW == 0.f) && !quad)
 		ExtMesh_Sample(&motionLocalToWorld,
 				meshIndex, triangleIndex,
 				u0, u1,
@@ -546,7 +591,7 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 		tmpHitPoint->intoObject = (dot(sampleDir, geometryN) < 0.f);
 	} else
 		HitPoint_Init(tmpHitPoint, false,
-			meshIndex, triangleIndex, time,
+			meshIndex, sampleTriangleIndex, time,
 			samplePoint, -sampleDir,
 			b1, b2,
 			passThroughEvent
@@ -601,7 +646,7 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	} else if (solidAnglePdfW > 0.f)
 		*directPdfW = solidAnglePdfW;
 	else
-		*directPdfW = triLight->triangle.invTriangleArea * shadowRayDistanceSquared / fabs(cosAtLight);
+		*directPdfW = invSampleArea * shadowRayDistanceSquared / fabs(cosAtLight);
 
 	// Setup the shadow ray
 	Ray_Init4(shadowRay, shadowRayOrig, shadowRayDir, 0.f, shadowRayDistance, time);

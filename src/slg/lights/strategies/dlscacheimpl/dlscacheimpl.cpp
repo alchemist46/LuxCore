@@ -262,7 +262,9 @@ void DirectLightSamplingCache::ComputeCacheEntryReceivedLuminance(
 		auto& light = scene.GetLightSources().GetLightSource(lightIndex);
 
 		// Check if the light source uses direct light sampling
-		if (!light.IsDirectLightSamplingEnabled()) {
+		if (!light.IsDirectLightSamplingEnabled() ||
+				// The first triangle of a quad samples the whole quad
+				IsIlluminateQuadSecondary(light)) {
 			// This light source is excluded from direct light sampling
 			continue;
 		}
@@ -358,8 +360,14 @@ void DirectLightSamplingCache::BuildCacheEntryLightDistribution(const u_int entr
 		// Normalize and place a lower cap to received luminance (2.5% of max. value)
 
 		const float invMaxLuminanceValue = 1.f / maxLuminanceValue;
-		for (auto &l : entryReceivedLuminance)
-			l = Max(l * invMaxLuminanceValue , .025f);
+		for (u_int i = 0; i < entryReceivedLuminance.size(); ++i) {
+			// Not the second triangle of a quad: the first one samples the
+			// whole quad (see TriangleLight::quadLight)
+			if (IsIlluminateQuadSecondary(scene.GetLightSources().GetLightSource(i)))
+				entryReceivedLuminance[i] = 0.f;
+			else
+				entryReceivedLuminance[i] = Max(entryReceivedLuminance[i] * invMaxLuminanceValue , .025f);
+		}
 
 		cacheEntries[entryIndex].lightsDistribution = std::make_unique<Distribution1D>(
 			entryReceivedLuminance

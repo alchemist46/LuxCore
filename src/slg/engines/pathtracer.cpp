@@ -334,8 +334,10 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 		float weight;
 		if (!(pathInfo.lastBSDFEvent & SPECULAR)) {
 			auto& lightStrategy = scene.GetLightSources().GetIlluminateLightStrategy();
+			// The strategies pick a quad of two triangle lights as its first
+			// triangle
 			const float lightPickProb = lightStrategy.SampleLightPdf(
-				*lightSource,
+				GetIlluminatePickLight(*lightSource),
 				ray.o, pathInfo.lastShadeN, pathInfo.lastFromVolume);
 
 			// This is a specific check to avoid fireflies with DLSC

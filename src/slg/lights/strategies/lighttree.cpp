@@ -64,7 +64,7 @@ namespace slg { namespace {
 
 struct LightBounds {
 	LightBounds() : axis(0.f, 0.f, 1.f), cosThetaO(1.f), cosThetaE(1.f),
-			phi(0.f), twoSided(false), isotropic(false), isTriangle(false) { }
+			phi(0.f), twoSided(false), isotropic(false), isTriangle(false), isQuad(false) { }
 
 	Point Centroid() const { return bbox.Center(); }
 
@@ -80,8 +80,10 @@ struct LightBounds {
 	bool isotropic;
 
 	// A triangle light with a fixed position and a Lambertian emission: its
-	// vertices, in the order of its emitting normal
-	bool isTriangle;
+	// vertices, in the order of its emitting normal. A quad of two triangle
+	// lights (see TriangleLight::quadLight): the corner c and the corners
+	// c + ex and c + ey of its parallelogram.
+	bool isTriangle, isQuad;
 	Point vertices[3];
 };
 
@@ -137,6 +139,7 @@ LightBounds Union(const LightBounds &a, const LightBounds &b) {
 	result.twoSided = a.twoSided || b.twoSided;
 	result.isotropic = a.isotropic && b.isotropic;
 	result.isTriangle = false;
+	result.isQuad = false;
 
 	return result;
 }
@@ -163,6 +166,64 @@ typedef enum {
 	LIGHT_NOT_SAMPLED, LIGHT_IN_TREE, LIGHT_DISTANT
 } LightKind;
 
+// The bounds of the triangle light tl
+void GetTriangleBounds(const TriangleLight &tl, const float importance, LightBounds *bounds) {
+	const Material &mat = *tl.lightMaterial;
+	const ExtMesh &mesh = tl.sceneObject->GetExtMesh();
+	const Triangle &tri = mesh.GetTriangles()[tl.triangleIndex];
+
+	// The bounds over the motion of the mesh, sampled at the key
+	// times and halfway between them
+	vector<float> times;
+	const ExtMotionTriangleMesh *motionMesh = dynamic_cast<const ExtMotionTriangleMesh *>(&mesh);
+	if (motionMesh) {
+		const vector<float> &keyTimes = motionMesh->GetMotionSystem().times;
+		for (u_int i = 0; i < keyTimes.size(); ++i) {
+			times.push_back(keyTimes[i]);
+			if (i + 1 < keyTimes.size())
+				times.push_back(.5f * (keyTimes[i] + keyTimes[i + 1]));
+		}
+	} else
+		times.push_back(0.f);
+
+	for (u_int i = 0; i < times.size(); ++i) {
+		Transform local2World;
+		mesh.GetLocal2World(times[i], local2World);
+
+		for (u_int j = 0; j < 3; ++j)
+			bounds->bbox = luxrays::Union(bounds->bbox, mesh.GetVertex(local2World, tri.v[j]));
+
+		// The emitting side (TriangleLight::Illuminate())
+		const Vector n(mesh.GetGeometryNormal(local2World, tl.triangleIndex));
+		if (i == 0)
+			bounds->axis = n;
+		else
+			ConeUnion(bounds->axis, bounds->cosThetaO, n, 1.f, &bounds->axis, &bounds->cosThetaO);
+	}
+
+	if (mat.GetEmissionFunc()) {
+		// It can emit on both sides
+		bounds->twoSided = true;
+		bounds->cosThetaE = 0.f;
+	} else
+		bounds->cosThetaE = (mat.GetEmittedTheta() < 90.f) ? Max(0.f, mat.GetEmittedCosThetaMax()) : 0.f;
+
+	// The intensity along the normal
+	bounds->phi = mat.GetEmittedRadianceY(1.f / tl.GetMeshArea()) * tl.GetTriangleArea() * importance;
+
+	if (!motionMesh && !mat.GetEmissionFunc() && (bounds->cosThetaE == 0.f) &&
+			(tl.GetTriangleArea() > 0.f)) {
+		Transform local2World;
+		mesh.GetLocal2World(0.f, local2World);
+		bounds->isTriangle = true;
+		for (u_int j = 0; j < 3; ++j)
+			bounds->vertices[j] = mesh.GetVertex(local2World, tri.v[j]);
+		if (Dot(Cross(bounds->vertices[1] - bounds->vertices[0], bounds->vertices[2] - bounds->vertices[0]),
+				bounds->axis) < 0.f)
+			swap(bounds->vertices[1], bounds->vertices[2]);
+	}
+}
+
 // The bounds of a light, or its importance if it is a distant light
 LightKind GetLightBounds(SceneConstRef scene, LightSourceConstRef l,
 		LightBounds *bounds, ocl::LightTreeDistantLight *distant) {
@@ -173,59 +234,37 @@ LightKind GetLightBounds(SceneConstRef scene, LightSourceConstRef l,
 	switch (l.GetType()) {
 		case TYPE_TRIANGLE: {
 			const TriangleLight &tl = static_cast<const TriangleLight &>(l);
-			const Material &mat = *tl.lightMaterial;
-			const ExtMesh &mesh = tl.sceneObject->GetExtMesh();
-			const Triangle &tri = mesh.GetTriangles()[tl.triangleIndex];
+			GetTriangleBounds(tl, importance, bounds);
 
-			// The bounds over the motion of the mesh, sampled at the key
-			// times and halfway between them
-			vector<float> times;
-			const ExtMotionTriangleMesh *motionMesh = dynamic_cast<const ExtMotionTriangleMesh *>(&mesh);
-			if (motionMesh) {
-				const vector<float> &keyTimes = motionMesh->GetMotionSystem().times;
-				for (u_int i = 0; i < keyTimes.size(); ++i) {
-					times.push_back(keyTimes[i]);
-					if (i + 1 < keyTimes.size())
-						times.push_back(.5f * (keyTimes[i] + keyTimes[i + 1]));
+			if (tl.IsQuadPrimary()) {
+				// A quad is one leaf: the bounds of both triangles
+				LightBounds partnerBounds;
+				GetTriangleBounds(*tl.quadPartner, importance, &partnerBounds);
+
+				const bool isQuad = bounds->isTriangle && partnerBounds.isTriangle;
+				const Vector axis = bounds->axis;
+				const float cosThetaO = bounds->cosThetaO;
+				*bounds = Union(*bounds, partnerBounds);
+
+				if (isQuad) {
+					// The same normal
+					bounds->axis = axis;
+					bounds->cosThetaO = cosThetaO;
+
+					const ExtMesh &mesh = tl.sceneObject->GetExtMesh();
+					Transform local2World;
+					mesh.GetLocal2World(0.f, local2World);
+					Point c;
+					Vector ex, ey;
+					tl.GetQuadEdges(local2World, &c, &ex, &ey);
+					bounds->isTriangle = true;
+					bounds->isQuad = true;
+					bounds->vertices[0] = c;
+					bounds->vertices[1] = c + ex;
+					bounds->vertices[2] = c + ey;
+					if (Dot(Cross(ex, ey), bounds->axis) < 0.f)
+						swap(bounds->vertices[1], bounds->vertices[2]);
 				}
-			} else
-				times.push_back(0.f);
-
-			for (u_int i = 0; i < times.size(); ++i) {
-				Transform local2World;
-				mesh.GetLocal2World(times[i], local2World);
-
-				for (u_int j = 0; j < 3; ++j)
-					bounds->bbox = luxrays::Union(bounds->bbox, mesh.GetVertex(local2World, tri.v[j]));
-
-				// The emitting side (TriangleLight::Illuminate())
-				const Vector n(mesh.GetGeometryNormal(local2World, tl.triangleIndex));
-				if (i == 0)
-					bounds->axis = n;
-				else
-					ConeUnion(bounds->axis, bounds->cosThetaO, n, 1.f, &bounds->axis, &bounds->cosThetaO);
-			}
-
-			if (mat.GetEmissionFunc()) {
-				// It can emit on both sides
-				bounds->twoSided = true;
-				bounds->cosThetaE = 0.f;
-			} else
-				bounds->cosThetaE = (mat.GetEmittedTheta() < 90.f) ? Max(0.f, mat.GetEmittedCosThetaMax()) : 0.f;
-
-			// The intensity along the normal
-			bounds->phi = mat.GetEmittedRadianceY(1.f / tl.GetMeshArea()) * tl.GetTriangleArea() * importance;
-
-			if (!motionMesh && !mat.GetEmissionFunc() && (bounds->cosThetaE == 0.f) &&
-					(tl.GetTriangleArea() > 0.f)) {
-				Transform local2World;
-				mesh.GetLocal2World(0.f, local2World);
-				bounds->isTriangle = true;
-				for (u_int j = 0; j < 3; ++j)
-					bounds->vertices[j] = mesh.GetVertex(local2World, tri.v[j]);
-				if (Dot(Cross(bounds->vertices[1] - bounds->vertices[0], bounds->vertices[2] - bounds->vertices[0]),
-						bounds->axis) < 0.f)
-					swap(bounds->vertices[1], bounds->vertices[2]);
 			}
 			break;
 		}
@@ -399,12 +438,21 @@ u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 				node.bboxMax[j] = bounds.vertices[1][j];
 				node.axis[j] = bounds.vertices[2][j];
 			}
-			const Point centroid = (bounds.vertices[0] + bounds.vertices[1] + bounds.vertices[2]) * (1.f / 3.f);
-			node.radius = sqrtf(Max(Max(
-					DistanceSquared(bounds.vertices[0], centroid),
-					DistanceSquared(bounds.vertices[1], centroid)),
-					DistanceSquared(bounds.vertices[2], centroid)));
-			node.flags |= LIGHTTREE_NODE_TRIANGLE;
+			if (bounds.isQuad) {
+				// The parallelogram: its center and the half of its longer diagonal
+				const Point &c = bounds.vertices[0];
+				const Point opposite = bounds.vertices[1] + (bounds.vertices[2] - c);
+				node.radius = .5f * sqrtf(Max(DistanceSquared(c, opposite),
+						DistanceSquared(bounds.vertices[1], bounds.vertices[2])));
+				node.flags |= LIGHTTREE_NODE_TRIANGLE | LIGHTTREE_NODE_QUAD;
+			} else {
+				const Point centroid = (bounds.vertices[0] + bounds.vertices[1] + bounds.vertices[2]) * (1.f / 3.f);
+				node.radius = sqrtf(Max(Max(
+						DistanceSquared(bounds.vertices[0], centroid),
+						DistanceSquared(bounds.vertices[1], centroid)),
+						DistanceSquared(bounds.vertices[2], centroid)));
+				node.flags |= LIGHTTREE_NODE_TRIANGLE;
+			}
 		}
 		nodes[nodeIndex].childOrLightIndex = lights[start].first;
 		lightIndex[lights[start].first] = nodeIndex;
@@ -552,6 +600,9 @@ void LightStrategyLightTree::Build(SceneConstRef scene) {
 		// take the picks of the lights next to them (measured on the Blender
 		// classroom, whose lamp meshes sit around its sphere lights)
 		if (!l.IsDirectLightSamplingEnabled())
+			continue;
+		// The second triangle of a quad is in the leaf of the first one
+		if (IsIlluminateQuadSecondary(l))
 			continue;
 
 		LightBounds bounds;

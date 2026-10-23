@@ -47,12 +47,14 @@ OPENCL_FORCE_INLINE float LightTree_SinFromCos(const float cosTheta) {
 // The importance of a triangle light leaf: its radiance times its solid angle
 // from p times the bound of the incidence. Far from the triangle it is the
 // importance of LightTree_NodeImportance(), close to it the two triangles of a
-// quad differ.
+// quad differ. A quad leaf is the parallelogram of its 3 vertices.
 OPENCL_FORCE_INLINE float LightTree_TriangleImportance(__global const LightTreeNode *node,
 		const float3 p, const float3 n, const bool hasNormal) {
 	const float3 v0 = MAKE_FLOAT3(node->bboxMin[0], node->bboxMin[1], node->bboxMin[2]);
 	const float3 v1 = MAKE_FLOAT3(node->bboxMax[0], node->bboxMax[1], node->bboxMax[2]);
 	const float3 v2 = MAKE_FLOAT3(node->axis[0], node->axis[1], node->axis[2]);
+
+	const bool isQuad = (node->flags & LIGHTTREE_NODE_QUAD);
 
 	const float3 crossN = cross(v1 - v0, v2 - v0);
 	const float doubleArea = length(crossN);
@@ -65,7 +67,7 @@ OPENCL_FORCE_INLINE float LightTree_TriangleImportance(__global const LightTreeN
 	if (!(node->flags & LIGHTTREE_NODE_TWOSIDED) && !(side > 0.f))
 		return 0.f;
 
-	const float3 toCentroid = (v0 + v1 + v2) * (1.f / 3.f) - p;
+	const float3 toCentroid = (isQuad ? (.5f * (v1 + v2)) : ((v0 + v1 + v2) * (1.f / 3.f))) - p;
 	const float centroidDistance2 = dot(toCentroid, toCentroid);
 	if (!(centroidDistance2 > 0.f))
 		return 0.f;
@@ -74,9 +76,10 @@ OPENCL_FORCE_INLINE float LightTree_TriangleImportance(__global const LightTreeN
 
 	// The solid angle: exact close to the triangle, the projected area far
 	// from it (where the float precision of the exact one breaks down)
-	const float area = .5f * doubleArea;
+	const float area = isQuad ? doubleArea : (.5f * doubleArea);
 	const float solidAngle = (centroidDistance2 < 64.f * area) ?
-		SphericalTriangle_SolidAngle(v0, v1, v2, p) :
+		(SphericalTriangle_SolidAngle(v0, v1, v2, p) +
+			(isQuad ? SphericalTriangle_SolidAngle(v1, v1 + v2 - v0, v2, p) : 0.f)) :
 		(area * fabs(dot(triN, wi)) / centroidDistance2);
 
 	float cosIncidence = 1.f;

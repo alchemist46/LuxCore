@@ -155,3 +155,17 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: a session with `batch.haltspp = 64` renders its 64 spp, then after `BeginSceneEdit()`/`EndSceneEdit()` (a camera move) the film stops at 20 spp: `HasDone()` stays false and the pass count does not move for minutes. With `batch.haltspp = 32` the session reports done at 20 spp. Same with every cache off and on the build before CA1 (244d25614), so not PhotonGI.
 - Reproduce: `EDIT="scene.camera.lookat.orig = -2.5 -8. 2.9" SPP=64 out/venvtest/Scripts/python -u lc-work/ca1/edit_halt_repro.py PATHOCL "path.photongi.indirect.enabled = 0;path.photongi.caustic.enabled = 0"` (cornell-glass 160x160, HIP).
 - Notes: suspect the per-thread halt check (`PathOCLOpenCLRenderThread::RenderThreadImpl()`: `haltSPP`, `GetThreadFilmsEyeSPP()`, the spp-per-iteration estimate) counting the samples of before the edit. Found during CA1; the PhotonGI edit test there halts by hand instead.
+
+### The light tree's learning biases the direct light on the CPU
+- Found: 2026-10-23
+- Area: light (light tree learning), engine (PATHCPU)
+- Problem: with the learning on (the default) PATHCPU reads the direct light of a light of a few triangles too bright: +0.07% at depth 1 on a box lit by a tilted 0.6x0.4 rectangle exported as two triangle lights (0.070276-0.070284 against 0.070224-0.070227 with `lightstrategy.lighttree.learning.enable = 0`, with UNIFORM and with the rectangle as one quad light, ±0.000003 per seed pair at 1024 spp), the same on one thread; +0.01% at depth 3 on the box with a horizontal quad as two triangles. PATHOCL reads +0.006% on the tilted case (0.070231 against 0.070227, ±0.000001).
+- Reproduce: `lc-work/d3/qtest.py PATHCPU 64 1024 1 --light tilted --set lightstrategy.trianglelight.quad=0` against the same with `--set lightstrategy.lighttree.learning.enable=0` (64x64 SDL Cornell box, HIP not needed).
+- Notes: not a thread race (one thread the same). A light that is one leaf of the tree (a Blender area light since D3 samples its quad as one light) has nothing to learn and is exact. Suspects: the pick pdf returned by `LightTree_SampleLights()` against the learned cells it read (`learnPickStash`, the swap of `learnLiveIndex` at an epoch), or the learned probabilities following the samples of the same Owen-scrambled Sobol sequence (an adaptation correlated with the samples it weights). Found during D3.
+
+### WrapBlack PATHCPU_METROPOLIS fails at the pixel threshold
+- Found: 2026-10-23
+- Area: tests
+- Problem: `test_WrapBlack_PATHCPU_METROPOLIS` fails about 2 runs in 3 with 3.01-3.07% of the pixels different against the 3.00% maximum (mean brightness 0.36-0.43%, the maximum is 1.5%), on the build before D3 (9202d1ad4) too.
+- Reproduce: `pyunittests/unittests.py --filter WrapBlack_PATHCPU_METROPOLIS` (CPU), a few runs.
+- Notes: the scene has only an infinite light (no triangle lights), so not D3. The Metropolis noise of this scene sits at the threshold: a per-test `MAX_DIFFERENT_PIXELS_OVERRIDES` entry or a new reference would do, after checking the mean is right.

@@ -260,7 +260,10 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 						lightTreeLearn, lightTreeLearnCells,
 					VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
 					pathInfo->lastFromVolume,
-					light->lightSceneIndex);
+					// The strategies pick a quad of two triangle lights as
+					// its first triangle
+					(light->triangle.quadLightIndex != NULL_INDEX) ?
+						light->triangle.quadLightIndex : light->lightSceneIndex);
 
 #if !defined(RENDER_ENGINE_RTPATHOCL)
 			// This is a specific check to avoid fireflies with DLSC

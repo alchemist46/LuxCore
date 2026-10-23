@@ -148,6 +148,15 @@ typedef struct {
 
 	// Solid angle sampling of the direct light (see sphericaltriangle_funcs.cl)
 	unsigned int solidAngleSampling;
+
+	// The quad of two triangles sampled as one light (see
+	// slg::TriangleLight::quadLight), on both triangles: the light index of
+	// the first triangle (NULL_INDEX out of any quad), the triangle index of
+	// both, the vertex number of the corner c of the quad in the first one and
+	// of the opposite corner in the second one
+	unsigned int quadLightIndex;
+	unsigned int quadTriangleIndex, quadPartnerTriangleIndex;
+	unsigned int quadCorner, quadPartnerCorner;
 } TriangleLightParam;
 
 typedef struct {

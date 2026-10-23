@@ -32,6 +32,7 @@ using namespace slg;
 TriangleLight::TriangleLight() : sceneObject(nullptr), 
 		meshIndex(NULL_INDEX), triangleIndex(NULL_INDEX),
 		solidAngleSampling(false),
+		quadLight(nullptr), quadPartner(nullptr), quadCorner(0), quadPartnerCorner(0),
 		triangleArea(0.f), invTriangleArea(0.f),
 		meshArea(0.f), invMeshArea(0.f) {
 }
@@ -42,6 +43,30 @@ TriangleLight::~TriangleLight() {
 bool TriangleLight::UsesSolidAngleSampling() const {
 	// Not for the lights with an emission function: their pdf has no cosine
 	return solidAngleSampling && !lightMaterial->GetEmissionFunc();
+}
+
+void TriangleLight::GetQuadEdges(const Transform &localToWorld, Point *c,
+		Vector *ex, Vector *ey) const {
+	auto& mesh = sceneObject->GetExtMesh();
+	const Triangle &tri = mesh.GetTriangles()[triangleIndex];
+
+	*c = mesh.GetVertex(localToWorld, tri.v[quadCorner]);
+	*ex = mesh.GetVertex(localToWorld, tri.v[(quadCorner + 1) % 3]) - *c;
+	*ey = mesh.GetVertex(localToWorld, tri.v[(quadCorner + 2) % 3]) - *c;
+}
+
+float TriangleLight::GetQuadDirectPdfW(const Transform &localToWorld, const Point &refPoint,
+		const float distance, const float cosAtLight) const {
+	Point c;
+	Vector ex, ey;
+	GetQuadEdges(localToWorld, &c, &ex, &ey);
+
+	const float solidAnglePdfW = QuadLight_SolidAnglePdf(c, ex, ey, refPoint);
+	if (solidAnglePdfW > 0.f)
+		return solidAnglePdfW;
+
+	const float quadArea = Cross(ex, ey).Length();
+	return (quadArea > 0.f) ? PdfAtoW(1.f / quadArea, distance, cosAtLight) : 0.f;
 }
 
 bool TriangleLight::IsDirectLightSamplingEnabled() const {
@@ -167,6 +192,11 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	// A safety check to avoid NaN/Inf
 	if ((triangleArea == 0.f) || (meshArea == 0.f))
 		return Spectrum();
+	// The second triangle of a quad is sampled by the first one: a strategy
+	// that picks it anyway (a floor of its distribution) must not count it
+	// twice
+	if (IsQuadSecondary())
+		return Spectrum();
 
 	//--------------------------------------------------------------------------
 	// Compute the sample point and direction
@@ -180,7 +210,26 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	Point samplePoint;
 	float b0, b1, b2;
 	float solidAnglePdfW = 0.f;
-	if (UsesSolidAngleSampling()) {
+	// The triangle of the sample point and the inverse of the area it is
+	// sampled on
+	u_int sampleTriangleIndex = triangleIndex;
+	float invSampleArea = invTriangleArea;
+	if (IsQuadPrimary()) {
+		// The whole quad from a 2D sample
+		Point c;
+		Vector ex, ey;
+		GetQuadEdges(tmpHitPoint.localToWorld, &c, &ex, &ey);
+		const float quadArea = Cross(ex, ey).Length();
+		if (!(quadArea > 0.f))
+			return Spectrum();
+		invSampleArea = 1.f / quadArea;
+
+		float u, v;
+		solidAnglePdfW = QuadLight_Sample(c, ex, ey, bsdf.hitPoint.p, u0, u1, &samplePoint, &u, &v);
+		if (QuadLight_GetTriangle(u, v, quadCorner, quadPartnerCorner, &b1, &b2))
+			sampleTriangleIndex = quadPartner->triangleIndex;
+		b0 = 1.f - b1 - b2;
+	} else if (UsesSolidAngleSampling()) {
 		const Triangle &tri = mesh.GetTriangles()[triangleIndex];
 		const Point p0 = mesh.GetVertex(tmpHitPoint.localToWorld, tri.v[0]);
 		const Point p1 = mesh.GetVertex(tmpHitPoint.localToWorld, tri.v[1]);
@@ -192,7 +241,7 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 			samplePoint = b0 * p0 + b1 * p1 + b2 * p2;
 		}
 	}
-	if (solidAnglePdfW == 0.f)
+	if ((solidAnglePdfW == 0.f) && !IsQuadPrimary())
 		mesh.Sample(tmpHitPoint.localToWorld, triangleIndex, u0, u1, &samplePoint, &b0, &b1, &b2);
 
 	Vector sampleDir = samplePoint - bsdf.hitPoint.p;
@@ -202,7 +251,7 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	
 	// Initialize the temporary HitPoint
 	tmpHitPoint.Init(true, false,
-			scene, meshIndex, triangleIndex,
+			scene, meshIndex, sampleTriangleIndex,
 			samplePoint, -sampleDir,
 			b1, b2,
 			passThroughEvent);
@@ -264,7 +313,7 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 				*emissionPdfW = invTriangleArea * fabsf(cosAtLight) * INV_PI;
 		}
 
-		directPdfW = (solidAnglePdfW > 0.f) ? solidAnglePdfW : (invTriangleArea * distanceSquared / fabsf(cosAtLight));
+		directPdfW = (solidAnglePdfW > 0.f) ? solidAnglePdfW : (invSampleArea * distanceSquared / fabsf(cosAtLight));
 	}
 
 	assert (!isnan(directPdfW) && !isinf(directPdfW));
@@ -343,8 +392,38 @@ Spectrum TriangleLight::GetRadiance(const HitPoint &hitPoint,
 
 	return lightMaterial->GetEmittedRadiance(hitPoint, invMeshArea) * emissionColor;
 }
+
+LightSourceConstRef slg::GetIlluminatePickLight(LightSourceConstRef l) {
+	if (l.GetType() == TYPE_TRIANGLE) {
+		const TriangleLight &tl = static_cast<const TriangleLight &>(l);
+		if (tl.quadLight)
+			return *tl.quadLight;
+	}
+
+	return l;
+}
+
+bool slg::IsIlluminateQuadSecondary(LightSourceConstRef l) {
+	return (l.GetType() == TYPE_TRIANGLE) && static_cast<const TriangleLight &>(l).IsQuadSecondary();
+}
+
+float slg::GetIlluminatePower(SceneConstRef scene, LightSourceConstRef l) {
+	if (l.GetType() == TYPE_TRIANGLE) {
+		const TriangleLight &tl = static_cast<const TriangleLight &>(l);
+		if (tl.IsQuadPrimary())
+			return tl.GetPower(scene) + tl.quadPartner->GetPower(scene);
+		if (tl.IsQuadSecondary())
+			return 0.f;
+	}
+
+	return l.GetPower(scene);
+}
+
 float TriangleLight::GetDirectPdfW(const HitPoint &hitPoint, const Point &refPoint,
 		const float distance, const float cosAtLight) const {
+	if (quadLight)
+		return quadLight->GetQuadDirectPdfW(hitPoint.localToWorld, refPoint, distance, cosAtLight);
+
 	if (UsesSolidAngleSampling()) {
 		auto& mesh = sceneObject->GetExtMesh();
 		const Triangle &tri = mesh.GetTriangles()[triangleIndex];

@@ -130,6 +130,8 @@ private:
 	// lightIndexOffsetByMeshIndex, lightStrategyType, etc.
 	// This is called by Scene::Preprocess()
 	void Preprocess(SceneConstRef scene, const bool useRTMode);
+	// Finds the quads of the triangle lights (see TriangleLight::quadLight)
+	void PairQuadLights(SceneConstRef scene);
 
 
 	//--------------------------------------------------------------------------
@@ -159,6 +161,9 @@ private:
 		emitLightStrategy, illuminateLightStrategy, infiniteLightStrategy;
 	// Solid angle sampling of the triangle lights (lightstrategy.trianglelight.solidangle)
 	bool triangleLightSolidAngle;
+	// The quads of two triangle lights sampled as one light
+	// (lightstrategy.trianglelight.quad)
+	bool triangleLightQuad;
 };
 
 }

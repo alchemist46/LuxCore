@@ -382,6 +382,21 @@ void CompiledScene::CompileLights() {
 				oclLight->triangle.triangleIndex = tl.triangleIndex;
 				oclLight->triangle.solidAngleSampling = tl.UsesSolidAngleSampling();
 
+				if (tl.quadLight) {
+					const TriangleLight &first = *tl.quadLight;
+					oclLight->triangle.quadLightIndex = first.lightSceneIndex;
+					oclLight->triangle.quadTriangleIndex = first.triangleIndex;
+					oclLight->triangle.quadPartnerTriangleIndex = first.quadPartner->triangleIndex;
+					oclLight->triangle.quadCorner = first.quadCorner;
+					oclLight->triangle.quadPartnerCorner = first.quadPartnerCorner;
+				} else {
+					oclLight->triangle.quadLightIndex = NULL_INDEX;
+					oclLight->triangle.quadTriangleIndex = NULL_INDEX;
+					oclLight->triangle.quadPartnerTriangleIndex = NULL_INDEX;
+					oclLight->triangle.quadCorner = 0;
+					oclLight->triangle.quadPartnerCorner = 0;
+				}
+
 				auto& emissionFunc = tl.lightMaterial->GetEmissionFunc();
 				if (emissionFunc) {
 					oclLight->triangle.average = emissionFunc->Average();

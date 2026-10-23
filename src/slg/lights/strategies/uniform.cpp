@@ -18,6 +18,7 @@
 
 #include "slg/lights/strategies/uniform.h"
 #include "slg/scene/scene.h"
+#include "slg/lights/trianglelight.h"
 
 using namespace std;
 using namespace luxrays;
@@ -47,7 +48,8 @@ void LightStrategyUniform::Preprocess(SceneConstRef scene, const LightStrategyTa
 				break;
 			}
 			case TASK_ILLUMINATE: {
-				if (l.IsDirectLightSamplingEnabled())
+				// A quad of two triangle lights is one light
+				if (l.IsDirectLightSamplingEnabled() && !IsIlluminateQuadSecondary(l))
 					lightPower.push_back(l.GetImportance());
 				else
 					lightPower.push_back(0.f);

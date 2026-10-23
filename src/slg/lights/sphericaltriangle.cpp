@@ -31,6 +31,10 @@ namespace slg { namespace ocl { namespace {
 float3 ToFloat3(const luxrays::Point &p) {
 	return MAKE_FLOAT3(p.x, p.y, p.z);
 }
+
+float3 ToFloat3(const luxrays::Vector &v) {
+	return MAKE_FLOAT3(v.x, v.y, v.z);
+}
 } } }
 
 using namespace luxrays;
@@ -52,5 +56,27 @@ bool slg::SphericalTriangle_Sample(const Point &v0, const Point &v1, const Point
 
 	return slg::ocl::SphericalTriangle_Sample(slg::ocl::ToFloat3(v0), slg::ocl::ToFloat3(v1),
 			slg::ocl::ToFloat3(v2), slg::ocl::ToFloat3(p), s, t, b0, b1, b2, pdfW);
+}
+
+float slg::QuadLight_Sample(const Point &c, const Vector &ex, const Vector &ey,
+		const Point &p, const float u0, const float u1,
+		Point *point, float *u, float *v) {
+	slg::ocl::float3 pt;
+	const float pdfW = slg::ocl::QuadLight_Sample(slg::ocl::ToFloat3(c), slg::ocl::ToFloat3(ex),
+			slg::ocl::ToFloat3(ey), slg::ocl::ToFloat3(p), u0, u1, &pt, u, v);
+	*point = Point(pt.x, pt.y, pt.z);
+
+	return pdfW;
+}
+
+float slg::QuadLight_SolidAnglePdf(const Point &c, const Vector &ex, const Vector &ey,
+		const Point &p) {
+	return slg::ocl::QuadLight_SolidAnglePdf(slg::ocl::ToFloat3(c), slg::ocl::ToFloat3(ex),
+			slg::ocl::ToFloat3(ey), slg::ocl::ToFloat3(p));
+}
+
+bool slg::QuadLight_GetTriangle(const float u, const float v,
+		const u_int corner, const u_int partnerCorner, float *b1, float *b2) {
+	return slg::ocl::QuadLight_GetTriangle(u, v, corner, partnerCorner, b1, b2);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

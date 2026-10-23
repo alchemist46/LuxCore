@@ -18,6 +18,7 @@
 
 #include "slg/lights/strategies/power.h"
 #include "slg/scene/scene.h"
+#include "slg/lights/trianglelight.h"
 
 using namespace std;
 using namespace luxrays;
@@ -54,8 +55,10 @@ void LightStrategyPower::Preprocess(SceneConstRef scene, const LightStrategyTask
 				break;
 			}
 			case TASK_ILLUMINATE: {
+				// A quad of two triangle lights is one light
 				if (l.IsDirectLightSamplingEnabled())
-					lightPower.push_back(power);
+					lightPower.push_back(l.IsInfinite() ? power :
+						(GetIlluminatePower(scene, l) * l.GetImportance()));
 				else
 					lightPower.push_back(0.f);
 				break;

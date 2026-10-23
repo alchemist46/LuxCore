@@ -40,6 +40,17 @@ bool SphericalTriangle_Sample(const luxrays::Point &v0, const luxrays::Point &v1
 		const luxrays::Point &v2, const luxrays::Point &p, const float u,
 		float *b0, float *b1, float *b2, float *pdfW);
 
+// The sampling of the quad lights (sphericaltriangle_funcs.cl): the quad is
+// c + u * ex + v * ey. QuadLight_Sample() returns the solid angle pdf, or 0
+// for a point sampled by area.
+float QuadLight_Sample(const luxrays::Point &c, const luxrays::Vector &ex,
+		const luxrays::Vector &ey, const luxrays::Point &p, const float u0, const float u1,
+		luxrays::Point *point, float *u, float *v);
+float QuadLight_SolidAnglePdf(const luxrays::Point &c, const luxrays::Vector &ex,
+		const luxrays::Vector &ey, const luxrays::Point &p);
+bool QuadLight_GetTriangle(const float u, const float v,
+		const u_int corner, const u_int partnerCorner, float *b1, float *b2);
+
 class TriangleLight : public IntersectableLightSource {
 public:
 	TriangleLight();
@@ -82,6 +93,17 @@ public:
 
 	bool UsesSolidAngleSampling() const;
 
+	// The quads (see quadLight below)
+	bool IsQuadPrimary() const { return quadLight == this; }
+	bool IsQuadSecondary() const { return quadLight && (quadLight != this); }
+	// The corner and the edges of the quad of the first triangle
+	void GetQuadEdges(const luxrays::Transform &localToWorld, luxrays::Point *c,
+			luxrays::Vector *ex, luxrays::Vector *ey) const;
+	// The pdf of Illuminate() of the first triangle for a direct hit on the
+	// quad from refPoint
+	float GetQuadDirectPdfW(const luxrays::Transform &localToWorld, const luxrays::Point &refPoint,
+			const float distance, const float cosAtLight) const;
+
 	SceneObjectConstPtr sceneObject;
 	// Note: meshIndex is initialized in LightSourceDefinitions::Preprocess()
 	u_int meshIndex, triangleIndex;
@@ -89,10 +111,34 @@ public:
 	// LightSourceDefinitions::Preprocess() (lightstrategy.trianglelight.solidangle)
 	bool solidAngleSampling;
 
+	// Two triangles of the mesh that make a planar parallelogram are one light
+	// for the direct light sampling of the path engines, set by
+	// LightSourceDefinitions::Preprocess() (lightstrategy.trianglelight.quad):
+	// the strategies pick the quad as its first triangle (quadLight, nullptr
+	// for a triangle out of any quad) with the importance of the quad and
+	// never pick the second one, Illuminate() of the first triangle samples
+	// the whole quad and a BSDF hit on either triangle takes its pdf. The
+	// first triangle also holds quadPartner, the second triangle, the vertex
+	// number of the corner c of the quad in its triangle (the other two are
+	// c + ex and c + ey, in their cyclic order) and the vertex number of the
+	// opposite corner c + ex + ey in the second triangle.
+	const TriangleLight *quadLight;
+	const TriangleLight *quadPartner;
+	u_int quadCorner, quadPartnerCorner;
+
 private:
 	float triangleArea, invTriangleArea;
 	float meshArea, invMeshArea;
 };
+
+// For the strategies of the direct light sampling, which pick the quads of
+// two triangle lights as one light (see TriangleLight::quadLight): the light
+// picked for l (the first triangle of its quad), true for the second triangle
+// of a quad (never picked) and the power of l (the one of the quad for its
+// first triangle)
+LightSourceConstRef GetIlluminatePickLight(LightSourceConstRef l);
+bool IsIlluminateQuadSecondary(LightSourceConstRef l);
+float GetIlluminatePower(SceneConstRef scene, LightSourceConstRef l);
 
 }
 

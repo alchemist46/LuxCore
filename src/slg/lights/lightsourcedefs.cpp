@@ -41,6 +41,7 @@ LightSourceDefinitions::LightSourceDefinitions() :
 	illuminateLightStrategy = std::make_unique<LightStrategyLogPower>();
 	infiniteLightStrategy = std::make_unique<LightStrategyLogPower>();
 	triangleLightSolidAngle = false;
+	triangleLightQuad = true;
 	lightGroupCount = 1;
 }
 
@@ -213,6 +214,10 @@ void LightSourceDefinitions::SetLightStrategy(const luxrays::Properties &props) 
 	const std::string engineType = props.Get(Property("renderengine.type")("PATHOCL")).Get<std::string>();
 	triangleLightSolidAngle = props.Get(Property("lightstrategy.trianglelight.solidangle")(false)).Get<bool>() &&
 			(engineType != "BIDIRCPU") && (engineType != "BIDIRVMCPU");
+	// The quads of two triangle lights sampled as one light. Not for the BiDir
+	// engines either (the solid angle sampling of the rectangles).
+	triangleLightQuad = props.Get(Property("lightstrategy.trianglelight.quad")(true)).Get<bool>() &&
+			(engineType != "BIDIRCPU") && (engineType != "BIDIRVMCPU");
 }
 
 void LightSourceDefinitions::UpdateVolumeReferences(
@@ -303,6 +308,8 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 		++i;
 	}
 
+	PairQuadLights(scene);
+
 //	const double end1 = WallClockTime();
 //	SLG_LOG("Light step #1 preprocessing time: " << (end1 - start) << "secs");
 
@@ -352,6 +359,114 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 
 //	const double endTotal = WallClockTime();
 //	SLG_LOG("Light total preprocessing time: " << (endTotal - start) << "secs");
+}
+
+// True if the triangles ta and tb of the mesh make a planar parallelogram
+// with the same winding: they share two vertices, ta is (c, c + ex, c + ey)
+// from its vertex number corner and tb is (c + ex + ey, c + ey, c + ex) from
+// its vertex number partnerCorner. Parallelograms stay parallelograms through
+// any affine transformation (the instances and the motion of the mesh).
+static bool IsQuad(const ExtMesh &mesh, const Transform &localToWorld,
+		const Triangle &ta, const Triangle &tb, u_int *corner, u_int *partnerCorner) {
+	Point a[3], b[3];
+	for (u_int k = 0; k < 3; ++k) {
+		a[k] = mesh.GetVertex(localToWorld, ta.v[k]);
+		b[k] = mesh.GetVertex(localToWorld, tb.v[k]);
+	}
+
+	// The only vertex of p that is not one of q
+	auto notShared = [](const Point *p, const Point *q, u_int *index) {
+		u_int count = 0;
+		for (u_int i = 0; i < 3; ++i) {
+			if (!((p[i] == q[0]) || (p[i] == q[1]) || (p[i] == q[2]))) {
+				*index = i;
+				++count;
+			}
+		}
+		return (count == 1);
+	};
+	u_int ca, cb;
+	if (!notShared(a, b, &ca) || !notShared(b, a, &cb))
+		return false;
+
+	const Point &c = a[ca];
+	const Point &pa = a[(ca + 1) % 3];
+	const Point &pb = a[(ca + 2) % 3];
+	// The same winding
+	if (!((b[(cb + 1) % 3] == pb) && (b[(cb + 2) % 3] == pa)))
+		return false;
+
+	const Vector ex = pa - c;
+	const Vector ey = pb - c;
+	if (!(Cross(ex, ey).Length() > 0.f))
+		return false;
+	// The fourth corner, within the float precision of the vertices
+	if (!((b[cb] - (pa + ey)).Length() <= 1e-4f * (ex.Length() + ey.Length())))
+		return false;
+
+	*corner = ca;
+	*partnerCorner = cb;
+	return true;
+}
+
+void LightSourceDefinitions::PairQuadLights(SceneConstRef scene) {
+	for (TriangleLight &tl : intersectableLightSources) {
+		tl.quadLight = nullptr;
+		tl.quadPartner = nullptr;
+		tl.quadCorner = 0;
+		tl.quadPartnerCorner = 0;
+	}
+
+	if (!triangleLightQuad)
+		return;
+
+	// The two triangles of a quad follow each other in the mesh (a triangulated
+	// quad, a Blender area light)
+	u_int quadCount = 0;
+	const u_int meshCount = scene.GetObjects().GetSize();
+	for (u_int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+		const u_int offset = lightIndexOffsetByMeshIndex[meshIndex];
+		if (offset == NULL_INDEX)
+			continue;
+
+		const ExtMesh &mesh = scene.GetObjects().GetSceneObject(meshIndex).GetExtMesh();
+		Transform localToWorld;
+		mesh.GetLocal2World(0.f, localToWorld);
+		const auto tris = mesh.GetTriangles();
+
+		const u_int triCount = mesh.GetTotalTriangleCount();
+		for (u_int t = 0; t + 1 < triCount; ++t) {
+			const u_int index0 = lightIndexByTriIndex[offset + t];
+			const u_int index1 = lightIndexByTriIndex[offset + t + 1];
+			if ((index0 == NULL_INDEX) || (index1 == NULL_INDEX))
+				continue;
+			TriangleLight &l0 = static_cast<TriangleLight &>(lights[index0].get());
+			TriangleLight &l1 = static_cast<TriangleLight &>(lights[index1].get());
+
+			// Not for the lights with an emission map (their direct light
+			// sampling is by area) and not for the meshes without direct
+			// light sampling
+			if (l0.lightMaterial->GetEmissionFunc() || !l0.IsDirectLightSamplingEnabled() ||
+					(l0.GetTriangleArea() == 0.f) || (l1.GetTriangleArea() == 0.f))
+				continue;
+
+			u_int corner, partnerCorner;
+			if (IsQuad(mesh, localToWorld, tris[t], tris[t + 1], &corner, &partnerCorner)) {
+				l0.quadLight = &l0;
+				l0.quadPartner = &l1;
+				l0.quadCorner = corner;
+				l0.quadPartnerCorner = partnerCorner;
+				l1.quadLight = &l0;
+				l1.quadPartner = &l0;
+				++quadCount;
+				// The next triangle is taken
+				++t;
+			}
+		}
+	}
+
+	if (quadCount > 0)
+		SLG_LOG("Triangle lights sampled as quads: " << quadCount);
 }
 
 void LightSourceDefinitions::UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode) {
