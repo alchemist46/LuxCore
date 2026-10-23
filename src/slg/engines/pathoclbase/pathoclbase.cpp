@@ -414,6 +414,9 @@ void PathOCLBaseRenderEngine::StartLockLess() {
 		// photonGICache will be nullptr if the cache is disabled
 		if (photonGICache)
 			photonGICache->Preprocess(renderNativeThreads.size() + renderOCLThreads.size());
+	} else if (photonGICache) {
+		// Restored from the render state: maybe with another thread count
+		photonGICache->InitUpdate(renderNativeThreads.size() + renderOCLThreads.size());
 	}
 
 	pathTracer.SetPhotonGICache(photonGICache);
@@ -522,8 +525,22 @@ void PathOCLBaseRenderEngine::BeginSceneEditLockLess() {
 void PathOCLBaseRenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
 	if (lightSamplerSharedData)
 		lightSamplerSharedData->Reset();
+
+	// The render threads are stopped here
+	const bool photonGICacheRebuilt = PhotonGICache::EndSceneEdit(photonGICache,
+			renderConfig.GetScene(), renderConfig.GetConfig(), editActions,
+			renderNativeThreads.size() + renderOCLThreads.size());
+	if (photonGICacheRebuilt)
+		pathTracer.SetPhotonGICache(photonGICache);
+
 	compiledScene->Recompile(editActions);
-	if (compiledScene->wasCameraCompiled || compiledScene->wasMaterialsCompiled)
+	// The edits computing the cache again compile the path tracer (and so the
+	// cache) too, this is only a safety net
+	if (photonGICacheRebuilt && !compiledScene->wasPhotonGICompiled)
+		compiledScene->RecompilePhotonGI();
+	// The PhotonGI parameters (the radius etc.) are in the task configuration
+	if (compiledScene->wasCameraCompiled || compiledScene->wasMaterialsCompiled ||
+			compiledScene->wasPhotonGICompiled)
 		InitGPUTaskConfiguration();
 
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {

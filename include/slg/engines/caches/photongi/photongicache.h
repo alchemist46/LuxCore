@@ -219,10 +219,22 @@ typedef struct PhotonGICacheParams_t {
 		bool safeSave;
 	} persistent;
 
+	// The parameters and the scene the cache was computed for (see
+	// PhotonGICache::ComputeSignature()): a persistent file with another
+	// signature is computed again
+	std::string signature;
+
 	friend class boost::serialization::access;
-	
+
 protected:
 	template<class Archive> void serialize(Archive &ar, const u_int version) {
+		if (version >= 7) {
+			ar & samplerType;
+			ar & photon.timeStart;
+			ar & photon.timeEnd;
+			ar & signature;
+		}
+
 		ar & photon.maxTracedCount;
 		ar & photon.maxPathDepth;
 
@@ -283,6 +295,10 @@ public:
 	const PhotonGICacheParams &GetParams() const { return params; }
 
 	void Preprocess(const u_int threadCount);
+	// Sets up the periodic caustic update for a new run of threadCount render
+	// threads (all stopped): at the start, after a resume from a render state
+	// (saved with another thread count) and after a scene edit
+	void InitUpdate(const u_int threadCount);
 	bool Update(const u_int threadIndex, const u_int filmSPP,
 		const std::function<void()> &threadZeroCallback);
 	bool Update(const u_int threadIndex, const u_int filmSPP) {
@@ -290,6 +306,18 @@ public:
 		return Update(threadIndex, filmSPP, noCallback);
 	}
 	void FinishUpdate(const u_int threadIndex);
+	// Incremented by each caustic update: every GPU device re-uploads the
+	// caustic map when it changes
+	u_int GetUpdateGeneration() const { return updateGeneration; }
+
+	// Called by the render engines at the end of a scene edit, with the render
+	// threads stopped: the cache is computed again after an edit of the
+	// geometry, the materials, the image maps or the lights (and the periodic
+	// caustic update starts again otherwise). Returns true if the cache was
+	// computed again (cache may then be nullptr).
+	static bool EndSceneEdit(PhotonGICache *&cache, SceneConstRef scn,
+		const luxrays::Properties &cfg, const EditActionList &editActions,
+		const u_int threadCount);
 
 	const luxrays::SpectrumGroup *GetIndirectRadiance(const BSDF &bsdf) const;
 	luxrays::SpectrumGroup ConnectWithCausticPaths(const BSDF &bsdf) const;
@@ -334,7 +362,8 @@ private:
 			std::vector<luxrays::SpectrumGroup> &filteredRadianceValues) const;
 	void CreateRadiancePhotons();
 
-	void LoadPersistentCache(const std::string &fileName);
+	std::string ComputeSignature() const;
+	bool LoadPersistentCache(const std::string &fileName);
 	void SavePersistentCache(const std::string &fileName);
 
 	template<class Archive> void serialize(Archive &ar, const u_int version);
@@ -350,7 +379,7 @@ private:
     };
     completion_t pgic_completion();
 	std::unique_ptr< std::barrier<completion_t> > threadsSyncBarrier;
-	u_int lastUpdateSpp, updateSeedBase;
+	u_int lastUpdateSpp, updateSeedBase, updateGeneration;
 	bool finishUpdateFlag;
 
 	// Visibility map
@@ -374,7 +403,7 @@ BOOST_CLASS_VERSION(slg::GenericPhoton, 1)
 BOOST_CLASS_VERSION(slg::PGICVisibilityParticle, 2)
 BOOST_CLASS_VERSION(slg::Photon, 2)
 BOOST_CLASS_VERSION(slg::RadiancePhoton, 2)
-BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 6)
+BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 7)
 BOOST_CLASS_VERSION(slg::PhotonGICache, 3)
 
 BOOST_CLASS_EXPORT_KEY(slg::GenericPhoton)

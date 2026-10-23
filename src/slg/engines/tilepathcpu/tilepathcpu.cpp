@@ -113,6 +113,9 @@ void TilePathCPURenderEngine::StartLockLess() {
 		// photonGICache will be nullptr if the cache is disabled
 		if (photonGICache)
 			photonGICache->Preprocess(renderThreads.size());
+	} else if (photonGICache) {
+		// Restored from the render state: maybe with another thread count
+		photonGICache->InitUpdate(renderThreads.size());
 	}
 
 	//--------------------------------------------------------------------------
@@ -134,6 +137,15 @@ void TilePathCPURenderEngine::StopLockLess() {
 	
 	delete photonGICache;
 	photonGICache = nullptr;
+}
+
+void TilePathCPURenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
+	// The render threads are stopped here
+	if (PhotonGICache::EndSceneEdit(photonGICache, renderConfig.GetScene(),
+			renderConfig.GetConfig(), editActions, renderThreads.size()))
+		pathTracer.SetPhotonGICache(photonGICache);
+
+	CPUTileRenderEngine::EndSceneEditLockLess(editActions);
 }
 
 //------------------------------------------------------------------------------

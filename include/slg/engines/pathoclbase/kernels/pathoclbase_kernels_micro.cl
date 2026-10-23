@@ -699,10 +699,12 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 							if (radiance) {
 								for (uint i = 0; i < pgicLightGroupCounts; ++i)
 									VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(taskState->throughput.c) * VLOAD3F(radiance[i].c));
-							}
 
-							// I can terminate the path, all done
-							return MK_SPLAT_SAMPLE;
+								// I can terminate the path, all done
+								return MK_SPLAT_SAMPLE;
+							}
+							// No cache entry here (the visibility pass placed
+							// none): the path goes on as if the cache was off
 						}
 					}
 

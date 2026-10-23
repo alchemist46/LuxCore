@@ -41,6 +41,8 @@ using namespace slg;
 
 PhotonGICache::PhotonGICache() :
 		scene(nullptr),
+		threadCount(0), lastUpdateSpp(0), updateSeedBase(1), updateGeneration(0),
+		finishUpdateFlag(false),
 		visibilityParticlesKdTree(nullptr),
 		radiancePhotonsBVH(nullptr) ,
 		causticPhotonsBVH(nullptr) {
@@ -48,6 +50,8 @@ PhotonGICache::PhotonGICache() :
 
 PhotonGICache::PhotonGICache(SceneConstRef scn, const PhotonGICacheParams &p) :
 		scene(&scn), params(p),
+		threadCount(0), lastUpdateSpp(0), updateSeedBase(1), updateGeneration(0),
+		finishUpdateFlag(false),
 		visibilityParticlesKdTree(nullptr),
 		radiancePhotonsBVH(nullptr) ,
 		indirectPhotonTracedCount(0),
@@ -371,22 +375,25 @@ void PhotonGICache::CreateRadiancePhotons() {
 }
 
 void PhotonGICache::Preprocess(const u_int threadCnt) {
-	threadCount = threadCnt;
-	threadsSyncBarrier.reset(new std::barrier(threadCount, completion_t()));
+	InitUpdate(threadCnt);
 	lastUpdateSpp = 0;
 	updateSeedBase = 1;
-	finishUpdateFlag = false;
+	updateGeneration = 0;
 
 	if (params.persistent.fileName != "") {
+		// The signature of the parameters asked (before the pre-processing
+		// changes them) and of the scene
+		params.signature = ComputeSignature();
+
 		// Check if the file already exist
 		if (std::filesystem::exists(params.persistent.fileName)) {
 			// Load the cache from the file
-			LoadPersistentCache(params.persistent.fileName);
-
-			return;
+			if (LoadPersistentCache(params.persistent.fileName))
+				return;
 		}
-		
-		// The file doesn't exist so I have to go trough normal pre-processing
+
+		// The file doesn't exist or was computed for another scene or other
+		// parameters, so I have to go trough normal pre-processing
 	}
 
 	//--------------------------------------------------------------------------

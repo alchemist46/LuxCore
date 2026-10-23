@@ -86,6 +86,7 @@ protected:
 	virtual void InitFilm();
 	virtual void StartLockLess();
 	virtual void StopLockLess();
+	virtual void EndSceneEditLockLess(const EditActionList &editActions);
 
 	// Samples settings
 	u_int aaSamples;

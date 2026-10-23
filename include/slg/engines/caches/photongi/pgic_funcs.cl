@@ -47,7 +47,10 @@ OPENCL_FORCE_INLINE bool PhotonGICache_IsDirectLightHitVisible(
 		return false;
 	else if (!taskConfig->pathTracer.pgic.causticEnabled || !photonGICausticCacheUsed)
 		return true;
-	else if (!pathInfo->isNearlyCaustic && (taskConfig->pathTracer.pgic.debugType == PGIC_DEBUG_NONE))
+	// Not a caustic path: EyePathInfo_IsCausticPath(), as the CPU's
+	// EyePathInfo::IsCausticPath()
+	else if (!(pathInfo->isNearlyCaustic && (pathInfo->depth.depth > 1)) &&
+			(taskConfig->pathTracer.pgic.debugType == PGIC_DEBUG_NONE))
 		return true;
 	else
 		return false;

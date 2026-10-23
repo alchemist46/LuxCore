@@ -712,10 +712,13 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 								// by using passThrough here
 								passThrough))) {
 						const SpectrumGroup *group = photonGICache->GetIndirectRadiance(bsdf);
-						if (group)
+						if (group) {
 							sampleResult.radiance.AddWeighted(pathThroughput, *group);
-						// I can terminate the path, all done
-						break;
+							// I can terminate the path, all done
+							break;
+						}
+						// No cache entry here (the visibility pass placed
+						// none): the path goes on as if the cache was off
 					}
 
 					photonGICacheEnabledOnLastHit = true;

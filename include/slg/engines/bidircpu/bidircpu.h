@@ -191,6 +191,9 @@ protected:
 	virtual void InitFilm();
 	virtual void StartLockLess();
 	virtual void StopLockLess();
+	virtual void EndSceneEditLockLess(const EditActionList &editActions);
+
+	static luxrays::Properties PhotonGIConfig(const luxrays::Properties &cfg);
 
 	PhotonGICache *photonGICache;
 

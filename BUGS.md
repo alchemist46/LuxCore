@@ -86,41 +86,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` (TILEPATHOCL, seed 1, aa 8, 320x240, HIP device) six times with the same build, then `compare`: 2 of 6 runs at HEAD `aa2fa98c1` had the other value.
 - Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change.
 
-### PhotonGI: the GPU drops light hits after the caustic cache fired
-- Found: 2026-10-22
-- Area: engine (PATHOCL), caches
-- Problem: `pgic_funcs.cl:50` tests `!isNearlyCaustic` where the CPU tests `!IsCausticPath()` (`isNearlyCaustic && depth > 1`, `photongicache.cpp:101`, `pathinfo.h:102`), so once `photonGICausticCacheUsed` is set at the first vertex the GPU adds no emission at a light hit after one diffuse bounce (the BSDF half of the direct light); the CPU does.
-- Reproduce: cornell-glass with `path.photongi.caustic.enabled = 1`, PATHCPU against PATHOCL means, 256 spp.
-- Notes: found by reading (ROADMAP CA1), magnitude not measured. Fix: `EyePathInfo_IsCausticPath()` (`pathinfo_funcs.cl:143-145`).
-
-### PhotonGI is not rebuilt on scene edits and its caustic update stops after one
-- Found: 2026-10-22
-- Area: engine, caches
-- Problem: the cache is built in `StartLockLess` only (`pathcpu.cpp:158-163`, `pathoclbase.cpp:522-535`), so it goes stale on geometry, light and material edits; `FinishUpdate()` sets `finishUpdateFlag` (`pgicupdate.cpp:91-100`) and nothing resets it, so after any edit the periodic caustic update never runs again (and `filmSPP - lastUpdateSpp` underflows after the film reset).
-- Reproduce: a PATHCPU session with the caustic cache and `updatespp = 8`; edit a light; render on.
-- Notes: ROADMAP CA1.
-
-### PhotonGI multi-GPU keeps the old caustic map
-- Found: 2026-10-22
-- Area: engine (PATHOCL), caches
-- Problem: `Update()` returns true to thread 0 only, so only the first device re-runs `InitPhotonGI()` and `SetKernelArgs()` (`pathoclopenclthread.cpp:341-346`); the other devices keep the previous caustic map and radius.
-- Reproduce: two OpenCL/HIP devices, the caustic cache with the periodic update.
-- Notes: ROADMAP CA1; not reproducible on this machine (one GPU).
-
-### PhotonGI persistent file and resume
-- Found: 2026-10-22
-- Area: engine, serialization
-- Problem: a `.pgi` file is loaded with no scene or parameter check and its stored params override the config's (`pgicserialize.cpp:31-86`); `samplerType`, `photon.time.*` and `finishUpdateFlag` are not serialized (uninitialized after a load, `photongicache.h:225-260`); the `.rsm` resume re-creates the update barrier with the saved thread count (`pgicserialize.cpp:99-119`), so a resume with another thread count desynchronizes the update.
-- Reproduce: render with `path.photongi.persistent.file`, change the lights, render again: the old cache is used.
-- Notes: ROADMAP CA1; see also K5.
-
-### A null PhotonGI indirect lookup ends the path
-- Found: 2026-10-22
-- Area: engine, caches
-- Problem: when the cache is enabled at a vertex but no radiance photon is within the radius, `GetIndirectRadiance()` returns null and the path still breaks (`pathtracer.cpp:714-718`, `pathoclbase_kernels_micro.cl:699-705`): lost energy where the visibility pass placed no entry, and wherever `path.regularization.enable` makes a mirror or a near-specular glossy surface eligible (the gate reads the regularized glossiness, `photongicache.cpp:70`; the caches are built without regularization).
-- Reproduce: a scene with the indirect cache and a mirror, regularization on; compare with the cache off.
-- Notes: ROADMAP CA1.
-
 ### DLSC: BVH leak, stale radius and a pick floor on DLS-disabled lights
 - Found: 2026-10-22
 - Area: light
@@ -169,3 +134,24 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: on a 64x64 film, `batch.haltspp = 64` gives 141-147 samples per pixel and `256` gives 416-431 (the SAMPLECOUNT channel; every pixel within 4 of the others, so the image is fine, only slower). The halt counts the samples in flight, one per task, and the GPU runs 524288 tasks (the SampleResult buffer of the log), i.e. 128 samples per pixel of this film, whatever the halt.
 - Reproduce: `lc-work/d1/toy/toy.py PATHOCL aquad 64 64 256 --set opencl.devices.select=01 --set film.opencl.enable=0` (a floor lit by one quad light, depth 1), HIP.
 - Notes: the task count does not follow the film size (the Sobol bucket size does since 2026-10-18). At 540x540 it is about two samples per pixel (524288 tasks for 291600 pixels). Found during D1; not investigated further.
+
+### PhotonGI drops the light hits after a diffuse then a non-diffuse bounce
+- Found: 2026-10-23
+- Area: engine, caches
+- Problem: with either PhotonGI cache on, `IsDirectLightHitVisible()` (`photongicache.cpp:101`, `pgic_funcs.cl:46`) drops every light hit whose last bounce is not diffuse once the path had a diffuse bounce (`!(lastBSDFEvent & DIFFUSE) && diffuseDepth > 0`), a firefly cut. Nothing adds these paths back: the caustic cache stores only the nearly specular chains, and the indirect cache only where it ends a path. Diffuse -> glossy -> light and the light leaving a scattering medium through glass are lost.
+- Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.indirect.enabled=1` (or `caustic.enabled=1`): disk 0.209 instead of 1.000 (1.000 with the caches off), same before and after CA1.
+- Notes: found during CA1 (2026-10-23). The fix (drop only the nearly caustic paths the caustic cache covers, the third test of the function) changes the look of every PhotonGI render with glossy surfaces (brighter, more fireflies): a decision for the user, see ROADMAP CA1.
+
+### PhotonGI caustic lookups on the GPU vary up to 15x in time between runs
+- Found: 2026-10-23
+- Area: engine (PATHOCL), caches
+- Problem: the same render takes 24 s or 341 s of kernel time depending on the run: each run traces its own caustic photons (Metropolis) and the GPU lookup visits every photon within the radius (`PGICPhotonBvh_ConnectAllNearEntries()`), so a dense caustic spot costs a lot.
+- Reproduce: cornell-glass with `path.photongi.caustic.enabled = 1`, `caustic.lookup.radius = 0.1`, `photon.maxcount = 4000000`, `caustic.updatespp = 0`, hybrid off, PATHOCL 200x200 at 64 spp: kernels 23.6 s in one run, 341 s in another (same build, `lc-work/ca1/timing.py`).
+- Notes: not investigated: not a regression of CA1 (the base build shows both). A cap on the photons per lookup (the old `caustic.lookup.maxcount`, commented out in `scenes/causticcube/render.cfg`) or a k-nearest lookup would bound it.
+
+### PATHOCL stops at about 20 spp after a scene edit with a halt spp
+- Found: 2026-10-23
+- Area: engine (PATHOCL halt, scene edits)
+- Problem: a session with `batch.haltspp = 64` renders its 64 spp, then after `BeginSceneEdit()`/`EndSceneEdit()` (a camera move) the film stops at 20 spp: `HasDone()` stays false and the pass count does not move for minutes. With `batch.haltspp = 32` the session reports done at 20 spp. Same with every cache off and on the build before CA1 (244d25614), so not PhotonGI.
+- Reproduce: `EDIT="scene.camera.lookat.orig = -2.5 -8. 2.9" SPP=64 out/venvtest/Scripts/python -u lc-work/ca1/edit_halt_repro.py PATHOCL "path.photongi.indirect.enabled = 0;path.photongi.caustic.enabled = 0"` (cornell-glass 160x160, HIP).
+- Notes: suspect the per-thread halt check (`PathOCLOpenCLRenderThread::RenderThreadImpl()`: `haltSPP`, `GetThreadFilmsEyeSPP()`, the spp-per-iteration estimate) counting the samples of before the edit. Found during CA1; the PhotonGI edit test there halts by hand instead.

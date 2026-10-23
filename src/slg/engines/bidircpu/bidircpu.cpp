@@ -113,11 +113,17 @@ void BiDirCPURenderEngine::StartLockLess() {
 
 	// note: photonGICache could have been restored from the render state
 	if (!photonGICache) {
-		photonGICache = PhotonGICache::FromProperties(renderConfig.GetScene(), cfg);
+		// BIDIRVMCPU doesn't use the cache
+		if (GetType() == BIDIRCPU) {
+			photonGICache = PhotonGICache::FromProperties(renderConfig.GetScene(), PhotonGIConfig(cfg));
 
-		// photonGICache will be nullptr if the cache is disabled
-		if (photonGICache)
-			photonGICache->Preprocess(renderThreads.size());
+			// photonGICache will be nullptr if the cache is disabled
+			if (photonGICache)
+				photonGICache->Preprocess(renderThreads.size());
+		}
+	} else {
+		// Restored from the render state: maybe with another thread count
+		photonGICache->InitUpdate(renderThreads.size());
 	}
 	
 	//--------------------------------------------------------------------------
@@ -155,6 +161,23 @@ void BiDirCPURenderEngine::StopLockLess() {
 
 	delete photonGICache;
 	photonGICache = nullptr;
+}
+
+void BiDirCPURenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
+	// The render threads are stopped here
+	PhotonGICache::EndSceneEdit(photonGICache, renderConfig.GetScene(),
+			PhotonGIConfig(renderConfig.GetConfig()), editActions, renderThreads.size());
+
+	CPUNoTileRenderEngine::EndSceneEditLockLess(editActions);
+}
+
+// BIDIRCPU uses only the caustic cache (the light paths do the rest)
+Properties BiDirCPURenderEngine::PhotonGIConfig(const Properties &cfg) {
+	Properties pgicCfg;
+	pgicCfg.Set(cfg);
+	pgicCfg.Set(Property("path.photongi.indirect.enabled")(false));
+
+	return pgicCfg;
 }
 
 //------------------------------------------------------------------------------

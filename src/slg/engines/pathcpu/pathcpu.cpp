@@ -122,6 +122,9 @@ void PathCPURenderEngine::StartLockLess() {
 		// photonGICache will be nullptr if the cache is disabled
 		if (photonGICache)
 			photonGICache->Preprocess(renderThreads.size());
+	} else if (photonGICache) {
+		// Restored from the render state: maybe with another thread count
+		photonGICache->InitUpdate(renderThreads.size());
 	}
 
 	//--------------------------------------------------------------------------
@@ -158,6 +161,11 @@ void PathCPURenderEngine::StopLockLess() {
 void PathCPURenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
 	if (lightSamplerSharedData)
 		lightSamplerSharedData->Reset();
+
+	// The render threads are stopped here
+	if (PhotonGICache::EndSceneEdit(photonGICache, renderConfig.GetScene(),
+			renderConfig.GetConfig(), editActions, renderThreads.size()))
+		pathTracer.SetPhotonGICache(photonGICache);
 
 	CPURenderEngine::EndSceneEditLockLess(editActions);
 }

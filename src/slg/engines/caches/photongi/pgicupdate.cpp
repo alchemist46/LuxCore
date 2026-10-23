@@ -22,13 +22,52 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+void PhotonGICache::InitUpdate(const u_int threadCnt) {
+	threadCount = threadCnt;
+	threadsSyncBarrier.reset(new std::barrier(threadCount, completion_t()));
+	finishUpdateFlag = false;
+}
+
+bool PhotonGICache::EndSceneEdit(PhotonGICache *&cache, SceneConstRef scn,
+		const Properties &cfg, const EditActionList &editActions,
+		const u_int threadCount) {
+	if (!cache)
+		return false;
+
+	// The photons and the cache entries depend on the geometry, the materials
+	// (and their image maps) and the lights. The camera edits keep the cache:
+	// the visibility entries stay where the first camera saw, the indirect
+	// cache falls back to path tracing elsewhere.
+	if (editActions.Has(GEOMETRY_EDIT) || editActions.Has(GEOMETRY_TRANS_EDIT) ||
+			editActions.Has(MATERIALS_EDIT) || editActions.Has(MATERIAL_TYPES_EDIT) ||
+			editActions.Has(LIGHTS_EDIT) || editActions.Has(LIGHT_TYPES_EDIT) ||
+			editActions.Has(IMAGEMAPS_EDIT)) {
+		SLG_LOG("Computing the PhotonGI cache again after the scene edit");
+
+		delete cache;
+		cache = nullptr;
+		cache = FromProperties(scn, cfg);
+		if (cache)
+			cache->Preprocess(threadCount);
+
+		return true;
+	} else {
+		// The film starts again from 0 samples/pixel
+		cache->InitUpdate(threadCount);
+		cache->lastUpdateSpp = 0;
+
+		return false;
+	}
+}
+
 bool PhotonGICache::Update(const u_int threadIndex, const u_int filmSPP,
 		const std::function<void()> &threadZeroCallback) {
 	if (!params.caustic.enabled || (params.caustic.updateSpp == 0) || finishUpdateFlag)
 		return false;
 
-	// Check if it is time to update the caustic cache
-	const u_int deltaSpp = filmSPP - lastUpdateSpp;
+	// Check if it is time to update the caustic cache (the film may have
+	// started again with fewer samples)
+	const u_int deltaSpp = (filmSPP > lastUpdateSpp) ? (filmSPP - lastUpdateSpp) : 0;
 	if (deltaSpp > params.caustic.updateSpp) {
 		// Time to update the caustic cache
 
@@ -70,6 +109,7 @@ bool PhotonGICache::Update(const u_int threadIndex, const u_int filmSPP,
 				}
 
 				lastUpdateSpp = filmSPP;
+				++updateGeneration;
 
 				if (threadZeroCallback)
 					threadZeroCallback();

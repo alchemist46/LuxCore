@@ -162,10 +162,6 @@ void TilePathOCLRenderThread::RenderTileWork(const TileWork &tileWork,
 			engine->aaSamples * engine->aaSamples, 0.0);
 }
 
-static void PGICUpdateCallBack(CompiledScene *compiledScene) {
-	compiledScene->RecompilePhotonGI();
-}
-
 void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	//SLG_LOG("[TilePathOCLRenderThread::" << threadIndex << "] Rendering thread started");
 
@@ -189,7 +185,14 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
         vector<TileWork> tileWorks(1);
         vector<slg::ocl::TilePathSamplerSharedData> samplerDatas(1);
-        const std::function<void()> pgicUpdateCallBack = std::bind(PGICUpdateCallBack, engine->compiledScene);
+        // Run by the first thread after a caustic cache update, while the others wait
+        const std::function<void()> pgicUpdateCallBack = [engine]() {
+        	engine->compiledScene->RecompilePhotonGI();
+        	// The new radius and photon count
+        	engine->taskConfig.pathTracer.pgic = engine->compiledScene->compiledPathTracer.pgic;
+        };
+        // The caustic map this device has (uploaded at the start)
+        u_int pgicUpdateGeneration = engine->photonGICache ? engine->photonGICache->GetUpdateGeneration() : 0;
 
         while (!stop_token.stop_requested()) {
                 // Check if we are in pause mode
@@ -251,8 +254,15 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                 if (engine->photonGICache) {
                         const u_int spp = engine->GetFilm().GetTotalEyeSampleCount() / engine->GetFilm().GetPixelCount();
 
-                        if (engine->photonGICache->Update(threadIndex, spp, pgicUpdateCallBack)) {
+                        engine->photonGICache->Update(threadIndex, spp, pgicUpdateCallBack);
+
+                        // Every device uploads the new caustic map, not only the one of
+                        // the thread that updated it
+                        if (engine->photonGICache->GetUpdateGeneration() != pgicUpdateGeneration) {
+                                pgicUpdateGeneration = engine->photonGICache->GetUpdateGeneration();
+
                                 InitPhotonGI();
+                                UpdateGPUTaskConfigurationBuffer();
                                 SetKernelArgs();
                         }
                 }

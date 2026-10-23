@@ -314,7 +314,8 @@ void PathOCLBaseOCLRenderThread::EndSceneEdit(const EditActionList &editActions)
 		InitMaterials();
 	}
 
-	if (cscene->wasCameraCompiled || cscene->wasMaterialsCompiled)
+	if (cscene->wasCameraCompiled || cscene->wasMaterialsCompiled ||
+			cscene->wasPhotonGICompiled)
 		UpdateGPUTaskConfigurationBuffer();
 
 	if (cscene->wasSceneObjectsCompiled) {
