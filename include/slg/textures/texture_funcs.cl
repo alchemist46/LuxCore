@@ -192,7 +192,31 @@ OPENCL_HOT_FUNCTION float3 Texture_Bump(const uint texIndex,
 
 		__global const TextureEvalOp* restrict evalOp = &texEvalOps[evalBumpOpStartIndex + i];
 
-		Texture_EvalOp(evalOp, evalStack, &evalStackOffsetVal, hitPoint, sampleDistance TEXTURES_PARAM);
+		// The shared evaluations (EVAL_SLOT_*: a copy to or from the slot
+		// at texIndex)
+		const TextureEvalOpType evalType = evalOp->evalType;
+		if (evalType >= EVAL_SLOT_STORE_FLOAT) {
+			const uint slot = evalOp->texIndex;
+			switch (evalType) {
+				case EVAL_SLOT_STORE_FLOAT:
+					evalStack[slot] = evalStack[evalStackOffsetVal - 1];
+					break;
+				case EVAL_SLOT_STORE_FLOAT3:
+					evalStack[slot] = evalStack[evalStackOffsetVal - 3];
+					evalStack[slot + 1] = evalStack[evalStackOffsetVal - 2];
+					evalStack[slot + 2] = evalStack[evalStackOffsetVal - 1];
+					break;
+				case EVAL_SLOT_LOAD_FLOAT:
+					EvalStack_PushFloat(evalStack[slot]);
+					break;
+				default:
+					EvalStack_PushFloat(evalStack[slot]);
+					EvalStack_PushFloat(evalStack[slot + 1]);
+					EvalStack_PushFloat(evalStack[slot + 2]);
+					break;
+			}
+		} else
+			Texture_EvalOp(evalOp, evalStack, &evalStackOffsetVal, hitPoint, sampleDistance TEXTURES_PARAM);
 	}
 #if defined(DEBUG_PRINTF_TEXTURE_EVAL)
 	printf("evalStackOffset=#%d\n", evalStackOffsetVal);

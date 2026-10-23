@@ -155,3 +155,10 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: the CPU bumps a TwoSided with its front or back material's `Bump()`, so with that material's `bumpsamplingdistance` and, for a nested TwoSided, recursively; the GPU (`Material_GetBumpTexIndex()`) takes only the bump texture of the front or back material and uses the TwoSided's own `bumpsamplingdistance`. The images differ only when the sampling distances differ or TwoSideds are nested.
 - Reproduce: a TwoSided whose front material has a bump texture and `bumpsamplingdistance = 0.01` (the TwoSided left at the default 0.001); PATHCPU against PATHOCL.
 - Notes: found reading the code for A6, not rendered. The GPU rule is also the slot rule of the bump cache (`CompiledScene::MaterialHasBump()`), so a fix on the GPU side changes both.
+
+### The GPU Mix texture bump uses the second texture's bump for the amount's
+- Found: 2026-10-23
+- Area: texture (mix, bump)
+- Problem: `MixTexture_Bump()` (`texture_bump_funcs.cl`) computes the amount's slope terms `dua`/`dva` from `bumbNTex2`, the second texture's bump, where the CPU (`MixTexture::Bump()`) uses the amount texture's bump; `bumbNAmount` is unused, so the GPU evaluates the amount's bump ops and drops them. The bumps differ wherever the amount texture varies and the two textures differ.
+- Reproduce: a `mix` texture with a varying amount (i.e. an image map) and different `texture1`/`texture2` as a material's `bumptex`; PATHCPU against PATHOCL.
+- Notes: found reading the code for A5, not rendered. A fix changes the GPU images of every scene with a Mix of bumps (the G0 classroom has 46 Mix textures), so it is not bit-identical; the A5 sharing does not depend on it.

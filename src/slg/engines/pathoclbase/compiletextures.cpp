@@ -27,6 +27,7 @@
 
 #include "slg/engines/pathoclbase/compiledscene.h"
 #include "slg/kernels/kernels.h"
+#include "slg/kernels/kernelsources.h"
 
 #include "slg/textures/band.h"
 #include "slg/textures/bilerp.h"
@@ -306,6 +307,9 @@ CompiledScene::EvalStackNeed CompiledScene::CompileTextureOpsGenericBumpMap(cons
 
 	// Eval texture at hit point
 	evalOpStackSize += CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
+	// The hit point EVAL_BUMP_GENERIC_OFFSET_U saves and the EVAL_BUMP op
+	// restores
+	const u_int basePoint = texEvalShare.point;
 
 	// EVAL_BUMP_GENERIC_OFFSET_U
 	slg::ocl::TextureEvalOp opOffsetU;
@@ -314,6 +318,7 @@ CompiledScene::EvalStackNeed CompiledScene::CompileTextureOpsGenericBumpMap(cons
 	texEvalOps.push_back(opOffsetU);
 	// Save original original P, shadeN and UV
 	evalOpStackSize += 3 + 3 + 2;
+	texEvalShare.NewPoint();
 
 	// Eval texture at hit point + offset U
 	evalOpStackSize += CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
@@ -323,14 +328,222 @@ CompiledScene::EvalStackNeed CompiledScene::CompileTextureOpsGenericBumpMap(cons
 	opOffsetV.texIndex = texIndex;
 	opOffsetV.evalType = slg::ocl::TextureEvalOpType::EVAL_BUMP_GENERIC_OFFSET_V;
 	texEvalOps.push_back(opOffsetV);
+	texEvalShare.NewPoint();
 
 	// Eval texture at hit point + offset V
 	evalOpStackSize += CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_FLOAT);
 
+	// The EVAL_BUMP op of the caller follows
+	texEvalShare.point = basePoint;
+
 	return evalOpStackSize;
 }
 
+// The textures with ops that move the hit point (and put it back) inside
+// their evaluation, other than the generic bump
+static bool TextureEvalMovesHitPoint(const slg::ocl::Texture &tex,
+		const slg::ocl::TextureEvalOpType opType) {
+	switch (tex.type) {
+		case slg::ocl::TRIPLANAR_TEX:
+			return (opType != slg::ocl::TextureEvalOpType::EVAL_BUMP) ||
+					tex.triplanarTex.enableUVlessBumpMap;
+		case slg::ocl::DISTORT_TEX:
+		case slg::ocl::BOMBING_TEX:
+			return (opType != slg::ocl::TextureEvalOpType::EVAL_BUMP);
+		default:
+			return false;
+	}
+}
+
+// The one-op evaluations that cost no more than a copy from a slot
+static bool TextureEvalIsCheap(const slg::ocl::Texture &tex) {
+	switch (tex.type) {
+		case slg::ocl::CONST_FLOAT:
+		case slg::ocl::CONST_FLOAT3:
+		case slg::ocl::OBJECTID_TEX:
+		case slg::ocl::OBJECTID_COLOR_TEX:
+		case slg::ocl::OBJECTID_NORMALIZED_TEX:
+		case slg::ocl::FRESNELCOLOR_TEX:
+		case slg::ocl::FRESNELCONST_TEX:
+		case slg::ocl::UV_TEX:
+		case slg::ocl::POSITION_TEX:
+		case slg::ocl::SHADING_NORMAL_TEX:
+			return true;
+		default:
+			return false;
+	}
+}
+
+// The ops of an evaluation. Inside a bump evaluation (texEvalShare.enabled),
+// an evaluation already done at the same hit point is not compiled again: the
+// first one copies its result to a slot (EVAL_SLOT_STORE_*) and the next ones
+// push the slot (EVAL_SLOT_LOAD_*). The nested bumps of the Blender exports
+// evaluate each child's bump and then its value at the same point, and the
+// generic bump of a child starts with that value. The result is the same to
+// the bit: the evaluations are functions of the hit point, and the ops that
+// move it restore it from a copy.
 CompiledScene::EvalStackNeed CompiledScene::CompileTextureOps(const u_int texIndex,
+		const slg::ocl::TextureEvalOpType opType) {
+	TextureEvalShare &share = texEvalShare;
+	if (!share.enabled || (share.opaqueDepth > 0))
+		return CompileTextureOpsNode(texIndex, opType);
+
+	const u_int resultSize = (opType == slg::ocl::TextureEvalOpType::EVAL_FLOAT) ? 1 : 3;
+	const auto key = std::make_tuple(texIndex, (u_int)opType, share.point);
+	const auto it = share.ids.find(key);
+	if (it != share.ids.end()) {
+		// Done before at this hit point: push the copy
+		const u_int id = it->second;
+		slg::ocl::TextureEvalOp op;
+		op.texIndex = id;
+		op.evalType = (resultSize == 1) ?
+			slg::ocl::TextureEvalOpType::EVAL_SLOT_LOAD_FLOAT :
+			slg::ocl::TextureEvalOpType::EVAL_SLOT_LOAD_FLOAT3;
+		texEvalOps.push_back(op);
+		share.used[id] = true;
+		share.extraOps += (int)share.unsharedOps[id] - 1;
+
+		EvalStackNeed evalOpStackSize;
+		evalOpStackSize += resultSize;
+		return evalOpStackSize;
+	}
+
+	const slg::ocl::Texture &tex = texs[texIndex];
+	const bool movesHitPoint = TextureEvalMovesHitPoint(tex, opType);
+	const size_t start = texEvalOps.size();
+	const int startExtraOps = share.extraOps;
+
+	if (movesHitPoint)
+		++share.opaqueDepth;
+	const EvalStackNeed evalOpStackSize = CompileTextureOpsNode(texIndex, opType);
+	if (movesHitPoint) {
+		--share.opaqueDepth;
+		// Whether its last op puts the hit point back to the bit or not,
+		// what follows sees a new one
+		share.NewPoint();
+	}
+
+	// Shared only if what follows sees the hit point it saw, as after a
+	// copy
+	const u_int length = texEvalOps.size() - start;
+	if ((share.point == std::get<2>(key)) &&
+			((length > 1) || !TextureEvalIsCheap(tex))) {
+		// The slot of this evaluation, if a later one uses it (see
+		// CompileTextureBumpOps())
+		const u_int id = share.sizes.size();
+		share.ids[key] = id;
+		share.sizes.push_back(resultSize);
+		share.unsharedOps.push_back(length + (share.extraOps - startExtraOps));
+		share.used.push_back(false);
+
+		slg::ocl::TextureEvalOp op;
+		op.texIndex = id;
+		op.evalType = (resultSize == 1) ?
+			slg::ocl::TextureEvalOpType::EVAL_SLOT_STORE_FLOAT :
+			slg::ocl::TextureEvalOpType::EVAL_SLOT_STORE_FLOAT3;
+		texEvalOps.push_back(op);
+		share.extraOps -= 1;
+	}
+
+	return evalOpStackSize;
+}
+
+// The ops of the bump evaluation of a texture, with the repeated evaluations
+// shared (see CompileTextureOps()). The slots are above the peak of the
+// evaluation, so the stack it needs grows by their size.
+CompiledScene::EvalStackNeed CompiledScene::CompileTextureBumpOps(const u_int texIndex) {
+	TextureEvalShare &share = texEvalShare;
+	share = TextureEvalShare();
+	share.enabled = true;
+
+	const size_t start = texEvalOps.size();
+	EvalStackNeed evalOpStackSize = CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_BUMP);
+
+	// The ops where each slot is written and last read
+	const u_int idCount = share.sizes.size();
+	vector<size_t> firstOp(idCount, 0), lastOp(idCount, 0);
+	for (size_t i = start; i < texEvalOps.size(); ++i) {
+		const slg::ocl::TextureEvalOp &op = texEvalOps[i];
+		if ((op.evalType == slg::ocl::TextureEvalOpType::EVAL_SLOT_STORE_FLOAT) ||
+				(op.evalType == slg::ocl::TextureEvalOpType::EVAL_SLOT_STORE_FLOAT3))
+			firstOp[op.texIndex] = i;
+		else if (op.evalType >= slg::ocl::TextureEvalOpType::EVAL_SLOT_LOAD_FLOAT)
+			lastOp[op.texIndex] = i;
+	}
+
+	// The slots of the evaluations a later one copies, above the peak of
+	// the evaluation: the lowest place free of the slots in use at the same
+	// time (the ids are in the order of their first op)
+	vector<u_int> slots(idCount, NULL_INDEX);
+	u_int slotsSize = 0;
+	for (u_int id = 0; id < idCount; ++id) {
+		if (!share.used[id])
+			continue;
+
+		u_int offset = 0;
+		for (bool moved = true; moved; ) {
+			moved = false;
+			for (u_int other = 0; other < id; ++other) {
+				if ((slots[other] != NULL_INDEX) && (lastOp[other] > firstOp[id]) &&
+						(slots[other] < offset + share.sizes[id]) &&
+						(offset < slots[other] + share.sizes[other])) {
+					offset = slots[other] + share.sizes[other];
+					moved = true;
+				}
+			}
+		}
+		slots[id] = offset;
+		slotsSize = Max(slotsSize, offset + share.sizes[id]);
+	}
+	for (u_int id = 0; id < idCount; ++id) {
+		if (slots[id] != NULL_INDEX)
+			slots[id] += evalOpStackSize.peak;
+	}
+
+	// The op count without the sharing
+	texEvalShareStats.unsharedOps += (texEvalOps.size() - start) + share.extraOps;
+
+	// Drop the copies to the slots nobody reads and put the slot positions
+	// in the others
+	size_t last = start;
+	for (size_t i = start; i < texEvalOps.size(); ++i) {
+		slg::ocl::TextureEvalOp op = texEvalOps[i];
+		if (op.evalType >= slg::ocl::TextureEvalOpType::EVAL_SLOT_STORE_FLOAT) {
+			if (slots[op.texIndex] == NULL_INDEX)
+				continue;
+			op.texIndex = slots[op.texIndex];
+		}
+		texEvalOps[last++] = op;
+	}
+	texEvalOps.resize(last);
+	share = TextureEvalShare();
+
+	evalOpStackSize.peak += slotsSize;
+	evalOpStackSize.sum += slotsSize;
+
+	if ((slotsSize > 0) && (evalOpStackSize.peak > slg::ocl::PrivateTextureEvalStackSize)) {
+		// The slots must not cost a scene the private stacks (see
+		// PathOCLBaseOCLRenderThread::InitKernels()): without the sharing
+		// if that fits
+		const vector<slg::ocl::TextureEvalOp> sharedOps(texEvalOps.begin() + start, texEvalOps.end());
+		texEvalOps.resize(start);
+		const EvalStackNeed unsharedNeed = CompileTextureOps(texIndex, slg::ocl::TextureEvalOpType::EVAL_BUMP);
+		if (unsharedNeed.peak <= slg::ocl::PrivateTextureEvalStackSize) {
+			texEvalShareStats.sharedOps += texEvalOps.size() - start;
+			++texEvalShareStats.unsharedTextures;
+			return unsharedNeed;
+		}
+		texEvalOps.resize(start);
+		texEvalOps.insert(texEvalOps.end(), sharedOps.begin(), sharedOps.end());
+	}
+
+	texEvalShareStats.sharedOps += texEvalOps.size() - start;
+	texEvalShareStats.maxSlotsSize = Max(texEvalShareStats.maxSlotsSize, slotsSize);
+
+	return evalOpStackSize;
+}
+
+CompiledScene::EvalStackNeed CompiledScene::CompileTextureOpsNode(const u_int texIndex,
 		const slg::ocl::TextureEvalOpType opType) {
 	// Translate textures to texture evaluate ops
 
@@ -1132,6 +1345,7 @@ void CompiledScene::CompileTextureOps() {
 	texEvalOps.clear();
 	maxTextureEvalStackSize = 0;
 	u_int maxTextureEvalStackSum = 0;
+	texEvalShareStats = decltype(texEvalShareStats)();
 
 	for (u_int i = 0; i < texs.size(); ++i) {
 		slg::ocl::Texture *tex = &texs[i];
@@ -1163,14 +1377,18 @@ void CompiledScene::CompileTextureOps() {
 		//----------------------------------------------------------------------
 
 		tex->evalBumpOpStartIndex = texEvalOps.size();
-		const EvalStackNeed evalOpsStackSizeBump = CompileTextureOps(i, slg::ocl::TextureEvalOpType::EVAL_BUMP);
+		const EvalStackNeed evalOpsStackSizeBump = CompileTextureBumpOps(i);
 		tex->evalBumpOpLength = texEvalOps.size() - tex->evalBumpOpStartIndex;
 
 		maxTextureEvalStackSize = Max(maxTextureEvalStackSize, evalOpsStackSizeBump.peak);
 		maxTextureEvalStackSum = Max(maxTextureEvalStackSum, evalOpsStackSizeBump.sum);
 	}
 
-	SLG_LOG("Texture evaluation ops count: " << texEvalOps.size());
+	SLG_LOG("Texture evaluation ops count: " << texEvalOps.size() <<
+			" (bump ops: " << texEvalShareStats.sharedOps << ", " <<
+			texEvalShareStats.unsharedOps << " without the sharing, max. " <<
+			texEvalShareStats.maxSlotsSize << " slot floats, " <<
+			texEvalShareStats.unsharedTextures << " not shared for the stack size)");
 	SLG_LOG("Texture evaluation max. stack size: " << maxTextureEvalStackSize << " (the sum of the ops: " << maxTextureEvalStackSum << ")");
 }
 

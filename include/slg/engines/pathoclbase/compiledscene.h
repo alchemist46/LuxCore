@@ -21,6 +21,9 @@
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
+#include <map>
+#include <tuple>
+
 #include "slg/slg.h"
 #include "slg/editaction.h"
 
@@ -223,6 +226,36 @@ public:
 private:
 	EvalStackNeed CompileTextureOpsGenericBumpMap(const u_int texIndex);
 	EvalStackNeed CompileTextureOps(const u_int texIndex, const slg::ocl::TextureEvalOpType opType);
+	EvalStackNeed CompileTextureOpsNode(const u_int texIndex, const slg::ocl::TextureEvalOpType opType);
+	EvalStackNeed CompileTextureBumpOps(const u_int texIndex);
+
+	// The sharing of the evaluations repeated inside one bump evaluation
+	// (see CompileTextureOps()): an evaluation is a texture, an eval type
+	// and the hit point it sees, a number that changes when an op moves the
+	// hit point
+	struct TextureEvalShare {
+		bool enabled = false;
+		// Inside a texture that moves the hit point with its own ops
+		// (Triplanar, Distort, Bombing): no sharing
+		u_int opaqueDepth = 0;
+		u_int point = 0, pointCount = 0;
+		std::map<std::tuple<u_int, u_int, u_int>, u_int> ids;
+		// Per shared evaluation: result size, used by a later one, and the
+		// op count it stands for
+		std::vector<u_int> sizes, unsharedOps;
+		std::vector<bool> used;
+		// The ops the shared evaluations save, minus the copies
+		int extraOps = 0;
+
+		u_int NewPoint() { return point = ++pointCount; }
+	} texEvalShare;
+	// For the log: the bump ops with and without the sharing
+	struct {
+		size_t sharedOps = 0, unsharedOps = 0;
+		u_int maxSlotsSize = 0;
+		// Not shared: the slots would not fit the private stack
+		u_int unsharedTextures = 0;
+	} texEvalShareStats;
 	void CompileTextureOps();
 	void CompileTextures();
 	void CompileImageMaps();

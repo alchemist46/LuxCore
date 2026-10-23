@@ -43,7 +43,16 @@ typedef enum {
 	// For the very special case of Triplanar texture
 	EVAL_BUMP_TRIPLANAR_STEP_1,
 	EVAL_BUMP_TRIPLANAR_STEP_2,
-	EVAL_BUMP_TRIPLANAR_STEP_3
+	EVAL_BUMP_TRIPLANAR_STEP_3,
+	// The evaluations repeated inside one bump evaluation (see
+	// CompiledScene::CompileTextureOps()): the first one copies its result
+	// to a slot of the stack, the next ones push the slot instead. texIndex
+	// is the slot's position in the stack. Only in the bump ops, run by
+	// Texture_Bump().
+	EVAL_SLOT_STORE_FLOAT,
+	EVAL_SLOT_STORE_FLOAT3,
+	EVAL_SLOT_LOAD_FLOAT,
+	EVAL_SLOT_LOAD_FLOAT3
 } TextureEvalOpType;
 
 typedef struct {
