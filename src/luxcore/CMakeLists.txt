@@ -130,16 +130,14 @@ install(
       WORLD_READ WORLD_EXECUTE
 )
 
-# Windows: install asan, if required
+# Windows: install asan, if required. The ASan runtime DLL of MSVC is next to
+# cl.exe; it is needed beside the DLLs and the executables built with
+# /fsanitize=address
 IF(DEFINED ENV{LUX_SANITIZE} AND MSVC)
-    include(ImplibUtils)
-    find_library(ASAN_IMPLIB "clang_rt.asan_dynamic-x86_64")
-    implib_to_dll(ASAN_IMPLIB)
-    #set(CMAKE_LIBRARY_PATH "${CMAKE_LIBRARY_PATH};${ASAN_LIBRARY_PATH}")
-    add_library(ASAN SHARED IMPORTED)
-    set_target_properties(ASAN PROPERTIES
-        IMPORTED_LOCATION ${ASAN_LIBRARY}
-        IMPORTED_IMPLIB ${ASAN_IMPLIB}
+    get_filename_component(_ASAN_CL_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_file(ASAN_LIBRARY "clang_rt.asan_dynamic-x86_64.dll"
+        HINTS "${_ASAN_CL_DIR}"
+        REQUIRED
     )
     cmake_path(GET ASAN_LIBRARY STEM LAST_ONLY ASAN_STEM)
     cmake_path(GET ASAN_LIBRARY PARENT_PATH ASAN_PATH)
@@ -150,11 +148,6 @@ IF(DEFINED ENV{LUX_SANITIZE} AND MSVC)
         COMPONENT luxcore
         DESTINATION bin
     )
-    #install(
-        #FILES "$<TARGET_PDB_FILE:ASAN>"
-        #COMPONENT luxcore
-        #DESTINATION bin
-    #)
 ENDIF()
 
 # Windows: Install pdb file (if msvc and debug)

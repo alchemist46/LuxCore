@@ -687,6 +687,89 @@ jobs:
           path: benchmark.json
           if-no-files-found: ignore
 
+  # AddressSanitizer: a pyluxcore built with LUX_SANITIZE=1 (MSVC
+  # /fsanitize=address, with debug information for the reports) runs the
+  # PATHCPU unit tests; an invalid memory access stops the process with a
+  # report in the log. A separate build, not shipped. Only in the runs started
+  # by hand: the instrumented tests take about an hour on a 12-thread
+  # desktop, about 8 times a normal run.
+  asan-tests:
+    name: AddressSanitizer unit tests (Windows, CPU)
+    needs: [bake-spirv, bake-hip]
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-2022
+    timeout-minutes: 300
+    env:
+      PYTHON_MINOR: 13
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Configure git for long paths
+        shell: bash
+        run: git config --system core.longpaths true
+
+      - name: Checkout main repository (standard context)
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout main repository (act context)
+        if: env.ACT
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.${{ env.PYTHON_MINOR }}
+
+      - name: Prepare msvc
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download the pre-baked SPIR-V modules
+        uses: actions/download-artifact@v7
+        with:
+          name: spirv-baked
+          path: spirv-baked
+
+      - name: Download the pre-baked HIP kernels
+        uses: actions/download-artifact@v7
+        with:
+          name: hip-baked
+          path: hip-baked
+
+      - name: Build the ASan wheel
+        shell: cmd
+        env:
+          CONAN_HOME: ${{ github.workspace }}\.conan2
+          LUXRAYS_SPIRV_BAKED_DIR: ${{ github.workspace }}\spirv-baked
+          LUXRAYS_HIP_BAKED_DIR: ${{ github.workspace }}\hip-baked
+          LUX_BUILD_TYPE: Release
+          LUX_SANITIZE: 1
+        run: |
+          pip install "conan==2.21" wheel repairwheel && make deps && make wheel-test
+
+      - name: Install the wheel
+        shell: bash
+        run: |
+          python -m pip install out/install/Release/wheel/*.whl pillow numpy
+
+      - name: Run the unit tests
+        shell: bash
+        working-directory: pyunittests
+        run: |
+          # The ASan report goes to stderr and the process ends with an error
+          python unittests.py --strict --subset
+
+      - name: Upload the test images
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: asan-tests-images
+          path: pyunittests/images/*.png
+
   attest-wheels:
     needs: [build-wheels]
     runs-on: ubuntu-latest

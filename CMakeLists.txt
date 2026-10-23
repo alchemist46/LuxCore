@@ -115,6 +115,11 @@ IF(DEFINED ENV{LUX_SANITIZE})
   IF(MSVC)
       add_compile_definitions(_DISABLE_VECTOR_ANNOTATION)
       add_compile_definitions(_DISABLE_STRING_ANNOTATION)
+      # Debug information (in the objects, so that it works with the
+      # parallel builds and ccache) and a PDB: the ASan reports then have
+      # the file and line numbers
+      add_compile_options(/Z7)
+      add_link_options(/DEBUG)
   ENDIF()
 ENDIF()
 
