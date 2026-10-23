@@ -155,13 +155,15 @@ OPENCL_FORCE_NOT_INLINE uint Material_EvalOp(
 		// MIX
 		//----------------------------------------------------------------------
 		case MIX:
-			MixMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
+			MixMaterial_EvalOp(material, evalType, evalOp->opData.bumpSlots,
+					evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
 			break;
 		//----------------------------------------------------------------------
 		// GLOSSYCOATING
 		//----------------------------------------------------------------------
 		case GLOSSYCOATING:
-			GlossyCoatingMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
+			GlossyCoatingMaterial_EvalOp(material, evalType, evalOp->opData.bumpSlots,
+					evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
 			break;
 		//----------------------------------------------------------------------
 		// MIRROR

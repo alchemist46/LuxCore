@@ -93,18 +93,18 @@ u_int CompiledScene::CompileMaterialConditionalOps(const u_int matIndex,
 }
 
 u_int CompiledScene::CompileMaterialConditionalOps(const u_int matIndex,
-		const u_int matAIndex, const slg::ocl::MaterialEvalOpType opTypeA,
-		const u_int matBIndex, const slg::ocl::MaterialEvalOpType opTypeB,
+		const u_int matAIndex, const slg::ocl::MaterialEvalOpType opTypeA, const u_int bumpSlotBaseA,
+		const u_int matBIndex, const slg::ocl::MaterialEvalOpType opTypeB, const u_int bumpSlotBaseB,
 		vector<slg::ocl::MaterialEvalOp> &evalOps) const {
 	// Compile opType of material A
 	vector<slg::ocl::MaterialEvalOp> evalOpsA;
 	const u_int evalOpStackSizeA = CompileMaterialOps(matAIndex, opTypeA,
-			evalOpsA);
+			bumpSlotBaseA, evalOpsA);
 
 	// Compile opType of material B
 	vector<slg::ocl::MaterialEvalOp> evalOpsB;
 	const u_int evalOpStackSizeB = CompileMaterialOps(matBIndex, opTypeB,
-			evalOpsB);
+			bumpSlotBaseB, evalOpsB);
 
 	return CompileMaterialConditionalOps(matIndex,
 			evalOpsA, evalOpStackSizeA,
@@ -145,14 +145,81 @@ static bool IsLeafMaterial(const slg::ocl::MaterialType type) {
 	}
 }
 
+// True if Material_Bump() of the material can change the hit point
+bool CompiledScene::MaterialHasBump(const u_int matIndex) const {
+	const slg::ocl::Material *mat = &mats[matIndex];
+
+	// As Material_GetBumpTexIndex()
+	if (mat->type == slg::ocl::TWOSIDED)
+		return (mats[mat->twosided.frontMatIndex].bumpTexIndex != NULL_INDEX) ||
+				(mats[mat->twosided.backMatIndex].bumpTexIndex != NULL_INDEX);
+	else
+		return (mat->bumpTexIndex != NULL_INDEX);
+}
+
+// The bump cache slots of the tree of a material: one per bumped sub-material
+// of a MIX or GLOSSYCOATING node (a TWOSIDED node has none of its own: its
+// parent bumps it with the front or back bump), in the order of
+// CompileMaterialOps(), the same for every op type
+u_int CompiledScene::MaterialBumpSlotCount(const u_int matIndex) const {
+	const slg::ocl::Material *mat = &mats[matIndex];
+
+	switch (mat->type) {
+		case MIX:
+			return (MaterialHasBump(mat->mix.matAIndex) ? 1 : 0) +
+					(MaterialHasBump(mat->mix.matBIndex) ? 1 : 0) +
+					MaterialBumpSlotCount(mat->mix.matAIndex) +
+					MaterialBumpSlotCount(mat->mix.matBIndex);
+		case GLOSSYCOATING:
+			return (MaterialHasBump(mat->glossycoating.matBaseIndex) ? 1 : 0) +
+					MaterialBumpSlotCount(mat->glossycoating.matBaseIndex);
+		case TWOSIDED:
+			return MaterialBumpSlotCount(mat->twosided.frontMatIndex) +
+					MaterialBumpSlotCount(mat->twosided.backMatIndex);
+		default:
+			return 0;
+	}
+}
+
+static u_int BumpCacheSlot(const u_int slot) {
+	return (slot < MATERIAL_BUMP_CACHE_MAX_SLOTS) ? slot : MATERIAL_BUMP_CACHE_NO_SLOT;
+}
+
+// bumpSlotBase is the first bump cache slot of the tree of the material
 u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
-		const slg::ocl::MaterialEvalOpType opType,
+		const slg::ocl::MaterialEvalOpType opType, const u_int bumpSlotBase,
 		vector<slg::ocl::MaterialEvalOp> &evalOps) const {
 	// Translate materials to material evaluate ops
 
 	const slg::ocl::Material *mat = &mats[matIndex];
 	u_int evalOpStackSize = 0;
 	bool addDefaultOp = true;
+
+	// The bump cache slots of the sub-materials the setup ops bump (A or the
+	// base, and B) and the first slots of the trees of the sub-materials (A,
+	// the base or the front, and B or the back)
+	u_int bumpSlotA = MATERIAL_BUMP_CACHE_NO_SLOT;
+	u_int bumpSlotB = MATERIAL_BUMP_CACHE_NO_SLOT;
+	u_int bumpSlotBaseA = bumpSlotBase;
+	u_int bumpSlotBaseB = bumpSlotBase;
+	switch (mat->type) {
+		case MIX:
+			if (MaterialHasBump(mat->mix.matAIndex))
+				bumpSlotA = BumpCacheSlot(bumpSlotBaseA++);
+			if (MaterialHasBump(mat->mix.matBIndex))
+				bumpSlotB = BumpCacheSlot(bumpSlotBaseA++);
+			bumpSlotBaseB = bumpSlotBaseA + MaterialBumpSlotCount(mat->mix.matAIndex);
+			break;
+		case GLOSSYCOATING:
+			if (MaterialHasBump(mat->glossycoating.matBaseIndex))
+				bumpSlotA = BumpCacheSlot(bumpSlotBaseA++);
+			break;
+		case TWOSIDED:
+			bumpSlotBaseB = bumpSlotBaseA + MaterialBumpSlotCount(mat->twosided.frontMatIndex);
+			break;
+		default:
+			break;
+	}
 
 	switch (mat->type) {
 		//----------------------------------------------------------------------
@@ -218,8 +285,8 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case MIX:
 			switch (opType) {
 				case slg::ocl::EVAL_ALBEDO:
-					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_ALBEDO, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_ALBEDO, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseA, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseB, evalOps);
 					break;
 				case slg::ocl::EVAL_GET_VOLUME_MIX_SETUP1:
 					evalOpStackSize += 3;
@@ -229,10 +296,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_INTERIOR_VOLUME:
 					if (mat->interiorVolumeIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP1, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, evalOps);
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP2, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP1, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, bumpSlotBaseA, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP2, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, bumpSlotBaseB, evalOps);
 					}
 
 					// 1 x parameter and 1 x result
@@ -240,10 +307,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_EXTERIOR_VOLUME:
 					if (mat->exteriorVolumeIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP1, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, evalOps);
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP2, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP1, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, bumpSlotBaseA, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_VOLUME_MIX_SETUP2, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, bumpSlotBaseB, evalOps);
 					}
 
 					// 1 x parameter and 1 x result
@@ -259,10 +326,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_EMITTED_RADIANCE:
 					if (mat->emitTexIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE_MIX_SETUP1, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, evalOps);
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE_MIX_SETUP2, evalOps);
-						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE_MIX_SETUP1, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, bumpSlotBaseA, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE_MIX_SETUP2, bumpSlotBase, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, bumpSlotBaseB, evalOps);
 					}
 
 					// 1 x parameter and 3 x result
@@ -277,10 +344,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP1, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, evalOps);
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP2, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP1, bumpSlotBase, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, bumpSlotBaseA, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP2, bumpSlotBase, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, bumpSlotBaseB, evalOps);
 
 					// 5 x parameter and 3 x result
 					evalOpStackSize += 5;
@@ -294,10 +361,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 26;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP1, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_EVALUATE, evalOps);
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP2, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_EVALUATE, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP1, bumpSlotBase, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP2, bumpSlotBase, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseB, evalOps);
 					break;
 				case slg::ocl::EVAL_SAMPLE_MIX_SETUP1:
 					// 6 x parameters and 25 x results
@@ -308,15 +375,15 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 33;
 					break;
 				case slg::ocl::EVAL_SAMPLE: {
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_MIX_SETUP1, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_MIX_SETUP1, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-							mat->mix.matAIndex, slg::ocl::EVAL_SAMPLE,
-							mat->mix.matBIndex, slg::ocl::EVAL_SAMPLE,
+							mat->mix.matAIndex, slg::ocl::EVAL_SAMPLE, bumpSlotBaseA,
+							mat->mix.matBIndex, slg::ocl::EVAL_SAMPLE, bumpSlotBaseB,
 							evalOps);
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_MIX_SETUP2, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_MIX_SETUP2, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-							mat->mix.matAIndex, slg::ocl::EVAL_EVALUATE,
-							mat->mix.matBIndex, slg::ocl::EVAL_EVALUATE,
+							mat->mix.matAIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA,
+							mat->mix.matBIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseB,
 							evalOps);
 					break;
 				}
@@ -327,31 +394,31 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case GLOSSYCOATING:
 			switch (opType) {
 				case slg::ocl::EVAL_ALBEDO:
-					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseA, evalOps);
 					break;
 				case slg::ocl::EVAL_GET_INTERIOR_VOLUME:
 					if (mat->interiorVolumeIndex == NULL_INDEX)
-						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_INTERIOR_VOLUME, bumpSlotBaseA, evalOps);
 
 					// 1 x parameter and 1 x result
 					evalOpStackSize += 1;					
 					break;
 				case slg::ocl::EVAL_GET_EXTERIOR_VOLUME:
 					if (mat->exteriorVolumeIndex == NULL_INDEX)
-						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_EXTERIOR_VOLUME, bumpSlotBaseA, evalOps);
 
 					// 1 x parameter and 1 x result
 					evalOpStackSize += 1;
 					break;
 				case slg::ocl::EVAL_GET_EMITTED_RADIANCE:
 					if (mat->emitTexIndex == NULL_INDEX)
-						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_EMITTED_RADIANCE, bumpSlotBaseA, evalOps);
 
 					// 1 x parameter and 3 x results
 					evalOpStackSize += 3;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
-					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, bumpSlotBaseA, evalOps);
 
 					// 5 x parameters and 3 x results
 					evalOpStackSize += 5;
@@ -361,12 +428,12 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 21;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_GLOSSYCOATING_SETUP, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_GLOSSYCOATING_SETUP, bumpSlotBase, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA, evalOps);
 					// The albedo of the base for the darkening, on top of the
 					// stack for the glossy coating evaluation
 					if (mat->glossycoating.darkening)
-						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOps);
+						evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseA, evalOps);
 					break;
 				case slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_SETUP:
 					// 6 x parameters and 35 x results
@@ -381,19 +448,19 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 8;
 					break;
 				case slg::ocl::EVAL_SAMPLE: {
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_SETUP, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_SETUP, bumpSlotBase, evalOps);
 					
 					vector<slg::ocl::MaterialEvalOp> evalOpsSampleBase;
-					u_int evalOpStackSizeSampleBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_SAMPLE, evalOpsSampleBase);
+					u_int evalOpStackSizeSampleBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_SAMPLE, bumpSlotBaseA, evalOpsSampleBase);
 					if (mat->glossycoating.darkening)
-						evalOpStackSizeSampleBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOpsSampleBase);
-					evalOpStackSizeSampleBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE, evalOpsSampleBase);
+						evalOpStackSizeSampleBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseA, evalOpsSampleBase);
+					evalOpStackSizeSampleBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE, bumpSlotBase, evalOpsSampleBase);
 
 					vector<slg::ocl::MaterialEvalOp> evalOpsEvaluateBase;
-					u_int evalOpStackSizeEvaluateBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, evalOpsEvaluateBase);
+					u_int evalOpStackSizeEvaluateBase = CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA, evalOpsEvaluateBase);
 					if (mat->glossycoating.darkening)
-						evalOpStackSizeEvaluateBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, evalOpsEvaluateBase);
-					evalOpStackSizeEvaluateBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_EVALUATE_BASE, evalOpsEvaluateBase);
+						evalOpStackSizeEvaluateBase += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_ALBEDO, bumpSlotBaseA, evalOpsEvaluateBase);
+					evalOpStackSizeEvaluateBase += CompileMaterialOps(matIndex, slg::ocl::EVAL_SAMPLE_GLOSSYCOATING_CLOSE_EVALUATE_BASE, bumpSlotBase, evalOpsEvaluateBase);
 							
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
 							evalOpsSampleBase, evalOpStackSizeSampleBase,
@@ -410,20 +477,20 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case TWOSIDED:
 			switch (opType) {
 				case slg::ocl::EVAL_ALBEDO:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-							mat->twosided.frontMatIndex, opType,
-							mat->twosided.backMatIndex, opType,
+							mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+							mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 							evalOps);
 
 					addDefaultOp = false;
 					break;
 				case slg::ocl::EVAL_GET_INTERIOR_VOLUME:
 					if (mat->interiorVolumeIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 						evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-								mat->twosided.frontMatIndex, opType,
-								mat->twosided.backMatIndex, opType,
+								mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+								mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 								evalOps);
 
 						addDefaultOp = false;
@@ -434,10 +501,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_EXTERIOR_VOLUME:
 					if (mat->exteriorVolumeIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 						evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-								mat->twosided.frontMatIndex, opType,
-								mat->twosided.backMatIndex, opType,
+								mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+								mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 								evalOps);
 
 						addDefaultOp = false;
@@ -448,10 +515,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_EMITTED_RADIANCE:
 					if (mat->emitTexIndex == NULL_INDEX) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 						evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-								mat->twosided.frontMatIndex, opType,
-								mat->twosided.backMatIndex, opType,
+								mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+								mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 								evalOps);
 
 						addDefaultOp = false;
@@ -462,10 +529,10 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
 					if ((mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX)) {
-						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+						evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 						evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-								mat->twosided.frontMatIndex, opType,
-								mat->twosided.backMatIndex, opType,
+								mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+								mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 								evalOps);
 
 						addDefaultOp = false;
@@ -475,19 +542,19 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					}
 					break;
 				case slg::ocl::EVAL_EVALUATE:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-							mat->twosided.frontMatIndex, opType,
-							mat->twosided.backMatIndex, opType,
+							mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+							mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 							evalOps);
 
 					addDefaultOp = false;
 					break;
 				case slg::ocl::EVAL_SAMPLE:
-					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, evalOps);
+					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
-							mat->twosided.frontMatIndex, opType,
-							mat->twosided.backMatIndex, opType,
+							mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
+							mat->twosided.backMatIndex, opType, bumpSlotBaseB,
 							evalOps);
 
 					addDefaultOp = false;
@@ -509,6 +576,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 
 		op.matIndex = matIndex;
 		op.evalType = opType;
+		op.opData.bumpSlots = MATERIAL_BUMP_CACHE_SLOTS(bumpSlotA, bumpSlotB);
 
 		evalOps.push_back(op);
 	}
@@ -521,6 +589,7 @@ void CompiledScene::CompileMaterialOps() {
 
 	matEvalOps.clear();
 	maxMaterialEvalStackSize = 0;
+	u_int maxBumpSlotCount = 0;
 
 	for (u_int i = 0; i < mats.size(); ++i) {
 		slg::ocl::Material *mat = &mats[i];
@@ -536,6 +605,8 @@ void CompiledScene::CompileMaterialOps() {
 		mat->nullPassThrough = (mat->type == slg::ocl::NULLMAT) &&
 				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
 		mat->defaultEmittedRadiance = leaf;
+
+		maxBumpSlotCount = Max(maxBumpSlotCount, MaterialBumpSlotCount(i));
 		mat->constEmittedRadiance = leaf && ((mat->emitTexIndex == NULL_INDEX) ||
 				(texs[mat->emitTexIndex].type == slg::ocl::CONST_FLOAT) ||
 				(texs[mat->emitTexIndex].type == slg::ocl::CONST_FLOAT3));
@@ -546,7 +617,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalAlbedoOpStartIndex = matEvalOps.size();
 		const u_int evalAlbedoOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_ALBEDO, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_ALBEDO, 0, matEvalOps);
 		mat->evalAlbedoOpLength = matEvalOps.size() - mat->evalAlbedoOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalAlbedoOpsStackSizeFloat);
@@ -557,7 +628,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalGetInteriorVolumeOpStartIndex = matEvalOps.size();
 		const u_int evalGetInteriorVolumeOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_GET_INTERIOR_VOLUME, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_GET_INTERIOR_VOLUME, 0, matEvalOps);
 		mat->evalGetInteriorVolumeOpLength = matEvalOps.size() - mat->evalGetInteriorVolumeOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalGetInteriorVolumeOpsStackSizeFloat);
@@ -568,7 +639,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalGetExteriorVolumeOpStartIndex = matEvalOps.size();
 		const u_int evalGetExteriorVolumeOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_GET_EXTERIOR_VOLUME, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_GET_EXTERIOR_VOLUME, 0, matEvalOps);
 		mat->evalGetExteriorVolumeOpLength = matEvalOps.size() - mat->evalGetExteriorVolumeOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalGetExteriorVolumeOpsStackSizeFloat);
@@ -579,7 +650,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalGetEmittedRadianceOpStartIndex = matEvalOps.size();
 		const u_int evalGetEmittedRadianceOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_GET_EMITTED_RADIANCE, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_GET_EMITTED_RADIANCE, 0, matEvalOps);
 		mat->evalGetEmittedRadianceOpLength = matEvalOps.size() - mat->evalGetEmittedRadianceOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalGetEmittedRadianceOpsStackSizeFloat);
@@ -590,7 +661,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalGetPassThroughTransparencyOpStartIndex = matEvalOps.size();
 		const u_int evalGetPassThroughTransparencyOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_GET_PASS_TROUGH_TRANSPARENCY, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_GET_PASS_TROUGH_TRANSPARENCY, 0, matEvalOps);
 		mat->evalGetPassThroughTransparencyOpLength = matEvalOps.size() - mat->evalGetPassThroughTransparencyOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalGetPassThroughTransparencyOpsStackSizeFloat);
@@ -601,7 +672,7 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalEvaluateOpStartIndex = matEvalOps.size();
 		const u_int evalEvaluateOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_EVALUATE, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_EVALUATE, 0, matEvalOps);
 		mat->evalEvaluateOpLength = matEvalOps.size() - mat->evalEvaluateOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalEvaluateOpsStackSizeFloat);
@@ -612,14 +683,17 @@ void CompiledScene::CompileMaterialOps() {
 		
 		mat->evalSampleOpStartIndex = matEvalOps.size();
 		const u_int evalSampleOpsStackSizeFloat = CompileMaterialOps(i,
-				slg::ocl::MaterialEvalOpType::EVAL_SAMPLE, matEvalOps);
+				slg::ocl::MaterialEvalOpType::EVAL_SAMPLE, 0, matEvalOps);
 		mat->evalSampleOpLength = matEvalOps.size() - mat->evalSampleOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalSampleOpsStackSizeFloat);
 	}
 
+	materialBumpCacheSize = 3 * Min<u_int>(maxBumpSlotCount, MATERIAL_BUMP_CACHE_MAX_SLOTS);
+
 	SLG_LOG("Material evaluation ops count: " << matEvalOps.size());
 	SLG_LOG("Material evaluation max. stack size: " << maxMaterialEvalStackSize);
+	SLG_LOG("Material bump cache slots: " << maxBumpSlotCount);
 }
 
 void CompiledScene::CompileMaterials() {

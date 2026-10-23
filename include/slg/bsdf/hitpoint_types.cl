@@ -77,5 +77,8 @@ typedef struct {
 	// path or 0, and whether the path already has its colour
 	float wavelength;
 	int dispersionTinted;
+	// The slots of the material bump cache filled at this vertex (see
+	// Material_BumpSubMaterial()), cleared by BSDF_Init()
+	unsigned int bumpCacheValidSlots;
 } HitPoint;
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

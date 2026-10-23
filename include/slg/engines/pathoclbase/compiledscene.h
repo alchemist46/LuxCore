@@ -121,6 +121,9 @@ public:
 	std::vector<slg::ocl::MaterialEvalOp> matEvalOps;
 	// Expressed in float
 	u_int maxMaterialEvalStackSize;
+	// The bump cache at the end of each material evaluation stack (see
+	// Material_BumpSubMaterial()), in float: 3 per slot
+	u_int materialBumpCacheSize;
 	u_int defaultWorldVolumeIndex;
 	// True if a shadow ray can be let through by a material or a volume, so
 	// Scene_Intersect() needs the closest hit and its BSDF
@@ -170,11 +173,13 @@ private:
 		const std::vector<slg::ocl::MaterialEvalOp> &evalOpsB, const u_int evalOpStackSizeB,
 		std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
 	u_int CompileMaterialConditionalOps(const u_int matIndex,
-			const u_int matAIndex, const slg::ocl::MaterialEvalOpType opTypeA,
-			const u_int matBIndex, const slg::ocl::MaterialEvalOpType opTypeB,
+			const u_int matAIndex, const slg::ocl::MaterialEvalOpType opTypeA, const u_int bumpSlotBaseA,
+			const u_int matBIndex, const slg::ocl::MaterialEvalOpType opTypeB, const u_int bumpSlotBaseB,
 			std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
+	bool MaterialHasBump(const u_int matIndex) const;
+	u_int MaterialBumpSlotCount(const u_int matIndex) const;
 	u_int CompileMaterialOps(const u_int matIndex, const slg::ocl::MaterialEvalOpType opType,
-			std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
+			const u_int bumpSlotBase, std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
 	void CompileMaterialOps();
 	void CompileMaterials();
 	void CompileTextureMapping2D(

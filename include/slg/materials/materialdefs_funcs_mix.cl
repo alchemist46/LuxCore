@@ -299,7 +299,7 @@ OPENCL_FORCE_INLINE void MixMaterial_GetEmittedRadiance(__global const Material*
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE void MixMaterial_EvaluateSetUp1(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	float3 lightDir, eyeDir;
@@ -315,7 +315,7 @@ OPENCL_FORCE_INLINE void MixMaterial_EvaluateSetUp1(__global const Material* res
 	EvalStack_PushFloat3(originalDpdv);
 
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
-	Material_Bump(material->mix.matAIndex, hitPointTmp
+	Material_BumpSubMaterial(material->mix.matAIndex, MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matAShadeN = VLOAD3F(&hitPointTmp->shadeN.x);
@@ -341,7 +341,7 @@ OPENCL_FORCE_INLINE void MixMaterial_EvaluateSetUp1(__global const Material* res
 }
 
 OPENCL_FORCE_INLINE void MixMaterial_EvaluateSetUp2(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	// Pop the result of the first evaluation
@@ -373,7 +373,7 @@ OPENCL_FORCE_INLINE void MixMaterial_EvaluateSetUp2(__global const Material* res
 	EvalStack_PushFloat3(originalDpdu);
 	EvalStack_PushFloat3(originalDpdv);
 
-	Material_Bump(material->mix.matBIndex, hitPointTmp
+	Material_BumpSubMaterial(material->mix.matBIndex, MATERIAL_BUMP_CACHE_SLOT_B(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matBShadeN = VLOAD3F(&hitPointTmp->shadeN.x);
@@ -492,7 +492,7 @@ OPENCL_FORCE_INLINE void MixMaterial_Evaluate(__global const Material* restrict 
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp1(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	float u0, u1, passThroughEvent;
@@ -519,7 +519,8 @@ OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp1(__global const Material* restr
 	EvalStack_PushFloat3(originalDpdv);
 
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
-	Material_Bump(matIndexFirst, hitPointTmp
+	Material_BumpSubMaterial(matIndexFirst,
+		sampleMatA ? MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots) : MATERIAL_BUMP_CACHE_SLOT_B(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matFirstShadeN = VLOAD3F(&hitPointTmp->shadeN.x);
@@ -556,7 +557,7 @@ OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp1(__global const Material* restr
 }
 
 OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp2(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	// Pop the result of the first evaluation
@@ -614,7 +615,8 @@ OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp2(__global const Material* restr
 	EvalStack_PushFloat3(originalDpdu);
 	EvalStack_PushFloat3(originalDpdv);
 
-	Material_Bump(matIndexSecond, hitPointTmp
+	Material_BumpSubMaterial(matIndexSecond,
+		sampleMatA ? MATERIAL_BUMP_CACHE_SLOT_B(bumpSlots) : MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matSecondShadeN = VLOAD3F(&hitPointTmp->shadeN.x);
@@ -767,6 +769,7 @@ OPENCL_FORCE_INLINE void MixMaterial_Sample(__global const Material* restrict ma
 OPENCL_FORCE_NOT_INLINE void MixMaterial_EvalOp(
 		__global const Material* restrict material,
 		const MaterialEvalOpType evalType,
+		const uint bumpSlots,
 		__global float *evalStack,
 		uint *evalStackOffset,
 		__global const HitPoint *hitPoint
@@ -806,19 +809,19 @@ OPENCL_FORCE_NOT_INLINE void MixMaterial_EvalOp(
 			MixMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_EVALUATE_MIX_SETUP1:
-			MixMaterial_EvaluateSetUp1(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			MixMaterial_EvaluateSetUp1(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_EVALUATE_MIX_SETUP2:
-			MixMaterial_EvaluateSetUp2(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			MixMaterial_EvaluateSetUp2(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_EVALUATE:
 			MixMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_SAMPLE_MIX_SETUP1:
-			MixMaterial_SampleSetUp1(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			MixMaterial_SampleSetUp1(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_SAMPLE_MIX_SETUP2:
-			MixMaterial_SampleSetUp2(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			MixMaterial_SampleSetUp2(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_SAMPLE:
 			MixMaterial_Sample(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);

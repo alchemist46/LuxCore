@@ -64,6 +64,75 @@ CASES = {
     "localmapping": ("scenes/bigmonkey/bigmonkey-proctex.cfg", "", ""),
     "randommapping": ("scenes/randomizedmapping/cube.cfg", "", ""),
     "triplanar-bump": ("scenes/luxball/texball-triplanar-bump.cfg", "", ""),
+    # The bumps of the sub-materials (the bump cache of the GPU): nested
+    # Mixes of bumped leaves, a bumped Mix, a GlossyCoating with a bumped base
+    # and a TwoSided with one bumped side
+    "mixbump": ("scenes/luxball/luxball-hdr.cfg", "", """
+scene.textures.lux.type = imagemap
+scene.textures.lux.file = scenes/luxball/lux.png
+scene.textures.lux.gamma = 1.0
+scene.textures.lux.mapping.uvscale = 8 -8
+scene.textures.bumpimg.type = scale
+scene.textures.bumpimg.texture1 = 0.01
+scene.textures.bumpimg.texture2 = lux
+scene.textures.wrinkled.type = wrinkled
+scene.textures.wrinkled.mapping.type = globalmapping3d
+scene.textures.wrinkled.mapping.transformation = 20 0 0 0  0 20 0 0  0 0 20 0  0 0 0 1
+scene.textures.bumpwrinkled.type = scale
+scene.textures.bumpwrinkled.texture1 = 0.005
+scene.textures.bumpwrinkled.texture2 = wrinkled
+scene.textures.fbm.type = fbm
+scene.textures.fbm.mapping.type = globalmapping3d
+scene.textures.fbm.mapping.transformation = 30 0 0 0  0 30 0 0  0 0 30 0  0 0 0 1
+scene.textures.bumpfbm.type = scale
+scene.textures.bumpfbm.texture1 = 0.003
+scene.textures.bumpfbm.texture2 = fbm
+scene.materials.leafglossy.type = glossy2
+scene.materials.leafglossy.kd = 0.5 0.1 0.1
+scene.materials.leafglossy.uroughness = 0.1
+scene.materials.leafglossy.vroughness = 0.1
+scene.materials.leafglossy.bumptex = bumpwrinkled
+scene.materials.leafmatte.type = matte
+scene.materials.leafmatte.kd = 0.1 0.6 0.1
+scene.materials.leafmatte.bumptex = bumpimg
+scene.materials.leafmetal.type = metal2
+scene.materials.leafmetal.preset = gold
+scene.materials.leafmetal.uroughness = 0.2
+scene.materials.leafmetal.vroughness = 0.2
+scene.materials.leafmetal.bumptex = bumpfbm
+scene.materials.leafplain.type = matte
+scene.materials.leafplain.kd = 0.6 0.6 0.6
+scene.materials.mixinner.type = mix
+scene.materials.mixinner.material1 = leafglossy
+scene.materials.mixinner.material2 = leafmatte
+scene.materials.mixinner.amount = lux
+scene.materials.mixinner.bumptex = bumpfbm
+scene.materials.coated.type = glossycoating
+scene.materials.coated.base = leafmetal
+scene.materials.coated.ks = 0.05 0.05 0.05
+scene.materials.coated.uroughness = 0.05
+scene.materials.coated.vroughness = 0.05
+scene.materials.coated.bumptex = bumpimg
+scene.materials.mixouter.type = mix
+scene.materials.mixouter.material1 = mixinner
+scene.materials.mixouter.material2 = coated
+scene.materials.mixouter.amount = 0.4
+scene.materials.twosides.type = twosided
+scene.materials.twosides.frontmaterial = leafglossy
+scene.materials.twosides.backmaterial = leafplain
+scene.materials.mixtwosided.type = mix
+scene.materials.mixtwosided.material1 = twosides
+scene.materials.mixtwosided.material2 = mixinner
+scene.materials.mixtwosided.amount = 0.5
+scene.materials.mixroom.type = mix
+scene.materials.mixroom.material1 = leafmatte
+scene.materials.mixroom.material2 = leafplain
+scene.materials.mixroom.amount = 0.3
+scene.objects.luxshell.material = mixouter
+scene.objects.luxinner.material = mixtwosided
+scene.objects.luxtext.material = mixtwosided
+scene.objects.room.material = mixroom
+"""),
 }
 
 PROPS = """

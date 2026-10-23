@@ -148,3 +148,10 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: a grey matte sphere and floor lit only by a sun read 1.0011 of PATHCPU in every channel with PATHOCL (2 seeds each, 256 spp, 96x96; the seed noise is under 1e-4). The other lights of the same check (sky2, a point light and an emissive quad with a temperature, a constant environment) agree within 0.02%.
 - Reproduce: `tests/benchmark/cpugpu.py <outdir> cases=sun` (a `sun` light, `dir = 0.3 -0.4 1`, gain 0.01, path depth 8).
 - Notes: not investigated. Suspects: the sun disk sampling or its pdf (cone angle from the relative size), CPU against GPU.
+
+### The bump of a TwoSided sub-material differs between the CPU and the GPU
+- Found: 2026-10-22
+- Area: material (twosided, bump)
+- Problem: the CPU bumps a TwoSided with its front or back material's `Bump()`, so with that material's `bumpsamplingdistance` and, for a nested TwoSided, recursively; the GPU (`Material_GetBumpTexIndex()`) takes only the bump texture of the front or back material and uses the TwoSided's own `bumpsamplingdistance`. The images differ only when the sampling distances differ or TwoSideds are nested.
+- Reproduce: a TwoSided whose front material has a bump texture and `bumpsamplingdistance = 0.01` (the TwoSided left at the default 0.001); PATHCPU against PATHOCL.
+- Notes: found reading the code for A6, not rendered. The GPU rule is also the slot rule of the bump cache (`CompiledScene::MaterialHasBump()`), so a fix on the GPU side changes both.

@@ -160,8 +160,11 @@ void PathOCLBaseOCLRenderThread::InitMaterials() {
 			sizeof(slg::ocl::MaterialEvalOp) * renderEngine->compiledScene->matEvalOps.size(), "Material evaluation ops");
 
 	const u_int taskCount = renderEngine->taskCount;
-	intersectionDevice.AllocBufferRW(&materialEvalStackBuff, 
-			nullptr, sizeof(float) * renderEngine->compiledScene->maxMaterialEvalStackSize *
+	// Each task's block ends with the bump cache (see
+	// Material_BumpSubMaterial()), also with the private stacks
+	intersectionDevice.AllocBufferRW(&materialEvalStackBuff,
+			nullptr, sizeof(float) * (renderEngine->compiledScene->maxMaterialEvalStackSize +
+			renderEngine->compiledScene->materialBumpCacheSize) *
 			taskCount, "Material evaluation stacks");
 
 	// The random walks of the subsurface materials (one element when there is

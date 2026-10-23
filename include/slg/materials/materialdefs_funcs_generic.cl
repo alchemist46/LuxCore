@@ -65,33 +65,100 @@ OPENCL_FORCE_INLINE float Material_GetEmittedCosThetaMax(const uint matIndex
 // Material_Bump
 //------------------------------------------------------------------------------
 
+OPENCL_FORCE_INLINE uint Material_GetBumpTexIndex(__global const Material *material,
+		__global const HitPoint *hitPoint
+		MATERIALS_PARAM_DECL) {
+	// A special case here for TWOSIDED material
+	if (material->type == TWOSIDED) {
+		return hitPoint->intoObject ? mats[material->twosided.frontMatIndex].bumpTexIndex :
+			mats[material->twosided.backMatIndex].bumpTexIndex;
+	} else
+		return material->bumpTexIndex;
+}
+
+OPENCL_FORCE_INLINE void Material_SetBumpedShadeN(__global HitPoint *hitPoint, const float3 shadeN) {
+	// Update dpdu and dpdv so they are still orthogonal to shadeN
+	float3 dpdu = VLOAD3F(&hitPoint->dpdu.x);
+	float3 dpdv = VLOAD3F(&hitPoint->dpdv.x);
+	dpdu = cross(shadeN, cross(dpdu, shadeN));
+	dpdv = cross(shadeN, cross(dpdv, shadeN));
+	// Update HitPoint structure
+	VSTORE3F(shadeN, &hitPoint->shadeN.x);
+	VSTORE3F(dpdu, &hitPoint->dpdu.x);
+	VSTORE3F(dpdv, &hitPoint->dpdv.x);
+}
+
 OPENCL_FORCE_INLINE void Material_Bump(const uint matIndex, __global HitPoint *hitPoint
 	MATERIALS_PARAM_DECL) {
 	__global const Material *material = &mats[matIndex];
 
-	uint bumpTexIndex;
-	
-	// A special case here for TWOSIDED material
-	if (material->type == TWOSIDED) {
-		bumpTexIndex = hitPoint->intoObject ? mats[material->twosided.frontMatIndex].bumpTexIndex : 
-			mats[material->twosided.backMatIndex].bumpTexIndex;
-	} else
-		bumpTexIndex = material->bumpTexIndex;
-
+	const uint bumpTexIndex = Material_GetBumpTexIndex(material, hitPoint
+			MATERIALS_PARAM);
 	if (bumpTexIndex != NULL_INDEX) {
 		const float3 shadeN = Texture_Bump(bumpTexIndex, hitPoint, material->bumpSampleDistance
 			TEXTURES_PARAM);
 
-		// Update dpdu and dpdv so they are still orthogonal to shadeN
-		float3 dpdu = VLOAD3F(&hitPoint->dpdu.x);
-		float3 dpdv = VLOAD3F(&hitPoint->dpdv.x);
-		dpdu = cross(shadeN, cross(dpdu, shadeN));
-		dpdv = cross(shadeN, cross(dpdv, shadeN));
-		// Update HitPoint structure
-		VSTORE3F(shadeN, &hitPoint->shadeN.x);
-		VSTORE3F(dpdu, &hitPoint->dpdu.x);
-		VSTORE3F(dpdv, &hitPoint->dpdv.x);
+		Material_SetBumpedShadeN(hitPoint, shadeN);
 	}
+}
+
+//------------------------------------------------------------------------------
+// The bump cache (see MATERIAL_BUMP_CACHE_MAX_SLOTS)
+//
+// The slots, 3 floats each, are at the end of the task's block of the material
+// evaluation stacks (CompiledScene::materialBumpCacheSize floats of the
+// maxMaterialEvalStackSize), downwards; the mask of the valid ones is
+// HitPoint::bumpCacheValidSlots, which BSDF_Init() clears. A slot holds a value
+// of the vertex the BSDF was initialized for: the shading normal of a
+// sub-material depends only on the hit point and on the frame its parent
+// leaves in it, which are the same in every Evaluate and Sample of the vertex.
+// A scene with slots has a Mix or a GlossyCoating, so its stacks are never the
+// private ones (see PathOCLBaseOCLRenderThread::InitKernels()) and evalStack
+// is the start of the task's block: get_global_id() in the material functions
+// that are not inlined would cost registers and scratch to every scene.
+//
+// The cache gives the same images as evaluating each bump every time, to the
+// last bit, but how it is written changes how the compiler rounds the bump
+// code under -ffast-math: a store to the global block in BSDF_Init() (so the
+// mask is in the HitPoint) and a second Texture_Bump() call site here (so
+// there is one, also for the sub-materials without a slot) each moved the
+// images of the Mix scenes by the last bits.
+//------------------------------------------------------------------------------
+
+// Material_Bump() of a sub-material, its shading normal kept in the slot
+// bumpSlot of the bump cache
+OPENCL_FORCE_INLINE void Material_BumpSubMaterial(const uint matIndex, const uint bumpSlot,
+		__global HitPoint *hitPoint, __global float *evalStack
+		MATERIALS_PARAM_DECL) {
+	__global const Material *material = &mats[matIndex];
+
+	const uint bumpTexIndex = Material_GetBumpTexIndex(material, hitPoint
+			MATERIALS_PARAM);
+	if (bumpTexIndex == NULL_INDEX)
+		return;
+
+#if defined(PARAM_EVALSTACK_PRIVATE)
+	const bool cached = false;
+#else
+	const bool cached = (bumpSlot != MATERIAL_BUMP_CACHE_NO_SLOT);
+#endif
+	__global float *slotShadeN = &evalStack[maxMaterialEvalStackSize - 3 * (bumpSlot + 1)];
+	const uint slotBit = cached ? (1u << bumpSlot) : 0u;
+
+	float3 shadeN;
+	if (hitPoint->bumpCacheValidSlots & slotBit)
+		shadeN = VLOAD3F(slotShadeN);
+	else {
+		shadeN = Texture_Bump(bumpTexIndex, hitPoint, material->bumpSampleDistance
+			TEXTURES_PARAM);
+
+		if (cached) {
+			VSTORE3F(shadeN, slotShadeN);
+			hitPoint->bumpCacheValidSlots |= slotBit;
+		}
+	}
+
+	Material_SetBumpedShadeN(hitPoint, shadeN);
 }
 
 //------------------------------------------------------------------------------

@@ -139,6 +139,9 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	const CompiledScene *cscene = renderEngine->compiledScene;
 	const bool privateEvalStack = (intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) &&
 			(cscene->maxMaterialEvalStackSize <= slg::ocl::PrivateMaterialEvalStackSize) &&
+			// The bump cache is addressed from the task's global stack (see
+			// Material_BumpSubMaterial())
+			(cscene->materialBumpCacheSize == 0) &&
 			(cscene->maxTextureEvalStackSize <= slg::ocl::PrivateTextureEvalStackSize);
 
 	// The random walk of the subsurface materials is compiled only for the
@@ -391,7 +394,9 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, materialsBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, materialEvalOpsBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, materialEvalStackBuff);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, cscene->maxMaterialEvalStackSize);
+	// The size of a task's block, with the bump cache at its end
+	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, cscene->maxMaterialEvalStackSize +
+			cscene->materialBumpCacheSize);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, texturesBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, textureEvalOpsBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, textureEvalStackBuff);

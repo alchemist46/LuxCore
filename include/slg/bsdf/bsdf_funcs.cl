@@ -171,6 +171,9 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 	// Apply bump or normal mapping
 	//--------------------------------------------------------------------------
 
+	// The bump cache holds the shading normals of the sub-materials of the
+	// previous vertex
+	bsdf->hitPoint.bumpCacheValidSlots = 0;
 	Material_Bump(matIndex, &bsdf->hitPoint
 			MATERIALS_PARAM);
 	BSDF_EnsureValidNormals(&bsdf->hitPoint);

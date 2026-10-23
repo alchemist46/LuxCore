@@ -53,11 +53,27 @@ typedef enum {
 	EVAL_TWOSIDED_SETUP
 } MaterialEvalOpType;
 
+// The bump cache keeps, for the vertex being shaded, the shading normal of
+// each bumped sub-material of a Mix or GlossyCoating tree, so its bump is
+// evaluated once per vertex instead of once per Evaluate and Sample (see
+// Material_BumpSubMaterial()). A slot per edge of the tree, at most 32 (the
+// bits of the valid mask); the edges past them are not cached.
+#define MATERIAL_BUMP_CACHE_MAX_SLOTS 32
+#define MATERIAL_BUMP_CACHE_NO_SLOT 0xffffu
+#define MATERIAL_BUMP_CACHE_SLOTS(slotA, slotB) ((slotA) | ((slotB) << 16))
+#define MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots) ((bumpSlots) & 0xffffu)
+#define MATERIAL_BUMP_CACHE_SLOT_B(bumpSlots) ((bumpSlots) >> 16)
+
 typedef struct {
 	unsigned int matIndex;
 	MaterialEvalOpType evalType;
 	union {
+		// EVAL_CONDITIONAL_GOTO and EVAL_UNCONDITIONAL_GOTO
 		unsigned int opsCount;
+		// The other ops: the bump cache slots of the sub-materials bumped by
+		// the op (MATERIAL_BUMP_CACHE_SLOTS(): material A or the base, and
+		// material B), set for the Mix and GlossyCoating setup ops
+		unsigned int bumpSlots;
 	} opData;
 } MaterialEvalOp;
 

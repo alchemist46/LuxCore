@@ -116,7 +116,7 @@ OPENCL_FORCE_INLINE float3 GlossyCoatingMaterial_Darkening(__global const Materi
 }
 
 OPENCL_FORCE_INLINE void GlossyCoatingMaterial_EvaluateSetUp(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	float3 lightDir, eyeDir;
@@ -132,7 +132,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_EvaluateSetUp(__global const Mate
 	EvalStack_PushFloat3(originalDpdv);
 
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
-	Material_Bump(material->glossycoating.matBaseIndex, hitPointTmp
+	Material_BumpSubMaterial(material->glossycoating.matBaseIndex, MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matBaseShadeN = VLOAD3F(&hitPointTmp->shadeN.x);
@@ -329,7 +329,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Material* restrict material,
-		__global const HitPoint *hitPoint,
+		const uint bumpSlots, __global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	float u0, u1, passThroughEvent;
@@ -382,7 +382,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 	EvalStack_PushFloat3(originalDpdv);
 
 	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
-	Material_Bump(material->glossycoating.matBaseIndex, hitPointTmp
+	Material_BumpSubMaterial(material->glossycoating.matBaseIndex, MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots), hitPointTmp, evalStack
 		MATERIALS_PARAM);
 	// Re-read the shadeN modified by Material_Bump()
 	const float3 matBaseShadeN = VLOAD3F(&hitPoint->shadeN.x);
@@ -689,6 +689,7 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 OPENCL_FORCE_NOT_INLINE void GlossyCoatingMaterial_EvalOp(
 		__global const Material* restrict material,
 		const MaterialEvalOpType evalType,
+		const uint bumpSlots,
 		__global float *evalStack,
 		uint *evalStackOffset,
 		__global const HitPoint *hitPoint
@@ -710,13 +711,13 @@ OPENCL_FORCE_NOT_INLINE void GlossyCoatingMaterial_EvalOp(
 			GlossyCoatingMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_EVALUATE_GLOSSYCOATING_SETUP:
-			GlossyCoatingMaterial_EvaluateSetUp(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			GlossyCoatingMaterial_EvaluateSetUp(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_EVALUATE:
 			GlossyCoatingMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_SAMPLE_GLOSSYCOATING_SETUP:
-			GlossyCoatingMaterial_SampleSetUp(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			GlossyCoatingMaterial_SampleSetUp(material, bumpSlots, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE:
 			GlossyCoatingMaterial_SampleMatBaseSample(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
