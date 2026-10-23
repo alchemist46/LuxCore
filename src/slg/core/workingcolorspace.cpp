@@ -16,11 +16,14 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <cmath>
 #include <cstdio>
 
 #include <OpenColorIO/OpenColorIO.h>
 namespace OCIO = OCIO_NAMESPACE;
 
+#include "luxrays/core/color/spds/blackbodyspd.h"
+#include "luxrays/core/geometry/matrix3x3.h"
 #include "luxrays/utils/strutils.h"
 #include "slg/core/workingcolorspace.h"
 #include "slg/core/workingcolorspace_matrices.h"
@@ -195,6 +198,96 @@ string WorkingColorSpace::WorkingColorSpaceType2String(const WorkingColorSpaceTy
 			return "acescg";
 		default:
 			throw runtime_error("Unknown working color space type in WorkingColorSpace::WorkingColorSpaceType2String(): " + ToString(type));
+	}
+}
+
+//------------------------------------------------------------------------------
+// Blackbody temperatures
+//------------------------------------------------------------------------------
+
+// CIE XYZ to Linear Rec.709: the inverse of the ToXYZ matrix of REC709
+namespace {
+struct XYZToRec709Matrix {
+	XYZToRec709Matrix() {
+		double toXYZ[3][3];
+		for (u_int y = 0; y < 3; ++y)
+			for (u_int x = 0; x < 3; ++x)
+				toXYZ[y][x] = workingcolorspace::ToXYZ[WorkingColorSpace::REC709][y][x];
+
+		if (!Invert3x3(toXYZ, m))
+			throw runtime_error("Internal error in XYZToRec709Matrix(): singular matrix");
+	}
+
+	double m[3][3];
+};
+}
+
+Spectrum WorkingColorSpace::FromTemperature(const float temperature,
+		const TemperatureNormalization normalization) const {
+	if (normalization != TEMPERATURE_NORMALIZE_LUMINANCE)
+		return FromRec709(TemperatureToWhitePoint(temperature, normalization == TEMPERATURE_NORMALIZE_MAX));
+
+	// As Cycles' blackbody: the Rec.709 colour of the spectrum (not
+	// desaturated into the gamut) scaled to luminance 1, converted to the
+	// working space, its negative components (outside the gamut of the
+	// working space) set to 0
+	BlackbodySPD spd(temperature);
+	const XYZColor xyz = spd.ToXYZ();
+
+	static const XYZToRec709Matrix xyzToRec709;
+	const double (&m)[3][3] = xyzToRec709.m;
+	double rgb[3];
+	for (u_int y = 0; y < 3; ++y)
+		rgb[y] = m[y][0] * xyz.c[0] + m[y][1] * xyz.c[1] + m[y][2] * xyz.c[2];
+
+	// The luminance of RGBColor::Y(), so the working space luminance is 1
+	const double y = rec709LuminanceWeights[0] * rgb[0] + rec709LuminanceWeights[1] * rgb[1] +
+			rec709LuminanceWeights[2] * rgb[2];
+	// No light (a temperature of 0 K or close to it)
+	if (!(y > 0.0) || !std::isfinite(y))
+		return Spectrum(0.f);
+
+	const Spectrum c = FromRec709(Spectrum((float)(rgb[0] / y), (float)(rgb[1] / y), (float)(rgb[2] / y)));
+	return c.Clamp(0.f, INFINITY);
+}
+
+TemperatureNormalization WorkingColorSpace::GetTemperatureNormalization(
+		const Properties &props, const string &prefix) {
+	if (props.IsDefined(prefix + ".normalization"))
+		return String2TemperatureNormalization(props.Get(prefix + ".normalization").Get<string>());
+
+	return props.Get(Property(prefix + ".normalize")(false)).Get<bool>() ?
+		TEMPERATURE_NORMALIZE_MAX : TEMPERATURE_NORMALIZE_NONE;
+}
+
+void WorkingColorSpace::AddTemperatureNormalization(Properties &props,
+		const string &prefix, const TemperatureNormalization normalization) {
+	props.Set(Property(prefix + ".normalize")(normalization != TEMPERATURE_NORMALIZE_NONE));
+	if (normalization == TEMPERATURE_NORMALIZE_LUMINANCE)
+		props.Set(Property(prefix + ".normalization")(TemperatureNormalization2String(normalization)));
+}
+
+TemperatureNormalization WorkingColorSpace::String2TemperatureNormalization(const string &type) {
+	if (type == "none")
+		return TEMPERATURE_NORMALIZE_NONE;
+	else if (type == "max")
+		return TEMPERATURE_NORMALIZE_MAX;
+	else if (type == "luminance")
+		return TEMPERATURE_NORMALIZE_LUMINANCE;
+	else
+		throw runtime_error("Unknown temperature normalization: " + type);
+}
+
+string WorkingColorSpace::TemperatureNormalization2String(const TemperatureNormalization type) {
+	switch (type) {
+		case TEMPERATURE_NORMALIZE_NONE:
+			return "none";
+		case TEMPERATURE_NORMALIZE_MAX:
+			return "max";
+		case TEMPERATURE_NORMALIZE_LUMINANCE:
+			return "luminance";
+		default:
+			throw runtime_error("Unknown temperature normalization in WorkingColorSpace::TemperatureNormalization2String(): " + ToString(type));
 	}
 }
 

@@ -24,8 +24,29 @@
 
 #include "luxrays/core/color/color.h"
 #include "luxrays/core/kernelconstants.h"
+#include "luxrays/utils/properties.h"
 
 namespace slg {
+
+//------------------------------------------------------------------------------
+// TemperatureNormalization
+//
+// How the colour of a blackbody temperature (lights, emission, the blackbody
+// texture) is scaled. The property "<name>.normalize" (a bool) selects NONE or
+// MAX, as it always did; "<name>.normalization" ("none", "max" or
+// "luminance"), if defined, takes precedence.
+//------------------------------------------------------------------------------
+
+typedef enum {
+	// The RGB of the blackbody spectrum as is (very large values)
+	TEMPERATURE_NORMALIZE_NONE = 0,
+	// Divided by the largest RGB value of any blackbody up to 13000 K: the
+	// brightness follows the temperature (luminance 0.73 at 6500 K)
+	TEMPERATURE_NORMALIZE_MAX = 1,
+	// Luminance 1 in the working space, as Cycles' light temperature and
+	// Blackbody node: the temperature changes only the colour
+	TEMPERATURE_NORMALIZE_LUMINANCE = 2
+} TemperatureNormalization;
 
 //------------------------------------------------------------------------------
 // WorkingColorSpace
@@ -108,6 +129,23 @@ public:
 
 	static WorkingColorSpaceType String2WorkingColorSpaceType(const std::string &type);
 	static std::string WorkingColorSpaceType2String(const WorkingColorSpaceType type);
+
+	// The colour of a blackbody at the temperature (Kelvin), in the working
+	// space
+	luxrays::Spectrum FromTemperature(const float temperature,
+			const TemperatureNormalization normalization) const;
+
+	// The normalization of a temperature from the properties
+	// <prefix>.normalize and <prefix>.normalization
+	static TemperatureNormalization GetTemperatureNormalization(
+			const luxrays::Properties &props, const std::string &prefix);
+	// The same two properties: .normalize always, .normalization only for
+	// LUMINANCE (so the scenes of the other modes stay readable by the older
+	// builds)
+	static void AddTemperatureNormalization(luxrays::Properties &props,
+			const std::string &prefix, const TemperatureNormalization normalization);
+	static TemperatureNormalization String2TemperatureNormalization(const std::string &type);
+	static std::string TemperatureNormalization2String(const TemperatureNormalization type);
 
 private:
 	static luxrays::Spectrum Mul(const float (&m)[3][3], const luxrays::Spectrum &c) {

@@ -297,3 +297,123 @@ class TestWorkingColorSpace(unittest.TestCase):
 			self.assertGreater(maxValue, 0.0, space)
 			maxDiff = max(max(abs(img[i] - img[i + 1]), abs(img[i + 1] - img[i + 2])) for i in range(0, len(img), 3))
 			self.assertLess(maxDiff / maxValue, 1e-4, space)
+
+	#---------------------------------------------------------------------------
+	# Blackbody temperatures normalized to luminance 1
+	#---------------------------------------------------------------------------
+
+	# Blender 5.2.2's Light.temperature_color (Cycles' light temperature and
+	# Blackbody node) in each working space
+	CYCLES_TEMPERATURE_COLOR = {
+		"rec709": {
+			2000: (2.520095, 0.646851, 0.020413),
+			3000: (1.770841, 0.844285, 0.272223),
+			6500: (1.042552, 0.984053, 1.035272),
+			10000: (0.871384, 0.994925, 1.430509)},
+		"rec2020": {
+			2000: (1.794998, 0.769169, 0.116521),
+			3000: (1.400831, 0.901807, 0.347136),
+			6500: (1.022973, 0.988676, 1.030883),
+			10000: (0.936280, 0.991336, 1.383007)},
+	}
+
+	# The colour of a constant infinite light with the temperature, seen
+	# directly (every pixel has it)
+	def TemperatureLightRGB(self, space, temperature, normalizationProps):
+		img = RenderRGB(space, """
+			scene.camera.lookat.orig = 0 0 0
+			scene.camera.lookat.target = 0 1 0
+			scene.lights.l.type = constantinfinite
+			scene.lights.l.color = 1 1 1
+			scene.lights.l.temperature = {}
+			""".format(temperature) + normalizationProps.replace("PREFIX", "scene.lights.l.temperature"))
+		return tuple(img[0:3])
+
+	def LuminanceWeights(self, space):
+		w = (0.212671, 0.715160, 0.072169)
+		if space == "rec709":
+			return w
+		m = TO_REC709[space]
+		return tuple(sum(m[y][x] * w[y] for y in range(3)) for x in range(3))
+
+	def test_WorkingColorSpace_TemperatureLuminance(self):
+		for space in ("rec709", "rec2020", "acescg"):
+			w = self.LuminanceWeights(space)
+			for t in (2000, 3000, 6500, 10000):
+				c = self.TemperatureLightRGB(space, t, "PREFIX.normalization = luminance\n")
+				# Luminance 1 in the working space
+				self.assertAlmostEqual(sum(a * b for a, b in zip(w, c)), 1.0, delta=1e-4, msg=(space, t))
+				# Cycles' colour (its fit of the blackbody against the
+				# spectrum here: within 0.3% from 2000 to 12000 K)
+				if space in self.CYCLES_TEMPERATURE_COLOR:
+					ref = self.CYCLES_TEMPERATURE_COLOR[space][t]
+					for a, b in zip(c, ref):
+						self.assertAlmostEqual(a, b, delta=3e-3 * max(b, 0.1), msg=(space, t))
+
+	def test_WorkingColorSpace_TemperatureModes(self):
+		w = self.LuminanceWeights("rec709")
+		# normalize = 1 is the same as normalization = max, as before: the
+		# luminance follows the temperature (0.72 at 6500 K)
+		maxRGB = self.TemperatureLightRGB("rec709", 6500, "PREFIX.normalize = 1\n")
+		self.assertEqual(maxRGB, self.TemperatureLightRGB("rec709", 6500, "PREFIX.normalization = max\n"))
+		self.assertAlmostEqual(sum(a * b for a, b in zip(w, maxRGB)), 0.7244, delta=1e-3)
+		# normalization takes precedence over normalize
+		self.assertEqual(maxRGB, self.TemperatureLightRGB("rec709", 6500, "PREFIX.normalize = 0\nPREFIX.normalization = max\n"))
+		noneRGB = self.TemperatureLightRGB("rec709", 6500, "PREFIX.normalize = 1\nPREFIX.normalization = none\n")
+		self.assertGreater(min(noneRGB), 1000.0)
+		self.assertEqual(noneRGB, self.TemperatureLightRGB("rec709", 6500, ""))
+
+		with self.assertRaises(RuntimeError):
+			ParseScene("""
+				scene.lights.l.type = constantinfinite
+				scene.lights.l.temperature = 6500
+				scene.lights.l.temperature.normalization = lum
+				""")
+
+	def test_WorkingColorSpace_TemperatureEmitters(self):
+		# The blackbody texture and the emission temperature use the same
+		# luminance normalization as the lights: the same image as a constant
+		# emission of the light's colour
+		for space in ("rec709", "rec2020"):
+			c = self.TemperatureLightRGB(space, 3000, "PREFIX.normalization = luminance\n")
+			ref = RenderRGB(space, BLACKBODY_SCENE.replace("scene.materials.bb.emission = bb",
+					"scene.materials.bb.emission = {} {} {}".format(*c)))
+			scale = max(ref)
+			self.assertGreater(scale, 0.0)
+
+			tex = RenderRGB(space, BLACKBODY_SCENE.replace("scene.textures.bb.temperature = 4000",
+					"scene.textures.bb.temperature = 3000\nscene.textures.bb.normalization = luminance"))
+			emission = RenderRGB(space, BLACKBODY_SCENE.replace("scene.materials.bb.emission = bb",
+					"scene.materials.bb.emission = 1 1 1\n"
+					"scene.materials.bb.emission.temperature = 3000\n"
+					"scene.materials.bb.emission.temperature.normalization = luminance"))
+			for img in (tex, emission):
+				self.assertLess(max(abs(a - b) for a, b in zip(img, ref)) / scale, 1e-5, space)
+
+	def test_WorkingColorSpace_TemperatureExport(self):
+		# .normalization is exported only for luminance, so the scenes of the
+		# other modes stay readable by the older builds
+		text = """
+			scene.textures.bb.type = blackbody
+			scene.textures.bb.temperature = 3000
+			scene.textures.bb.normalization = {0}
+			scene.materials.m.type = matte
+			scene.materials.m.kd = 0 0 0
+			scene.materials.m.emission = bb
+			scene.materials.m.emission.temperature = 3000
+			scene.materials.m.emission.temperature.normalization = {0}
+			scene.objects.sphere.ply = {1}simple-mat-sphere1.ply
+			scene.objects.sphere.material = m
+			scene.lights.l.type = constantinfinite
+			scene.lights.l.temperature = 3000
+			scene.lights.l.temperature.normalization = {0}
+			"""
+		prefixes = ("scene.textures.bb", "scene.materials.m.emission.temperature", "scene.lights.l.temperature")
+		for mode, normalize in (("none", False), ("max", True), ("luminance", True)):
+			props = ParseScene(text.format(mode, S)).ToProperties()
+			for prefix in prefixes:
+				self.assertEqual(props.Get(prefix + ".normalize").GetBool(), normalize, (mode, prefix))
+				if mode == "luminance":
+					self.assertEqual(props.Get(prefix + ".normalization").GetString(), "luminance", prefix)
+				else:
+					self.assertFalse(props.IsDefined(prefix + ".normalization"), (mode, prefix))

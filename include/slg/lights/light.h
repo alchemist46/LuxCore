@@ -155,7 +155,7 @@ public:
 class NotIntersectableLightSource : public LightSource {
 public:
 	NotIntersectableLightSource() :
-		gain(1.f), temperature(-1.f), normalizeTemperature(false),
+		gain(1.f), temperature(-1.f), temperatureNormalization(TEMPERATURE_NORMALIZE_NONE),
 		id(0), importance(1.f), temperatureScale(1.f) { }
 	virtual ~NotIntersectableLightSource() { }
 
@@ -180,7 +180,7 @@ public:
 	luxrays::Spectrum gain;
 
 	float temperature;
-	bool normalizeTemperature;
+	TemperatureNormalization temperatureNormalization;
 
 	// The space of the colours computed by the light (temperature, sun, sky)
 	WorkingColorSpace workingColorSpace;

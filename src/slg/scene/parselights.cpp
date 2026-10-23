@@ -470,7 +470,7 @@ LightSourceUPtr Scene::CreateLightSource(const string &name, const luxrays::Prop
 
 		nils.workingColorSpace = workingColorSpace;
 		nils.temperature = props.Get(Property(propName + ".temperature")(-1.0)).Get<double>();
-		nils.normalizeTemperature = props.Get(Property(propName + ".temperature.normalize")(false)).Get<bool>();
+		nils.temperatureNormalization = WorkingColorSpace::GetTemperatureNormalization(props, propName + ".temperature");
 	}
 
 	if (props.IsDefined(propName + ".volume")) {

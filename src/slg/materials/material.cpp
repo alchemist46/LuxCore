@@ -39,7 +39,7 @@ Material::Material(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 		directLightSamplingType(DLS_AUTO), emittedImportance(1.f),
 		emittedGain(1.f), emittedPower(0.f), emittedEfficiency(0.f),
 		emittedPowerNormalize(true), emittedGainNormalize(false),
-		emittedTemperature(-1.f), emittedNormalizeTemperature(false),
+		emittedTemperature(-1.f), emittedTemperatureNormalization(TEMPERATURE_NORMALIZE_NONE),
 		frontTransparencyTex(frontTransp), backTransparencyTex(backTransp),
 		emittedTex(emitted), bumpTex(bump), bumpSampleDistance(.001f),
 		emissionMap(nullptr), emissionFunc(nullptr),
@@ -176,7 +176,7 @@ Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {
 
 void Material::UpdateEmittedFactor() {
 	const Spectrum emittedTemperatureScale = (emittedTemperature >= 0.f) ?
-		workingColorSpace.FromRec709(TemperatureToWhitePoint(emittedTemperature, emittedNormalizeTemperature)) :
+		workingColorSpace.FromTemperature(emittedTemperature, emittedTemperatureNormalization) :
 		Spectrum(1.f);
 
 	if (emittedTex) {
@@ -240,7 +240,8 @@ PropertiesUPtr Material::ToProperties(const ImageMapCache &imgMapCache, const bo
 		props.Set(emissionMap->ToProperties("scene.materials." + name, false));
 	}
 	props.Set(Property("scene.materials." + name + ".emission.temperature")(emittedTemperature));
-	props.Set(Property("scene.materials." + name + ".emission.temperature.normalize")(emittedNormalizeTemperature));
+	WorkingColorSpace::AddTemperatureNormalization(props, "scene.materials." + name + ".emission.temperature",
+			emittedTemperatureNormalization);
 
 	switch (directLightSamplingType) {
 		case DLS_ENABLED:

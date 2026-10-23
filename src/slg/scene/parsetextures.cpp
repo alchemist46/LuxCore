@@ -475,8 +475,8 @@ TextureUPtr Scene::CreateTexture(const string &texName, const Properties &props)
 								sharpness, noiseoffset, spheres, octaves, omega, variability, baseflatness, spheresize);
 	} else if (texType == "blackbody") {
 		const float temperature = Max(props.Get(Property(propName + ".temperature")(6500.0)).Get<double>(), 0.0);
-		const bool normalize = props.Get(Property(propName + ".normalize")(false)).Get<bool>();
-		tex = std::make_unique<BlackBodyTexture>(temperature, normalize, workingColorSpace);
+		const TemperatureNormalization normalization = WorkingColorSpace::GetTemperatureNormalization(props, propName);
+		tex = std::make_unique<BlackBodyTexture>(temperature, normalization, workingColorSpace);
 	} else if (texType == "irregulardata") {
 		if (!props.IsDefined(propName + ".wavelengths"))
 			throw runtime_error("Missing wavelengths property in irregulardata texture: " + propName);

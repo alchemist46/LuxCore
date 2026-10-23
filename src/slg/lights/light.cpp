@@ -73,7 +73,7 @@ string LightSource::LightSourceType2String(const LightSourceType type) {
 
 void NotIntersectableLightSource::Preprocess() {
 	temperatureScale = (temperature >= 0.f) ?
-		workingColorSpace.FromRec709(TemperatureToWhitePoint(temperature, normalizeTemperature)) :
+		workingColorSpace.FromTemperature(temperature, temperatureNormalization) :
 		Spectrum(1.f);
 }
 
@@ -86,8 +86,8 @@ PropertiesUPtr NotIntersectableLightSource::ToProperties(const ImageMapCache &im
 			Property(prefix + ".gain")(gain) <<
 			Property(prefix + ".transformation")(lightToWorld.m) <<
 			Property(prefix + ".id")(id) <<
-			Property(prefix + ".temperature")(temperature) <<
-			Property(prefix + ".temperature.normalize")(normalizeTemperature);
+			Property(prefix + ".temperature")(temperature);
+	WorkingColorSpace::AddTemperatureNormalization(props, prefix + ".temperature", temperatureNormalization);
 
 	return props_ptr;
 }

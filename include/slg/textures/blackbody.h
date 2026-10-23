@@ -29,7 +29,7 @@ namespace slg {
 
 class BlackBodyTexture : public Texture {
 public:
-	BlackBodyTexture(const float temp, const bool normalize,
+	BlackBodyTexture(const float temp, const TemperatureNormalization normalization,
 			const WorkingColorSpace &workingColorSpace);
 	virtual ~BlackBodyTexture() { }
 
@@ -45,7 +45,7 @@ public:
 
 private:
 	const float temperature;
-	const bool normalize;
+	const TemperatureNormalization normalization;
 
 	luxrays::Spectrum rgb;
 };

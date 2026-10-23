@@ -784,7 +784,8 @@ MaterialUPtr Scene::CreateMaterial(
 	mat->SetLightID(props.Get(Property(propName + ".emission.id")(0u)).Get<u_int>());
 	mat->SetEmittedImportance(parseFloat("emission.importance", 1.0));
 	mat->SetEmittedTemperature(parseFloat("emission.temperature", -1.f));
-	mat->SetEmittedTemperatureNormalize(parseBool("emission.temperature.normalize", false));
+	mat->SetEmittedTemperatureNormalization(WorkingColorSpace::GetTemperatureNormalization(props,
+			propName + ".emission.temperature"));
 
 	mat->SetPassThroughShadowTransparency(GetColor(props.Get(Property(propName + ".transparency.shadow")(Spectrum(0.f)))));
 	if (props.IsDefined(propName + ".transparency.shadowoverride")){

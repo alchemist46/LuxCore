@@ -94,7 +94,7 @@ public:
 	const WorkingColorSpace &GetWorkingColorSpace() const { return workingColorSpace; }
 
 	void SetEmittedTemperature(const float v) { emittedTemperature = v; UpdateEmittedFactor(); }
-	void SetEmittedTemperatureNormalize(const bool v) { emittedNormalizeTemperature = v; UpdateEmittedFactor(); }
+	void SetEmittedTemperatureNormalization(const TemperatureNormalization v) { emittedTemperatureNormalization = v; UpdateEmittedFactor(); }
 	bool IsUsingPrimitiveArea() const { return usePrimitiveArea; }
 
 	virtual MaterialType GetType() const = 0;
@@ -304,7 +304,7 @@ protected:
 	float emittedPower, emittedEfficiency, emittedTheta, emittedCosThetaMax;
 	bool emittedPowerNormalize, emittedGainNormalize;
 	float emittedTemperature;
-	bool emittedNormalizeTemperature;
+	TemperatureNormalization emittedTemperatureNormalization;
 
 	TextureConstPtr frontTransparencyTex;
 	TextureConstPtr backTransparencyTex;
