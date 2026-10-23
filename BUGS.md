@@ -162,3 +162,10 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: `MixTexture_Bump()` (`texture_bump_funcs.cl`) computes the amount's slope terms `dua`/`dva` from `bumbNTex2`, the second texture's bump, where the CPU (`MixTexture::Bump()`) uses the amount texture's bump; `bumbNAmount` is unused, so the GPU evaluates the amount's bump ops and drops them. The bumps differ wherever the amount texture varies and the two textures differ.
 - Reproduce: a `mix` texture with a varying amount (i.e. an image map) and different `texture1`/`texture2` as a material's `bumptex`; PATHCPU against PATHOCL.
 - Notes: found reading the code for A5, not rendered. A fix changes the GPU images of every scene with a Mix of bumps (the G0 classroom has 46 Mix textures), so it is not bit-identical; the A5 sharing does not depend on it.
+
+### PATHOCL renders far more than the halt spp on a small film
+- Found: 2026-10-23
+- Area: engine (PATHOCL halt)
+- Problem: on a 64x64 film, `batch.haltspp = 64` gives 141-147 samples per pixel and `256` gives 416-431 (the SAMPLECOUNT channel; every pixel within 4 of the others, so the image is fine, only slower). The halt counts the samples in flight, one per task, and the GPU runs 524288 tasks (the SampleResult buffer of the log), i.e. 128 samples per pixel of this film, whatever the halt.
+- Reproduce: `lc-work/d1/toy/toy.py PATHOCL aquad 64 64 256 --set opencl.devices.select=01 --set film.opencl.enable=0` (a floor lit by one quad light, depth 1), HIP.
+- Notes: the task count does not follow the film size (the Sobol bucket size does since 2026-10-18). At 540x540 it is about two samples per pixel (524288 tasks for 291600 pixels). Found during D1; not investigated further.
