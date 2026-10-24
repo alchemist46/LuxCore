@@ -140,7 +140,10 @@ log = {"scene": str(cfg), "pyluxcore": pyluxcore.Version(), "pyluxcore_file": py
 
 def render(name, spp, seed):
     props, w, h = config_props(spp, seed)
-    os.chdir(cfg.parent)
+    # The paths of the exported scenes are relative to the render.cfg, those
+    # of the repo's own SDL scenes to the repo root
+    scene_file = props.Get("scene.file").GetString()
+    os.chdir(cfg.parent if (cfg.parent / scene_file).exists() else REPO_ROOT)
     t0 = time.perf_counter()
     if args.scene_set:
         # Parse() defines each object again from the given properties only:
@@ -191,7 +194,8 @@ def render(name, spp, seed):
            "resolution": [w, h], "file": npy.name,
            "mean": [float(x) for x in img.reshape(-1, 3).mean(axis=0)],
            "nonfinite": int((~np.isfinite(img)).sum())}
-    log["engine"] = props.Get("renderengine.type").GetString()
+    log["engine"] = (props.Get("renderengine.type").GetString()
+                     if props.IsDefined("renderengine.type") else "PATHCPU")
     log["runs"].append(run)
     print(f"[native] {name}: {spp} spp seed {seed} setup {t1 - t0:.2f} s render {t2 - t1:.2f} s "
           f"{samplesec / 1e6:.2f} Msamples/s mean {run['mean']}", flush=True)
