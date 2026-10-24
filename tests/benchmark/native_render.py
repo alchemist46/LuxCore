@@ -180,11 +180,15 @@ def render(name, spp, seed):
     session.Stop()
     passes = stats.Get("stats.renderengine.pass").GetInt()
     samplesec = stats.Get("stats.renderengine.total.samplesec").GetFloat()
+    raysec = stats.Get("stats.renderengine.performance.total").GetFloat()
     npy = out / (name + ".npy")
     np.save(npy, img)
     np.save(out / (name + "-look.npy"), look)
     run = {"name": name, "spp": spp, "seed": seed, "setup_s": t1 - t0, "render_s": t2 - t1,
-           "pass": passes, "samplesec": samplesec, "resolution": [w, h], "file": npy.name,
+           "pass": passes, "samplesec": samplesec, "raysec": raysec,
+           # Rays traced per sample (camera, shadow and bounce rays): the path length
+           "rays_per_sample": raysec * (t2 - t1) / max(1, passes * w * h),
+           "resolution": [w, h], "file": npy.name,
            "mean": [float(x) for x in img.reshape(-1, 3).mean(axis=0)],
            "nonfinite": int((~np.isfinite(img)).sum())}
     log["engine"] = props.Get("renderengine.type").GetString()
