@@ -11,6 +11,10 @@
 #
 #   tests/benchmark/g0_run.sh <name> <prepared.blend> <venv> <percentage> [spp...]
 #
+# <prepared.blend> is one file both engines render (g0_prepare.py), or, for a
+# scene made by hand for each engine (the Cornell box of scenes/cornell,
+# g0_prepare.py --native), "<cycles.blend>,<luxcore.blend>".
+#
 # Environment:
 #   STEPS    steps to run, in order (default "run"): "cold" times the first
 #            render with an empty kernel cache, "ref" renders a reference of
@@ -23,7 +27,8 @@
 #            "--luxcore-set path.russianroulette.depth=5"
 #
 # Examples:
-#   tests/benchmark/g0_run.sh cornell out/g0/cornell/cornell-g0.blend out/venvs/g0 100
+#   tests/benchmark/g0_run.sh cornell \
+#       out/g0/cornell/cornell-cycles-g0.blend,out/g0/cornell/cornell-luxcore-g0.blend out/venvs/g0 50
 #   STEPS="cold ref run" tests/benchmark/g0_run.sh classroom \
 #       out/g0/classroom/classroom/classroom-g0.blend out/venvs/g0 100 64 256
 set -eo pipefail
@@ -35,12 +40,19 @@ ENGINES=${ENGINES:-cycles luxcore}
 STEPS=${STEPS:-run}
 REF=${REF:-1024}
 OUT=${OUT:-out/g0/results}/$NAME
-SITE=$(ls -d "$VENV"/lib*/python3*/site-packages | head -1)
+SITE=$(ls -d "$VENV"/lib*/python3*/site-packages "$VENV"/Lib/site-packages 2>/dev/null | head -1 || true)
+PY=$VENV/bin/python
+[ -x "$PY" ] || PY=$VENV/Scripts/python.exe
+case $BLEND in
+    *,*) BLEND_CYCLES=${BLEND%%,*}; BLEND_LUXCORE=${BLEND#*,} ;;
+    *) BLEND_CYCLES=$BLEND; BLEND_LUXCORE=$BLEND ;;
+esac
 mkdir -p out/tmp
 
 for e in $ENGINES; do
     E=$(echo "$e" | tr a-z A-Z)
     D=$OUT/$e
+    blend=BLEND_$E; blend=${!blend}
     mkdir -p "$D"
     for step in $STEPS; do
         case $step in
@@ -51,7 +63,7 @@ for e in $ENGINES; do
         esac
         rm -f "$D/$step".json "$D/$step"-*.npy
         echo "[$(date +%T)] $NAME $e $step"
-        env ${cache:+XDG_CACHE_HOME=$cache} blender -b --factory-startup --disable-autoexec "$BLEND" \
+        env ${cache:+XDG_CACHE_HOME=$cache} blender -b --factory-startup --disable-autoexec "$blend" \
             --python-exit-code 1 --python tests/benchmark/g0_render.py -- \
             --engine "$E" --out "$D" --tag "$step" --percentage "$PCT" \
             --addon "$ADDON" --site-packages "$SITE" "${extra[@]}" $RENDER_ARGS > "$D/$step.log" 2>&1 \
@@ -60,4 +72,4 @@ for e in $ENGINES; do
         [ -n "$cache" ] && rm -rf "$cache"
     done
 done
-"$VENV/bin/python" tests/benchmark/g0_analyze.py "$OUT" | tee "$OUT/report.txt"
+"$PY" tests/benchmark/g0_analyze.py "$OUT" | tee "$OUT/report.txt"

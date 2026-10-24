@@ -33,6 +33,13 @@ and aligns the render settings of the two engines:
 The result is checked by running the addon's material converter on every
 material: any warning fails the script.
 
+--native is for a pair of scenes made by hand, one per engine (the Cornell
+box of scenes/cornell: "Cornell Box Cycles.blend" with Cycles nodes,
+"Cornell Box Luxcore.blend" with LuxCore nodes). Their materials and lights are
+the ones each engine renders natively, so nothing above is rewritten: only
+the render settings are aligned (and the path depths, when --depth is given;
+without it each file keeps its own). Run it once per file.
+
 Run with Blender (no render is started):
 
     blender -b --factory-startup --disable-autoexec SRC.blend --python-exit-code 1 \\
@@ -52,7 +59,10 @@ import bpy
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 parser = argparse.ArgumentParser(prog="g0_prepare.py")
 parser.add_argument("--out", required=True, help="output .blend")
-parser.add_argument("--depth", type=int, required=True, help="path depth of both engines")
+parser.add_argument("--depth", type=int, help="path depth of both engines (required without --native)")
+parser.add_argument("--native", action="store_true",
+                    help="keep the materials and lights of the file (a scene made for each engine): "
+                         "align only the render settings")
 parser.add_argument("--scene", help="scene to keep (default: the active one)")
 parser.add_argument("--addon", required=True, help="BlendLuxCore source directory")
 parser.add_argument("--site-packages", required=True, help="site-packages with pyluxcore")
@@ -61,6 +71,8 @@ parser.add_argument("--sky-color", type=float, nargs=3, default=(0.12, 0.16, 0.2
 parser.add_argument("--constant", type=float, default=0.5,
                     help="value replacing procedural textures and attributes")
 args = parser.parse_args(argv)
+if args.depth is None and not args.native:
+    parser.error("--depth is required without --native")
 
 # --- Load BlendLuxCore without its wheel loader ------------------------------
 
@@ -292,170 +304,172 @@ for other in [s for s in bpy.data.scenes if s != scene]:
 if bpy.context.window:
     bpy.context.window.scene = scene
 
-def linked_ids():
-    return [i for coll in (getattr(bpy.data, a) for a in dir(bpy.data))
-            if isinstance(coll, bpy.types.bpy_prop_collection)
-            for i in coll if isinstance(i, bpy.types.ID) and i.library]
+if not args.native:
+    def linked_ids():
+        return [i for coll in (getattr(bpy.data, a) for a in dir(bpy.data))
+                if isinstance(coll, bpy.types.bpy_prop_collection)
+                for i in coll if isinstance(i, bpy.types.ID) and i.library]
 
 
-# Make the linked assets local, so their materials can be rewritten
-for _ in range(4):
-    linked = linked_ids()
-    if not linked:
-        break
-    for i in linked:
-        try:
-            i.make_local()
-        except Exception as e:
-            print(f"[G0] make_local failed for {i!r}: {e}")
-# What is left is kept only by a fake user (unused assets): drop it
-for i in linked_ids():
-    if i.users - int(i.use_fake_user) == 0 and not bpy.data.user_map(subset=[i])[i]:
-        i.use_fake_user = False
-bpy.data.orphans_purge(do_local_ids=False, do_linked_ids=True, do_recursive=True)
-still_linked = [i.name_full for i in linked_ids()]
-if still_linked:
-    raise RuntimeError(f"still linked: {still_linked[:10]}")
-for name in [lib.name for lib in bpy.data.libraries]:
-    if name in bpy.data.libraries:
-        bpy.data.libraries.remove(bpy.data.libraries[name])
+    # Make the linked assets local, so their materials can be rewritten
+    for _ in range(4):
+        linked = linked_ids()
+        if not linked:
+            break
+        for i in linked:
+            try:
+                i.make_local()
+            except Exception as e:
+                print(f"[G0] make_local failed for {i!r}: {e}")
+    # What is left is kept only by a fake user (unused assets): drop it
+    for i in linked_ids():
+        if i.users - int(i.use_fake_user) == 0 and not bpy.data.user_map(subset=[i])[i]:
+            i.use_fake_user = False
+    bpy.data.orphans_purge(do_local_ids=False, do_linked_ids=True, do_recursive=True)
+    still_linked = [i.name_full for i in linked_ids()]
+    if still_linked:
+        raise RuntimeError(f"still linked: {still_linked[:10]}")
+    for name in [lib.name for lib in bpy.data.libraries]:
+        if name in bpy.data.libraries:
+            bpy.data.libraries.remove(bpy.data.libraries[name])
 
-done = set()
-flip = set()
-for mat in bpy.data.materials:
-    if mat.node_tree:
-        fix_tree(mat.node_tree, done, mat)
-    mat.luxcore.use_cycles_nodes = True
+    done = set()
+    flip = set()
+    for mat in bpy.data.materials:
+        if mat.node_tree:
+            fix_tree(mat.node_tree, done, mat)
+        mat.luxcore.use_cycles_nodes = True
 
-import bmesh
-flipped = set()
-for ob in scene.objects:
-    if ob.type != "MESH" or ob.data in flipped:
-        continue
-    indices = {i for i, slot in enumerate(ob.material_slots) if slot.material in flip}
-    if not indices:
-        continue
-    bm = bmesh.new()
-    bm.from_mesh(ob.data)
-    faces = [f for f in bm.faces if f.material_index in indices]
-    bmesh.ops.reverse_faces(bm, faces=faces)
-    bm.to_mesh(ob.data)
-    bm.free()
-    flipped.add(ob.data)
-    print(f"[G0] flipped {len(faces)} faces of {ob.data.name}")
-
-# Objects that Cycles' shadow rays ignore (Ray Visibility > Shadow off, e.g. the
-# classroom's window portal, which would otherwise block the sun): LuxCore has
-# no such object flag, only a material one (transparency.shadow), which the
-# reader does not set. Their materials get their own copy, flagged here and
-# made transparent to shadow rays by g0_render.py when the addon exports them.
-shadow_copies = {}
-for ob in scene.objects:
-    if ob.type != "MESH" or ob.visible_shadow or not utils_mod.is_obj_visible_in_cycles(ob):
-        continue
-    for slot in ob.material_slots:
-        mat = slot.material
-        if mat is None:
+    import bmesh
+    flipped = set()
+    for ob in scene.objects:
+        if ob.type != "MESH" or ob.data in flipped:
             continue
-        if mat not in shadow_copies:
-            copy = mat.copy()
-            copy.name = mat.name + ".noshadow"
-            copy["g0_shadow_transparent"] = True
-            shadow_copies[mat] = copy
-        slot.link = "OBJECT"
-        slot.material = shadow_copies[mat]
-        changes["material of a shadow-invisible object made shadow-transparent"] += 1
+        indices = {i for i, slot in enumerate(ob.material_slots) if slot.material in flip}
+        if not indices:
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        faces = [f for f in bm.faces if f.material_index in indices]
+        bmesh.ops.reverse_faces(bm, faces=faces)
+        bm.to_mesh(ob.data)
+        bm.free()
+        flipped.add(ob.data)
+        print(f"[G0] flipped {len(faces)} faces of {ob.data.name}")
 
-def blackbody_rgb(temperature):
-    """Linear Rec.709 color of a black body, normalized to luminance 1
-    (CIE 1931 matching functions, analytic fit of Wyman et al. 2013)."""
-    import math
-    def g(x, mu, s1, s2):
-        return math.exp(-0.5 * ((x - mu) / (s1 if x < mu else s2)) ** 2)
-    X = Y = Z = 0.0
-    for nm in range(380, 781, 5):
-        w = nm * 1e-9
-        b = 1 / (w ** 5 * (math.exp(1.4388e-2 / (w * temperature)) - 1))
-        X += b * (1.056 * g(nm, 599.8, 37.9, 31.0) + 0.362 * g(nm, 442.0, 16.0, 26.7) - 0.065 * g(nm, 501.1, 20.4, 26.2))
-        Y += b * (0.821 * g(nm, 568.8, 46.9, 40.5) + 0.286 * g(nm, 530.9, 16.3, 31.1))
-        Z += b * (1.217 * g(nm, 437.0, 11.8, 36.0) + 0.681 * g(nm, 459.0, 26.0, 13.8))
-    X, Z = X / Y, Z / Y
-    return [3.2406 * X - 1.5372 - 0.4986 * Z, -0.9689 * X + 1.8758 + 0.0415 * Z,
-            0.0557 * X - 0.2040 + 1.0570 * Z]
+    # Objects that Cycles' shadow rays ignore (Ray Visibility > Shadow off, e.g. the
+    # classroom's window portal, which would otherwise block the sun): LuxCore has
+    # no such object flag, only a material one (transparency.shadow), which the
+    # reader does not set. Their materials get their own copy, flagged here and
+    # made transparent to shadow rays by g0_render.py when the addon exports them.
+    shadow_copies = {}
+    for ob in scene.objects:
+        if ob.type != "MESH" or ob.visible_shadow or not utils_mod.is_obj_visible_in_cycles(ob):
+            continue
+        for slot in ob.material_slots:
+            mat = slot.material
+            if mat is None:
+                continue
+            if mat not in shadow_copies:
+                copy = mat.copy()
+                copy.name = mat.name + ".noshadow"
+                copy["g0_shadow_transparent"] = True
+                shadow_copies[mat] = copy
+            slot.link = "OBJECT"
+            slot.material = shadow_copies[mat]
+            changes["material of a shadow-invisible object made shadow-transparent"] += 1
+
+    def blackbody_rgb(temperature):
+        """Linear Rec.709 color of a black body, normalized to luminance 1
+        (CIE 1931 matching functions, analytic fit of Wyman et al. 2013)."""
+        import math
+        def g(x, mu, s1, s2):
+            return math.exp(-0.5 * ((x - mu) / (s1 if x < mu else s2)) ** 2)
+        X = Y = Z = 0.0
+        for nm in range(380, 781, 5):
+            w = nm * 1e-9
+            b = 1 / (w ** 5 * (math.exp(1.4388e-2 / (w * temperature)) - 1))
+            X += b * (1.056 * g(nm, 599.8, 37.9, 31.0) + 0.362 * g(nm, 442.0, 16.0, 26.7) - 0.065 * g(nm, 501.1, 20.4, 26.2))
+            Y += b * (0.821 * g(nm, 568.8, 46.9, 40.5) + 0.286 * g(nm, 530.9, 16.3, 31.1))
+            Z += b * (1.217 * g(nm, 437.0, 11.8, 36.0) + 0.681 * g(nm, 459.0, 26.0, 13.8))
+        X, Z = X / Y, Z / Y
+        return [3.2406 * X - 1.5372 - 0.4986 * Z, -0.9689 * X + 1.8758 + 0.0415 * Z,
+                0.0557 * X - 0.2040 + 1.0570 * Z]
 
 
-# BlendLuxCore reads only the light color and energy (and an unlinked Emission
-# strength) from the Cycles light nodes: fold the nodes into them, for Cycles too
-for light in bpy.data.lights:
-    if getattr(light, "use_nodes", False) and light.node_tree:
-        out = light.node_tree.get_output_node("CYCLES")
-        em = out.inputs["Surface"].links[0].from_node if out and out.inputs["Surface"].is_linked else None
-        if em is not None and em.bl_idname == "ShaderNodeEmission":
-            strength, color = em.inputs["Strength"], em.inputs["Color"]
-            s = strength.default_value
-            if strength.is_linked:
-                src = strength.links[0].from_node
-                if src.bl_idname == "ShaderNodeLightFalloff":
-                    s = src.inputs["Strength"].default_value
-                else:
-                    raise RuntimeError(f"light {light.name}: strength from {src.bl_idname}")
-            c = list(color.default_value)[:3]
-            if color.is_linked:
-                src = color.links[0].from_node
-                if src.bl_idname == "ShaderNodeBlackbody":
-                    c = blackbody_rgb(src.inputs["Temperature"].default_value)
-                elif src.bl_idname == "ShaderNodeRGB":
-                    c = list(src.outputs[0].default_value)[:3]
-                else:
-                    raise RuntimeError(f"light {light.name}: color from {src.bl_idname}")
-            light.energy *= s
-            light.color = [a * b for a, b in zip(light.color, c)]
-            # Blender 5 ignores use_nodes = False: leave a neutral node tree instead
-            for sock in (strength, color):
-                for link in list(sock.links):
-                    light.node_tree.links.remove(link)
-            strength.default_value = 1
-            color.default_value = (1, 1, 1, 1)
-            changes["light nodes folded into energy and color"] += 1
-        else:
-            raise RuntimeError(f"light {light.name}: unsupported node tree")
-    if not light.use_shadow:
-        # LuxCore lights always cast shadows
-        light.use_shadow = True
-        changes["light shadows enabled"] += 1
-    light.luxcore.use_cycles_settings = True
+    # BlendLuxCore reads only the light color and energy (and an unlinked Emission
+    # strength) from the Cycles light nodes: fold the nodes into them, for Cycles too
+    for light in bpy.data.lights:
+        if getattr(light, "use_nodes", False) and light.node_tree:
+            out = light.node_tree.get_output_node("CYCLES")
+            em = out.inputs["Surface"].links[0].from_node if out and out.inputs["Surface"].is_linked else None
+            if em is not None and em.bl_idname == "ShaderNodeEmission":
+                strength, color = em.inputs["Strength"], em.inputs["Color"]
+                s = strength.default_value
+                if strength.is_linked:
+                    src = strength.links[0].from_node
+                    if src.bl_idname == "ShaderNodeLightFalloff":
+                        s = src.inputs["Strength"].default_value
+                    else:
+                        raise RuntimeError(f"light {light.name}: strength from {src.bl_idname}")
+                c = list(color.default_value)[:3]
+                if color.is_linked:
+                    src = color.links[0].from_node
+                    if src.bl_idname == "ShaderNodeBlackbody":
+                        c = blackbody_rgb(src.inputs["Temperature"].default_value)
+                    elif src.bl_idname == "ShaderNodeRGB":
+                        c = list(src.outputs[0].default_value)[:3]
+                    else:
+                        raise RuntimeError(f"light {light.name}: color from {src.bl_idname}")
+                light.energy *= s
+                light.color = [a * b for a, b in zip(light.color, c)]
+                # Blender 5 ignores use_nodes = False: leave a neutral node tree instead
+                for sock in (strength, color):
+                    for link in list(sock.links):
+                        light.node_tree.links.remove(link)
+                strength.default_value = 1
+                color.default_value = (1, 1, 1, 1)
+                changes["light nodes folded into energy and color"] += 1
+            else:
+                raise RuntimeError(f"light {light.name}: unsupported node tree")
+        if not light.use_shadow:
+            # LuxCore lights always cast shadows
+            light.use_shadow = True
+            changes["light shadows enabled"] += 1
+        light.luxcore.use_cycles_settings = True
 
-# Cycles renders the empty material slots with its default material, the addon
-# with its own fallback: give them the Cycles default explicitly
-default_mat = None
-for ob in scene.objects:
-    data = ob.data
-    if ob.type not in {"MESH", "CURVE", "SURFACE", "META", "FONT"} or not hasattr(data, "materials"):
-        continue
-    if default_mat is None:
-        default_mat = bpy.data.materials.new("G0 default")
-        default_mat.use_nodes = True
-        nodes = default_mat.node_tree.nodes
-        for n in list(nodes):
-            if n.bl_idname != "ShaderNodeOutputMaterial":
-                nodes.remove(n)
-        diffuse = nodes.new("ShaderNodeBsdfDiffuse")
-        diffuse.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1)
-        default_mat.node_tree.links.new(diffuse.outputs[0], nodes["Material Output"].inputs["Surface"])
-        default_mat.luxcore.use_cycles_nodes = True
-    if len(ob.material_slots) == 0:
-        data.materials.append(default_mat)
-        changes["default material added"] += 1
-    for slot in ob.material_slots:
-        if slot.material is None:
-            slot.material = default_mat
-            changes["empty slot filled with the default material"] += 1
-# BlendLuxCore exports the Cycles area lights invisible to the camera
-for ob in scene.objects:
-    if ob.type == "LIGHT":
-        ob.visible_camera = False
-if scene.world:
-    scene.world.luxcore.use_cycles_settings = True
+    # Cycles renders the empty material slots with its default material, the addon
+    # with its own fallback: give them the Cycles default explicitly
+    default_mat = None
+    for ob in scene.objects:
+        data = ob.data
+        if ob.type not in {"MESH", "CURVE", "SURFACE", "META", "FONT"} or not hasattr(data, "materials"):
+            continue
+        if default_mat is None:
+            default_mat = bpy.data.materials.new("G0 default")
+            default_mat.use_nodes = True
+            nodes = default_mat.node_tree.nodes
+            for n in list(nodes):
+                if n.bl_idname != "ShaderNodeOutputMaterial":
+                    nodes.remove(n)
+            diffuse = nodes.new("ShaderNodeBsdfDiffuse")
+            diffuse.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1)
+            default_mat.node_tree.links.new(diffuse.outputs[0], nodes["Material Output"].inputs["Surface"])
+            default_mat.luxcore.use_cycles_nodes = True
+        if len(ob.material_slots) == 0:
+            data.materials.append(default_mat)
+            changes["default material added"] += 1
+        for slot in ob.material_slots:
+            if slot.material is None:
+                slot.material = default_mat
+                changes["empty slot filled with the default material"] += 1
+    # BlendLuxCore exports the Cycles area lights invisible to the camera
+    for ob in scene.objects:
+        if ob.type == "LIGHT":
+            ob.visible_camera = False
+    if scene.world:
+        scene.world.luxcore.use_cycles_settings = True
+
 
 # Animation on the scene would override the render settings (the classroom
 # demo keyframes cycles.seed, which freezes the noise pattern)
@@ -485,8 +499,9 @@ cy.blur_glossy = 0
 cy.caustics_reflective = True
 cy.caustics_refractive = True
 cy.use_light_tree = True
-cy.max_bounces = cy.diffuse_bounces = cy.glossy_bounces = cy.transmission_bounces = args.depth
-cy.transparent_max_bounces = args.depth
+if args.depth is not None:
+    cy.max_bounces = cy.diffuse_bounces = cy.glossy_bounces = cy.transmission_bounces = args.depth
+    cy.transparent_max_bounces = args.depth
 cy.filter_width = 1.5
 scene.view_settings.view_transform = "Standard"
 scene.view_settings.look = "None"
@@ -502,8 +517,11 @@ lc.sobol_adaptive_strength = 0
 lc.filter_enabled = True
 lc.filter = "BLACKMANHARRIS"
 lc.filter_width = 1.5
-lc.path.depth_total = lc.path.depth_diffuse = lc.path.depth_glossy = lc.path.depth_specular = args.depth
+if args.depth is not None:
+    lc.path.depth_total = lc.path.depth_diffuse = lc.path.depth_glossy = lc.path.depth_specular = args.depth
 lc.path.use_clamping = False
+# Cycles' glossy filter is off (blur_glossy = 0); this is its LuxCore counterpart
+lc.path.use_regularization = False
 halt = scene.luxcore.halt
 halt.enable = True
 halt.use_noise_thresh = False
@@ -522,6 +540,10 @@ for oi in depsgraph.object_instances:
         ob.data.calc_loop_triangles()
         tris += len(ob.data.loop_triangles)
         used |= {s.material.original for s in ob.material_slots if s.material}
+if args.native:
+    # The converter check needs the exporter for LuxCore node trees, and the
+    # Cycles file is not exported by LuxCore: the render is the check
+    used = set()
 
 errorlog.errors.clear()
 errorlog.warnings.clear()

@@ -4,7 +4,7 @@ Consolidated 2026-10-21 (HEAD `158a5b409`) from the unfinished items of [MODERNI
 
 ## 1. Where the engine stands
 
-Against Cycles on the same RX 6950 XT: **2.6x** at equal error on the Blender Cornell box (D3 re-measure of 2026-10-23 on Windows, 540x540, depth 8; 3.3x before D3, 4.5x in the G0 re-measure of 2026-10-17), **8.6x** on the Blender classroom (2026-10-17). The two factors:
+Against Cycles on the same RX 6950 XT: **3.4x** at equal error on the new hand-made Cornell pair of `scenes/cornell` (one scene per engine, 2026-10-24, 540x540, 12/4/4/12 bounces as the files have them; time per sample 2.8x, variance per sample 1.19x; `g0_prepare.py --native`, then `g0_run.sh` with `<cycles.blend>,<luxcore.blend>`; the two files match in brightness within 1%), the former G0 scene being **2.6x** on the Blender Cornell box (D3 re-measure of 2026-10-23 on Windows, 540x540, depth 8; 3.3x before D3, 4.5x in the G0 re-measure of 2026-10-17), **8.6x** on the Blender classroom (2026-10-17). The two factors:
 
 | | Cornell box | classroom |
 |---|---|---|

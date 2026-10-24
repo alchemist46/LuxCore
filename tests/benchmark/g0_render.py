@@ -19,7 +19,7 @@ times; g0_analyze.py turns them into RMSE-against-time curves. The engine
 settings are those of the prepared .blend; only the spp, the seed, the
 resolution percentage and the devices are set here.
 
-    blender -b --factory-startup --disable-autoexec out/g0/cornell/cornell-g0.blend \\
+    blender -b --factory-startup --disable-autoexec out/g0/cornell/cornell-luxcore-g0.blend \\
         --python-exit-code 1 --python tests/benchmark/g0_render.py -- \\
         --engine LUXCORE --out out/g0/results/cornell/luxcore --spp 16 32 64 \\
         --addon ~/GitHub/BlendLuxCore --site-packages out/venvs/<venv>/lib64/python3.13/site-packages
@@ -57,6 +57,8 @@ parser.add_argument("--luxcore-set", action="append", default=[], metavar="KEY=V
                     help="extra LuxCore config property, e.g. path.russianroulette.depth=5 (repeatable)")
 args = parser.parse_args(argv)
 
+# Blender resolves a relative render path against its own idea of the root
+args.out = os.path.abspath(args.out)
 os.makedirs(args.out, exist_ok=True)
 scene = bpy.context.scene
 scene.render.resolution_percentage = args.percentage
