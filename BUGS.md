@@ -156,13 +156,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `lc-work/d3/qtest.py PATHCPU 64 1024 1 --light tilted --set lightstrategy.trianglelight.quad=0` against the same with `--set lightstrategy.lighttree.learning.enable=0` (64x64 SDL Cornell box, HIP not needed).
 - Notes: not a thread race (one thread the same). A light that is one leaf of the tree (a Blender area light since D3 samples its quad as one light) has nothing to learn and is exact. Suspects: the pick pdf returned by `LightTree_SampleLights()` against the learned cells it read (`learnPickStash`, the swap of `learnLiveIndex` at an epoch), or the learned probabilities following the samples of the same Owen-scrambled Sobol sequence (an adaptation correlated with the samples it weights). Found during D3.
 
-### WrapBlack PATHCPU_METROPOLIS fails at the pixel threshold
-- Found: 2026-10-23
-- Area: tests
-- Problem: `test_WrapBlack_PATHCPU_METROPOLIS` fails about 2 runs in 3 with 3.01-3.07% of the pixels different against the 3.00% maximum (mean brightness 0.36-0.43%, the maximum is 1.5%), on the build before D3 (9202d1ad4) too.
-- Reproduce: `pyunittests/unittests.py --filter WrapBlack_PATHCPU_METROPOLIS` (CPU), a few runs.
-- Notes: the scene has only an infinite light (no triangle lights), so not D3. The Metropolis noise of this scene sits at the threshold: a per-test `MAX_DIFFERENT_PIXELS_OVERRIDES` entry or a new reference would do, after checking the mean is right.
-
 ### PhotonGI caustic cache reads darker than the light it replaces
 - Found: 2026-10-23
 - Area: caches (PhotonGI)

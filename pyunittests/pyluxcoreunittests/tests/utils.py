@@ -179,11 +179,14 @@ MAX_MEAN_DIFFERENCE_OVERRIDES = {
 # Tests with a larger, known, pixel noise (image name: maximum). The smooth
 # OpenPBR scene: its noise alone puts 2.3-5.0% of the pixels above the
 # tolerance (the mean agrees within 0.1%), so 3% passed or failed by chance.
+# WrapBlack with Metropolis on the CPU: 2.9-3.1% of the pixels (its linear mean
+# is +0.11% and -0.02% of Sobol's at 256 spp, two seeds).
 MAX_DIFFERENT_PIXELS_OVERRIDES = {
 	"OpenPBRSmoothMaterial_" + engineSampler + ".png": 0.08 for engineSampler in [
 		"BIDIRCPU_METROPOLIS", "BIDIRCPU_SOBOL", "PATHCPU_METROPOLIS", "PATHCPU_SOBOL",
 		"PATHOCL_METROPOLIS", "PATHOCL_SOBOL", "TILEPATHCPU_TILEPATHSAMPLER", "TILEPATHOCL_TILEPATHSAMPLER"]
 }
+MAX_DIFFERENT_PIXELS_OVERRIDES["WrapBlack_PATHCPU_METROPOLIS.png"] = 0.035
 
 # Set by the --strict command line option: fail if a reference is missing
 # (instead of copying the current result as reference)
