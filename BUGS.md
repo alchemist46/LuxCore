@@ -197,3 +197,31 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: a Python process that renders two furnace cases one after the other with the caustic cache segfaults (exit 139) now and then in the second one: `metal2-a0.05` then `glossy2-coat-a0.05` crashed on 565ebf8df and passed on the next build in one try each; the whole furnace list with the caustic cache (or both caches) crashed at `glossy2-coat-a0.05` in five runs of both builds, and with both caches the `glossycoating` group crashed after `glossycoating-white-a0.05`. Each case alone passes.
 - Reproduce: `tests/furnace/furnace.py PATHCPU metal2-a0.05,glossy2-coat-a0.05 path.photongi.caustic.enabled=1 path.photongi.photon.maxcount=2000000 path.photongi.caustic.updatespp=0`, a few runs; `all` instead of the two names crashes every time at the 18th case.
 - Notes: not investigated (the K4 ASan build would show it). Suspect state the first session's cache leaves behind (the caustic update barrier or its threads, a scene or BVH pointer).
+
+### Cornell box pair: the `Smooth by Angle` modifier of Suzanne is missing on the Windows machine
+- Found: 2026-10-24
+- Area: tests (G0, scenes/cornell)
+- Problem: both Cornell blends link `Smooth by Angle` from `geometry_nodes_essentials.blend` in the Apps/blender-5.1.2-linux-x64 folder next to the repo (a relative `//../Apps/...` path of the Linux machine), which does not exist here, so the modifier does nothing and Suzanne renders without it (it has `use_smooth` on, so the picture barely changes). The same file on the Linux machine renders with it. Both engines see the same mesh on one machine, so the A/B is not affected, but renders from the two machines differ.
+- Reproduce: open either blend in Blender on Windows and look at the modifier stack of Suzanne (Blender reports the missing library).
+- Notes: not fixed. Making the asset local (or removing the modifier) in both files would make the two machines agree.
+
+### Hybrid back/forward with a light partition of 0: PATHCPU drops the caustic paths
+- Found: 2026-10-24
+- Area: engine (PATHCPU, hybrid back/forward)
+- Problem: `scenes/CannelleEtFromage` renders 35x darker on PATHCPU than on PATHOCL (mean 0.0059 against 0.205 at half size, 64 spp). The scene has `path.hybridbackforward.enable = 1` with `path.hybridbackforward.partition = 0`: the eye paths leave the paths that the light tracing renders (the caustic ones, through the glass) to the light paths, and with a partition of 0 PATHCPU traces no light paths, so that light is lost. PATHOCL with no native threads (the scene's `opencl.native.threads.count = 0`) keeps them in its eye paths. The same in upstream pyluxcore 2.11.2 and in af4f833ea: an old behaviour, not a regression.
+- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.5 --spp 64` with and without `--engine PATHCPU --device cpu`.
+- Notes: not checked yet with a partition above 0 on PATHCPU (the CPU was busy with a bisection). A fix: treat a partition of 0 as the hybrid mode off for the eye paths (or warn), so that a scene set up for the GPU renders on the CPU too.
+
+### Glossy-heavy native scenes render 1.5x slower than LuxCore 2.11 on the CPU
+- Found: 2026-10-24
+- Area: material (glossy2, metal2, glossycoating; CPU)
+- Problem: `scenes/LuxCore2.1Benchmark` (13 glossy2, 3 metal2, 2 glossycoating) with the PhotonGI cache off, PATHCPU, quarter film, 128 spp: 8.1-8.6 s in upstream pyluxcore 2.11.2, af4f833ea and 16e85154b, 12.3 s at HEAD; DanishMood is 1.45x slower the same way. On the GPU the speed work hides it (HEAD 6% slower per sample than af4f833ea on this scene, against 1.36-1.69x faster on the scenes with fewer glossy materials). The PhotonGI part of the first measurement was the KdTree bug fixed in 700c091d6.
+- Reproduce: `tests/benchmark/native_render.py --scene LuxCore2.1Benchmark --engine PATHCPU --device cpu --scale 0.25 --spp 128 --set path.photongi.indirect.enabled=0` with `out/venvup2112` and HEAD.
+- Notes: bisected (one build per step, scripts in `C:/Users/Ricardo/lc-work/bis`) to three commits, all deliberate changes of the material models: 48c670678 "GGX is the only microfacet distribution" (8.3 -> 10.3 s, +24%, the image 10% brighter), d6e008a0c "Layered glossy family: reciprocal albedo-scaled coats" (9.8 -> 11.3 s, +16%, 5% darker), c56bba156 "Glossy coating: subsurface walk of the base, and coat darkening" (11.6 -> 12.4 s, +6%). The path depth change e137b7fcf adds 5% of light at no cost. Not checked yet: where the GGX cost goes (sampling, the height-correlated masking, the energy tables) and whether it can be made cheaper without changing the image.
+
+### HIPRT pinned archive: the old trace-kernel path misses hits (pre-G9 builds only)
+- Found: 2026-10-24
+- Area: build (HIPRT)
+- Problem: the pinned HIPRT archive (PRECOMPILE + BAKE_COMPILED_KERNEL, `C:/Users/Ricardo/lc-hiprt`) with a build from before G9 step 4 (3f79c20ba, which builds its trace kernel through `hiprtBuildTraceKernels`) misses a regular pattern of hits on gfx1030 / Windows: the 320x240 cornell has 37% non-black pixels, mean 0.156 instead of 0.385, deterministic. The BAKE_KERNEL build of the same HIPRT commit (`out/hiprt-dist-backup/Release`) is fine, and HEAD (its own trace kernel) is fine with the archive.
+- Reproduce: `out/venvb0` (af4f833ea) with `B0_HIPRT_DIR=C:\Users\Ricardo\lc-hiprt\dist\bin\Release`, `opencl.native.threads.count=0`, `C:\Users\Ricardo\lc-work\b0\render_b0.py 16 320 240`.
+- Notes: found while building the pre-optimization wheel; HEAD is not affected. It matters only for old builds or a return to `hiprtBuildTraceKernels`. Ruled out: the work group size, the DataSet race fixed in c5dc429b2, stale caches.

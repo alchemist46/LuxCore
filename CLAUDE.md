@@ -34,6 +34,14 @@ After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon
 5. Mention new entries in the final report of the task.
 6. Commit changes to `BUGS.md` together with the work during which the problem was found, or on their own.
 
+## Test scenes: LuxCore native only
+
+Every engine test (speed, noise, bias, look, CPU/GPU parity) runs on scenes made for LuxCore, with 100% native LuxCore materials, textures, lights and settings, so that it measures the engine itself and not a conversion:
+
+- The benchmark set is the LuxCore scenes in `scenes/`: `CannelleEtFromage`, `DanishMood`, `LuxCore2.1Benchmark`, `LynxSpider` and `OrangeJuice` (each has an SDL export in `LuxCoreScene/`, the `.blend`, and a `reference.png` made with the LuxCore version named in its `readme.txt`), plus the repo's own SDL scenes (`cornell`, `luxball`, and so on).
+- The only Cycles comparison is the Cornell box pair `scenes/cornell/Cornell Box Luxcore.blend` and `scenes/cornell/Cornell Box Cycles.blend`, made by hand to look alike (`g0_prepare.py --native`, then `g0_run.sh cornell <cycles.blend>,<luxcore.blend> ...`).
+- Do not use scenes converted from Cycles (the Blender classroom, the old G0 Cornell box, anything that goes through the addon's Cycles node reader or `g0_prepare.py` without `--native`) to judge a change. Results measured on them before 2026-10-24 are to be checked again on the native scenes.
+
 ## Keep render measurements short
 
 Use high sample counts only when a result needs them, so that iterations stay fast. Long references (thousands of spp) are rarely needed:
