@@ -102,3 +102,10 @@ CMakeUserPresets.json
 .vscode/
 tags
 scenes/displacement/lucy/lucy.ply
+# The native LuxCore benchmark scenes (about 900 MB, files up to 99 MB):
+# copied by hand to each machine, not tracked (CLAUDE.md "Test scenes")
+scenes/CannelleEtFromage/
+scenes/DanishMood/
+scenes/LuxCore2.1Benchmark/
+scenes/LynxSpider/
+scenes/OrangeJuice/
