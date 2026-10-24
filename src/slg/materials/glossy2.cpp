@@ -113,8 +113,8 @@ Spectrum Glossy2Material::Evaluate(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	const Spectrum EcFixed = GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks);
 	const Spectrum EcSampled = GGXEnergy_CoatE(u, v, fabsf(localSampledDir.z), ks);
@@ -166,8 +166,8 @@ Spectrum Glossy2Material::Sample(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-		v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+		u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+		v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 		const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 		const float wCoating = Glossy2_CoatProbability(GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks), kd);

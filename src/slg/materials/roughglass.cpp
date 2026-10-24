@@ -346,8 +346,8 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
 	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
@@ -363,8 +363,8 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
 	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
 	const float localFilmIor = ((localFilmThickness > 0.f) && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 
@@ -379,8 +379,8 @@ void RoughGlassMaterial::Pdf(const HitPoint &hitPoint,
 	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const float nc = ExtractExteriorIors(hitPoint, exteriorIor);
 	const float nt = ExtractInteriorIors(hitPoint, interiorIor);
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	PdfRough(hitPoint, localLightDir, localEyeDir, directPdfW, reversePdfW, kt, kr, nc, nt, u, v);
 }

@@ -191,8 +191,8 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Evaluate(__global const Material* re
 	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
 	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 	const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
 									 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && material->roughglass.filmIorTexIndex != NULL_INDEX) 
@@ -297,8 +297,8 @@ OPENCL_FORCE_INLINE void RoughGlassMaterial_Sample(__global const Material* rest
 	const float nt = ExtractInteriorIors(hitPoint, material->roughglass.interiorIorTexIndex TEXTURES_PARAM);
 	const float nuVal = Texture_GetFloatValue(material->roughglass.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->roughglass.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 	const float localFilmThickness = (material->roughglass.filmThicknessTexIndex != NULL_INDEX) 
 									 ? Texture_GetFloatValue(material->roughglass.filmThicknessTexIndex, hitPoint TEXTURES_PARAM) : 0.f;
 	const float localFilmIor = (localFilmThickness > 0.f && material->roughglass.filmIorTexIndex != NULL_INDEX) 

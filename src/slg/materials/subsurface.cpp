@@ -68,7 +68,7 @@ void SubsurfaceMaterial::GetReflection(const HitPoint &hitPoint, float *alpha, f
 		*F0 = -1.f;
 
 	const float r = Clamp(roughness->GetFloatValue(hitPoint), 0.f, 1.f);
-	*alpha = Microfacet_Regularize(Clamp(r * r, 1e-9f, 1.f), hitPoint.regularization);
+	*alpha = Microfacet_Regularize(Clamp(r * r, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 }
 
 void SubsurfaceMaterial::GetSubsurfaceWalkParams(const HitPoint &hitPoint, Spectrum *col,

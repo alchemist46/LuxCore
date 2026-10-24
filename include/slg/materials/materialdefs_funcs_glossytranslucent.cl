@@ -81,8 +81,8 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_GetSide(__global const Materi
 			hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(front ? material->glossytranslucent.nvTexIndex : material->glossytranslucent.nvbfTexIndex,
 			hitPoint TEXTURES_PARAM);
-	*u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-	*v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	*u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	*v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 	*alpha = Spectrum_Clamp(Texture_GetSpectrumValue(front ? material->glossytranslucent.kaTexIndex : material->glossytranslucent.kabfTexIndex,
 			hitPoint TEXTURES_PARAM));

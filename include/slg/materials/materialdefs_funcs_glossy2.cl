@@ -100,8 +100,8 @@ OPENCL_FORCE_INLINE float3 Glossy2Material_EvaluateLayers(__global const Materia
 	const float3 ks = Glossy2Material_GetKs(material, hitPoint TEXTURES_PARAM);
 	const float nuVal = Texture_GetFloatValue(material->glossy2.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->glossy2.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 	const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(eyeDir.z), ks);
 	const float3 EcLight = GGXEnergy_CoatE3(u, v, fabs(lightDir.z), ks);
@@ -163,8 +163,8 @@ OPENCL_FORCE_INLINE void Glossy2Material_Sample(__global const Material* restric
 		const float3 ks = Glossy2Material_GetKs(material, hitPoint TEXTURES_PARAM);
 		const float nuVal = Texture_GetFloatValue(material->glossy2.nuTexIndex, hitPoint TEXTURES_PARAM);
 		const float nvVal = Texture_GetFloatValue(material->glossy2.nvTexIndex, hitPoint TEXTURES_PARAM);
-		u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-		v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+		u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+		v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 		const float3 kd = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossy2.kdTexIndex, hitPoint TEXTURES_PARAM));
 		const float wCoating = Coating_Probability(GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks), kd);

@@ -114,8 +114,8 @@ Spectrum Metal2Material::Albedo(const HitPoint &hitPoint) const {
 Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	const Vector wh(Normalize(localLightDir + localEyeDir));
 	const float cosWH = Dot(localLightDir, wh);
@@ -153,8 +153,8 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	*pdfW = Microfacet_SampleReflect(u, v, localFixedDir, u0, u1, localSampledDir);
 
@@ -198,8 +198,8 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 void Metal2Material::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	const Vector &localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;

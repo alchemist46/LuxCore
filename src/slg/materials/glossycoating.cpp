@@ -197,8 +197,8 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 		// The coating pdf is the one of sampling the generated direction from
 		// the fixed one (SchlickBSDF_CoatingPdf(fixed, sampled), as Sample()
@@ -266,8 +266,8 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 		}
 		ks = ks.Clamp(0.f, 1.f);
 
-		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+		const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+		const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 		if (directPdfW) {
 			const Vector localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
@@ -320,8 +320,8 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	// The coating only on the front face
 	const Spectrum EcFixed = GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks);
@@ -458,8 +458,8 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 	}
 	ks = ks.Clamp(0.f, 1.f);
 
-	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	// The same pdfs as Evaluate() (the coating pdf is not symmetric)
 	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;

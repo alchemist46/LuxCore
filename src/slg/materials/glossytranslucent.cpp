@@ -81,8 +81,8 @@ static GlossyTranslucentSide GlossyTranslucent_GetSide(const GlossyTranslucentMa
 		side.ks *= ti * ti;
 	}
 	side.ks = side.ks.Clamp(0.f, 1.f);
-	side.u = Microfacet_Regularize(Clamp((front ? mat.GetNu() : mat.GetNu_bf())->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
-	side.v = Microfacet_Regularize(Clamp((front ? mat.GetNv() : mat.GetNv_bf())->GetFloatValue(hitPoint), 1e-9f, 1.f), hitPoint.regularization);
+	side.u = Microfacet_Regularize(Clamp((front ? mat.GetNu() : mat.GetNu_bf())->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	side.v = Microfacet_Regularize(Clamp((front ? mat.GetNv() : mat.GetNv_bf())->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 	side.alpha = (front ? mat.GetKa() : mat.GetKa_bf())->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	side.d = (front ? mat.GetDepth() : mat.GetDepth_bf())->GetFloatValue(hitPoint);
 

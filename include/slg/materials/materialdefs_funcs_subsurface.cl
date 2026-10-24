@@ -73,7 +73,7 @@ OPENCL_FORCE_INLINE void SubsurfaceMaterial_GetReflection(__global const Materia
 		*F0 = -1.f;
 
 	const float r = clamp(Texture_GetFloatValue(material->subsurface.roughnessTexIndex, hitPoint TEXTURES_PARAM), 0.f, 1.f);
-	*alpha = Microfacet_Regularize(clamp(r * r, 1e-9f, 1.f), hitPoint->regularization);
+	*alpha = Microfacet_Regularize(clamp(r * r, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 }
 
 OPENCL_FORCE_INLINE float3 SubsurfaceMaterial_EvaluateLayers(__global const Material* restrict material,

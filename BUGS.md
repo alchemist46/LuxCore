@@ -232,3 +232,24 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: the pinned HIPRT archive (PRECOMPILE + BAKE_COMPILED_KERNEL, `C:/Users/Ricardo/lc-hiprt`) with a build from before G9 step 4 (3f79c20ba, which builds its trace kernel through `hiprtBuildTraceKernels`) misses a regular pattern of hits on gfx1030 / Windows: the 320x240 cornell has 37% non-black pixels, mean 0.156 instead of 0.385, deterministic. The BAKE_KERNEL build of the same HIPRT commit (`out/hiprt-dist-backup/Release`) is fine, and HEAD (its own trace kernel) is fine with the archive.
 - Reproduce: `out/venvb0` (af4f833ea) with `B0_HIPRT_DIR=C:\Users\Ricardo\lc-hiprt\dist\bin\Release`, `opencl.native.threads.count=0`, `C:\Users\Ricardo\lc-work\b0\render_b0.py 16 320 240`.
 - Notes: found while building the pre-optimization wheel; HEAD is not affected. It matters only for old builds or a return to `hiprtBuildTraceKernels`. Ruled out: the work group size, the DataSet race fixed in c5dc429b2, stale caches.
+
+### The render time, samples/s and the time halt count the PhotonGI cache build
+- Found: 2026-10-24
+- Area: film (statistics, halt conditions), caches (PhotonGI)
+- Problem: the film's clock (`Film::statsStartSampleTime`, started in `Film::Init()`) starts in `RenderEngine::Start()` before `StartLockLess()`, which builds the PhotonGI cache (and the other pre-pass caches) before the render threads start. `stats.renderengine.time`, `stats.renderengine.total.samplesec` (`Film::GetTotalTime()`, `GetAvgSampleSec()`) and `batch.halttime` (`film.cpp`, `GetTotalTime() > haltTime`) all include the build: Blender shows a samples/s 2.4x too low on CannelleEtFromage with the indirect cache (1.97 instead of 4.9 M/s, 540x540, 256 spp, while the render itself runs at the speed of the cache-off render), and a time-halted render loses the build time from its rendering time.
+- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.5 --spp 256 --set path.photongi.indirect.enabled=1 --set path.photongi.indirect.maxsize=0` (HIP): the log's `samplesec` against 256*540*540/`render_s`.
+- Notes: the same in 2.11.2. Restart the film's clock (not its counts) when the render threads start, after the caches; the halt time then means rendering time. Check the resume (`.rsm`) path, which adds a start film.
+
+### PhotonGI indirect cache: walls and ceiling 2-5% darker than path tracing
+- Found: 2026-10-24
+- Area: caches (PhotonGI)
+- Problem: LuxCore2.1Benchmark (the scene's own PhotonGI settings, PATHOCL, half size, 1024 spp, clamping off) with the indirect cache against without: whole image -2.5%, walls -2.7%, ceiling -5.4%, floor -1%, a little warmer (R/B +0.3%). With the scene's clamping: -1.6%, -1.7%, -4.5%.
+- Reproduce: `tests/benchmark/native_render.py --scene LuxCore2.1Benchmark --spp 1024 --set path.clamping.variance.maxvalue=0` against the same with `--set path.photongi.indirect.enabled=0`.
+- Notes: not investigated. The ceiling is lit only indirectly, so the cache's share is largest there. Suspects: the area estimate of a visibility particle (`PGICVisibilityParticle::ComputeRadiance()`, from the mean distance of its hits), the 10 degree normal angle and the radius blur at the panel mouldings, the stop at 15M photons with the error still at 11%. Cannelle with the cache: mean within 0.05%.
+
+### PATHOCL: a rare one-pixel outlier in the luxball-hdr-vol parity render
+- Found: 2026-10-24
+- Area: engine (PATHOCL, volumes), tests
+- Problem: one of three TILEPATHOCL parity renders of `luxball-hdr-vol` with the same build had one value 1.5% off (pixel 143,101, red); the other runs agree to 1e-6, as the parity doc expects from the film's atomic adds.
+- Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` a few times and `compare` the directories (seen with the build of the GGX minimum roughness fix; the material change cannot reach this scene, which has only matte and null materials).
+- Notes: not investigated; suspect a race in the volume path (the homogeneous volume's scattering, or the film write of a sample from two tasks). Watch for it in later parity runs before calling a volume change non-identical.

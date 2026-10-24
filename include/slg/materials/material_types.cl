@@ -64,6 +64,12 @@ typedef enum {
 #define MATERIAL_BUMP_CACHE_SLOT_A(bumpSlots) ((bumpSlots) & 0xffffu)
 #define MATERIAL_BUMP_CACHE_SLOT_B(bumpSlots) ((bumpSlots) >> 16)
 
+// The smallest roughness (GGX alpha) of the microfacet lobes: a smooth surface
+// is a very sharp lobe, not a delta. Below about 1e-7 the float D and pdf of
+// a near-mirror direction overflow in the kernels (-ffast-math), the same
+// floor as OPENPBR_MIN_ALPHA.
+#define MICROFACET_MIN_ROUGHNESS 1e-4f
+
 typedef struct {
 	unsigned int matIndex;
 	MaterialEvalOpType evalType;

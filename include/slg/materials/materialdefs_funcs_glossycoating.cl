@@ -234,8 +234,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 
 		const float nuVal = Texture_GetFloatValue(material->glossycoating.nuTexIndex, hitPoint TEXTURES_PARAM);
 		const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
-		const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-		const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+		const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+		const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 		const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(eyeDir.z), ks);
 
@@ -290,8 +290,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 		const float3 fixedDir = eyeDir;
 		const float nuVal = Texture_GetFloatValue(material->glossycoating.nuTexIndex, hitPoint TEXTURES_PARAM);
 		const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
-		const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-		const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+		const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+		const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 		const float wCoating = (fixedDir.z > DEFAULT_COS_EPSILON_STATIC) ?
 			GlossyCoatingMaterial_CoatProbability(ks, GGXEnergy_CoatE3(u, v, fabs(fixedDir.z), ks)) : 0.f;
@@ -358,8 +358,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleSetUp(__global const Materi
 
 	const float nuVal = Texture_GetFloatValue(material->glossycoating.nuTexIndex, hitPoint TEXTURES_PARAM);
 	const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
-	const float u = Microfacet_Regularize(clamp(nuVal, 1e-9f, 1.f), hitPoint->regularization);
-	const float v = Microfacet_Regularize(clamp(nvVal, 1e-9f, 1.f), hitPoint->regularization);
+	const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
 
 	// Save u and v
 	EvalStack_PushFloat(u);

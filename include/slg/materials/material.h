@@ -366,7 +366,7 @@ extern float GGXDistribution_PdfBoundedReflect(const float alphaU, const float a
 // Glossy2, GlossyCoating and GlossyTranslucent
 //
 // u and v are the roughness values along the tangent and the bitangent, in
-// [1e-9, 1]. The NDF is the anisotropic GGX with alpha = (u, v), the masking
+// [MICROFACET_MIN_ROUGHNESS, 1]. The NDF is the anisotropic GGX with alpha = (u, v), the masking
 // is the height-correlated Smith one and the half vector is sampled from the
 // visible normals (Dupuy & Benyoub 2023, "Sampling visible GGX normals
 // with spherical caps"), bounded for the reflection lobes (Eto & Tokuyoshi 2023,
