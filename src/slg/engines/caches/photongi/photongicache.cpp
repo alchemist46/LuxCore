@@ -94,18 +94,36 @@ float PhotonGICache::GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
 	}
 }
 
-bool PhotonGICache::IsDirectLightHitVisible(const EyePathInfo &pathInfo,
-		const bool photonGICausticCacheUsed) const {
-	// This is a specific check to cut fireflies created by some glossy or
-	// specular bounce
-	if (!(pathInfo.lastBSDFEvent & DIFFUSE) && (pathInfo.depth.diffuseDepth > 0))
-		return false;
-	else if (!params.caustic.enabled || !photonGICausticCacheUsed)
-		return true;
-	else if (!pathInfo.IsCausticPath() && (params.debugType == PGIC_DEBUG_NONE))
-		return true;
+// The caustic photons are the light paths of 1 to photon.maxdepth - 1 nearly
+// specular bounces from a light to a PhotonGI surface (TracePhotonsThread,
+// with LightPathInfo::IsSpecularPath() and the same glossiness threshold). An
+// eye path that looked the caustic cache up at a vertex has their light there:
+// what it reaches from there with only such bounces is the same light again.
+// Everything else is counted: the light after a diffuse or rough bounce, the
+// direct light of the lookup vertex, the chains longer than the photon paths
+// and the light where the lookup found nothing.
+bool PhotonGICache::IsDirectLightHitVisible(const u_int causticChain) const {
+	// NextCausticChain() keeps causticChain <= photon.maxPathDepth
+	return !params.caustic.enabled || (causticChain < 2);
+}
+
+bool PhotonGICache::IsDirectLightSampleVisible(const u_int causticChain,
+		const BSDFEvent event, const float glossiness) const {
+	// The light sample adds one bounce to the chain
+	return !params.caustic.enabled || (causticChain == 0) ||
+			(causticChain >= params.photon.maxPathDepth) ||
+			!PathInfo::IsNearlySpecular(event, glossiness, params.glossinessUsageThreshold);
+}
+
+u_int PhotonGICache::NextCausticChain(const u_int causticChain, const bool causticLookup,
+		const BSDFEvent event, const float glossiness) const {
+	if (causticLookup)
+		return 1;
+	else if ((causticChain != 0) && (causticChain < params.photon.maxPathDepth) &&
+			PathInfo::IsNearlySpecular(event, glossiness, params.glossinessUsageThreshold))
+		return causticChain + 1;
 	else
-		return false;
+		return 0;
 }
 
 void PhotonGICache::TracePhotons(const u_int seedBase, const u_int photonTracedCount,

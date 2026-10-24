@@ -146,7 +146,8 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 		VSTORE3F(BLACK, &sampleResult->shadingNormal.x);
 	}
 	taskState->photonGICacheEnabledOnLastHit = false;
-	taskState->photonGICausticCacheUsed = false;
+	taskState->photonGICausticChain = 0;
+	taskState->photonGICausticLookup = false;
 	taskState->photonGIShowIndirectPathMixUsed = false;
 	// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 	taskState->throughShadowTransparency = false;
@@ -365,7 +366,8 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		__global PathDepthInfo *tmpDepthInfo,
 		__global const BSDF *bsdf,
 		const float3 pathThroughput,
-		const float3 shadowRayDir
+		const float3 shadowRayDir,
+		const uint photonGICausticChain
 		LIGHTS_PARAM_DECL) {
 	// Sample the BSDF
 	BSDFEvent event;
@@ -378,7 +380,11 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 			(taskConfig->pathTracer.hybridBackForward.enabled &&
 			EyePathInfo_IsCausticPathWithEvent(pathInfo, event,
 				BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM),
-				taskConfig->pathTracer.hybridBackForward.glossinessThreshold))
+				taskConfig->pathTracer.hybridBackForward.glossinessThreshold)) ||
+			// The light sample of a nearly specular bounce after a caustic
+			// cache lookup is in the lookup
+			!PhotonGICache_IsDirectLightSampleVisible(taskConfig, photonGICausticChain,
+				event, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM))
 			)
 		return false;
 

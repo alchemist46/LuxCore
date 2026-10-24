@@ -55,6 +55,8 @@ typedef struct {
 		unsigned int causticPhotonTracedCount;
 		float causticLookUpRadius;
 		float causticLookUpNormalCosAngle;
+		// The caustic photons have 1 to photonMaxPathDepth - 1 bounces
+		unsigned int photonMaxPathDepth;
 
 		int indirectEnabled, causticEnabled;
 

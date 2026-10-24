@@ -113,7 +113,10 @@ public:
 		const float u3, const float u4,
 		const EyePathInfo &pathInfo, const luxrays::Spectrum &pathThrouput,
 		const BSDF &bsdf, SampleResult *sampleResult,
-		const bool useBSDFEVal = true) const;
+		const bool useBSDFEVal = true,
+		// Where the path stands against the PhotonGI caustic cache (see
+		// PhotonGICache::NextCausticChain())
+		const u_int causticChain = 0) const;
 
 	void RenderEyePath(
 		luxrays::IntersectionDeviceRef device,

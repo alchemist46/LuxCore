@@ -257,6 +257,12 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 			taskConfig->pathTracer.rrType != RR_BOUNCE,
 			taskConfig->pathTracer.regularization
 			MATERIALS_PARAM);
+	if (taskConfig->pathTracer.pgic.causticEnabled) {
+		taskState->photonGICausticChain = PhotonGICache_NextCausticChain(taskConfig,
+				taskState->photonGICausticChain, taskState->photonGICausticLookup,
+				bsdfEvent, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM));
+		taskState->photonGICausticLookup = false;
+	}
 
 	// Russian Roulette (the throughput is still the one before the bounce)
 	const bool rrEnabled = EyePathInfo_UseRR(pathInfo, taskConfig->pathTracer.rrDepth);
@@ -455,7 +461,7 @@ OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 
 	checkDirectLightHit = checkDirectLightHit &&
 			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
-			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
+			PhotonGICache_IsDirectLightHitVisible(taskConfig, taskState->photonGICausticChain));
 
 	if (checkDirectLightHit) {
 		DirectHitInfiniteLight(
@@ -568,7 +574,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 
 	checkDirectLightHit = checkDirectLightHit &&
 			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
-			PhotonGICache_IsDirectLightHitVisible(taskConfig, pathInfo, taskState->photonGICausticCacheUsed));
+			PhotonGICache_IsDirectLightHitVisible(taskConfig, taskState->photonGICausticChain));
 
 	// Check if it is a light source (note: I can hit only triangle area light sources)
 #if defined(PARAM_ENABLE_SUBSURFACE)
@@ -662,21 +668,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 			case PGIC_DEBUG_NONE:
 			default: {
 				if (isPhotonGIEnabled) {
-					if (taskConfig->pathTracer.pgic.causticEnabled &&
-							(!taskConfig->pathTracer.hybridBackForward.enabled || (pathInfo->depth.depth != 0))) {
-						const bool isEmpty = PhotonGICache_ConnectWithCausticPaths(bsdf,
-								pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
-								taskConfig->pathTracer.pgic.causticPhotonTracedCount,
-								taskConfig->pathTracer.pgic.causticLookUpRadius,
-								taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
-								VLOAD3F(taskState->throughput.c),
-								&sampleResult->radiancePerPixelNormalized[0]
-								MATERIALS_PARAM);
-
-						if (!isEmpty)
-							taskState->photonGICausticCacheUsed = true;
-					}
-
+					// The indirect cache first: its radiance has all the
+					// photons, the caustic ones too
 					if (taskConfig->pathTracer.pgic.indirectEnabled) {
 						Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
 						const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
@@ -706,6 +699,21 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 							// No cache entry here (the visibility pass placed
 							// none): the path goes on as if the cache was off
 						}
+					}
+
+					if (taskConfig->pathTracer.pgic.causticEnabled &&
+							(!taskConfig->pathTracer.hybridBackForward.enabled || (pathInfo->depth.depth != 0))) {
+						const bool isEmpty = PhotonGICache_ConnectWithCausticPaths(bsdf,
+								pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
+								taskConfig->pathTracer.pgic.causticPhotonTracedCount,
+								taskConfig->pathTracer.pgic.causticLookUpRadius,
+								taskConfig->pathTracer.pgic.causticLookUpNormalCosAngle,
+								VLOAD3F(taskState->throughput.c),
+								&sampleResult->radiancePerPixelNormalized[0]
+								MATERIALS_PARAM);
+
+						if (!isEmpty)
+							taskState->photonGICausticLookup = true;
 					}
 
 					taskState->photonGICacheEnabledOnLastHit = true;
@@ -765,7 +773,8 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				&taskTmp->tmpPathDepthInfo,
 				bsdf,
 				VLOAD3F(taskState->throughput.c),
-				VLOAD3F(&shadowRay->d.x)
+				VLOAD3F(&shadowRay->d.x),
+				taskState->photonGICausticChain
 				LIGHTS_PARAM)) {
 		// Initialize the pass-through event for the shadow ray
 		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);

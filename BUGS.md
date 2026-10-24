@@ -135,13 +135,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `lc-work/d1/toy/toy.py PATHOCL aquad 64 64 256 --set opencl.devices.select=01 --set film.opencl.enable=0` (a floor lit by one quad light, depth 1), HIP.
 - Notes: the task count does not follow the film size (the Sobol bucket size does since 2026-10-18). At 540x540 it is about two samples per pixel (524288 tasks for 291600 pixels). Found during D1; not investigated further.
 
-### PhotonGI drops the light hits after a diffuse then a non-diffuse bounce
-- Found: 2026-10-23
-- Area: engine, caches
-- Problem: with either PhotonGI cache on, `IsDirectLightHitVisible()` (`photongicache.cpp:101`, `pgic_funcs.cl:46`) drops every light hit whose last bounce is not diffuse once the path had a diffuse bounce (`!(lastBSDFEvent & DIFFUSE) && diffuseDepth > 0`), a firefly cut. Nothing adds these paths back: the caustic cache stores only the nearly specular chains, and the indirect cache only where it ends a path. Diffuse -> glossy -> light and the light leaving a scattering medium through glass are lost.
-- Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.indirect.enabled=1` (or `caustic.enabled=1`): disk 0.209 instead of 1.000 (1.000 with the caches off), same before and after CA1.
-- Notes: found during CA1 (2026-10-23). The fix (drop only the nearly caustic paths the caustic cache covers, the third test of the function) changes the look of every PhotonGI render with glossy surfaces (brighter, more fireflies): a decision for the user, see ROADMAP CA1.
-
 ### PhotonGI caustic lookups on the GPU vary up to 15x in time between runs
 - Found: 2026-10-23
 - Area: engine (PATHOCL), caches
@@ -169,3 +162,38 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: `test_WrapBlack_PATHCPU_METROPOLIS` fails about 2 runs in 3 with 3.01-3.07% of the pixels different against the 3.00% maximum (mean brightness 0.36-0.43%, the maximum is 1.5%), on the build before D3 (9202d1ad4) too.
 - Reproduce: `pyunittests/unittests.py --filter WrapBlack_PATHCPU_METROPOLIS` (CPU), a few runs.
 - Notes: the scene has only an infinite light (no triangle lights), so not D3. The Metropolis noise of this scene sits at the threshold: a per-test `MAX_DIFFERENT_PIXELS_OVERRIDES` entry or a new reference would do, after checking the mean is right.
+
+### PhotonGI caustic cache reads darker than the light it replaces
+- Found: 2026-10-23
+- Area: caches (PhotonGI)
+- Problem: with the caustic cache a render reads darker than with every cache off, beyond the noise: cornell-glass with the right sphere's shadow transparency off, a large ceiling light (`Grey.ply`, emission 60) and the middle sphere a mirror: -0.39% (+-0.06%); the middle sphere a 0.04-rough silver metal2: -0.60% (+-0.09%); the small light and glass only: -0.04% (+-0.28%) (PATHCPU 200x200, 128 spp, 4 seeds, a new cache each run; photon.maxcount 4M, caustic.maxsize 1M, radius 0.1, updatespp 0, hybrid off). With one persistent cache file and the lookup at the first vertex only, the cache adds about 0.0014-0.0019 of the image mean where the path-traced light it replaces is about 0.003-0.004 (noisy).
+- Reproduce: `lc-work/pgicut/pt.py render <out> cmm-caustic --engine PATHCPU --spp 128 --seed N` against `cmm-none` (cases `cmb-*` for the metal).
+- Notes: found while removing the firefly cut (CA1). Not a double count or a missing path class as far as checked: the paths the render drops follow the photon definition (the same glossiness threshold, the same surfaces, 1 to photon.maxdepth - 1 bounces). Ruled out: the light sample skip (the mirror has none), the photon sampler (RANDOM the same), the radius (0.03 the same), D3's quad pairing (`lightstrategy.trianglelight.quad = 0`: -0.26%, 2 seeds). Suspects: photons are stored only near a visibility particle (`tracephotonsthread.cpp`, `allNearEntryIndices`), the lookup's normal tests, the edge loss of the disk. The old firefly cut hid it (it dropped far more: -8.6% on the metal case).
+
+### PhotonGI caustic cache in a volume is about 10x too bright
+- Found: 2026-10-23
+- Area: caches (PhotonGI), volumes
+- Problem: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.caustic.enabled=1 scene.volumes.v.photongi.enable=1` reads 10.0 instead of 1.0 (565ebf8df and the build after it alike). Volumes have `photongi.enable` false by default, so only scenes that turn it on are hit.
+- Reproduce: the command above (about 2 minutes).
+- Notes: not investigated: `PGICPhotonBvh::ConnectCacheEntry()` (`pgicbvh.cpp`) divides a volume's BSDF value by its pdf, which leaves the phase function out (1/(4 pi) for an isotropic volume, a factor 12.6); the volume normalization `4/3 pi r^3` is there. Check the GPU twin and the indirect cache of volumes with it.
+
+### PhotonGI persistent cache is computed again in every process with a metal preset
+- Found: 2026-10-23
+- Area: caches (PhotonGI persistent file)
+- Problem: the signature of the persistent file (`PhotonGICache::ComputeSignature()`, `pgicserialize.cpp`) hashes the scene properties with the names of the implicit textures, and some of these carry a random UUID (`metal2` with `preset` makes `<material>-Implicit-FresnelPreset-<uuid>`): every new process finds another signature, computes the cache again and overwrites the file.
+- Reproduce: cornell-glass with `scene.materials.glass-mid.type = metal2` and `preset = silver`, the caustic cache and `path.photongi.persistent.file`, rendered twice in two processes: the second logs "computed for another scene or other parameters". With an explicit `fresnelpreset` texture it is reused.
+- Notes: replace the UUIDs in the names by a fixed token before hashing, or hash the definitions without the implicit names.
+
+### PhotonGI caustic cache traces for hours on a scene without caustics
+- Found: 2026-10-23
+- Area: caches (PhotonGI)
+- Problem: on the white furnace matte sphere (no specular surface) the caustic cache with the default settings never fills: it traces the whole `photon.maxcount` (100M) at about 0.1M photons/s, and again at each caustic update. BIDIRCPU took 6704 s for one 256 spp case; PATHOCL more than 20 minutes. The same on the build before this one (565ebf8df).
+- Reproduce: `tests/furnace/furnace.py BIDIRCPU matte path.photongi.caustic.enabled=1` (or PATHCPU/PATHOCL).
+- Notes: the Metropolis photon sampler finds no useful path. Stop when nothing is stored after a share of the photons, or skip the caustic cache when the scene has no specular or nearly specular surface.
+
+### PATHCPU crashes in the second PhotonGI session of a process
+- Found: 2026-10-24
+- Area: engine (PATHCPU), caches (PhotonGI)
+- Problem: a Python process that renders two furnace cases one after the other with the caustic cache segfaults (exit 139) now and then in the second one: `metal2-a0.05` then `glossy2-coat-a0.05` crashed on 565ebf8df and passed on the next build in one try each; the whole furnace list with the caustic cache (or both caches) crashed at `glossy2-coat-a0.05` in five runs of both builds, and with both caches the `glossycoating` group crashed after `glossycoating-white-a0.05`. Each case alone passes.
+- Reproduce: `tests/furnace/furnace.py PATHCPU metal2-a0.05,glossy2-coat-a0.05 path.photongi.caustic.enabled=1 path.photongi.photon.maxcount=2000000 path.photongi.caustic.updatespp=0`, a few runs; `all` instead of the two names crashes every time at the 18th case.
+- Notes: not investigated (the K4 ASan build would show it). Suspect state the first session's cache leaves behind (the caustic update barrier or its threads, a scene or BVH pointer).

@@ -121,7 +121,10 @@ typedef struct {
 	float firstPassThroughEvent;
 	
 	int albedoToDo, photonGICacheEnabledOnLastHit,
-			photonGICausticCacheUsed, photonGIShowIndirectPathMixUsed,
+			// See PhotonGICache_NextCausticChain(): the chain, and if the
+			// caustic cache was looked up with a result at this vertex
+			photonGICausticChain, photonGICausticLookup,
+			photonGIShowIndirectPathMixUsed,
 			// The shadow transparency lag used by Scene_Intersect()
 			throughShadowTransparency;
 } GPUTaskState;

@@ -157,7 +157,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 		const float u3, const float u4,
 		const EyePathInfo &pathInfo, const Spectrum &pathThroughput,
 		const BSDF &bsdf, SampleResult *sampleResult,
-		const bool useBSDFEVal) const {
+		const bool useBSDFEVal, const u_int causticChain) const {
 	if (!bsdf.IsDelta()) {
 		// Select the light strategy to use
 		auto& lightStrategy =
@@ -205,7 +205,11 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 
 				if (!bsdfEval.Black() &&
 						(!hybridBackForwardEnable ||
-						!pathInfo.IsCausticPath(event, bsdf.GetUnregularizedGlossiness(), hybridBackForwardGlossinessThreshold))) {
+						!pathInfo.IsCausticPath(event, bsdf.GetUnregularizedGlossiness(), hybridBackForwardGlossinessThreshold)) &&
+						// The light sample of a nearly specular bounce after a
+						// caustic cache lookup is in the lookup
+						(!photonGICache ||
+						photonGICache->IsDirectLightSampleVisible(causticChain, event, bsdf.GetUnregularizedGlossiness()))) {
 					verify (!isnan(bsdfPdfW) && !isinf(bsdfPdfW));
 					
 					// Create a new PathDepthInfo for the path to the light source
@@ -526,7 +530,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 	SampleResult &sampleResult = sampleResults[0];
 	bool photonGIShowIndirectPathMixUsed = false;
-	bool photonGICausticCacheUsed = false;
+	// Where the path stands against the PhotonGI caustic cache (see
+	// PhotonGICache::NextCausticChain())
+	u_int causticChain = 0;
 	bool photonGICacheEnabledOnLastHit = false;
 	bool albedoToDo = true;
 	sampleResult.albedo = Spectrum(); // Just in case albedoToDo is never true
@@ -539,6 +545,8 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 	for (;;) {
 		sampleResult.firstPathVertex = (pathInfo.depth.depth == 0);
 		const u_int sampleOffset = eyeSampleBootSize + pathInfo.depth.depth * eyeSampleStepSize;
+		// The caustic cache was looked up here with a result
+		bool causticLookup = false;
 
 		RayHit eyeRayHit;
 		const float passThrough = sampler.GetSample(sampleOffset + IDX_PASSTHROUGH);
@@ -563,7 +571,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				(!hybridBackForwardEnable || !pathInfo.IsCausticPath()) &&
 				// Avoid to render caustic path if PhotonGI caustic cache is enabled
 				(!photonGICache ||
-					photonGICache->IsDirectLightHitVisible(pathInfo, photonGICausticCacheUsed));
+					photonGICache->IsDirectLightHitVisible(causticChain));
 
 		if (!hit) {
 			// Nothing was hit, look for env. lights
@@ -698,15 +706,8 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				if (isPhotonGIEnabled) {
 					// TODO: add support for AOVs (possible ?)
 
-					if (photonGICache->IsCausticEnabled() && (!hybridBackForwardEnable || pathInfo.depth.depth != 0)) {
-						const SpectrumGroup causticRadiance = photonGICache->ConnectWithCausticPaths(bsdf);
-
-						if (!causticRadiance.Black()) {
-							sampleResult.radiance.AddWeighted(pathThroughput, causticRadiance);
-							photonGICausticCacheUsed = true;
-						}
-					}
-
+					// The indirect cache first: its radiance has all the
+					// photons, the caustic ones too
 					if (photonGICache->IsIndirectEnabled() && photonGICacheEnabledOnLastHit &&
 							(eyeRayHit.t > photonGICache->GetIndirectUsageThreshold(pathInfo.lastBSDFEvent,
 								pathInfo.lastGlossiness,
@@ -721,6 +722,15 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 						}
 						// No cache entry here (the visibility pass placed
 						// none): the path goes on as if the cache was off
+					}
+
+					if (photonGICache->IsCausticEnabled() && (!hybridBackForwardEnable || pathInfo.depth.depth != 0)) {
+						const SpectrumGroup causticRadiance = photonGICache->ConnectWithCausticPaths(bsdf);
+
+						if (!causticRadiance.Black()) {
+							sampleResult.radiance.AddWeighted(pathThroughput, causticRadiance);
+							causticLookup = true;
+						}
 					}
 
 					photonGICacheEnabledOnLastHit = true;
@@ -752,7 +762,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_W),
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A),
 				pathInfo, 
-				pathThroughput, bsdf, &sampleResult);
+				pathThroughput, bsdf, &sampleResult, true, causticChain);
 
 		if (sampleResult.lastPathVertex)
 			break;
@@ -799,6 +809,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 		pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold,
 				rrType != slg::ocl::RR_BOUNCE, regularizationRoughness);
+		if (photonGICache)
+			causticChain = photonGICache->NextCausticChain(causticChain, causticLookup,
+					bsdfEvent, bsdf.GetUnregularizedGlossiness());
 
 		// Russian Roulette
 		float rrProb = 1.f;

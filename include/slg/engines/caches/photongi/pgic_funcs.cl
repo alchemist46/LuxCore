@@ -37,23 +37,45 @@ OPENCL_FORCE_INLINE bool PhotonGICache_IsPhotonGIEnabled(__global const BSDF *bs
 	}
 }
 
+// The caustic cache owns the light paths it stores. causticChain: 0 for none,
+// else 1 + the nearly specular bounces since the vertex where the caustic cache
+// was looked up with a result (see PhotonGICache::IsDirectLightHitVisible() and
+// PhotonGICache::NextCausticChain()).
+
+OPENCL_FORCE_INLINE bool PhotonGICache_IsNearlySpecular(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		const BSDFEvent event, const float glossiness) {
+	return (event & SPECULAR) || ((event & GLOSSY) &&
+			(glossiness <= taskConfig->pathTracer.pgic.glossinessUsageThreshold));
+}
+
 OPENCL_FORCE_INLINE bool PhotonGICache_IsDirectLightHitVisible(
 		__constant const GPUTaskConfiguration* restrict taskConfig,
-		__global const EyePathInfo *pathInfo,
-		const bool photonGICausticCacheUsed) {
-	// This is a specific check to cut fireflies created by some glossy or
-	// specular bounce
-	if (!(pathInfo->lastBSDFEvent & DIFFUSE) && (pathInfo->depth.diffuseDepth > 0))
-		return false;
-	else if (!taskConfig->pathTracer.pgic.causticEnabled || !photonGICausticCacheUsed)
-		return true;
-	// Not a caustic path: EyePathInfo_IsCausticPath(), as the CPU's
-	// EyePathInfo::IsCausticPath()
-	else if (!(pathInfo->isNearlyCaustic && (pathInfo->depth.depth > 1)) &&
-			(taskConfig->pathTracer.pgic.debugType == PGIC_DEBUG_NONE))
-		return true;
+		const uint causticChain) {
+	// PhotonGICache_NextCausticChain() keeps causticChain <= photonMaxPathDepth
+	return !taskConfig->pathTracer.pgic.causticEnabled || (causticChain < 2);
+}
+
+OPENCL_FORCE_INLINE bool PhotonGICache_IsDirectLightSampleVisible(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		const uint causticChain, const BSDFEvent event, const float glossiness) {
+	// The light sample adds one bounce to the chain
+	return !taskConfig->pathTracer.pgic.causticEnabled || (causticChain == 0) ||
+			(causticChain >= taskConfig->pathTracer.pgic.photonMaxPathDepth) ||
+			!PhotonGICache_IsNearlySpecular(taskConfig, event, glossiness);
+}
+
+OPENCL_FORCE_INLINE uint PhotonGICache_NextCausticChain(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		const uint causticChain, const bool causticLookup,
+		const BSDFEvent event, const float glossiness) {
+	if (causticLookup)
+		return 1;
+	else if ((causticChain != 0) && (causticChain < taskConfig->pathTracer.pgic.photonMaxPathDepth) &&
+			PhotonGICache_IsNearlySpecular(taskConfig, event, glossiness))
+		return causticChain + 1;
 	else
-		return false;
+		return 0;
 }
 
 //------------------------------------------------------------------------------

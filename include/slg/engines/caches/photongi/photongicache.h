@@ -289,8 +289,18 @@ public:
 	bool IsPhotonGIEnabled(const BSDF &bsdf) const;
 	float GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
 			const float lastGlossiness, const float u0) const;
-	bool IsDirectLightHitVisible(const EyePathInfo &pathInfo,
-		const bool photonGICausticCacheUsed) const;
+	// The caustic cache owns the light paths it stores: the light hit, or the
+	// light sample with the event of a vertex, of such a path is not counted
+	// again. causticChain is where the eye path stands against the cache: 0
+	// for none, else 1 + the nearly specular bounces since the vertex where
+	// the caustic cache was looked up with a result (see NextCausticChain()).
+	bool IsDirectLightHitVisible(const u_int causticChain) const;
+	bool IsDirectLightSampleVisible(const u_int causticChain,
+		const BSDFEvent event, const float glossiness) const;
+	// The chain after the bounce of a vertex: causticLookup is true when the
+	// caustic cache was looked up there with a result
+	u_int NextCausticChain(const u_int causticChain, const bool causticLookup,
+		const BSDFEvent event, const float glossiness) const;
 
 	const PhotonGICacheParams &GetParams() const { return params; }
 
