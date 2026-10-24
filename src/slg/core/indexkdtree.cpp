@@ -110,8 +110,8 @@ void IndexKdTree<T>::Build(
 		// Sort the nodes around the split plane
 		nth_element(
 			startIt,
-			endIt,
 			splitIt,
+			endIt,
 			CompareNode<T>(allEntries, splitAxis)
 		);
 
