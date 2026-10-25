@@ -115,13 +115,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: the scene above in SDL (`scene.objects.plane.vertices = -2 -2 0  2 -2 0  2 2 0  -2 2 0`, `faces = 0 1 2  0 2 3`, `uvs = 0 0  4 0  4 4  0 4`; camera `lookat.orig = 0 -2.5 2.2`, target the origin, fov 50), PATHCPU against PATHOCL (HIP, `opencl.native.threads.count = 0`), two seeds each.
 - Notes: found while checking the GPU Mix bump fix; not split yet (point light alone, environment alone, the light strategy with two lights, the near distance of the light to the plane).
 
-### PATHOCL renders the sun 0.1% brighter than PATHCPU
-- Found: 2026-10-22
-- Area: light (sun), engine (PATHOCL)
-- Problem: a grey matte sphere and floor lit only by a sun read 1.0011 of PATHCPU in every channel with PATHOCL (2 seeds each, 256 spp, 96x96; the seed noise is under 1e-4). The other lights of the same check (sky2, a point light and an emissive quad with a temperature, a constant environment) agree within 0.02%.
-- Reproduce: `tests/benchmark/cpugpu.py <outdir> cases=sun` (a `sun` light, `dir = 0.3 -0.4 1`, gain 0.01, path depth 8).
-- Notes: not investigated. Suspects: the sun disk sampling or its pdf (cone angle from the relative size), CPU against GPU.
-
 ### PhotonGI caustic lookups on the GPU vary up to 15x in time between runs
 - Found: 2026-10-23
 - Area: engine (PATHOCL), caches

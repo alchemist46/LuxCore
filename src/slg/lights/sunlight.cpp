@@ -141,6 +141,28 @@ void SunLight::GetPreprocessedData(float *absoluteSunDirData,
 		*sin2ThetaMaxData = sin2ThetaMax;
 }
 
+// The cone of the sun is about 180 float ulps wide around cos(thetaMax) =
+// 0.99999 at relsize 1: 1 - cosThetaMax cancels (0.4% too large at relsize 1,
+// 1.5% at 0.5), so the cone is sampled, and its pdf computed, from
+// 1 - cos(thetaMax) = sin^2(thetaMax) / (1 + cos(thetaMax))
+static float SunConeOneMinusCos(const float cosThetaMax, const float sin2ThetaMax) {
+	return sin2ThetaMax / (1.f + cosThetaMax);
+}
+
+static float SunConePdf(const float oneMinusCosThetaMax) {
+	return 1.f / (2.f * M_PI * oneMinusCosThetaMax);
+}
+
+static Vector SunConeSample(const float u0, const float u1, const float oneMinusCosThetaMax,
+		const Vector &x, const Vector &y, const Vector &z) {
+	const float u0x = oneMinusCosThetaMax * u0;
+	const float cosTheta = 1.f - u0x;
+	const float sinTheta = sqrtf(Max(0.f, u0x * (2.f - u0x)));
+	const float phi = u1 * 2.f * M_PI;
+
+	return cosf(phi) * sinTheta * x + sinf(phi) * sinTheta * y + cosTheta * z;
+}
+
 float SunLight::GetPower(SceneConstRef scene) const {
 	const float envRadius = GetEnvRadius(scene);
 
@@ -159,9 +181,12 @@ Spectrum SunLight::Emit(SceneConstRef scene,
 	float d1, d2;
 	ConcentricSampleDisk(u0, u1, &d1, &d2);
 	const Point rayOrig = worldCenter + envRadius * (absoluteSunDir + d1 * x + d2 * y);
-	const Vector rayDir = -UniformSampleCone(u2, u3, cosThetaMax, x, y, absoluteSunDir);
+	const float oneMinusCosThetaMax = SunConeOneMinusCos(cosThetaMax, sin2ThetaMax);
+	if (oneMinusCosThetaMax == 0.f)
+		return Spectrum();
+	const Vector rayDir = -SunConeSample(u2, u3, oneMinusCosThetaMax, x, y, absoluteSunDir);
 
-	const float uniformConePdf = UniformConePdf(cosThetaMax);
+	const float uniformConePdf = SunConePdf(oneMinusCosThetaMax);
 	emissionPdfW = uniformConePdf / (M_PI * envRadius * envRadius);
 
 	if (directPdfA)
@@ -179,12 +204,15 @@ Spectrum SunLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 		const float time, const float u0, const float u1, const float passThroughEvent,
         Ray &shadowRay, float &directPdfW,
 		float *emissionPdfW, float *cosThetaAtLight) const {
-	const Vector shadowRayDir = UniformSampleCone(u0, u1, cosThetaMax, x, y, absoluteSunDir);
-
-	// Check if the point can be inside the sun cone of light
-	const float cosAtLight = Dot(absoluteSunDir, shadowRayDir);
-	if (cosAtLight <= cosThetaMax)
+	const float oneMinusCosThetaMax = SunConeOneMinusCos(cosThetaMax, sin2ThetaMax);
+	if (oneMinusCosThetaMax == 0.f)
 		return Spectrum();
+	const Vector shadowRayDir = SunConeSample(u0, u1, oneMinusCosThetaMax, x, y, absoluteSunDir);
+
+	// The direction is in the cone by construction: testing it again against
+	// cosThetaMax dropped the samples the float rounding put on the edge
+	// (0.3% of them at relsize 1, a device dependent loss)
+	const float cosAtLight = Dot(absoluteSunDir, shadowRayDir);
 
 	const Point worldCenter = scene.GetDataSet().GetBSphere().center;
 	const float envRadius = GetEnvRadius(scene);
@@ -195,8 +223,8 @@ Spectrum SunLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	const float approach = Dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrtf(Max(0.f, envRadius * envRadius -
 		centerDistanceSquared + approach * approach));
-	
-	const float uniformConePdf = UniformConePdf(cosThetaMax);
+
+	const float uniformConePdf = SunConePdf(oneMinusCosThetaMax);
 	directPdfW = uniformConePdf;
 
 	if (cosThetaAtLight)
@@ -219,7 +247,7 @@ Spectrum SunLight::GetRadiance(SceneConstRef scene,
 	if ((cosThetaMax == 1.f) || (zD < 0.f) || ((xD * xD + yD * yD) > sin2ThetaMax))
 		return Spectrum();
 
-	const float uniformConePdf = UniformConePdf(cosThetaMax);
+	const float uniformConePdf = SunConePdf(SunConeOneMinusCos(cosThetaMax, sin2ThetaMax));
 	if (directPdfA)
 		*directPdfA = uniformConePdf;
 

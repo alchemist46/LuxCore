@@ -359,6 +359,14 @@ OPENCL_FORCE_INLINE float3 Sky2Light_Illuminate(__global const LightSource *sky2
 // SunLight
 //------------------------------------------------------------------------------
 
+// The cone of the sun is about 180 float ulps wide around cos(thetaMax) =
+// 0.99999 at relsize 1: 1 - cosThetaMax cancels, so the cone is sampled, and
+// its pdf computed, from 1 - cos(thetaMax) = sin^2(thetaMax) / (1 + cos(thetaMax))
+// (as on the CPU, sunlight.cpp)
+OPENCL_FORCE_INLINE float SunLight_ConeOneMinusCos(__global const LightSource *sunLight) {
+	return sunLight->notIntersectable.sun.sin2ThetaMax / (1.f + sunLight->notIntersectable.sun.cosThetaMax);
+}
+
 OPENCL_FORCE_INLINE float3 SunLight_GetRadiance(__global const LightSource *sunLight,
 		__global const BSDF *bsdf, const float3 dir, float *directPdfA) {
 	const float cosThetaMax = sunLight->notIntersectable.sun.cosThetaMax;
@@ -374,7 +382,7 @@ OPENCL_FORCE_INLINE float3 SunLight_GetRadiance(__global const LightSource *sunL
 		return BLACK;
 
 	if (directPdfA)
-		*directPdfA = UniformConePdf(cosThetaMax);
+		*directPdfA = 1.f / (2.f * M_PI_F * SunLight_ConeOneMinusCos(sunLight));
 
 	return VLOAD3F(sunLight->notIntersectable.sun.color.c);
 }
@@ -385,14 +393,19 @@ OPENCL_FORCE_INLINE float3 SunLight_Illuminate(__global const LightSource *sunLi
 		__global const BSDF *bsdf, const float time, const float u0, const float u1,
 		__global Ray *shadowRay, float *directPdfW) {
 
-	const float cosThetaMax = sunLight->notIntersectable.sun.cosThetaMax;
-	const float3 sunDir = VLOAD3F(&sunLight->notIntersectable.sun.absoluteDir.x);
-	const float3 shadowRayDir = UniformSampleCone(u0, u1, cosThetaMax, VLOAD3F(&sunLight->notIntersectable.sun.x.x), VLOAD3F(&sunLight->notIntersectable.sun.y.x), sunDir);
-
-	// Check if the point can be inside the sun cone of light
-	const float cosAtLight = dot(sunDir, shadowRayDir);
-	if (cosAtLight <= cosThetaMax)
+	const float oneMinusCosThetaMax = SunLight_ConeOneMinusCos(sunLight);
+	if (oneMinusCosThetaMax == 0.f)
 		return BLACK;
+
+	// The direction is in the cone by construction (no test against
+	// cosThetaMax: the float rounding put samples on the edge)
+	const float3 sunDir = VLOAD3F(&sunLight->notIntersectable.sun.absoluteDir.x);
+	const float u0x = oneMinusCosThetaMax * u0;
+	const float sinTheta = sqrt(fmax(0.f, u0x * (2.f - u0x)));
+	const float phi = u1 * 2.f * M_PI_F;
+	const float3 shadowRayDir = (cos(phi) * sinTheta) * VLOAD3F(&sunLight->notIntersectable.sun.x.x) +
+			(sin(phi) * sinTheta) * VLOAD3F(&sunLight->notIntersectable.sun.y.x) +
+			(1.f - u0x) * sunDir;
 
 	const float3 worldCenter = MAKE_FLOAT3(worldCenterX, worldCenterY, worldCenterZ);
 	const float envRadius = EnvLightSource_GetEnvRadius(sceneRadius);
@@ -404,7 +417,7 @@ OPENCL_FORCE_INLINE float3 SunLight_Illuminate(__global const LightSource *sunLi
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
 
-	*directPdfW = UniformConePdf(cosThetaMax);
+	*directPdfW = 1.f / (2.f * M_PI_F * oneMinusCosThetaMax);
 
 	// Setup the shadow ray
 	const float3 shadowRayOrig = BSDF_GetRayOrigin(bsdf, shadowRayDir);
