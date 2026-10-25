@@ -65,15 +65,16 @@ OPENCL_FORCE_INLINE float Material_GetEmittedCosThetaMax(const uint matIndex
 // Material_Bump
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE uint Material_GetBumpTexIndex(__global const Material *material,
+// The material whose bump texture and sampling distance bump the material: a
+// TWOSIDED one bumps with its front or back material, down a chain of nested
+// ones (as TwoSidedMaterial::Bump() on the CPU)
+OPENCL_FORCE_INLINE __global const Material *Material_GetBumpMaterial(__global const Material *material,
 		__global const HitPoint *hitPoint
 		MATERIALS_PARAM_DECL) {
-	// A special case here for TWOSIDED material
-	if (material->type == TWOSIDED) {
-		return hitPoint->intoObject ? mats[material->twosided.frontMatIndex].bumpTexIndex :
-			mats[material->twosided.backMatIndex].bumpTexIndex;
-	} else
-		return material->bumpTexIndex;
+	while (material->type == TWOSIDED)
+		material = &mats[hitPoint->intoObject ? material->twosided.frontMatIndex : material->twosided.backMatIndex];
+
+	return material;
 }
 
 OPENCL_FORCE_INLINE void Material_SetBumpedShadeN(__global HitPoint *hitPoint, const float3 shadeN) {
@@ -90,10 +91,10 @@ OPENCL_FORCE_INLINE void Material_SetBumpedShadeN(__global HitPoint *hitPoint, c
 
 OPENCL_FORCE_INLINE void Material_Bump(const uint matIndex, __global HitPoint *hitPoint
 	MATERIALS_PARAM_DECL) {
-	__global const Material *material = &mats[matIndex];
-
-	const uint bumpTexIndex = Material_GetBumpTexIndex(material, hitPoint
+	__global const Material *material = Material_GetBumpMaterial(&mats[matIndex], hitPoint
 			MATERIALS_PARAM);
+
+	const uint bumpTexIndex = material->bumpTexIndex;
 	if (bumpTexIndex != NULL_INDEX) {
 		const float3 shadeN = Texture_Bump(bumpTexIndex, hitPoint, material->bumpSampleDistance
 			TEXTURES_PARAM);
@@ -130,10 +131,10 @@ OPENCL_FORCE_INLINE void Material_Bump(const uint matIndex, __global HitPoint *h
 OPENCL_FORCE_INLINE void Material_BumpSubMaterial(const uint matIndex, const uint bumpSlot,
 		__global HitPoint *hitPoint, __global float *evalStack
 		MATERIALS_PARAM_DECL) {
-	__global const Material *material = &mats[matIndex];
-
-	const uint bumpTexIndex = Material_GetBumpTexIndex(material, hitPoint
+	__global const Material *material = Material_GetBumpMaterial(&mats[matIndex], hitPoint
 			MATERIALS_PARAM);
+
+	const uint bumpTexIndex = material->bumpTexIndex;
 	if (bumpTexIndex == NULL_INDEX)
 		return;
 

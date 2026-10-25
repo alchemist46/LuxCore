@@ -149,10 +149,10 @@ static bool IsLeafMaterial(const slg::ocl::MaterialType type) {
 bool CompiledScene::MaterialHasBump(const u_int matIndex) const {
 	const slg::ocl::Material *mat = &mats[matIndex];
 
-	// As Material_GetBumpTexIndex()
+	// As Material_GetBumpMaterial(): a TWOSIDED one, down its nested ones
 	if (mat->type == slg::ocl::TWOSIDED)
-		return (mats[mat->twosided.frontMatIndex].bumpTexIndex != NULL_INDEX) ||
-				(mats[mat->twosided.backMatIndex].bumpTexIndex != NULL_INDEX);
+		return MaterialHasBump(mat->twosided.frontMatIndex) ||
+				MaterialHasBump(mat->twosided.backMatIndex);
 	else
 		return (mat->bumpTexIndex != NULL_INDEX);
 }
