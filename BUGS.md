@@ -148,14 +148,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine (PATHCPU), caches (PhotonGI)
 - Problem: a Python process that renders two furnace cases one after the other with the caustic cache segfaults (exit 139) now and then in the second one: `metal2-a0.05` then `glossy2-coat-a0.05` crashed on 565ebf8df and passed on the next build in one try each; the whole furnace list with the caustic cache (or both caches) crashed at `glossy2-coat-a0.05` in five runs of both builds, and with both caches the `glossycoating` group crashed after `glossycoating-white-a0.05`. Each case alone passes.
 - Reproduce: `tests/furnace/furnace.py PATHCPU metal2-a0.05,glossy2-coat-a0.05 path.photongi.caustic.enabled=1 path.photongi.photon.maxcount=2000000 path.photongi.caustic.updatespp=0`, a few runs; `all` instead of the two names crashes every time at the 18th case.
-- Notes: not investigated (the K4 ASan build would show it). Suspect state the first session's cache leaves behind (the caustic update barrier or its threads, a scene or BVH pointer).
-
-### Cornell box pair: the `Smooth by Angle` modifier of Suzanne is missing on the Windows machine
-- Found: 2026-10-24
-- Area: tests (G0, scenes/cornell)
-- Problem: both Cornell blends link `Smooth by Angle` from `geometry_nodes_essentials.blend` in the Apps/blender-5.1.2-linux-x64 folder next to the repo (a relative `//../Apps/...` path of the Linux machine), which does not exist here, so the modifier does nothing and Suzanne renders without it (it has `use_smooth` on, so the picture barely changes). The same file on the Linux machine renders with it. Both engines see the same mesh on one machine, so the A/B is not affected, but renders from the two machines differ.
-- Reproduce: open either blend in Blender on Windows and look at the modifier stack of Suzanne (Blender reports the missing library).
-- Notes: not fixed. Making the asset local (or removing the modifier) in both files would make the two machines agree.
+- Notes: not investigated (the K4 ASan build would show it). Suspect state the first session's cache leaves behind (the caustic update barrier or its threads, a scene or BVH pointer). Still there on 2026-10-25 (4900f79c9): the `all` list crashed (exit 139) at the 18th case, `metal2-a0.05`, the first one after `roughglass-a0.05`.
 
 ### CannelleEtFromage: PATHOCL reads 3% brighter than PATHCPU without clamping
 - Found: 2026-10-25
