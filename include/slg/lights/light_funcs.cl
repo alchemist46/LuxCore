@@ -581,10 +581,17 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	const float distance = sqrt(distanceSquared);
 	sampleDir /= distance;
 	
-	// Build a temporary HitPoint. Without an emission map and with a constant
-	// emission, only the geometry normal and the side are read below: the
-	// normals, the UV and the differentials of HitPoint_Init() are skipped.
-	if ((triLight->triangle.imageMapIndex == NULL_INDEX) && mats[materialIndex].constEmittedRadiance) {
+	// The opacity of the light point scales its emission (as
+	// TriangleLight::GetOpacity() on the CPU): a ray stops on a light with a
+	// transparency texture only with that probability. A null material keeps
+	// its emission.
+	const bool opacity = !mats[materialIndex].noPassThroughTransparency && (mats[materialIndex].type != NULLMAT);
+
+	// Build a temporary HitPoint. Without an emission map, with a constant
+	// emission and opaque, only the geometry normal and the side are read
+	// below: the normals, the UV and the differentials of HitPoint_Init() are
+	// skipped.
+	if ((triLight->triangle.imageMapIndex == NULL_INDEX) && mats[materialIndex].constEmittedRadiance && !opacity) {
 		const float3 geometryN = ExtMesh_GetGeometryNormal(&motionLocalToWorld, meshIndex, triangleIndex EXTMESH_PARAM);
 		VSTORE3F(geometryN, &tmpHitPoint->geometryN.x);
 		// As HitPoint_Init() with fixedDir = -sampleDir
@@ -651,9 +658,19 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 	// Setup the shadow ray
 	Ray_Init4(shadowRay, shadowRayOrig, shadowRayDir, 0.f, shadowRayDistance, time);
 
-	return Material_GetEmittedRadiance(materialIndex,
+	float3 result = Material_GetEmittedRadiance(materialIndex,
 			tmpHitPoint, triLight->triangle.invMeshArea
 			MATERIALS_PARAM) * emissionColor;
+	if (opacity && !Spectrum_IsBlack(result)) {
+		Frame frame;
+		HitPoint_GetFrame(tmpHitPoint, &frame);
+		const float3 localFixedDir = Frame_ToLocal_Private(&frame, -sampleDir);
+		result *= Spectrum_Clamp(WHITE - Material_GetPassThroughTransparency(materialIndex,
+				tmpHitPoint, localFixedDir, passThroughEvent, false
+				MATERIALS_PARAM));
+	}
+
+	return result;
 }
 
 //------------------------------------------------------------------------------

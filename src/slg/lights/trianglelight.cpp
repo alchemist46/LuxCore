@@ -182,7 +182,29 @@ Spectrum TriangleLight::Emit(SceneConstRef scene,
 
 	ray.Update(rayOrig, rayDir, time);
 
-	return lightMaterial->GetEmittedRadiance(tmpHitPoint, invMeshArea) * emissionColor * fabsf(localDirOut.z);
+	// The side the light leaves from, as a ray coming back along it sees it
+	tmpHitPoint.fixedDir = rayDir;
+	tmpHitPoint.intoObject = (Dot(rayDir, tmpHitPoint.geometryN) > 0.f);
+
+	return lightMaterial->GetEmittedRadiance(tmpHitPoint, invMeshArea) * emissionColor * fabsf(localDirOut.z) *
+			GetOpacity(tmpHitPoint, passThroughEvent);
+}
+
+// A ray stops on a light with a transparency texture only with the probability
+// of its opacity (Material::GetPassThroughTransparency(), Scene::Intersect()):
+// the BSDF sampling sees opacity * emission, and the light sampling and the
+// light paths must emit the same, or MIS blends two different images. A null
+// material, which every ray passes, keeps its emission: it lights the scene
+// only through the light sampling.
+Spectrum TriangleLight::GetOpacity(const HitPoint &hitPoint, const float passThroughEvent) const {
+	if (lightMaterial->GetType() == NULLMAT)
+		return Spectrum(1.f);
+
+	const Frame frame(hitPoint.GetFrame());
+	const Spectrum transparency = lightMaterial->GetPassThroughTransparency(hitPoint,
+			frame.ToLocal(hitPoint.fixedDir), passThroughEvent, false);
+
+	return (Spectrum(1.f) - transparency).Clamp(0.f, 1.f);
 }
 
 Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
@@ -320,7 +342,8 @@ Spectrum TriangleLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	
 	shadowRay = Ray(shadowRayOrig, shadowRayDir, 0.f, shadowRayDistance, time);
 
-	return lightMaterial->GetEmittedRadiance(tmpHitPoint, invMeshArea) * emissionColor;
+	return lightMaterial->GetEmittedRadiance(tmpHitPoint, invMeshArea) * emissionColor *
+			GetOpacity(tmpHitPoint, passThroughEvent);
 }
 
 bool TriangleLight::IsAlwaysInShadow(SceneConstRef scene,

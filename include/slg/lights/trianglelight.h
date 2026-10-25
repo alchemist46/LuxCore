@@ -127,6 +127,10 @@ public:
 	u_int quadCorner, quadPartnerCorner;
 
 private:
+	// The opacity of the light point seen from hitPoint.fixedDir (an estimate
+	// of 0 or 1 for a transparency texture, see Material::GetPassThroughTransparency())
+	luxrays::Spectrum GetOpacity(const HitPoint &hitPoint, const float passThroughEvent) const;
+
 	float triangleArea, invTriangleArea;
 	float meshArea, invMeshArea;
 };
