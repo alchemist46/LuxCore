@@ -18,7 +18,7 @@ When a feature is done:
 After every commit (in this repo or in the BlendLuxCore repo), rebuild the addon and install it into Blender, so the installed copy always matches the latest commit:
 
 1. Set `version` in the addon's `blender_manifest.toml` to the current build version (the core's version in `build-system/build-settings.json`) and commit it if it changed.
-2. Build the zip from a clean `git archive HEAD` copy of the addon, not from the working tree: the CMake configure wipes `wheels/` and rewrites the manifest `wheels` line. In the copy, run `cmake -S . -B <build> -DCMAKE_BUILD_TYPE=Release && cmake --build <build>`; the zip lands in `<build>/out/`.
+2. Build the zip from a clean `git archive HEAD` copy of the addon, not from the working tree: the CMake configure wipes `wheels/` and rewrites the manifest `wheels` line. In the copy, run `cmake -S . -B <build> -DCMAKE_BUILD_TYPE=Release && cmake --build <build>`; the zip lands in `<build>/out/`. Copy it to `dist/` in the root of this repo (git-ignored), replacing the older zips there, so the zip to load in Blender (Preferences > Get Extensions > Install from Disk) is always in one known place.
 3. Install it with `blender --command extension install-file -r user_default --enable <zip>`, after backing up the installed copy (`~/.config/blender/5.2/extensions/user_default/blendluxcore`).
 4. Check the output says `BlendLuxCore <version> registered (with pyluxcore <version>)`.
 5. Do not bump `PYLUXCORE_VERSION` in the addon's `luxloader/__init__.py` until that version is on PyPI.
