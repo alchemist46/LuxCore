@@ -18,11 +18,14 @@
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
+#include <cstring>
 #include <iosfwd>
 #include <limits>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
+
+#include "oneapi/tbb.h"
 
 #include "luxrays/core/bvh/bvhbuild.h"
 #include "slg/engines/pathoclbase/compiledscene.h"
@@ -262,10 +265,11 @@ void CompiledScene::CompileLights() {
 
 	CompileELVC(EnvLightVisibilityCacheRPtr(nullptr));
 
-	for (u_int i = 0; i < lightCount; ++i) {
+	auto compileLight = [&](const u_int i) {
 		auto& l = scene.GetLightSources().GetLightSource(i);
 
 		slg::ocl::LightSource *oclLight = &lightDefs[i];
+		memset(oclLight, 0, sizeof(slg::ocl::LightSource));
 		oclLight->lightSceneIndex = l.lightSceneIndex;
 		oclLight->lightID = l.GetID();
 		oclLight->visibility =
@@ -713,6 +717,24 @@ void CompiledScene::CompileLights() {
 
 		if (l.IsEnvironmental())
 			envLightIndices.push_back(i);
+	};
+
+	// The triangle lights in parallel (a scene can have millions of them, in
+	// an order unrelated to their place in memory), then the other lights in
+	// their order: they add to envLightIndices, envLightDistributions and the
+	// ELVC data
+	vector<u_char> isTriangleLight(lightCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, lightCount, 1024),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				isTriangleLight[i] = (scene.GetLightSources().GetLightSource(i).GetType() == TYPE_TRIANGLE);
+				if (isTriangleLight[i])
+					compileLight(i);
+			}
+		});
+	for (u_int i = 0; i < lightCount; ++i) {
+		if (!isTriangleLight[i])
+			compileLight(i);
 	}
 
 	lightIndexOffsetByMeshIndex = scene.GetLightSources().GetLightIndexOffsetByMeshIndex();

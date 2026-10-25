@@ -48,6 +48,9 @@ public:
 	void UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode);
 
 	LightSourceUPtr DefineLightSource(LightSourceUPtr&& l);
+	// Defines the lights in their order, as DefineLightSource() each (the old
+	// lights of the same names are freed); their names are hashed in parallel
+	void DefineLightSources(std::vector<LightSourceUPtr> &&ls);
 	bool IsLightSourceDefined(const std::string &name) const;
 
 	LightSourceRef GetLightSource(const std::string &name);
@@ -127,6 +130,9 @@ public:
 	friend class Scene;
 
 private:
+	// DefineLightSource() with the hash of the light's name
+	LightSourceUPtr DefineLightSource(LightSourceUPtr&& l, const size_t nameHash);
+
 	// Update lightGroupCount, envLightSources, intersectableLightSources,
 	// lightIndexOffsetByMeshIndex, lightStrategyType, etc.
 	// This is called by Scene::Preprocess()
@@ -151,12 +157,28 @@ private:
 	// index, see Preprocess()) is the same as with string keys: robin_hood's
 	// own hash of a string_view is enabled only when __cplusplus says C++17,
 	// which MSVC doesn't without /Zc:__cplusplus, and std::hash is another one.
-	struct NameHash {
-		size_t operator()(const std::string_view name) const noexcept {
-			return robin_hood::hash_bytes(name.data(), name.size());
+	// The key keeps its hash: the table hashes every key again each time it
+	// grows, which read each name again (17.9M triangle lights: 5.1 s of
+	// inserts instead of 2.8 s). The same hash values, so the same table.
+	struct LightName {
+		LightName() : hash(0) { }
+		LightName(const std::string_view n, const size_t h) : name(n), hash(h) { }
+		LightName(const std::string_view n) : LightName(n, Hash(n)) { }
+		LightName(const std::string &n) : LightName(std::string_view(n)) { }
+
+		static size_t Hash(const std::string_view n) {
+			return robin_hood::hash_bytes(n.data(), n.size());
 		}
+
+		bool operator==(const LightName &k) const { return (hash == k.hash) && (name == k.name); }
+
+		std::string_view name;
+		size_t hash;
 	};
-	robin_hood::unordered_flat_map<std::string_view, LightSourceUPtr, NameHash> lightsByName;
+	struct LightNameHash {
+		size_t operator()(const LightName &k) const noexcept { return k.hash; }
+	};
+	robin_hood::unordered_flat_map<LightName, LightSourceUPtr, LightNameHash> lightsByName;
 
 	// Following containers just store references to lights
 	std::vector<std::reference_wrapper<LightSource>> lights;

@@ -16,6 +16,8 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include "oneapi/tbb.h"
+
 #include "slg/lights/strategies/logpower.h"
 #include "luxrays/utils/properties.h"
 #include "slg/scene/scene.h"
@@ -41,37 +43,39 @@ void LightStrategyLogPower::Preprocess(SceneConstRef scene, const LightStrategyT
 	if (lightCount == 0)
 		return;
 
-	vector<float> lightPower;
-	lightPower.reserve(lightCount);
+	// The lights in parallel (a scene can have millions of triangle lights)
+	vector<float> lightPower(lightCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, lightCount, 4096),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				auto& l = scene.GetLightSources().GetLightSource(i);
+				const float power = logf(1.f + l.GetPower(scene)) * l.GetImportance();
 
-	for (u_int i = 0; i < lightCount; ++i) {
-		auto& l = scene.GetLightSources().GetLightSource(i);
-		const float power = logf(1.f + l.GetPower(scene)) * l.GetImportance();
-
-		switch (taskType) {
-			case TASK_EMIT: {
-				lightPower.push_back(power);
-				break;
+				switch (taskType) {
+					case TASK_EMIT: {
+						lightPower[i] = power;
+						break;
+					}
+					case TASK_ILLUMINATE: {
+						if (l.IsDirectLightSamplingEnabled()){
+							// A quad of two triangle lights is one light
+							lightPower[i] = logf(1.f + GetIlluminatePower(scene, l)) * l.GetImportance();
+						} else
+							lightPower[i] = 0.f;
+						break;
+					}
+					case TASK_INFINITE_ONLY: {
+						if (l.IsInfinite())
+							lightPower[i] = power;
+						else
+							lightPower[i] = 0.f;
+						break;
+					}
+					default:
+						throw runtime_error("Unknown task in LightStrategyLogPower::Preprocess(): " + ToString(taskType));
+				}
 			}
-			case TASK_ILLUMINATE: {
-				if (l.IsDirectLightSamplingEnabled()){
-					// A quad of two triangle lights is one light
-					lightPower.push_back(logf(1.f + GetIlluminatePower(scene, l)) * l.GetImportance());
-				} else
-					lightPower.push_back(0.f);
-				break;
-			}
-			case TASK_INFINITE_ONLY: {
-				if (l.IsInfinite())
-					lightPower.push_back(power);
-				else
-					lightPower.push_back(0.f);
-				break;
-			}
-			default:
-				throw runtime_error("Unknown task in LightStrategyLogPower::Preprocess(): " + ToString(taskType));
-		}
-	}
+		});
 
 	// Build the data to power based light sampling
 	lightsDistribution = std::make_unique<Distribution1D>(lightPower);

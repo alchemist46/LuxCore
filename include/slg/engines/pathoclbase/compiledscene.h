@@ -22,7 +22,10 @@
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
 #include <map>
+#include <memory>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 #include "slg/slg.h"
 #include "slg/editaction.h"
@@ -37,6 +40,23 @@
 #include "slg/cameras/camera.h"
 
 namespace slg {
+
+// An allocator whose resize() leaves the new elements of a plain struct
+// uninitialized, for a vector the caller fills (and clears) in parallel
+template <typename T> class DefaultInitAllocator : public std::allocator<T> {
+public:
+	template <typename U> struct rebind { using other = DefaultInitAllocator<U>; };
+
+	DefaultInitAllocator() noexcept { }
+	template <typename U> DefaultInitAllocator(const DefaultInitAllocator<U> &) noexcept { }
+
+	template <typename U> void construct(U *p) noexcept(std::is_nothrow_default_constructible<U>::value) {
+		::new (static_cast<void *>(p)) U;
+	}
+	template <typename U, typename... Args> void construct(U *p, Args &&... args) {
+		::new (static_cast<void *>(p)) U(std::forward<Args>(args)...);
+	}
+};
 
 class CompiledScene {
 public:
@@ -83,8 +103,8 @@ public:
 	// Compiled Scene Objects
 	std::vector<slg::ocl::SceneObject> sceneObjs;
 
-	// Compiled Lights
-	std::vector<slg::ocl::LightSource> lightDefs;
+	// Compiled Lights (each one cleared and filled by CompileLights())
+	std::vector<slg::ocl::LightSource, DefaultInitAllocator<slg::ocl::LightSource>> lightDefs;
 	// Additional light related information
 	std::vector<u_int> envLightIndices;
 	std::vector<u_int> lightIndexOffsetByMeshIndex, lightIndexByTriIndex;

@@ -75,7 +75,7 @@ void SceneObjectDefinitions::DefineIntersectableLights
 	mesh.GetLocal2World(0.f, localToWorld);
 	mesh.GetMeshArea(localToWorld);
 
-	vector<std::unique_ptr<TriangleLight>> triLights(triangleCount);
+	vector<LightSourceUPtr> triLights(triangleCount);
 	tbb::parallel_for(tbb::blocked_range<u_int>(0, triangleCount, 1024),
 		[&](const tbb::blocked_range<u_int> &r) {
 			for (u_int i = r.begin(); i < r.end(); ++i) {
@@ -97,8 +97,7 @@ void SceneObjectDefinitions::DefineIntersectableLights
 			}
 		});
 
-	for (auto &tl : triLights)
-		lightDefs.DefineLightSource(std::move(tl));
+	lightDefs.DefineLightSources(std::move(triLights));
 }
 
 void SceneObjectDefinitions::UpdateMaterialReferences(MaterialConstRef oldMat, MaterialRef newMat) {

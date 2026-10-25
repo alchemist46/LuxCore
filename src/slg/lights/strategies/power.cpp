@@ -16,6 +16,8 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include "oneapi/tbb.h"
+
 #include "slg/lights/strategies/power.h"
 #include "slg/scene/scene.h"
 #include "slg/lights/trianglelight.h"
@@ -39,41 +41,43 @@ void LightStrategyPower::Preprocess(SceneConstRef scene, const LightStrategyTask
 	const float envRadius = InfiniteLightSource::GetEnvRadius(scene);
 	const float invEnvRadius2 = 1.f / (envRadius * envRadius);
 
-	vector<float> lightPower;
-	lightPower.reserve(lightCount);
-
-	for (u_int i = 0; i < lightCount; ++i) {
-		auto& l = scene.GetLightSources().GetLightSource(i);
-		float power = l.GetPower(scene) * l.GetImportance();
-		// In order to avoid over-sampling of distant lights
-		if (l.IsInfinite())
-			power *= invEnvRadius2;
-
-		switch (taskType) {
-			case TASK_EMIT: {
-				lightPower.push_back(power);
-				break;
-			}
-			case TASK_ILLUMINATE: {
-				// A quad of two triangle lights is one light
-				if (l.IsDirectLightSamplingEnabled())
-					lightPower.push_back(l.IsInfinite() ? power :
-						(GetIlluminatePower(scene, l) * l.GetImportance()));
-				else
-					lightPower.push_back(0.f);
-				break;
-			}
-			case TASK_INFINITE_ONLY: {
+	// The lights in parallel (a scene can have millions of triangle lights)
+	vector<float> lightPower(lightCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, lightCount, 4096),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				auto& l = scene.GetLightSources().GetLightSource(i);
+				float power = l.GetPower(scene) * l.GetImportance();
+				// In order to avoid over-sampling of distant lights
 				if (l.IsInfinite())
-					lightPower.push_back(power);
-				else
-					lightPower.push_back(0.f);
-				break;
+					power *= invEnvRadius2;
+
+				switch (taskType) {
+					case TASK_EMIT: {
+						lightPower[i] = power;
+						break;
+					}
+					case TASK_ILLUMINATE: {
+						// A quad of two triangle lights is one light
+						if (l.IsDirectLightSamplingEnabled())
+							lightPower[i] = l.IsInfinite() ? power :
+								(GetIlluminatePower(scene, l) * l.GetImportance());
+						else
+							lightPower[i] = 0.f;
+						break;
+					}
+					case TASK_INFINITE_ONLY: {
+						if (l.IsInfinite())
+							lightPower[i] = power;
+						else
+							lightPower[i] = 0.f;
+						break;
+					}
+					default:
+						throw runtime_error("Unknown task in LightStrategyPower::Preprocess(): " + ToString(taskType));
+				}
 			}
-			default:
-				throw runtime_error("Unknown task in LightStrategyPower::Preprocess(): " + ToString(taskType));
-		}
-	}
+		});
 
 	// Build the data to power based light sampling
 	lightsDistribution = std::make_unique<Distribution1D>(lightPower);

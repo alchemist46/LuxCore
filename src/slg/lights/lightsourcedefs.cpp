@@ -16,6 +16,7 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <atomic>
 #include <thread>
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -71,8 +72,26 @@ LightSourceDefinitions::~LightSourceDefinitions() {
 /// If a light source with the same name already exists in the container,
 /// it is extracted and returned.
 LightSourceUPtr LightSourceDefinitions::DefineLightSource(LightSourceUPtr&& newLight) {
+	const size_t nameHash = LightName::Hash(newLight->GetName());
+	return DefineLightSource(std::move(newLight), nameHash);
+}
+
+void LightSourceDefinitions::DefineLightSources(vector<LightSourceUPtr> &&newLights) {
+	vector<size_t> nameHashes(newLights.size());
+	tbb::parallel_for(tbb::blocked_range<size_t>(0, newLights.size(), 4096),
+		[&](const tbb::blocked_range<size_t> &r) {
+			for (size_t i = r.begin(); i < r.end(); ++i)
+				nameHashes[i] = LightName::Hash(newLights[i]->GetName());
+		});
+
+	for (size_t i = 0; i < newLights.size(); ++i)
+		DefineLightSource(std::move(newLights[i]), nameHashes[i]);
+	newLights.clear();
+}
+
+LightSourceUPtr LightSourceDefinitions::DefineLightSource(LightSourceUPtr&& newLight, const size_t nameHash) {
 	// The key is the name of the light it owns
-	const string_view name = newLight->GetName();
+	const LightName name(newLight->GetName(), nameHash);
 
 	auto [e, inserted] = lightsByName.try_emplace(name);
 
@@ -147,7 +166,7 @@ vector<string> LightSourceDefinitions::GetLightSourceNames() const {
 	vector<string> names;
 	names.reserve(lights.size());
 	for (auto const &e : lightsByName)
-		names.push_back(string(e.first));
+		names.push_back(string(e.first.name));
 
 	return names;
 }
@@ -173,7 +192,7 @@ std::vector<LightSourceUPtr> LightSourceDefinitions::DeleteLightSourceStartWith(
 	// Build the list of lights to delete
 	std::vector<string> nameList;
 	for (auto const &e : lightsByName) {
-		const string_view name = e.first;
+		const string_view name = e.first.name;
 
 		if (name.starts_with(namePrefix))
 			nameList.push_back(string(name));
@@ -202,7 +221,7 @@ std::vector<LightSourceUPtr> LightSourceDefinitions::DeleteLightSourceByMaterial
 			l.GetType() == TYPE_TRIANGLE
 			&& (static_cast<const TriangleLight&>(l)).lightMaterial == &mat
 		) {
-			nameList.push_back(string(e.first));
+			nameList.push_back(string(e.first.name));
 		}
 	}
 
@@ -280,51 +299,87 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 	}
 	lightIndexByTriIndex.assign(lightTriCount, NULL_INDEX);
 
-	// The mesh index of the last triangle light: the triangle lights of a mesh
-	// often follow each other
-	SceneObjectConstPtr lastSceneObject = nullptr;
-	u_int lastMeshIndex = NULL_INDEX;
+	// The list of all lights, in the order of the map: it gives their index
+	lights.reserve(lightsByName.size());
+	for (auto const &e : lightsByName)
+		lights.push_back(*e.second);
+	const u_int lightCount = lights.size();
 
-	u_int i = 0;
-	for (auto const &e : lightsByName) {
-		auto& l = *e.second;
+	// The mesh index of each scene object
+	robin_hood::unordered_flat_map<const SceneObject *, u_int> meshIndexByObject;
+	for (u_int meshIndex = 0; meshIndex < meshCount; ++meshIndex)
+		meshIndexByObject[&scene.GetObjects().GetSceneObject(meshIndex)] = meshIndex;
 
-		// Initialize the light source index
-		l.lightSceneIndex = i;
+	// Each light in parallel: a scene can have millions of triangle lights,
+	// in an order unrelated to their place in memory
+	static constexpr u_char LIGHT_ENV = 1, LIGHT_TRIANGLE = 2;
+	vector<u_char> lightKinds(lightCount);
+	struct LightCounts {
+		u_int groupCount = 0;
+		vector<u_int> typeCount = vector<u_int>(LIGHT_SOURCE_TYPE_COUNT, 0);
+	};
+	tbb::combinable<LightCounts> counts;
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, lightCount, 4096),
+		[&](const tbb::blocked_range<u_int> &r) {
+			LightCounts &c = counts.local();
 
-		// Update the light group count
-		lightGroupCount = Max(lightGroupCount, l.GetID() + 1);
+			// The mesh index of the last triangle light: the triangle lights
+			// of a mesh often follow each other
+			const SceneObject *lastSceneObject = nullptr;
+			u_int lastMeshIndex = NULL_INDEX;
 
-		// Update the light type count
-		++lightTypeCount[l.GetType()];
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				LightSource &l = lights[i];
 
-		// Update the list of all lights
-		lights.push_back(l);
+				// Initialize the light source index
+				l.lightSceneIndex = i;
 
-		// Update the list of env. lights
-		if (l.IsEnvironmental())
-			envLightSources.push_back(static_cast<EnvLightSourceRef>(l));
+				// The light group and type counts
+				c.groupCount = Max(c.groupCount, l.GetID() + 1);
+				++c.typeCount[l.GetType()];
 
-		// Update the list of triangle lights and the light index of their
-		// triangle (the triangle light named
-		// EncodeTriangleLightNamePrefix(objectName) + triangleIndex)
-		if (l.GetType() == TYPE_TRIANGLE) {
-			auto& tl = static_cast<TriangleLightRef>(l);
-			intersectableLightSources.push_back(tl);
+				u_char kind = 0;
+				if (l.IsEnvironmental())
+					kind |= LIGHT_ENV;
 
-			if (tl.sceneObject != lastSceneObject) {
-				lastSceneObject = tl.sceneObject;
-				lastMeshIndex = scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+				// The light index of the triangle of a triangle light (the
+				// triangle light named EncodeTriangleLightNamePrefix(objectName)
+				// + triangleIndex)
+				if (l.GetType() == TYPE_TRIANGLE) {
+					kind |= LIGHT_TRIANGLE;
+					auto& tl = static_cast<TriangleLightRef>(l);
+
+					if (tl.sceneObject.get() != lastSceneObject) {
+						lastSceneObject = tl.sceneObject.get();
+						auto it = meshIndexByObject.find(lastSceneObject);
+						// An object that isn't in the scene throws there
+						lastMeshIndex = (it != meshIndexByObject.end()) ? it->second :
+								scene.GetObjects().GetSceneObjectIndex(*tl.sceneObject);
+					}
+					tl.meshIndex = lastMeshIndex;
+					tl.solidAngleSampling = triangleLightSolidAngle;
+
+					const u_int offset = lightIndexOffsetByMeshIndex[tl.meshIndex];
+					if (offset != NULL_INDEX)
+						lightIndexByTriIndex[offset + tl.triangleIndex] = i;
+				}
+
+				lightKinds[i] = kind;
 			}
-			tl.meshIndex = lastMeshIndex;
-			tl.solidAngleSampling = triangleLightSolidAngle;
+		});
+	counts.combine_each([&](const LightCounts &c) {
+		lightGroupCount = Max(lightGroupCount, c.groupCount);
+		for (u_int t = 0; t < LIGHT_SOURCE_TYPE_COUNT; ++t)
+			lightTypeCount[t] += c.typeCount[t];
+	});
 
-			const u_int offset = lightIndexOffsetByMeshIndex[tl.meshIndex];
-			if (offset != NULL_INDEX)
-				lightIndexByTriIndex[offset + tl.triangleIndex] = i;
-		}
-
-		++i;
+	// The lists of env. lights and of triangle lights, in the order of the
+	// lights
+	for (u_int i = 0; i < lightCount; ++i) {
+		if (lightKinds[i] & LIGHT_ENV)
+			envLightSources.push_back(static_cast<EnvLightSourceRef>(lights[i].get()));
+		if (lightKinds[i] & LIGHT_TRIANGLE)
+			intersectableLightSources.push_back(static_cast<TriangleLightRef>(lights[i].get()));
 	}
 
 	PairQuadLights(scene);
@@ -429,63 +484,71 @@ static bool IsQuad(const ExtMesh &mesh, const Transform &localToWorld,
 }
 
 void LightSourceDefinitions::PairQuadLights(SceneConstRef scene) {
-	for (TriangleLight &tl : intersectableLightSources) {
-		tl.quadLight = nullptr;
-		tl.quadPartner = nullptr;
-		tl.quadCorner = 0;
-		tl.quadPartnerCorner = 0;
-	}
+	tbb::parallel_for(tbb::blocked_range<size_t>(0, intersectableLightSources.size(), 4096),
+		[&](const tbb::blocked_range<size_t> &r) {
+			for (size_t i = r.begin(); i < r.end(); ++i) {
+				TriangleLight &tl = intersectableLightSources[i];
+				tl.quadLight = nullptr;
+				tl.quadPartner = nullptr;
+				tl.quadCorner = 0;
+				tl.quadPartnerCorner = 0;
+			}
+		});
 
 	if (!triangleLightQuad)
 		return;
 
 	// The two triangles of a quad follow each other in the mesh (a triangulated
-	// quad, a Blender area light)
-	u_int quadCount = 0;
+	// quad, a Blender area light). The meshes in parallel: each triangle light
+	// belongs to one mesh.
+	atomic<u_int> quadCount(0);
 	const u_int meshCount = scene.GetObjects().GetSize();
-	for (u_int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
-		const u_int offset = lightIndexOffsetByMeshIndex[meshIndex];
-		if (offset == NULL_INDEX)
-			continue;
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, meshCount, 1),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int meshIndex = r.begin(); meshIndex < r.end(); ++meshIndex) {
+				const u_int offset = lightIndexOffsetByMeshIndex[meshIndex];
+				if (offset == NULL_INDEX)
+					continue;
 
-		const ExtMesh &mesh = scene.GetObjects().GetSceneObject(meshIndex).GetExtMesh();
-		Transform localToWorld;
-		mesh.GetLocal2World(0.f, localToWorld);
-		const auto tris = mesh.GetTriangles();
+				const ExtMesh &mesh = scene.GetObjects().GetSceneObject(meshIndex).GetExtMesh();
+				Transform localToWorld;
+				mesh.GetLocal2World(0.f, localToWorld);
+				const auto tris = mesh.GetTriangles();
 
-		const u_int triCount = mesh.GetTotalTriangleCount();
-		for (u_int t = 0; t + 1 < triCount; ++t) {
-			const u_int index0 = lightIndexByTriIndex[offset + t];
-			const u_int index1 = lightIndexByTriIndex[offset + t + 1];
-			if ((index0 == NULL_INDEX) || (index1 == NULL_INDEX))
-				continue;
-			TriangleLight &l0 = static_cast<TriangleLight &>(lights[index0].get());
-			TriangleLight &l1 = static_cast<TriangleLight &>(lights[index1].get());
+				const u_int triCount = mesh.GetTotalTriangleCount();
+				for (u_int t = 0; t + 1 < triCount; ++t) {
+					const u_int index0 = lightIndexByTriIndex[offset + t];
+					const u_int index1 = lightIndexByTriIndex[offset + t + 1];
+					if ((index0 == NULL_INDEX) || (index1 == NULL_INDEX))
+						continue;
+					TriangleLight &l0 = static_cast<TriangleLight &>(lights[index0].get());
+					TriangleLight &l1 = static_cast<TriangleLight &>(lights[index1].get());
 
-			// Not for the lights with an emission map (their direct light
-			// sampling is by area) and not for the meshes without direct
-			// light sampling
-			if (l0.lightMaterial->GetEmissionFunc() || !l0.IsDirectLightSamplingEnabled() ||
-					(l0.GetTriangleArea() == 0.f) || (l1.GetTriangleArea() == 0.f))
-				continue;
+					// Not for the lights with an emission map (their direct light
+					// sampling is by area) and not for the meshes without direct
+					// light sampling
+					if (l0.lightMaterial->GetEmissionFunc() || !l0.IsDirectLightSamplingEnabled() ||
+							(l0.GetTriangleArea() == 0.f) || (l1.GetTriangleArea() == 0.f))
+						continue;
 
-			u_int corner, partnerCorner;
-			if (IsQuad(mesh, localToWorld, tris[t], tris[t + 1], &corner, &partnerCorner)) {
-				l0.quadLight = &l0;
-				l0.quadPartner = &l1;
-				l0.quadCorner = corner;
-				l0.quadPartnerCorner = partnerCorner;
-				l1.quadLight = &l0;
-				l1.quadPartner = &l0;
-				++quadCount;
-				// The next triangle is taken
-				++t;
+					u_int corner, partnerCorner;
+					if (IsQuad(mesh, localToWorld, tris[t], tris[t + 1], &corner, &partnerCorner)) {
+						l0.quadLight = &l0;
+						l0.quadPartner = &l1;
+						l0.quadCorner = corner;
+						l0.quadPartnerCorner = partnerCorner;
+						l1.quadLight = &l0;
+						l1.quadPartner = &l0;
+						++quadCount;
+						// The next triangle is taken
+						++t;
+					}
+				}
 			}
-		}
-	}
+		});
 
 	if (quadCount > 0)
-		SLG_LOG("Triangle lights sampled as quads: " << quadCount);
+		SLG_LOG("Triangle lights sampled as quads: " << quadCount.load());
 }
 
 void LightSourceDefinitions::UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode) {

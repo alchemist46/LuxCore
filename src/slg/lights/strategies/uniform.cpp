@@ -16,6 +16,8 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include "oneapi/tbb.h"
+
 #include "slg/lights/strategies/uniform.h"
 #include "slg/scene/scene.h"
 #include "slg/lights/trianglelight.h"
@@ -36,36 +38,38 @@ void LightStrategyUniform::Preprocess(SceneConstRef scene, const LightStrategyTa
 	if (lightCount == 0)
 		return;
 
-	vector<float> lightPower;
-	lightPower.reserve(lightCount);
+	// The lights in parallel (a scene can have millions of triangle lights)
+	vector<float> lightPower(lightCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, lightCount, 4096),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				auto& l = scene.GetLightSources().GetLightSource(i);
 
-	for (u_int i = 0; i < lightCount; ++i) {
-		auto& l = scene.GetLightSources().GetLightSource(i);
-
-		switch (taskType) {
-			case TASK_EMIT: {
-				lightPower.push_back(l.GetImportance());
-				break;
+				switch (taskType) {
+					case TASK_EMIT: {
+						lightPower[i] = l.GetImportance();
+						break;
+					}
+					case TASK_ILLUMINATE: {
+						// A quad of two triangle lights is one light
+						if (l.IsDirectLightSamplingEnabled() && !IsIlluminateQuadSecondary(l))
+							lightPower[i] = l.GetImportance();
+						else
+							lightPower[i] = 0.f;
+						break;
+					}
+					case TASK_INFINITE_ONLY: {
+						if (l.IsInfinite())
+							lightPower[i] = l.GetImportance();
+						else
+							lightPower[i] = 0.f;
+						break;
+					}
+					default:
+						throw runtime_error("Unknown task in LightStrategyUniform::Preprocess(): " + ToString(taskType));
+				}
 			}
-			case TASK_ILLUMINATE: {
-				// A quad of two triangle lights is one light
-				if (l.IsDirectLightSamplingEnabled() && !IsIlluminateQuadSecondary(l))
-					lightPower.push_back(l.GetImportance());
-				else
-					lightPower.push_back(0.f);
-				break;
-			}
-			case TASK_INFINITE_ONLY: {
-				if (l.IsInfinite())
-					lightPower.push_back(l.GetImportance());
-				else
-					lightPower.push_back(0.f);
-				break;
-			}
-			default:
-				throw runtime_error("Unknown task in LightStrategyUniform::Preprocess(): " + ToString(taskType));
-		}
-	}
+		});
 
 	lightsDistribution = std::make_unique<Distribution1D>(lightPower);
 }
