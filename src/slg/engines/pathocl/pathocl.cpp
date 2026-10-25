@@ -246,6 +246,20 @@ void PathOCLRenderEngine::UpdateTaskCount() {
 				const u_int filmPixelCount = GetFilm().GetWidth() * GetFilm().GetHeight();
 				taskCount = Min<u_int>(taskCount, Max<u_int>(filmPixelCount / Max<u_int>(oclRenderThreadCount, 1u), 1u));
 			}
+
+			// With a halt spp, one sample per task (over all the devices) is
+			// at most 1/16 of it: the samples in flight at the halt and the
+			// samples a kernel iteration finishes are what the halt check can't
+			// cut, and on a small film the default count was far more than
+			// the halt (128 spp per sample of every task at 64x64, which
+			// rendered 141 spp for a halt of 64 and 416 for 256)
+			const u_int haltSPP = GetEyeHaltSPP();
+			if (haltSPP > 0) {
+				const u_int *subRegion = GetFilm().GetSubRegion();
+				const double regionPixelCount = double(subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+				const double haltTaskCount = regionPixelCount * haltSPP / (16.0 * Max<u_int>(oclRenderThreadCount, 1u));
+				taskCount = (u_int)Min<double>(taskCount, Max<double>(haltTaskCount, 8192.0));
+			}
 		} else
 			taskCount = cfg.Get(Property("opencl.task.count")(taskCap)).Get<u_int>();
 	}

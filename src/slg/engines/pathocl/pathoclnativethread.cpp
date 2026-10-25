@@ -159,6 +159,11 @@ void PathOCLNativeRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	// Trace paths
 	//--------------------------------------------------------------------------
 
+	// The halt spp is checked here too: the session runs the film tests only
+	// when it polls the statistics, and on a small film the native threads
+	// rendered far past it in the meantime (36 spp for a halt of 16 at 64x64)
+	const u_int haltSPP = engine->GetEyeHaltSPP();
+
 	for (u_int steps = 0; !stop_token.stop_requested(); ++steps) {
 		// Check if we are in pause mode
 		if (engine->pauseMode) {
@@ -179,6 +184,8 @@ void PathOCLNativeRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 		// Check halt conditions
 		if (engine->GetFilm().GetConvergence() == 1.f)
+			break;
+		if ((haltSPP > 0) && ((steps % 16) == 15) && (engine->GetThreadFilmsEyeSPP() >= haltSPP))
 			break;
                 if (stop_token.stop_requested())
                         break;

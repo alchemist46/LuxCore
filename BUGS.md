@@ -136,13 +136,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: a TwoSided whose front material has a bump texture and `bumpsamplingdistance = 0.01` (the TwoSided left at the default 0.001); PATHCPU against PATHOCL.
 - Notes: found reading the code for A6, not rendered. The GPU rule is also the slot rule of the bump cache (`CompiledScene::MaterialHasBump()`), so a fix on the GPU side changes both.
 
-### PATHOCL renders far more than the halt spp on a small film
-- Found: 2026-10-23
-- Area: engine (PATHOCL halt)
-- Problem: on a 64x64 film, `batch.haltspp = 64` gives 141-147 samples per pixel and `256` gives 416-431 (the SAMPLECOUNT channel; every pixel within 4 of the others, so the image is fine, only slower). The halt counts the samples in flight, one per task, and the GPU runs 524288 tasks (the SampleResult buffer of the log), i.e. 128 samples per pixel of this film, whatever the halt.
-- Reproduce: `lc-work/d1/toy/toy.py PATHOCL aquad 64 64 256 --set opencl.devices.select=01 --set film.opencl.enable=0` (a floor lit by one quad light, depth 1), HIP.
-- Notes: the task count does not follow the film size (the Sobol bucket size does since 2026-10-18). At 540x540 it is about two samples per pixel (524288 tasks for 291600 pixels). Found during D1; not investigated further.
-
 ### PhotonGI caustic lookups on the GPU vary up to 15x in time between runs
 - Found: 2026-10-23
 - Area: engine (PATHOCL), caches

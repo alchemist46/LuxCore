@@ -304,11 +304,16 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		}
 
 		// Near the halt spp, the batch is cut to the next check (half of the
-		// samples still missing)
+		// samples still missing). Until the spp per iteration is known, the
+		// batches are of one iteration: on a small film the first batches
+		// alone went 16 spp past a halt of 64.
 		u_int batchIterations = iterations;
-		if ((haltSPP > 0) && (sppPerIteration > 0.0)) {
-			const double halfIterationsLeft = .5 * (haltTargetSPP - haltCheckSPP) / sppPerIteration;
-			batchIterations =(u_int)Clamp(ceil(halfIterationsLeft - iterationsSinceHaltCheck), 1.0, (double)iterations);
+		if (haltSPP > 0) {
+			if (sppPerIteration > 0.0) {
+				const double halfIterationsLeft = .5 * (haltTargetSPP - haltCheckSPP) / sppPerIteration;
+				batchIterations = (u_int)Clamp(ceil(halfIterationsLeft - iterationsSinceHaltCheck), 1.0, (double)iterations);
+			} else
+				batchIterations = 1;
 		}
 
 		//------------------------------------------------------------------
