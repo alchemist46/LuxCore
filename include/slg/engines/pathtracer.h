@@ -150,6 +150,14 @@ public:
 	}
 
 	bool HasToRenderEyeSample(PathTracerThreadState &state) const;
+	// The hybrid back/forward mode leaves the caustic paths of the eye paths to
+	// the light paths. An engine that traces no light path (the tile and RT
+	// engines, PATHOCL without native threads) calls DisableHybridBackForward(),
+	// so that its eye paths render them. An engine that traces both on the same
+	// threads (PATHCPU, BAKECPU) calls CheckHybridBackForwardPartition(): a
+	// partition of 0 would trace no eye path, so it takes the default
+	void DisableHybridBackForward(const std::string &engineName);
+	void CheckHybridBackForwardPartition(const std::string &engineName);
 	void ApplyVarianceClamp(const PathTracerThreadState &state,
 			std::vector<SampleResult> &sampleResults) const;
 	void RenderSample(PathTracerThreadState &state) const;

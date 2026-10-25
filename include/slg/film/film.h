@@ -338,6 +338,11 @@ public:
 	double GetTotalTime() const {
 		return luxrays::WallClockTime() - statsStartSampleTime;
 	}
+	// Restarts the clock of GetTotalTime() (not the sample counts), when the
+	// render threads start after the pre-pass caches are built
+	void ResetTotalTime() {
+		statsStartSampleTime = luxrays::WallClockTime();
+	}
 	double GetAvgSampleSec() const {
 		const double t = GetTotalTime();
 		return (t > 0.0) ? (GetTotalSampleCount() / t) : 0.0;

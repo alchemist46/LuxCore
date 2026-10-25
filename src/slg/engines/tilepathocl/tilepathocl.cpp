@@ -157,6 +157,7 @@ void TilePathOCLRenderEngine::StartLockLess() {
 	// pathTracer must be configured here because it is then used
 	// to set tileRepository->varianceClamping, etc.
 	pathTracer.ParseOptions(cfg, *defaultProps);
+	pathTracer.DisableHybridBackForward(RenderEngineType2String(GetType()));
 
 	//--------------------------------------------------------------------------
 	// Restore render state if there is one

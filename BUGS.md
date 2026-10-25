@@ -86,12 +86,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: a random walk goes on past 256 bounces with a Russian roulette, up to 65536 (`subsurface_funcs.cl`), and TILEPATHOCL runs the trace and `MK_RT` kernels of a tile pass until its last task is done, one walk step per iteration (about 0.37 ms each with 4096 tasks, launch-bound): the longest walk of the pass sets its time. Measured 2026-10-22 (furnace, 96x96, 256 spp, TILEPATHOCL against the old hard limit of 256 bounces): a white sphere of mean free path 0.01 of its radius takes 24 s instead of 1 s (it read 0.864 with the limit, 0.997 now), mean free path 1.0 6 s instead of 1 s, albedo 0.95 10 s instead of 1 s (0.922 with the limit, 0.962 now). Albedo 0.8 and below, and the coloured and coated cases, take the same time. PATHOCL is barely affected (4 s for the densest), since its tasks start new samples independently.
 - Reproduce: `tests/furnace/furnace.py TILEPATHOCL subsurface-rad0.01 spp=256` against `PATHOCL`.
 - Notes: the energy the limit lost is real (4% at albedo 0.95), so the fix is to take several walk steps per kernel launch rather than to shorten the walks: that needs the ray traversal inside `MK_RT` (HIPRT can traverse from any kernel) instead of the separate trace kernel. A TILEPATHOCL-only steeper roulette (survival (b / (b + 1))^2, reaching n bounces with (256 / n)^2) would shorten the tail at the cost of noise in the densest media; not tried.
+
 ### One pixel of luxball-hdr-vol differs between TILEPATHOCL runs at a fixed seed
 - Found: 2026-10-22
 - Area: engine
 - Problem: two runs of the same build should differ by at most 1e-6 per value (the atomic adds of the film), but pixel (x 143, y 101) of luxball-hdr-vol comes out with one of two values that differ by 1.5e-2 (relative); the rest of the image is identical.
 - Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` (TILEPATHOCL, seed 1, aa 8, 320x240, HIP device) six times with the same build, then `compare`: 2 of 6 runs at HEAD `aa2fa98c1` had the other value.
-- Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change.
+- Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation, the homogeneous volume's scattering, the film write of a sample from two tasks). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change. Seen again on 2026-10-24 with the build of the GGX minimum roughness fix (1 of 3 runs, the red channel of the same pixel; the scene has only matte and null materials, so that change cannot reach it).
 
 ### DLSC: BVH leak, stale radius and a pick floor on DLS-disabled lights
 - Found: 2026-10-22
@@ -114,6 +115,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: by reading; the particle placement differs from where the render's paths land.
 - Notes: deferred with K1 (ROADMAP CA, deferred).
 
+### PATHOCL renders a matte plane under a point light 0.2% brighter than PATHCPU
+- Found: 2026-10-25
+- Area: engine (PATHOCL against PATHCPU), light (point?)
+- Problem: a 4x4 matte plane (kd 0.7, two triangles with UVs, no bump) lit by a point light (`position = 1.5 -1 1.2`, gain 6) and a constant environment of 0.2, perspective camera, 160x120, Sobol, 256 spp: PATHCPU reads 0.16131, PATHOCL 0.16162 (+0.19%), and the 8x8 block means differ by 0.21% RMS against a seed-to-seed noise of 0.05%. The same gap with a bump texture on the plane. `tests/benchmark/cpugpu.py` found the point light and the constant environment within 0.02% (on its own sphere-and-floor scene).
+- Reproduce: the scene above in SDL (`scene.objects.plane.vertices = -2 -2 0  2 -2 0  2 2 0  -2 2 0`, `faces = 0 1 2  0 2 3`, `uvs = 0 0  4 0  4 4  0 4`; camera `lookat.orig = 0 -2.5 2.2`, target the origin, fov 50), PATHCPU against PATHOCL (HIP, `opencl.native.threads.count = 0`), two seeds each.
+- Notes: found while checking the GPU Mix bump fix; not split yet (point light alone, environment alone, the light strategy with two lights, the near distance of the light to the plane).
+
 ### PATHOCL renders the sun 0.1% brighter than PATHCPU
 - Found: 2026-10-22
 - Area: light (sun), engine (PATHOCL)
@@ -127,13 +135,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: the CPU bumps a TwoSided with its front or back material's `Bump()`, so with that material's `bumpsamplingdistance` and, for a nested TwoSided, recursively; the GPU (`Material_GetBumpTexIndex()`) takes only the bump texture of the front or back material and uses the TwoSided's own `bumpsamplingdistance`. The images differ only when the sampling distances differ or TwoSideds are nested.
 - Reproduce: a TwoSided whose front material has a bump texture and `bumpsamplingdistance = 0.01` (the TwoSided left at the default 0.001); PATHCPU against PATHOCL.
 - Notes: found reading the code for A6, not rendered. The GPU rule is also the slot rule of the bump cache (`CompiledScene::MaterialHasBump()`), so a fix on the GPU side changes both.
-
-### The GPU Mix texture bump uses the second texture's bump for the amount's
-- Found: 2026-10-23
-- Area: texture (mix, bump)
-- Problem: `MixTexture_Bump()` (`texture_bump_funcs.cl`) computes the amount's slope terms `dua`/`dva` from `bumbNTex2`, the second texture's bump, where the CPU (`MixTexture::Bump()`) uses the amount texture's bump; `bumbNAmount` is unused, so the GPU evaluates the amount's bump ops and drops them. The bumps differ wherever the amount texture varies and the two textures differ.
-- Reproduce: a `mix` texture with a varying amount (i.e. an image map) and different `texture1`/`texture2` as a material's `bumptex`; PATHCPU against PATHOCL.
-- Notes: found reading the code for A5, not rendered. A fix changes the GPU images of every scene with a Mix of bumps (the G0 classroom has 46 Mix textures), so it is not bit-identical; the A5 sharing does not depend on it.
 
 ### PATHOCL renders far more than the halt spp on a small film
 - Found: 2026-10-23
@@ -168,21 +169,14 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: caches (PhotonGI)
 - Problem: with the caustic cache a render reads darker than with every cache off, beyond the noise: cornell-glass with the right sphere's shadow transparency off, a large ceiling light (`Grey.ply`, emission 60) and the middle sphere a mirror: -0.39% (+-0.06%); the middle sphere a 0.04-rough silver metal2: -0.60% (+-0.09%); the small light and glass only: -0.04% (+-0.28%) (PATHCPU 200x200, 128 spp, 4 seeds, a new cache each run; photon.maxcount 4M, caustic.maxsize 1M, radius 0.1, updatespp 0, hybrid off). With one persistent cache file and the lookup at the first vertex only, the cache adds about 0.0014-0.0019 of the image mean where the path-traced light it replaces is about 0.003-0.004 (noisy).
 - Reproduce: `lc-work/pgicut/pt.py render <out> cmm-caustic --engine PATHCPU --spp 128 --seed N` against `cmm-none` (cases `cmb-*` for the metal).
-- Notes: found while removing the firefly cut (CA1). Not a double count or a missing path class as far as checked: the paths the render drops follow the photon definition (the same glossiness threshold, the same surfaces, 1 to photon.maxdepth - 1 bounces). Ruled out: the light sample skip (the mirror has none), the photon sampler (RANDOM the same), the radius (0.03 the same), D3's quad pairing (`lightstrategy.trianglelight.quad = 0`: -0.26%, 2 seeds). Suspects: photons are stored only near a visibility particle (`tracephotonsthread.cpp`, `allNearEntryIndices`), the lookup's normal tests, the edge loss of the disk. The old firefly cut hid it (it dropped far more: -8.6% on the metal case).
+- Notes: found while removing the firefly cut (CA1). Not a double count or a missing path class as far as checked: the paths the render drops follow the photon definition (the same glossiness threshold, the same surfaces, 1 to photon.maxdepth - 1 bounces). Ruled out: the light sample skip (the mirror has none), the photon sampler (RANDOM the same), the radius (0.03 the same), D3's quad pairing (`lightstrategy.trianglelight.quad = 0`: -0.26%, 2 seeds). Suspects: photons are stored only near a visibility particle (`tracephotonsthread.cpp`, `allNearEntryIndices`), the lookup's normal tests, the edge loss of the disk. The old firefly cut hid it (it dropped far more: -8.6% on the metal case). In a volume too (2026-10-25, after the volume fix): the furnace `glass-vol-s1` reads 0.973 with the caustic cache against 1.004 without (PATHCPU 256 spp, 4M photons), 0.193 against 0.200 with absorption 1; part of it is the blur of the lookup sphere at the medium's boundary.
 
-### PhotonGI caustic cache in a volume is about 10x too bright
-- Found: 2026-10-23
+### PhotonGI indirect cache in a volume uses the surface estimate (suspected)
+- Found: 2026-10-25
 - Area: caches (PhotonGI), volumes
-- Problem: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.caustic.enabled=1 scene.volumes.v.photongi.enable=1` reads 10.0 instead of 1.0 (565ebf8df and the build after it alike). Volumes have `photongi.enable` false by default, so only scenes that turn it on are hit.
-- Reproduce: the command above (about 2 minutes).
-- Notes: not investigated: `PGICPhotonBvh::ConnectCacheEntry()` (`pgicbvh.cpp`) divides a volume's BSDF value by its pdf, which leaves the phase function out (1/(4 pi) for an isotropic volume, a factor 12.6); the volume normalization `4/3 pi r^3` is there. Check the GPU twin and the indirect cache of volumes with it.
-
-### PhotonGI persistent cache is computed again in every process with a metal preset
-- Found: 2026-10-23
-- Area: caches (PhotonGI persistent file)
-- Problem: the signature of the persistent file (`PhotonGICache::ComputeSignature()`, `pgicserialize.cpp`) hashes the scene properties with the names of the implicit textures, and some of these carry a random UUID (`metal2` with `preset` makes `<material>-Implicit-FresnelPreset-<uuid>`): every new process finds another signature, computes the cache again and overwrites the file.
-- Reproduce: cornell-glass with `scene.materials.glass-mid.type = metal2` and `preset = silver`, the caustic cache and `path.photongi.persistent.file`, rendered twice in two processes: the second logs "computed for another scene or other parameters". With an explicit `fresnelpreset` texture it is reused.
-- Notes: replace the UUIDs in the names by a fixed token before hashing, or hash the definitions without the implicit names.
+- Problem: `PGICVisibilityParticle::ComputeRadiance()` (`photongicache.h`) turns the photons of a volume visibility particle into radiance with the surface formula: the flux over an area (pi r^2, or the one estimated from the hit distances) times `EvaluateTotal() / pi`. A volume needs the flux over a volume (4/3 pi r^3), the phase function instead of 1/pi, and the photon flux without the sigma_t of the volume's scatter weight (as the caustic cache does since 2026-10-25, `TracePhotonsThread::TracePhotonPath()`).
+- Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.indirect.enabled=1 scene.volumes.v.photongi.enable=1` (not run yet).
+- Notes: found while fixing the caustic cache in volumes (10x too bright); by reading only. Volumes have `photongi.enable` false by default.
 
 ### PhotonGI caustic cache traces for hours on a scene without caustics
 - Found: 2026-10-23
@@ -205,12 +199,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: open either blend in Blender on Windows and look at the modifier stack of Suzanne (Blender reports the missing library).
 - Notes: not fixed. Making the asset local (or removing the modifier) in both files would make the two machines agree.
 
-### Hybrid back/forward with a light partition of 0: PATHCPU drops the caustic paths
-- Found: 2026-10-24
-- Area: engine (PATHCPU, hybrid back/forward)
-- Problem: `scenes/CannelleEtFromage` renders 35x darker on PATHCPU than on PATHOCL (mean 0.0059 against 0.205 at half size, 64 spp). The scene has `path.hybridbackforward.enable = 1` with `path.hybridbackforward.partition = 0`: the eye paths leave the paths that the light tracing renders (the caustic ones, through the glass) to the light paths, and with a partition of 0 PATHCPU traces no light paths, so that light is lost. PATHOCL with no native threads (the scene's `opencl.native.threads.count = 0`) keeps them in its eye paths. The same in upstream pyluxcore 2.11.2 and in af4f833ea: an old behaviour, not a regression.
-- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.5 --spp 64` with and without `--engine PATHCPU --device cpu`.
-- Notes: not checked yet with a partition above 0 on PATHCPU (the CPU was busy with a bisection). A fix: treat a partition of 0 as the hybrid mode off for the eye paths (or warn), so that a scene set up for the GPU renders on the CPU too.
+### CannelleEtFromage: PATHOCL reads 3% brighter than PATHCPU without clamping
+- Found: 2026-10-25
+- Area: engine (PATHOCL against PATHCPU), material (glass caustics?)
+- Problem: with the variance clamping off, quarter film, 256 spp, the green mean is 0.2210/0.2213 (seeds 1/2) on PATHCPU with the scene's hybrid (its partition of 0 replaced by 0.8), 0.2202 on PATHCPU with the hybrid off (seed 1), and 0.2272/0.2270 on PATHOCL (the eye paths render the caustics, no native threads). The seed noise is about 0.1%. The build before the hybrid fix, whose GPU eye paths dropped the caustics, read 0.2226 on PATHOCL (seed 1): the GPU without its caustics is already 0.7% above the CPU with them, and the GPU's eye-path caustics add 2% where the CPU's eye paths (hybrid off) read 0.4% below its light-traced caustics.
+- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.25 --spp 256 --repeats 1 --set path.clamping.variance.maxvalue=0`, with and without `--engine PATHCPU --device cpu` (add `--set path.hybridbackforward.enable=0` for the CPU without the hybrid).
+- Notes: found while fixing the hybrid with a partition of 0 (2026-10-25); before that fix PATHCPU rendered only the light-traced caustics (mean 0.006) and the GPU dropped the caustics, which hid it. MODERNIZATION_PLAN "Verification" (2026-10-17) had the four engines within the noise on the CPU export of the scene with the clamping off: so it may be newer than that, or specific to this export. Not split by material or path class yet.
 
 ### Glossy-heavy native scenes render 1.5x slower than LuxCore 2.11 on the CPU
 - Found: 2026-10-24
@@ -233,23 +227,9 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `out/venvb0` (af4f833ea) with `B0_HIPRT_DIR=C:\Users\Ricardo\lc-hiprt\dist\bin\Release`, `opencl.native.threads.count=0`, `C:\Users\Ricardo\lc-work\b0\render_b0.py 16 320 240`.
 - Notes: found while building the pre-optimization wheel; HEAD is not affected. It matters only for old builds or a return to `hiprtBuildTraceKernels`. Ruled out: the work group size, the DataSet race fixed in c5dc429b2, stale caches.
 
-### The render time, samples/s and the time halt count the PhotonGI cache build
-- Found: 2026-10-24
-- Area: film (statistics, halt conditions), caches (PhotonGI)
-- Problem: the film's clock (`Film::statsStartSampleTime`, started in `Film::Init()`) starts in `RenderEngine::Start()` before `StartLockLess()`, which builds the PhotonGI cache (and the other pre-pass caches) before the render threads start. `stats.renderengine.time`, `stats.renderengine.total.samplesec` (`Film::GetTotalTime()`, `GetAvgSampleSec()`) and `batch.halttime` (`film.cpp`, `GetTotalTime() > haltTime`) all include the build: Blender shows a samples/s 2.4x too low on CannelleEtFromage with the indirect cache (1.97 instead of 4.9 M/s, 540x540, 256 spp, while the render itself runs at the speed of the cache-off render), and a time-halted render loses the build time from its rendering time.
-- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.5 --spp 256 --set path.photongi.indirect.enabled=1 --set path.photongi.indirect.maxsize=0` (HIP): the log's `samplesec` against 256*540*540/`render_s`.
-- Notes: the same in 2.11.2. Restart the film's clock (not its counts) when the render threads start, after the caches; the halt time then means rendering time. Check the resume (`.rsm`) path, which adds a start film.
-
 ### PhotonGI indirect cache: walls and ceiling 2-5% darker than path tracing
 - Found: 2026-10-24
 - Area: caches (PhotonGI)
 - Problem: LuxCore2.1Benchmark (the scene's own PhotonGI settings, PATHOCL, half size, 1024 spp, clamping off) with the indirect cache against without: whole image -2.5%, walls -2.7%, ceiling -5.4%, floor -1%, a little warmer (R/B +0.3%). With the scene's clamping: -1.6%, -1.7%, -4.5%.
 - Reproduce: `tests/benchmark/native_render.py --scene LuxCore2.1Benchmark --spp 1024 --set path.clamping.variance.maxvalue=0` against the same with `--set path.photongi.indirect.enabled=0`.
 - Notes: not investigated. The ceiling is lit only indirectly, so the cache's share is largest there. Suspects: the area estimate of a visibility particle (`PGICVisibilityParticle::ComputeRadiance()`, from the mean distance of its hits), the 10 degree normal angle and the radius blur at the panel mouldings, the stop at 15M photons with the error still at 11%. Cannelle with the cache: mean within 0.05%.
-
-### PATHOCL: a rare one-pixel outlier in the luxball-hdr-vol parity render
-- Found: 2026-10-24
-- Area: engine (PATHOCL, volumes), tests
-- Problem: one of three TILEPATHOCL parity renders of `luxball-hdr-vol` with the same build had one value 1.5% off (pixel 143,101, red); the other runs agree to 1e-6, as the parity doc expects from the film's atomic adds.
-- Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` a few times and `compare` the directories (seen with the build of the GGX minimum roughness fix; the material change cannot reach this scene, which has only matte and null materials).
-- Notes: not investigated; suspect a race in the volume path (the homogeneous volume's scattering, or the film write of a sample from two tasks). Watch for it in later parity runs before calling a volume change non-identical.

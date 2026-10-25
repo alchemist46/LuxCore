@@ -305,6 +305,11 @@ Spectrum BSDF::EvaluateTotal() const {
 	return material->EvaluateTotal(hitPoint);
 }
 
+Spectrum BSDF::GetVolumeSigmaT() const {
+	auto volume = dynamic_observer_cast<const Volume>(material);
+	return volume ? volume->SigmaT(hitPoint) : Spectrum();
+}
+
 bool BSDF::HasBakeMap(const BakeMapType type) const {
 	return sceneObject && sceneObject->HasBakeMap(type);
 }

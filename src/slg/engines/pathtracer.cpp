@@ -1182,6 +1182,24 @@ bool PathTracer::HasToRenderEyeSample(PathTracerThreadState &state) const {
 	}
 }
 
+void PathTracer::DisableHybridBackForward(const string &engineName) {
+	if (hybridBackForwardEnable) {
+		SLG_LOG("WARNING: " << engineName << " traces no light paths, path.hybridbackforward.enable is ignored");
+		hybridBackForwardEnable = false;
+	}
+}
+
+void PathTracer::CheckHybridBackForwardPartition(const string &engineName) {
+	if (hybridBackForwardEnable && (hybridBackForwardPartition == 0.f)) {
+		// A partition of 0 is BlendLuxCore's export for PATHOCL, where it gives
+		// the native threads to the light paths while the GPU traces the eye
+		// paths
+		hybridBackForwardPartition = GetDefaultProps()->Get("path.hybridbackforward.partition").Get<double>();
+		SLG_LOG("WARNING: " << engineName << " traces no eye paths with path.hybridbackforward.partition = 0, " <<
+				hybridBackForwardPartition << " is used");
+	}
+}
+
 void PathTracer::ApplyVarianceClamp(const PathTracerThreadState &state,
 		vector<SampleResult> &sampleResults) const {
 	// Variance clamping
@@ -1331,6 +1349,11 @@ void PathTracer::ParseOptions(
 	if (hybridBackForwardEnable) {
 		hybridBackForwardPartition = Clamp(cfg.Get(defaultProps.Get("path.hybridbackforward.partition")).Get<double>(), 0.0, 1.0);
 		hybridBackForwardGlossinessThreshold = Clamp(cfg.Get(defaultProps.Get("path.hybridbackforward.glossinessthreshold")).Get<double>(), 0.0, 1.0);
+
+		// A partition of 1 traces only eye paths (HasToRenderEyeSample()), so
+		// they have to render the caustics too
+		if (hybridBackForwardPartition == 1.f)
+			hybridBackForwardEnable = false;
 	}
 
 	// Path regularization settings. Only the eye paths are regularized: with

@@ -130,6 +130,10 @@ void RenderEngine::Start(FilmRef flm, std::mutex *flmMutex) {
 
 	StartLockLess();
 
+	// StartLockLess() builds the caches (PhotonGI, etc.) before it starts the
+	// render threads: the render time, the samples/sec and the halt time count
+	// only the rendering
+	film->ResetTotalTime();
 	film->ResetTests();
 }
 

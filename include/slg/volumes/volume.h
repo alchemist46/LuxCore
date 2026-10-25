@@ -82,6 +82,7 @@ public:
 	virtual luxrays::PropertiesUPtr ToProperties() const;
 
 	friend class SchlickScatter;
+	friend class BSDF;
 
 protected:
 	virtual luxrays::Spectrum SigmaA(const HitPoint &hitPoint) const = 0;

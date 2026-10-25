@@ -188,9 +188,21 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 
 						if (allNearEntryIndices.size() > 0) {
 							if ((pathInfo.depth.depth > 0) && pathInfo.IsSpecularPath() && !causticDone) {
-								// It is a caustic photon
+								// It is a caustic photon. At a volume scattering
+								// vertex the flux carries sigma_t (the weight
+								// of Volume::Scatter()), so the photons summed
+								// over a sphere estimate sigma_t times the
+								// fluence: it is removed here, the lookup
+								// needs only the fluence
+								Spectrum photonFlux = lightPathFlux;
+								if (bsdf.IsVolume()) {
+									const Spectrum sigmaT = bsdf.GetVolumeSigmaT();
+									for (u_int i = 0; i < COLOR_SAMPLES; ++i)
+										photonFlux.c[i] = (sigmaT.c[i] > 0.f) ? (photonFlux.c[i] / sigmaT.c[i]) : 0.f;
+								}
+
 								newCausticPhotons.push_back(Photon(bsdf.hitPoint.p, nextEventRay.d,
-										light->GetID(), lightPathFlux, landingSurfaceNormal, bsdf.IsVolume()));
+										light->GetID(), photonFlux, landingSurfaceNormal, bsdf.IsVolume()));
 
 								usefulPath = true;
 							}

@@ -50,11 +50,11 @@ SpectrumGroup PGICPhotonBvh::ConnectCacheEntry(const Photon &photon, const BSDF 
 	Spectrum bsdfEval = bsdf.Evaluate(-photon.d, &event, &directPdfW, nullptr);
 	// bsdf.Evaluate() multiplies the result by AbsDot(bsdf.hitPoint.shadeN, -photon->d)
 	// so I have to cancel that factor. It is already included in photon density
-	// estimation.
+	// estimation. A volume's value (the albedo times the phase function) has
+	// no cosine and is used as it is: the volume photons estimate the fluence
+	// (see TracePhotonsThread::TracePhotonPath())
 	if (!bsdf.IsVolume())
 		bsdfEval /= AbsDot(bsdf.hitPoint.shadeN, -photon.d);
-	else
-		bsdfEval /= directPdfW;
 
 	SpectrumGroup result;
 	result.Add(photon.lightID, photon.alpha * bsdfEval);

@@ -106,6 +106,9 @@ void PathOCLRenderEngine::StartLockLess() {
 
 	auto defaultProps = PathOCLRenderEngine::GetDefaultProps();
 	pathTracer.ParseOptions(cfg, *defaultProps);
+	// The light paths run only on the native threads
+	if (nativeRenderThreadCount == 0)
+		pathTracer.DisableHybridBackForward(RenderEngineType2String(GetType()));
 
 	//--------------------------------------------------------------------------
 	// Restore render state if there is one

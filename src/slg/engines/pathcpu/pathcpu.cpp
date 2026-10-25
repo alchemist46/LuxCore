@@ -132,6 +132,10 @@ void PathCPURenderEngine::StartLockLess() {
 	//--------------------------------------------------------------------------
 
 	pathTracer.ParseOptions(cfg, *GetDefaultProps());
+	if (GetType() == RTPATHCPU)
+		pathTracer.DisableHybridBackForward(RenderEngineType2String(GetType()));
+	else
+		pathTracer.CheckHybridBackForwardPartition(RenderEngineType2String(GetType()));
 
 	if (pathTracer.hybridBackForwardEnable)
 		lightSamplerSharedData = MetropolisSamplerSharedData::FromProperties(Properties(), seedBaseGenerator, GetFilm());

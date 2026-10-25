@@ -180,6 +180,9 @@ public:
 
 	luxrays::Spectrum Albedo() const;
 	luxrays::Spectrum EvaluateTotal() const;
+	// The extinction coefficient at a volume scattering vertex (black when
+	// !IsVolume())
+	luxrays::Spectrum GetVolumeSigmaT() const;
 	luxrays::Spectrum Evaluate(const luxrays::Vector &generatedDir,
 		BSDFEvent *event, float *directPdfW = NULL, float *reversePdfW = NULL) const;
 	luxrays::Spectrum Sample(luxrays::Vector *sampledDir,

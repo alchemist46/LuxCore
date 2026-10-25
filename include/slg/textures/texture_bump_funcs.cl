@@ -156,7 +156,7 @@ OPENCL_FORCE_INLINE float3 MixTexture_Bump(__global const HitPoint *hitPoint,
 	const float du2 = dot(n, u) / nn;
 	const float dv2 = dot(n, v) / nn;
 
-	n = bumbNTex2;
+	n = bumbNAmount;
 	nn = dot(n, shadeN);
 	const float dua = dot(n, u) / nn;
 	const float dva = dot(n, v) / nn;

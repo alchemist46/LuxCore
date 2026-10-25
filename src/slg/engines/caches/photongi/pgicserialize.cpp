@@ -54,6 +54,40 @@ static void HashString(u_longlong &hash, const string &s) {
 	hash = (hash ^ 0xffull) * 1099511628211ull;
 }
 
+static bool IsUUIDAt(const string &s, const size_t pos) {
+	// "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", as NamedObject::GetUniqueName()
+	// writes it
+	if (pos + 36 > s.size())
+		return false;
+	for (size_t i = 0; i < 36; ++i) {
+		const char c = s[pos + i];
+		if ((i == 8) || (i == 13) || (i == 18) || (i == 23)) {
+			if (c != '-')
+				return false;
+		} else if (!(((c >= '0') && (c <= '9')) || ((c >= 'a') && (c <= 'f'))))
+			return false;
+	}
+
+	return true;
+}
+
+// The implicit textures of a material (a metal2 preset, a constant value, etc.)
+// are named with a random UUID (NamedObject::GetUniqueName()), different in
+// every process: the UUIDs are replaced by a fixed token
+static string StripUUIDs(const string &s) {
+	string result;
+	result.reserve(s.size());
+	for (size_t i = 0; i < s.size();) {
+		if (IsUUIDAt(s, i)) {
+			result += "<uuid>";
+			i += 36;
+		} else
+			result += s[i++];
+	}
+
+	return result;
+}
+
 // The parameters that change what the cache holds, as the configuration asks
 // them (before Preprocess() fills in the radius etc.), and a hash of the scene
 // without the camera: the scene properties, the meshes and the image maps. The
@@ -89,7 +123,7 @@ string PhotonGICache::ComputeSignature() const {
 					name.starts_with("scene.volumes.")) &&
 					name.ends_with(".id") && !name.ends_with(".emission.id"))
 				continue;
-			HashString(sceneHash, sceneProps->Get(name).ToString());
+			HashString(sceneHash, StripUUIDs(sceneProps->Get(name).ToString()));
 		}
 	} catch (const exception &e) {
 		SLG_LOG("PhotonGI cache can not compute the scene signature: " << e.what());

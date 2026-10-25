@@ -183,6 +183,7 @@ void BakeCPURenderEngine::StartLockLess() {
 	//--------------------------------------------------------------------------
 
 	pathTracer.ParseOptions(cfg, *GetDefaultProps());
+	pathTracer.CheckHybridBackForwardPartition(RenderEngineType2String(GetType()));
 
 	if (pathTracer.hybridBackForwardEnable) {
 		auto sharedData = MetropolisSamplerSharedData::FromProperties(
