@@ -28,6 +28,10 @@
 
 #include "slg/imagemap/imagemapcache.h"
 
+namespace luxrays {
+class IntersectionDevice;
+}
+
 namespace slg {
 
 //------------------------------------------------------------------------------
@@ -84,7 +88,10 @@ public:
 	// Preprocess/update methods
 	virtual void Update(const u_int filmWidth, const u_int filmHeight,
 		const u_int *filmSubRegion);
-	virtual void UpdateAuto(SceneConstRef scene);
+	// The device traces the ray of the auto focus and of the auto volume if the
+	// CPU accelerator (Embree) isn't built yet, so it isn't built only for
+	// them (see TraceAutoRay())
+	virtual void UpdateAuto(SceneConstRef scene, luxrays::IntersectionDevice *device = nullptr);
 
 	// Rendering methods
 	float GenerateRayTime(const float u) const { return luxrays::Lerp(u, shutterOpen, shutterClose); }
@@ -118,6 +125,11 @@ public:
 	void SetVolume(VolumeConstRef vol) { volume = std::addressof(vol); }
 
 	bool autoVolume;
+
+	// Traces the ray of UpdateAuto(): with Embree if it is built (or if there
+	// is no device), else with the device
+	static bool TraceAutoRay(SceneConstRef scene, luxrays::IntersectionDevice *device,
+			const luxrays::Ray &ray, luxrays::RayHit *rayHit);
 
 	// For motion blur
 	const luxrays::MotionSystem *motionSystem;

@@ -65,6 +65,15 @@ public:
 	ImageMapRef GetImageMap(const std::string &fileName, const ImageMapConfig &imgCfg,
 			const bool applyResizePolicy);
 
+	// Loads in parallel the image files that GetImageMap(file, config, true) is
+	// going to be asked for (each file is decoded by one thread, the decoding is
+	// most of the time of loading a scene with many textures). The image maps
+	// are added to the cache in the order of the requests; GetImageMap() then
+	// finds them. A file that can't be loaded is left to GetImageMap(), which
+	// fails as it does without the preload. Only with the resize policy that
+	// loads the file as it is.
+	void PreloadImageMaps(const std::vector<std::pair<std::string, ImageMapConfig>> &requests);
+
 	void DeleteImageMap(ImageMapConstRef im);
 
 	std::string GetSequenceFileName(ImageMapConstRef im) const;

@@ -35,6 +35,15 @@ public:
 	virtual bool HasHWSupport() const { return true; }
 
 	//--------------------------------------------------------------------------
+	// Serial interface: a single ray through the data parallel one, for the
+	// rare rays traced by the host (i.e. the camera ray of the auto focus and
+	// of the auto volume). It waits for the device, so it is not for the render
+	// loop and it requires the device to be idle for the calling thread.
+	//--------------------------------------------------------------------------
+
+	virtual bool TraceRay(const Ray *ray, RayHit *rayHit) override;
+
+	//--------------------------------------------------------------------------
 	// Data parallel interface: to trace a multiple rays (i.e. on the GPU)
 	//--------------------------------------------------------------------------
 

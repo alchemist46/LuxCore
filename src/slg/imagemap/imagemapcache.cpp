@@ -17,8 +17,13 @@
  ***************************************************************************/
 
 #include <boost/lexical_cast.hpp>
+#include <atomic>
+#include <set>
+#include <thread>
+
 #include <boost/format.hpp>
 
+#include "luxrays/utils/thread.h"
 #include "slg/core/sdl.h"
 #include "slg/imagemap/imagemapcache.h"
 #include "slg/textures/imagemaptex.h"
@@ -128,6 +133,75 @@ ImageMapRef ImageMapCache::GetImageMap(
 	auto& imRef = AppendImageMap(ImageMapSPtr(std::move(im)), fileName, key);
 
 	return std::ref(imRef);
+}
+
+void ImageMapCache::PreloadImageMaps(const vector<pair<string, ImageMapConfig>> &requests) {
+	// The other policies scale the image or write a TX file: they load their
+	// image maps one at a time
+	if (!dynamic_cast<const ImageMapResizeNonePolicy *>(resizePolicy))
+		return;
+
+	struct Job {
+		string fileName;
+		ImageMapConfig cfg;
+		string key;
+		ImageMapUPtr im;
+	};
+	vector<Job> jobs;
+	set<string> jobKeys;
+	for (const auto &request : requests) {
+		ImageMapConfig imgCfg = request.second;
+		imgCfg.workingColorSpace = workingColorSpace;
+
+		// The checks of GetImageMap(): a defined image map or a file loaded
+		// with the same configuration
+		if (mapByKey.find(GetCacheKey(request.first)) != mapByKey.end())
+			continue;
+		const string key = GetCacheKey(request.first, imgCfg);
+		if ((mapByKey.find(key) != mapByKey.end()) || !jobKeys.insert(key).second)
+			continue;
+
+		jobs.push_back(Job{request.first, imgCfg, key, nullptr});
+	}
+	if (jobs.size() < 2)
+		return;
+
+	const double startTime = WallClockTime();
+
+	atomic<size_t> nextJob(0);
+	auto loader = [&jobs, &nextJob]() {
+		for (;;) {
+			const size_t i = nextJob++;
+			if (i >= jobs.size())
+				return;
+
+			try {
+				jobs[i].im = std::make_unique<ImageMap>(jobs[i].fileName, jobs[i].cfg);
+			} catch (...) {
+				// GetImageMap() loads the file again and reports the error
+			}
+		}
+	};
+
+	const size_t threadCount = Min<size_t>(jobs.size(), Max<size_t>(1, GetHardwareThreadCount()));
+	vector<thread> threads;
+	for (size_t i = 1; i < threadCount; ++i)
+		threads.emplace_back(loader);
+	loader();
+	for (auto &t : threads)
+		t.join();
+
+	// In the order of the requests
+	for (auto &job : jobs) {
+		if (!job.im)
+			continue;
+
+		resizePolicyToApply.push_back(false);
+		AppendImageMap(ImageMapSPtr(std::move(job.im)), job.fileName, job.key);
+	}
+
+	SDL_LOG("Preloaded " << jobs.size() << " image maps with " << threadCount <<
+			" threads in " << int((WallClockTime() - startTime) * 1000.0) << "ms");
 }
 
 ImageMapRef ImageMapCache::DefineImageMap(ImageMapUPtr&& im) {

@@ -16,6 +16,7 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include "luxrays/core/intersectiondevice.h"
 #include "luxrays/utils/properties.h"
 #include "slg/film/film.h"
 #include "slg/core/sdl.h"
@@ -90,7 +91,15 @@ static bool SceneHasVolumes(SceneConstRef scene) {
 	return false;
 }
 
-void Camera::UpdateAuto(SceneConstRef scene) {
+bool Camera::TraceAutoRay(SceneConstRef scene, IntersectionDevice *device,
+		const Ray &ray, RayHit *rayHit) {
+	if (device && !scene.GetDataSet().HasAccelerator(ACCEL_EMBREE))
+		return device->TraceRay(&ray, rayHit);
+
+	return scene.GetDataSet().GetAccelerator(ACCEL_EMBREE)->Intersect(&ray, rayHit);
+}
+
+void Camera::UpdateAuto(SceneConstRef scene, IntersectionDevice *device) {
 	// Without volumes the camera volume can only be none: the ray below is
 	// skipped, so the CPU accelerator (Embree) isn't built only for it (0.34
 	// s on the 1.25M triangles of the Blender classroom), as when the GPU
@@ -109,7 +118,7 @@ void Camera::UpdateAuto(SceneConstRef scene) {
 		// Trace the ray. If there isn't an intersection just use the current
 		// focal distance
 		RayHit rayHit;
-		if (scene.GetDataSet().GetAccelerator(ACCEL_EMBREE)->Intersect(&ray, &rayHit)) {
+		if (TraceAutoRay(scene, device, ray, &rayHit)) {
 			/* I can not use BSDF::Init() here because Camera::UpdateAuto()
 			 * can be called before light preprocessing
 

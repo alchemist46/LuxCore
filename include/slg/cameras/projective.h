@@ -88,7 +88,7 @@ public:
 	}
 
 	// Preprocess/update methods
-	virtual void UpdateAuto(SceneConstRef scene);
+	virtual void UpdateAuto(SceneConstRef scene, luxrays::IntersectionDevice *device = nullptr);
 	virtual void Update(const u_int filmWidth, const u_int filmHeight,
 		const u_int *filmSubRegion);
 

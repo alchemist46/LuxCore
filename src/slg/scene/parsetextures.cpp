@@ -97,6 +97,24 @@ void Scene::ParseTextures(const Properties &props) {
 		return;
 	}
 
+	// Decode the image files of the image map textures in parallel: it is most
+	// of the time of loading a scene with many textures, and CreateTexture()
+	// then finds the image maps in the cache
+	vector<pair<string, ImageMapConfig>> imgMapRequests;
+	for(const string &key: texKeys) {
+		const string texName = Property::ExtractField(key, 2);
+		if (texName == "")
+			continue;
+
+		const string propName = "scene.textures." + texName;
+		if (props.Get(Property(propName + ".type")("imagemap")).Get<string>() == "imagemap") {
+			imgMapRequests.emplace_back(
+					props.Get(Property(propName + ".file")("image.png")).Get<string>(),
+					ImageMapConfig(props, propName));
+		}
+	}
+	imgMapCache.PreloadImageMaps(imgMapRequests);
+
 	for(const string &key: texKeys) {
 		// Extract the texture name
 		const string texName = Property::ExtractField(key, 2);

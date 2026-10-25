@@ -77,8 +77,22 @@ void Scene::Preprocess(Context& ctx, const u_int filmWidth, const u_int filmHeig
 	if (editActions.Has(CAMERA_EDIT))
 		PreprocessCamera(filmWidth, filmHeight, filmSubRegion);
 
-	// Update auto-focus and auto-volume
-	camera->UpdateAuto(*this);
+	// Update auto-focus and auto-volume. Their ray is traced by a native
+	// device if there is one (Embree is built for it anyway), else by a
+	// hardware device: the CPU accelerator isn't built only for one ray (0.2 s
+	// for 1.7M triangles, 0.65 s for 5.5M) when the GPU renders without native
+	// threads.
+	IntersectionDevice *autoDevice = nullptr;
+	if (ctx.IsRunning()) {
+		for (IntersectionDevice &device : ctx.GetIntersectionDevices()) {
+			if (!device.HasHWSupport()) {
+				autoDevice = &device;
+				break;
+			} else if (!autoDevice)
+				autoDevice = &device;
+		}
+	}
+	camera->UpdateAuto(*this, autoDevice);
 
 	// At this point, both the data set and the camera are updated
 	const BBox sceneBBox = Union(dataSet->GetBBox(), camera->GetBBox());

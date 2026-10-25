@@ -51,7 +51,7 @@ ProjectiveCamera::ProjectiveCamera(const CameraType type, const float *sw,
 	clippingPlaneNormal = Normal(1.f, 0.f, 0.f);
 }
 
-void ProjectiveCamera::UpdateAuto(SceneConstRef scene) {
+void ProjectiveCamera::UpdateAuto(SceneConstRef scene, IntersectionDevice *device) {
 	if (autoFocus) {
 		// Save lens radius
 		const float lensR = lensRadius;
@@ -67,11 +67,11 @@ void ProjectiveCamera::UpdateAuto(SceneConstRef scene) {
 		// Trace the ray. If there isn't an intersection just use the current
 		// focal distance
 		RayHit rayHit;
-		if (scene.GetDataSet().GetAccelerator(ACCEL_EMBREE)->Intersect(&ray, &rayHit))
+		if (TraceAutoRay(scene, device, ray, &rayHit))
 			focalDistance = rayHit.t;
 	}
 
-	Camera::UpdateAuto(scene);
+	Camera::UpdateAuto(scene, device);
 }
 
 void ProjectiveCamera::Update(const u_int width, const u_int height, const u_int *subRegion) {

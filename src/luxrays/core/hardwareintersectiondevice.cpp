@@ -30,5 +30,30 @@ HardwareIntersectionDevice::HardwareIntersectionDevice() {
 HardwareIntersectionDevice::~HardwareIntersectionDevice() {
 }
 
+bool HardwareIntersectionDevice::TraceRay(const Ray *ray, RayHit *rayHit) {
+	HardwareDeviceBuffer *rayBuff = nullptr;
+	HardwareDeviceBuffer *rayHitBuff = nullptr;
+
+	PushThreadCurrentDevice();
+	try {
+		AllocBufferRO(&rayBuff, (void *)ray, sizeof(Ray), "Single ray");
+		AllocBufferRW(&rayHitBuff, nullptr, sizeof(RayHit), "Single ray hit");
+
+		EnqueueTraceRayBuffer(rayBuff, rayHitBuff, 1);
+		EnqueueReadBuffer(rayHitBuff, true, sizeof(RayHit), rayHit);
+		FinishQueue();
+	} catch (...) {
+		FreeBuffer(&rayBuff);
+		FreeBuffer(&rayHitBuff);
+		PopThreadCurrentDevice();
+		throw;
+	}
+	FreeBuffer(&rayBuff);
+	FreeBuffer(&rayHitBuff);
+	PopThreadCurrentDevice();
+
+	return !rayHit->Miss();
+}
+
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

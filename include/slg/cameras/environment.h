@@ -92,7 +92,7 @@ public:
 
 	// Preprocess/update methods
 	virtual void Update(const u_int filmWidth, const u_int filmHeight, const u_int *filmSubRegion);
-	virtual void UpdateAuto(SceneConstRef scene) { };
+	virtual void UpdateAuto(SceneConstRef scene, luxrays::IntersectionDevice *device = nullptr) { };
 
 	// Rendering methods
 	virtual void GenerateRay(const float time,
