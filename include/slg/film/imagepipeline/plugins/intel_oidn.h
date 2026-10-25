@@ -64,8 +64,11 @@ private:
 		const GenericFrameBuffer<4, 1, float>& channel,
 		const u_int width,
 		const u_int height,
-		bool enablePrefiltering
+		bool enablePrefiltering,
+		const bool isNormal
 	) const;
+	// Without srcBuffer, the albedo or the normal image (only one of them)
+	// is denoised itself: the OIDN prefiltering of the auxiliary images
 	void FilterImage (const std::string &imageName,
 			const float *srcBuffer, float *dstBuffer,
 			const float *albedoBuffer, const float *normalBuffer,

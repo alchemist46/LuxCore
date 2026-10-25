@@ -183,14 +183,31 @@ void IntelOIDN::FilterImage(const string &imageName,
 
     lux::oidn::FilterRef filter = device.newFilter(filterType.c_str());
 
-    lux::oidn::BufferRef colorBuf = device.newBuffer((float*)srcBuffer, width * height * 3 * sizeof(float));
-    lux::oidn::BufferRef albedoBuf = device.newBuffer((float*)albedoBuffer, width * height * 3 * sizeof(float));
-    lux::oidn::BufferRef normalBuf = device.newBuffer((float*)normalBuffer, width * height * 3 * sizeof(float));
-    lux::oidn::BufferRef dstBuf = device.newBuffer((float*)dstBuffer, width * height * 3 * sizeof(float));
+	const size_t byteSize = width * height * 3 * sizeof(float);
+	auto newBuffer = [&](const float *buf) {
+		return device.newBuffer((float *)buf, byteSize);
+	};
 
+	if (srcBuffer) {
+		filter.setImage("color", newBuffer(srcBuffer), lux::oidn::Format::Float3, width, height);
+		if (albedoBuffer) {
+			filter.setImage("albedo", newBuffer(albedoBuffer), lux::oidn::Format::Float3, width, height);
 
-    filter.set("hdr", true);
-	filter.set("cleanAux", cleanAux);
+			// Normals can only be used if albedo is supplied as well
+			if (normalBuffer)
+				filter.setImage("normal", newBuffer(normalBuffer), lux::oidn::Format::Float3, width, height);
+		}
+		filter.set("hdr", true);
+		filter.set("cleanAux", cleanAux);
+	} else {
+		// Prefiltering: the auxiliary image is the only input. It can not
+		// go in as the color: that has to be positive, the normals are not.
+		if (albedoBuffer)
+			filter.setImage("albedo", newBuffer(albedoBuffer), lux::oidn::Format::Float3, width, height);
+		else
+			filter.setImage("normal", newBuffer(normalBuffer), lux::oidn::Format::Float3, width, height);
+	}
+
 	// The quality mode: "balanced" and "fast" trade some quality for speed
 	// (for interactive rendering); "default" leaves the OIDN default (high)
 	if (quality == "high")
@@ -200,16 +217,7 @@ void IntelOIDN::FilterImage(const string &imageName,
 	else if (quality == "fast")
 		filter.set("quality", lux::oidn::Quality::Fast);
 	filter.set("maxMemoryMB", oidnMemLimit);
-    filter.setImage("color", colorBuf, lux::oidn::Format::Float3, width, height);
-    if (albedoBuffer) {
-        filter.setImage("albedo", albedoBuf, lux::oidn::Format::Float3, width, height);
-
-        // Normals can only be used if albedo is supplied as well
-        if (normalBuffer)
-            filter.setImage("normal", normalBuf, lux::oidn::Format::Float3, width, height);
-    }
-    
-    filter.setImage("output", dstBuf, lux::oidn::Format::Float3, width, height);
+    filter.setImage("output", newBuffer(dstBuffer), lux::oidn::Format::Float3, width, height);
     filter.commit();
 
     SLG_LOG("IntelOIDNPlugin executing " + imageName + " filter");
@@ -228,12 +236,10 @@ IntelOIDN::float_buffer IntelOIDN::PrepareBuffer (
 	const GenericFrameBuffer<4, 1, float>& channel,
 	const u_int width,
 	const u_int height,
-	bool enablePrefiltering
+	bool enablePrefiltering,
+	const bool isNormal
 ) const {
-	IntelOIDN::float_buffer outBuffer(width * height * 3);
-	IntelOIDN::float_buffer tmpBuffer(outBuffer.size());
-	IntelOIDN::float_buffer dummy1(outBuffer.size());
-	IntelOIDN::float_buffer dummy2(outBuffer.size());
+	IntelOIDN::float_buffer tmpBuffer(width * height * 3);
 
 	// Extract channel
 	tbb::parallel_for(
@@ -244,23 +250,22 @@ IntelOIDN::float_buffer IntelOIDN::PrepareBuffer (
 		}
 	);
 
-	// Prefilter
-	if (enablePrefiltering) {
-		FilterImage(
-			imageName,
-			&tmpBuffer[0],
-			&outBuffer[0],
-			&dummy1[0],
-			&dummy2[0],
-			width, height,
-			false
-		);
-	} else {
+	if (!enablePrefiltering)
 		return tmpBuffer;
-	}
+
+	// Prefilter
+	IntelOIDN::float_buffer outBuffer(tmpBuffer.size());
+	FilterImage(
+		imageName,
+		nullptr,
+		&outBuffer[0],
+		isNormal ? nullptr : &tmpBuffer[0],
+		isNormal ? &tmpBuffer[0] : nullptr,
+		width, height,
+		false
+	);
 
 	return outBuffer;
-
 }
 
 
@@ -298,7 +303,8 @@ void IntelOIDN::Apply(Film &film, const u_int index) {
 			*film.channel_ALBEDO,
 			width,
 			height,
-			enablePrefiltering
+			enablePrefiltering,
+			false
 		);
 	};
 
@@ -308,7 +314,8 @@ void IntelOIDN::Apply(Film &film, const u_int index) {
 			*film.channel_AVG_SHADING_NORMAL,
 			width,
 			height,
-			enablePrefiltering
+			enablePrefiltering,
+			true
 		);
 	};
 
@@ -321,13 +328,9 @@ void IntelOIDN::Apply(Film &film, const u_int index) {
 			// Prepare only albedo
 			SLG_LOG("[IntelOIDNPlugin] Warning: AVG_SHADING_NORMAL AOV not found");
 			prepareAlbedo();
-			normalBuffer = float_buffer(3 * pixelCount);
 		}
-	} else {
+	} else
 		SLG_LOG("[IntelOIDNPlugin] Warning: ALBEDO AOV not found");
-		albedoBuffer = float_buffer(3 * pixelCount);
-		normalBuffer = float_buffer(3 * pixelCount);
-	}
 
 
 	SLG_LOG("IntelOIDNPlugin filtering image");
