@@ -54,6 +54,8 @@ protected:
 	void UpdateAllCameraThreadsOCLBuffers();
 
 	TileWork tileWork;
+	// The samples rendered since the light tree learning started
+	double lightTreeLearnSampleCount;
 };
 
 //------------------------------------------------------------------------------

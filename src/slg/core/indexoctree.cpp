@@ -29,8 +29,6 @@
 #include "slg/core/indexoctree.h"
 
 // Required for explicit instantiations
-#include "slg/lights/strategies/dlscacheimpl/dlscacheimpl.h"
-// Required for explicit instantiations
 #include "slg/engines/caches/photongi/photongicache.h"
 // Required for explicit instantiations
 #include "slg/lights/visibility/envlightvisibilitycache.h"
@@ -140,7 +138,6 @@ void IndexOctree<T>::AddImpl(IndexOctreeNode *node, const BBox &nodeBBox,
 // C++ can be quite horrible...
 
 namespace slg {
-template class IndexOctree<DLSCVisibilityParticle>;
 template class IndexOctree<PGICVisibilityParticle>;
 template class IndexOctree<ELVCVisibilityParticle>;
 }

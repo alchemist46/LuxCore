@@ -95,8 +95,6 @@ set(SLG_KERNELS
     include/slg/lights/light_types.cl
     include/slg/lights/sphericaltriangle_funcs.cl
     include/slg/lights/light_funcs.cl
-    include/slg/lights/strategies/dlsc_types.cl
-    include/slg/lights/strategies/dlsc_funcs.cl
     include/slg/lights/strategies/lighttree_types.cl
     include/slg/lights/strategies/lighttree_funcs.cl
     include/slg/lights/strategies/lightstrategy_funcs.cl

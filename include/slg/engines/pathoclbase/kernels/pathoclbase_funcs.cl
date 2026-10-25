@@ -209,9 +209,6 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 			float weight;
 			if (!(pathInfo->lastBSDFEvent & SPECULAR)) {
 				const float lightPickProb = LightStrategy_SampleLightPdf(lightsDistribution,
-						dlscAllEntries,
-						dlscDistributions, dlscBVHNodes,
-						dlscRadius2, dlscNormalCosAngle,
 						lightTreeNodes, lightTreeDistantLights,
 						lightTreeDistantLightCount, lightTreeLightIndex,
 						lightTreeLearn, lightTreeLearnCells,
@@ -253,9 +250,6 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 		float weight = 1.f;
 		if (!(pathInfo->lastBSDFEvent & SPECULAR)) {
 			const float lightPickProb = LightStrategy_SampleLightPdf(lightsDistribution,
-					dlscAllEntries,
-					dlscDistributions, dlscBVHNodes,
-					dlscRadius2, dlscNormalCosAngle,
 					lightTreeNodes, lightTreeDistantLights,
 					lightTreeDistantLightCount, lightTreeLightIndex,
 						lightTreeLearn, lightTreeLearnCells,
@@ -266,12 +260,6 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 					(light->triangle.quadLightIndex != NULL_INDEX) ?
 						light->triangle.quadLightIndex : light->lightSceneIndex);
 
-#if !defined(RENDER_ENGINE_RTPATHOCL)
-			// This is a specific check to avoid fireflies with DLSC
-			if ((lightPickProb == 0.f) && light->isDirectLightSamplingEnabled && dlscAllEntries)
-				return;
-#endif
-			
 			const float directPdfW = TriangleLight_GetDirectPdfW(light, &bsdf->hitPoint,
 					VLOAD3F(&ray->o.x), distance,
 					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x)))
@@ -311,9 +299,6 @@ OPENCL_FORCE_INLINE bool DirectLight_Illuminate(
 	float lightPickPdf;
 	float learnBoundsProb[LIGHTTREE_MAX_SLOTS];
 	const uint lightIndex = LightStrategy_SampleLights(lightDist,
-			dlscAllEntries,
-			dlscDistributions, dlscBVHNodes,
-			dlscRadius2, dlscNormalCosAngle,
 			lightTreeNodes, lightTreeDistantLights,
 			lightTreeDistantLightCount, onlyInfiniteLights ? NULL : lightTreeLightIndex,
 			lightTreeLearn, lightTreeLearnCells,
@@ -544,11 +529,6 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		KERNEL_ARGS_INFINITELIGHT \
 		, __global const float* restrict lightsDistribution \
 		, __global const float* restrict infiniteLightSourcesDistribution \
-		, __global const DLSCacheEntry* restrict dlscAllEntries \
-		, __global const float* restrict dlscDistributions \
-		, __global const IndexBVHArrayNode* restrict dlscBVHNodes \
-		, const float dlscRadius2 \
-		, const float dlscNormalCosAngle \
 		, __global const LightTreeNode* restrict lightTreeNodes \
 		, __global const LightTreeDistantLight* restrict lightTreeDistantLights \
 		, const uint lightTreeDistantLightCount \

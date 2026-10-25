@@ -344,11 +344,6 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 				GetIlluminatePickLight(*lightSource),
 				ray.o, pathInfo.lastShadeN, pathInfo.lastFromVolume);
 
-			// This is a specific check to avoid fireflies with DLSC
-			if ((lightPickProb == 0.f) && lightSource->IsDirectLightSamplingEnabled() &&
-					(lightStrategy.GetType() == TYPE_DLS_CACHE))
-				return;
-
 			// The pdf of the light sampling from the origin of the ray: the
 			// last scattering vertex (Scene::Intersect() moves mint, not the
 			// origin, past the pass-through surfaces)

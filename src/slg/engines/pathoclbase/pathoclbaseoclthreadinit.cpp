@@ -248,19 +248,6 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 		intersectionDevice.FreeBuffer(&infiniteLightSourcesDistributionBuff);
 	}
 
-	if (cscene->dlscAllEntries.size() > 0) {
-		intersectionDevice.AllocBufferRO(&dlscAllEntriesBuff, &cscene->dlscAllEntries[0],
-			cscene->dlscAllEntries.size() * sizeof(slg::ocl::DLSCacheEntry), "DLSC all entries");
-		intersectionDevice.AllocBufferRO(&dlscDistributionsBuff, &cscene->dlscDistributions[0],
-			cscene->dlscDistributions.size() * sizeof(float), "DLSC distributions table");
-		intersectionDevice.AllocBufferRO(&dlscBVHNodesBuff, &cscene->dlscBVHArrayNode[0],
-			cscene->dlscBVHArrayNode.size() * sizeof(luxrays::ocl::IndexBVHArrayNode), "DLSC BVH nodes");
-	} else {
-		intersectionDevice.FreeBuffer(&dlscAllEntriesBuff);
-		intersectionDevice.FreeBuffer(&dlscDistributionsBuff);
-		intersectionDevice.FreeBuffer(&dlscBVHNodesBuff);
-	}
-
 	if (cscene->lightTreeLightIndex.size() > 0) {
 		if (cscene->lightTreeNodes.size() > 0) {
 			intersectionDevice.AllocBufferRO(&lightTreeNodesBuff, &cscene->lightTreeNodes[0],

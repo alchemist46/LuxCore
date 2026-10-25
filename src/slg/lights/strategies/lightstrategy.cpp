@@ -27,14 +27,22 @@ using namespace slg;
 // LightStrategy
 //------------------------------------------------------------------------------
 
-// The default is LIGHT_TREE (LOG_POWER until 2026-10-17): at equal error it
-// was 1.3-1.55x as fast on the GPU and 1.0-1.08x on the CPU in the G0 scenes
-LightStrategyType LightStrategy::GetType(const luxrays::Properties &cfg) {
+// The type tag of a configuration. The default is LIGHT_TREE (LOG_POWER until
+// 2026-10-17): at equal error it was 1.3-1.55x as fast on the GPU and
+// 1.0-1.08x on the CPU in the G0 scenes. DLS_CACHE, the direct light sampling
+// cache removed on 2026-10-25, is the light tree too: its learned cells pick
+// the lights that reach each region of the scene, as the cache did, without
+// the cache's pre-pass.
+static string GetTypeTag(const Properties &cfg) {
 	const string type = cfg.Get(
 		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
 	).Get<string>();
 
-	return String2LightStrategyType(type);
+	return (type == "DLS_CACHE") ? LightStrategyLightTree::GetObjectTag() : type;
+}
+
+LightStrategyType LightStrategy::GetType(const luxrays::Properties &cfg) {
+	return String2LightStrategyType(GetTypeTag(cfg));
 }
 
 //------------------------------------------------------------------------------
@@ -42,14 +50,16 @@ LightStrategyType LightStrategy::GetType(const luxrays::Properties &cfg) {
 //------------------------------------------------------------------------------
 
 PropertiesUPtr LightStrategy::ToProperties(const Properties &cfg) {
-	const string type = cfg.Get(
-		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
-	).Get<string>();
+	const string type = GetTypeTag(cfg);
+	if (cfg.IsDefined("lightstrategy.type") && (cfg.Get("lightstrategy.type").Get<string>() == "DLS_CACHE"))
+		SLG_LOG("The DLS_CACHE light strategy is no longer available: using " << type);
 
 	LightStrategyRegistry::ToProperties func;
 
 	if (LightStrategyRegistry::STATICTABLE_NAME(ToProperties).Get(type, func)) {
-		return func(cfg);
+		PropertiesUPtr props = func(cfg);
+		*props << Property("lightstrategy.type")(type);
+		return props;
 	} else
 		throw runtime_error(
 			"Unknown light strategy type in LightStrategy::ToProperties(): " + type
@@ -57,9 +67,7 @@ PropertiesUPtr LightStrategy::ToProperties(const Properties &cfg) {
 }
 
 LightStrategyUPtr LightStrategy::FromProperties(const Properties &cfg) {
-	const string type = cfg.Get(
-		Property("lightstrategy.type")(LightStrategyLightTree::GetObjectTag())
-	).Get<string>();
+	const string type = GetTypeTag(cfg);
 
 	LightStrategyRegistry::FromProperties func;
 	if (LightStrategyRegistry::STATICTABLE_NAME(FromProperties).Get(type, func))
@@ -122,7 +130,6 @@ OBJECTSTATICREGISTRY_STATICFIELDS(LightStrategyRegistry);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyUniform);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyPower);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyLogPower);
-OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyDLSCache);
 OBJECTSTATICREGISTRY_REGISTER(LightStrategyRegistry, LightStrategyLightTree);
 // Just add here any new LightStrategy (don't forget in the .h too)
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

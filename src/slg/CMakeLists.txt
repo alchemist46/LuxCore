@@ -225,10 +225,6 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/lights/sunlight.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/sphericaltriangle.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/trianglelight.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscache.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscacheimpl/dlscacheimpl.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscacheimpl/dlscoctree.cpp
-  ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/dlscacheimpl/dlscbvh.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/distributionlightstrategy.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/lightstrategy.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/lights/strategies/lighttree.cpp

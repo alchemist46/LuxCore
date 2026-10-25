@@ -240,9 +240,6 @@ protected:
 	luxrays::HardwareDeviceBuffer *envLightIndicesBuff;
 	luxrays::HardwareDeviceBuffer *lightsDistributionBuff;
 	luxrays::HardwareDeviceBuffer *infiniteLightSourcesDistributionBuff;
-	luxrays::HardwareDeviceBuffer *dlscAllEntriesBuff;
-	luxrays::HardwareDeviceBuffer *dlscDistributionsBuff;
-	luxrays::HardwareDeviceBuffer *dlscBVHNodesBuff;
 	luxrays::HardwareDeviceBuffer *lightTreeNodesBuff;
 	luxrays::HardwareDeviceBuffer *lightTreeDistantLightsBuff;
 	luxrays::HardwareDeviceBuffer *lightTreeLightIndexBuff;

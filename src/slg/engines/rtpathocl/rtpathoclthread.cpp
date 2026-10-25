@@ -38,7 +38,7 @@ using namespace std::literals::chrono_literals;
 
 RTPathOCLRenderThread::RTPathOCLRenderThread(const u_int index,
 	HardwareIntersectionDeviceRef device, TilePathOCLRenderEngine *re) : 
-	TilePathOCLRenderThread(index, device, re) {
+	TilePathOCLRenderThread(index, device, re), lightTreeLearnSampleCount(0.0) {
 }
 
 RTPathOCLRenderThread::~RTPathOCLRenderThread() {
@@ -92,8 +92,9 @@ void RTPathOCLRenderThread::UpdateOCLBuffers(const EditActionList &updateActions
 	}
 
 	if  (cscene->wasLightsCompiled) {
-		// Update Scene Lights
+		// Update Scene Lights (the light tree learning starts afresh)
 		InitLights();
+		lightTreeLearnSampleCount = 0.0;
 	}
 
 	//--------------------------------------------------------------------------
@@ -225,6 +226,12 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                                 sizeof(slg::ocl::pathoclbase::GPUTaskStats) * taskCount,
                                 gpuTaskStats.get());
                         intersectionDevice.FinishQueue();
+
+                        // The epochs of the light tree learning (the samples of
+                        // the tile, as RenderTileWork() counts them in the film)
+                        lightTreeLearnSampleCount += (double)tileWork.GetCoord().width * tileWork.GetCoord().height *
+                                        engine->aaSamples * engine->aaSamples;
+                        UpdateLightTreeLearning(lightTreeLearnSampleCount);
 
                         engine->tileRepository->NextTile(engine->GetFilm(), engine->filmMutex, tileWork, threadFilms[0]->GetFilm());
 

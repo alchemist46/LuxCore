@@ -27,7 +27,6 @@
 #include "slg/lights/strategies/uniform.h"
 #include "slg/lights/strategies/power.h"
 #include "slg/lights/strategies/logpower.h"
-#include "slg/lights/strategies/dlscache.h"
 #include "slg/lights/strategies/lighttree.h"
 
 namespace slg {
@@ -61,7 +60,6 @@ protected:
 	OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(LightStrategyRegistry, LightStrategyUniform);
 	OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(LightStrategyRegistry, LightStrategyPower);
 	OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(LightStrategyRegistry, LightStrategyLogPower);
-	OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(LightStrategyRegistry, LightStrategyDLSCache);
 	OBJECTSTATICREGISTRY_DECLARE_REGISTRATION(LightStrategyRegistry, LightStrategyLightTree);
 	// Just add here any new LightStrategy (don't forget in the .cpp too)
 

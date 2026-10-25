@@ -24,8 +24,6 @@
 // Required for explicit instantiations
 #include "slg/engines/caches/photongi/photongicache.h"
 // Required for explicit instantiations
-#include "slg/lights/strategies/dlscacheimpl/dlscacheimpl.h"
-// Required for explicit instantiations
 #include "slg/lights/visibility/envlightvisibilitycache.h"
 
 using namespace std;
@@ -89,11 +87,9 @@ IndexBvh<T>::IndexBvh(const vector<T> *entries, const float radius) :
 namespace slg {
 template class IndexBvh<Photon>;
 template class IndexBvh<RadiancePhoton>;
-template class IndexBvh<DLSCacheEntry>;
 template class IndexBvh<ELVCacheEntry>;
 }
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::IndexBvh<Photon>)
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::IndexBvh<RadiancePhoton>)
-// Serialization for DLSCacheEntry is still TODO
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

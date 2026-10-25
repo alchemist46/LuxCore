@@ -43,85 +43,13 @@
 #include "slg/lights/trianglelight.h"
 #include "slg/lights/spherelight.h"
 #include "slg/lights/mapspherelight.h"
-#include "slg/lights/strategies/dlscache.h"
-#include "slg/lights/strategies/dlscacheimpl/dlscbvh.h"
 #include "slg/lights/strategies/lighttree.h"
 
 using namespace std;
 using namespace luxrays;
 using namespace slg;
 
-void CompiledScene::CompileDLSC(const LightStrategyDLSCache& dlscLightStrategy) {
-	if (dlscLightStrategy.UseRTMode()) {
-		dlscAllEntries.clear();
-		dlscAllEntries.shrink_to_fit();
-
-		dlscDistributions.clear();
-		dlscDistributions.shrink_to_fit();
-
-		dlscBVHArrayNode.clear();
-		dlscBVHArrayNode.shrink_to_fit();
-
-		return;
-	}
-
-	dlscRadius2 = dlscLightStrategy.GetEntryRadius() * dlscLightStrategy.GetEntryRadius();
-	dlscNormalCosAngle = cosf(Radians(dlscLightStrategy.GetEntryNormalAngle()));
-
-	// Compile all cache entries
-	auto bvh = dlscLightStrategy.GetBVH();
-	if (bvh) {
-		const std::vector<DLSCacheEntry> *allEntries = bvh->GetAllEntries();
-		const u_int entriesCount = allEntries->size();
-
-		dlscAllEntries.resize(entriesCount);
-		dlscDistributions.clear();
-		for (u_int i = 0; i < entriesCount; ++i) {
-			const DLSCacheEntry &entry = (*allEntries)[i];
-			slg::ocl::DLSCacheEntry &oclEntry = dlscAllEntries[i];
-
-			ASSIGN_VECTOR(oclEntry.p, entry.p);
-			ASSIGN_NORMAL(oclEntry.n, entry.n);
-
-			oclEntry.isVolume = entry.isVolume;
-
-			if (entry.lightsDistribution) {
-				// Compile the light Distribution1D
-				const auto size = dlscDistributions.size();
-
-				oclEntry.lightsDistributionOffset = size;
-
-				auto [dist, distributionSize] = CompileDistribution1D(*entry.lightsDistribution);
-
-				const auto distributionSize4 = distributionSize / sizeof(float);
-				dlscDistributions.resize(size + distributionSize4);
-
-				std::copy_n(dist.begin(), distributionSize4, &dlscDistributions[size]);
-
-			} else
-				oclEntry.lightsDistributionOffset = NULL_INDEX;
-
-		}
-
-		// Compile the DLSC BVH
-		u_int nNodes;
-		const luxrays::ocl::IndexBVHArrayNode *nodes = bvh->GetArrayNodes(&nNodes);
-		dlscBVHArrayNode.resize(nNodes);
-		copy(&nodes[0], &nodes[0] + nNodes, dlscBVHArrayNode.begin());
-	} else {
-		dlscAllEntries.clear();
-		dlscDistributions.clear();
-		dlscBVHArrayNode.clear();
-	}
-
-	dlscAllEntries.shrink_to_fit();
-	dlscDistributions.shrink_to_fit();
-	dlscBVHArrayNode.shrink_to_fit();
-}
-
 void CompiledScene::CompileLightStrategy() {
-	dlscRadius2 = 0.f;
-	dlscNormalCosAngle = 0.f;
 	lightTreeNodes.clear();
 	lightTreeDistantLights.clear();
 	lightTreeLightIndex.clear();
@@ -146,52 +74,35 @@ void CompiledScene::CompileLightStrategy() {
 			);
 		}
 	} catch(std::bad_cast&) {
-		// Check if it is an LightStrategyDLSCache
+		// Check if it is an LightStrategyLightTree
 		try {
-			auto& dlscLightStrategy =
-				dynamic_cast<const LightStrategyDLSCache&>(illuminateLightStrategy);
+			auto& treeLightStrategy =
+				dynamic_cast<const LightStrategyLightTree&>(illuminateLightStrategy);
 			lightsDistribution.clear();
 			lightsDistributionSize = 0;
 
-			if (dlscLightStrategy.GetLightsDistribution()) {
+			// The tree (lighttree_funcs.cl walks the same arrays as the
+			// CPU) and, for the code paths that don't use it, its log
+			// power distribution
+			if (treeLightStrategy.UseTree()) {
+				lightTreeNodes = treeLightStrategy.GetNodes();
+				lightTreeDistantLights = treeLightStrategy.GetDistantLights();
+				lightTreeLightIndex = treeLightStrategy.GetLightIndex();
+				if (treeLightStrategy.UseLearning()) {
+					lightTreeLearn = treeLightStrategy.GetLearn();
+					lightTreeLearnCellCount = treeLightStrategy.GetLearnCellCount();
+					lightTreeLearnMaxWeight = treeLightStrategy.GetLearnMaxWeight();
+					lightTreeLearnSamples = treeLightStrategy.GetLearnSamples();
+				}
+			}
+			if (treeLightStrategy.GetLightsDistribution()) {
 				std::tie(lightsDistribution, lightsDistributionSize) =
 					CompileDistribution1D(
-						*dlscLightStrategy.GetLightsDistribution()
+						*treeLightStrategy.GetLightsDistribution()
 					);
 			}
-
-			CompileDLSC(dlscLightStrategy);
 		} catch(std::bad_cast&) {
-			// Check if it is an LightStrategyLightTree
-			try {
-				auto& treeLightStrategy =
-					dynamic_cast<const LightStrategyLightTree&>(illuminateLightStrategy);
-				lightsDistribution.clear();
-				lightsDistributionSize = 0;
-
-				// The tree (lighttree_funcs.cl walks the same arrays as the
-				// CPU) and, for the code paths that don't use it, its log
-				// power distribution
-				if (treeLightStrategy.UseTree()) {
-					lightTreeNodes = treeLightStrategy.GetNodes();
-					lightTreeDistantLights = treeLightStrategy.GetDistantLights();
-					lightTreeLightIndex = treeLightStrategy.GetLightIndex();
-					if (treeLightStrategy.UseLearning()) {
-						lightTreeLearn = treeLightStrategy.GetLearn();
-						lightTreeLearnCellCount = treeLightStrategy.GetLearnCellCount();
-						lightTreeLearnMaxWeight = treeLightStrategy.GetLearnMaxWeight();
-						lightTreeLearnSamples = treeLightStrategy.GetLearnSamples();
-					}
-				}
-				if (treeLightStrategy.GetLightsDistribution()) {
-					std::tie(lightsDistribution, lightsDistributionSize) =
-						CompileDistribution1D(
-							*treeLightStrategy.GetLightsDistribution()
-						);
-				}
-			} catch(std::bad_cast&) {
-				throw runtime_error("Unsupported illuminate light strategy in CompiledScene::CompileLights()");
-			}
+			throw runtime_error("Unsupported illuminate light strategy in CompiledScene::CompileLights()");
 		}
 	}
 
@@ -213,12 +124,10 @@ void CompiledScene::CompileLightStrategy() {
 				);
 		}
 	} catch(std::bad_cast&) {
-		// Check if it is an LightStrategyDLSCache or a LightStrategyLightTree:
-		// both use a log power distribution for the infinite lights
+		// Check if it is an LightStrategyLightTree: it uses a log power
+		// distribution for the infinite lights
 		const Distribution1D *dist = nullptr;
-		if (auto dlscLightStrategy = dynamic_cast<const LightStrategyDLSCache *>(&infiniteLightStrategy))
-			dist = dlscLightStrategy->GetLightsDistribution().get();
-		else if (auto treeLightStrategy = dynamic_cast<const LightStrategyLightTree *>(&infiniteLightStrategy))
+		if (auto treeLightStrategy = dynamic_cast<const LightStrategyLightTree *>(&infiniteLightStrategy))
 			dist = treeLightStrategy->GetLightsDistribution().get();
 		else
 			throw runtime_error("Unsupported infinite light strategy in CompiledScene::CompileLights()");

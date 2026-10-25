@@ -32,8 +32,6 @@
 #include "slg/utils/pathdepthinfo.h"
 
 // Required for explicit instantiations
-#include "slg/lights/strategies/dlscacheimpl/dlscacheimpl.h"
-// Required for explicit instantiations
 #include "slg/engines/caches/photongi/photongicache.h"
 // Required for explicit instantiations
 #include "slg/lights/visibility/envlightvisibilitycache.h"
@@ -400,7 +398,6 @@ void SceneVisibility<T>::Build() {
 // C++ can be quite horrible...
 
 namespace slg {
-template class SceneVisibility<DLSCVisibilityParticle>;
 template class SceneVisibility<PGICVisibilityParticle>;
 template class SceneVisibility<ELVCVisibilityParticle>;
 }

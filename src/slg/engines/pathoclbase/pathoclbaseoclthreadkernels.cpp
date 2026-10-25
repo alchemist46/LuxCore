@@ -424,11 +424,6 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, envLightDistributionsBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, lightsDistributionBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, infiniteLightSourcesDistributionBuff);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, dlscAllEntriesBuff);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, dlscDistributionsBuff);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, dlscBVHNodesBuff);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, cscene->dlscRadius2);
-	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, cscene->dlscNormalCosAngle);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, lightTreeNodesBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, lightTreeDistantLightsBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, (u_int)cscene->lightTreeDistantLights.size());

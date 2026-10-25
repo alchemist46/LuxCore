@@ -186,10 +186,6 @@ typedef struct {
 	__global const float* restrict envLightDistribution, \
 	__global const float* restrict lightsDistribution, \
 	__global const float* restrict infiniteLightSourcesDistribution, \
-	__global const DLSCacheEntry* restrict dlscAllEntries, \
-	__global const float* restrict dlscDistributions, \
-	__global const IndexBVHArrayNode* restrict dlscBVHNodes, \
-	const float dlscRadius2, const float dlscNormalCosAngle, \
 	__global const LightTreeNode* restrict lightTreeNodes, \
 	__global const LightTreeDistantLight* restrict lightTreeDistantLights, \
 	const uint lightTreeDistantLightCount, \
@@ -212,11 +208,6 @@ typedef struct {
 	envLightDistribution, \
 	lightsDistribution, \
 	infiniteLightSourcesDistribution, \
-	dlscAllEntries, \
-	dlscDistributions, \
-	dlscBVHNodes, \
-	dlscRadius2, \
-	dlscNormalCosAngle, \
 	lightTreeNodes, \
 	lightTreeDistantLights, \
 	lightTreeDistantLightCount, \
