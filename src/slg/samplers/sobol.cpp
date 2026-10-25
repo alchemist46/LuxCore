@@ -599,7 +599,7 @@ PropertiesUPtr SobolSampler::GetDefaultProps() {
 			Property("sampler.sobol.supersampling")(1) <<
 			Property("sampler.sobol.overlapping")(1) <<
 			Property("sampler.sobol.bluenoise.enable")(true) <<
-			Property("sampler.sobol.bluenoise.first")(false) <<
+			Property("sampler.sobol.bluenoise.first")(true) <<
 			// The chunk without a halt spp. Past its chunk a pixel continues
 			// with a sequence of its own, which is not stratified with the
 			// chunk: measured on cornell and luxball-hdr (PATHCPU), against
