@@ -118,7 +118,14 @@ ImageMapRef ImageMapCache::GetImageMap(
 	// I haven't yet loaded the file
 
 	ImageMapUPtr im;
-	if (applyResizePolicy) {
+	auto preloaded = applyResizePolicy ? preloadedImageMaps.end() : preloadedImageMaps.find(key);
+	if (preloaded != preloadedImageMaps.end()) {
+		// Decoded by PreloadImageMaps()
+		im = std::move(preloaded->second);
+		preloadedImageMaps.erase(preloaded);
+
+		resizePolicyToApply.push_back(false);
+	} else if (applyResizePolicy) {
 		// Scale the image if required
 		bool toApply;
 		im = resizePolicy->ApplyResizePolicy(fileName, imgCfg, toApply);
@@ -135,34 +142,41 @@ ImageMapRef ImageMapCache::GetImageMap(
 	return std::ref(imRef);
 }
 
-void ImageMapCache::PreloadImageMaps(const vector<pair<string, ImageMapConfig>> &requests) {
-	// The other policies scale the image or write a TX file: they load their
-	// image maps one at a time
-	if (!dynamic_cast<const ImageMapResizeNonePolicy *>(resizePolicy))
-		return;
+void ImageMapCache::PreloadImageMaps(const vector<pair<string, ImageMapConfig>> &requests,
+		const vector<pair<string, ImageMapConfig>> &laterRequests) {
+	preloadedImageMaps.clear();
 
 	struct Job {
 		string fileName;
 		ImageMapConfig cfg;
 		string key;
+		bool later;
 		ImageMapUPtr im;
 	};
 	vector<Job> jobs;
 	set<string> jobKeys;
-	for (const auto &request : requests) {
-		ImageMapConfig imgCfg = request.second;
-		imgCfg.workingColorSpace = workingColorSpace;
+	auto addJobs = [&](const vector<pair<string, ImageMapConfig>> &reqs, const bool later) {
+		for (const auto &request : reqs) {
+			ImageMapConfig imgCfg = request.second;
+			imgCfg.workingColorSpace = workingColorSpace;
 
-		// The checks of GetImageMap(): a defined image map or a file loaded
-		// with the same configuration
-		if (mapByKey.find(GetCacheKey(request.first)) != mapByKey.end())
-			continue;
-		const string key = GetCacheKey(request.first, imgCfg);
-		if ((mapByKey.find(key) != mapByKey.end()) || !jobKeys.insert(key).second)
-			continue;
+			// The checks of GetImageMap(): a defined image map or a file loaded
+			// with the same configuration
+			if (mapByKey.find(GetCacheKey(request.first)) != mapByKey.end())
+				continue;
+			const string key = GetCacheKey(request.first, imgCfg);
+			if ((mapByKey.find(key) != mapByKey.end()) || !jobKeys.insert(key).second)
+				continue;
 
-		jobs.push_back(Job{request.first, imgCfg, key, nullptr});
-	}
+			jobs.push_back(Job{request.first, imgCfg, key, later, nullptr});
+		}
+	};
+	// The other policies scale the image or write a TX file: they load the
+	// image maps of the textures one at a time. The later requests are read
+	// without the resize policy
+	if (dynamic_cast<const ImageMapResizeNonePolicy *>(resizePolicy))
+		addJobs(requests, false);
+	addJobs(laterRequests, true);
 	if (jobs.size() < 2)
 		return;
 
@@ -191,13 +205,17 @@ void ImageMapCache::PreloadImageMaps(const vector<pair<string, ImageMapConfig>> 
 	for (auto &t : threads)
 		t.join();
 
-	// In the order of the requests
+	// In the order of the requests; the later ones wait for GetImageMap()
 	for (auto &job : jobs) {
 		if (!job.im)
 			continue;
 
-		resizePolicyToApply.push_back(false);
-		AppendImageMap(ImageMapSPtr(std::move(job.im)), job.fileName, job.key);
+		if (job.later)
+			preloadedImageMaps[job.key] = std::move(job.im);
+		else {
+			resizePolicyToApply.push_back(false);
+			AppendImageMap(ImageMapSPtr(std::move(job.im)), job.fileName, job.key);
+		}
 	}
 
 	SDL_LOG("Preloaded " << jobs.size() << " image maps with " << threadCount <<

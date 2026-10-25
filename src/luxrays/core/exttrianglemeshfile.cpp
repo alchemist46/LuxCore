@@ -20,6 +20,7 @@
 #include <fstream>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <atomic>
 
@@ -269,17 +270,18 @@ static int TriAOVCB(p_ply_argument argument) {
 //------------------------------------------------------------------------------
 
 // The fast path of the binary PLY reading: an element of vertices (any
-// fixed size properties, the x, y, z are extracted and the others are
+// fixed size properties; the positions, the normals and the uvs, colors
+// and alphas of each data layer are extracted and the others are
 // skipped, exactly like the rply reader below skips the properties
-// without a callback) followed by an element of triangular faces (any
-// fixed size properties plus the vertex_indices list, the last property
-// of the element). The whole file is read at once and the two elements
-// are parsed in parallel chunks, directly from the bytes - the rply
-// reader walks the file through stdio and invokes one callback per
-// value, one value at a time.
+// without a callback and drops the vertex AOVs) followed by an element of
+// triangular faces (any fixed size properties plus the vertex_indices
+// list, the last property of the element). The whole file is read at once
+// and the two elements are parsed in parallel chunks, directly from the
+// bytes - the rply reader walks the file through stdio and invokes one
+// callback per value, one value at a time.
 //
-// Anything else (the ASCII format, the properties the rply path would
-// extract: normals, uvs, colors, alphas, AOVs, list properties in the
+// Anything else (the ASCII format, the triangle AOV elements, a partial
+// normal, uv or color, a property name seen twice, list properties in the
 // vertex element, other or missing elements, quad or polygon faces,
 // truncated files) is rejected here and read by the rply path below,
 // unchanged: the fast path is a strict subset and the fallback keeps
@@ -370,8 +372,13 @@ static double PlyPropValue(const unsigned char *p, const PlyPropType t,
 			return PlyReadValue<int32_t>(p, bigEndian);
 		case PlyPropType::UINT:
 			return PlyReadValue<uint32_t>(p, bigEndian);
-		case PlyPropType::FLOAT:
-			return PlyReadValue<float>(p, bigEndian);
+		case PlyPropType::FLOAT: {
+			// The NaN and infinite values are read as 0, like
+			// ibinary_float32 of rply does (exported meshes can have
+			// NaN normals)
+			const float v = PlyReadValue<float>(p, bigEndian);
+			return isfinite(v) ? v : 0.0;
+		}
 		case PlyPropType::DOUBLE:
 			return PlyReadValue<double>(p, bigEndian);
 	}
@@ -384,6 +391,9 @@ struct PlyProperty {
 	string name;
 	PlyPropType type = PlyPropType::FLOAT;
 	size_t offset = 0;
+	// Spelled "uchar", not "uint8": rply keeps the two apart and ColorCB
+	// and AlphaCB scale only the first one to [0, 1]
+	bool uchar = false;
 };
 
 // An element of the header
@@ -405,6 +415,54 @@ static string PlyBaseName(const string &name) {
 		--last;
 
 	return name.substr(0, last);
+}
+
+// The vertex values the fast path extracts: the position and normal
+// components, then PLY_FIELD_LAYER_COUNT values for each data layer
+enum {
+	PLY_FIELD_X, PLY_FIELD_Y, PLY_FIELD_Z,
+	PLY_FIELD_NX, PLY_FIELD_NY, PLY_FIELD_NZ,
+	PLY_FIELD_LAYER_BASE
+};
+enum {
+	PLY_FIELD_U, PLY_FIELD_V,
+	PLY_FIELD_RED, PLY_FIELD_GREEN, PLY_FIELD_BLUE,
+	PLY_FIELD_ALPHA,
+	PLY_FIELD_LAYER_COUNT
+};
+
+// A vertex property the fast path extracts
+struct PlyField {
+	size_t offset;
+	PlyPropType type;
+	bool uchar;
+	u_int target;
+};
+
+// The value a vertex property holds, by the names the rply path looks for
+// (the layer 0 without a suffix, the layer i with the suffix i). Returns
+// false for the properties the rply path skips or drops (the vertex AOVs)
+static bool PlyFieldTarget(const string &name, u_int &target) {
+	static const char * const fixedNames[] = { "x", "y", "z", "nx", "ny", "nz" };
+	for (u_int i = 0; i < PLY_FIELD_LAYER_BASE; ++i) {
+		if (name == fixedNames[i]) {
+			target = i;
+			return true;
+		}
+	}
+
+	static const char * const layerNames[] = { "s", "t", "red", "green", "blue", "alpha" };
+	for (u_int layer = 0; layer < EXTMESH_MAX_DATA_COUNT; ++layer) {
+		const string suffix = (layer == 0) ? "" : ToString(layer);
+		for (u_int kind = 0; kind < PLY_FIELD_LAYER_COUNT; ++kind) {
+			if (name == layerNames[kind] + suffix) {
+				target = PLY_FIELD_LAYER_BASE + layer * PLY_FIELD_LAYER_COUNT + kind;
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 // Read the plain binary PLY meshes. Returns null when the file is
@@ -502,6 +560,7 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 					if (!ss || !PlyParsePropType(type1, property.type))
 						return nullptr;
 					property.name = name;
+					property.uchar = (type1 == "uchar");
 					for (const PlyProperty &p : element.properties)
 						property.offset += PlyPropTypeSize(p.type);
 					element.properties.push_back(std::move(property));
@@ -528,40 +587,57 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 	const PlyElement &vertexElement = elements[0];
 	const PlyElement &faceElement = elements[1];
 
-	// The vertex element must not carry anything the rply path would
-	// load: the fast path reads only the positions
-	for (const PlyProperty &property : vertexElement.properties) {
-		const string base = PlyBaseName(property.name);
-		if ((base == "nx") || (base == "ny") || (base == "nz") ||
-				(base == "s") || (base == "t") ||
-				(base == "red") || (base == "green") || (base == "blue") ||
-				(base == "alpha") || (base == "vertaov"))
-			return nullptr;
-	}
-
-	// The face element must not carry the triangle AOVs either
+	// The face element must not carry the triangle AOVs
 	for (const PlyProperty &property : faceElement.properties) {
 		if (PlyBaseName(property.name) == "triaov")
 			return nullptr;
 	}
 
-	// The vertex positions
-	size_t xOffset = SIZE_MAX, yOffset = SIZE_MAX, zOffset = SIZE_MAX;
-	PlyPropType xType = PlyPropType::FLOAT, yType = PlyPropType::FLOAT, zType = PlyPropType::FLOAT;
+	// The vertex properties the rply path extracts, by the names it looks
+	// for: the positions, the normals and, for each data layer, the uvs,
+	// colors and alphas ("s", "t", "red", ... for the layer 0, "s1", "t1",
+	// "red1", ... for the others). The vertex AOVs are skipped: the rply
+	// path reads them and drops them. Every other property is skipped by
+	// both paths
+	vector<PlyField> fields;
+	array<int, PLY_FIELD_LAYER_BASE + PLY_FIELD_LAYER_COUNT * EXTMESH_MAX_DATA_COUNT> fieldFound;
+	fieldFound.fill(0);
 	for (const PlyProperty &property : vertexElement.properties) {
-		if (property.name == "x") {
-			xOffset = property.offset;
-			xType = property.type;
-		} else if (property.name == "y") {
-			yOffset = property.offset;
-			yType = property.type;
-		} else if (property.name == "z") {
-			zOffset = property.offset;
-			zType = property.type;
-		}
+		u_int target;
+		if (!PlyFieldTarget(property.name, target))
+			continue;
+
+		// A property name seen twice: left to the rply path
+		if (fieldFound[target]++)
+			return nullptr;
+
+		fields.push_back(PlyField{property.offset, property.type, property.uchar, target});
 	}
-	if ((xOffset == SIZE_MAX) || (yOffset == SIZE_MAX) || (zOffset == SIZE_MAX))
+
+	// The positions are required and each group is either complete or
+	// absent: a partial normal, uv or color is left to the rply path
+	auto groupState = [&](const u_int first, const u_int count) {
+		u_int found = 0;
+		for (u_int i = 0; i < count; ++i)
+			found += fieldFound[first + i];
+		return (found == 0) ? 0 : ((found == count) ? 1 : -1);
+	};
+	if (groupState(PLY_FIELD_X, 3) != 1)
 		return nullptr;
+	const int normalsState = groupState(PLY_FIELD_NX, 3);
+	if (normalsState < 0)
+		return nullptr;
+	array<bool, EXTMESH_MAX_DATA_COUNT> hasUVs, hasColors, hasAlphas;
+	for (u_int i = 0; i < EXTMESH_MAX_DATA_COUNT; ++i) {
+		const u_int layerBase = PLY_FIELD_LAYER_BASE + i * PLY_FIELD_LAYER_COUNT;
+		const int uvState = groupState(layerBase + PLY_FIELD_U, 2);
+		const int colorState = groupState(layerBase + PLY_FIELD_RED, 3);
+		if ((uvState < 0) || (colorState < 0))
+			return nullptr;
+		hasUVs[i] = (uvState == 1);
+		hasColors[i] = (colorState == 1);
+		hasAlphas[i] = (fieldFound[layerBase + PLY_FIELD_ALPHA] != 0);
+	}
 
 	// The record sizes
 	size_t vertexStride = 0;
@@ -585,20 +661,68 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 			(data.size() - dataStart < vertexBytes + faceBytes))
 		return nullptr;
 
-	// Read the vertices: one parallel pass over the records
+	// The output buffers, allocated as the rply path does
+	const size_t vertexCount = vertexElement.count;
 	VertexBuffer p;
-	p.Allocate(vertexElement.count);
+	p.Allocate(vertexCount);
+	NormalBuffer n;
+	if (normalsState == 1)
+		n.Allocate(vertexCount);
+	ExtMeshProp<UV> uvs;
+	ExtMeshProp<Spectrum> cols;
+	ExtMeshProp<float> alphas;
+	for (u_int i = 0; i < EXTMESH_MAX_DATA_COUNT; ++i) {
+		if (hasUVs[i])
+			uvs.AllocateLayer(i, vertexCount);
+		if (hasColors[i])
+			cols.AllocateLayer(i, vertexCount);
+		if (hasAlphas[i])
+			alphas.AllocateLayer(i, vertexCount);
+	}
+
+	// Read the vertices: one parallel pass over the records
 	{
 		const std::span<Point> points = p.GetObjects();
+		Normal * const normals = (normalsState == 1) ? n.GetObjects().data() : nullptr;
 		const unsigned char * const vertexData = data.data() + dataStart;
-		tbb::parallel_for(tbb::blocked_range<size_t>(0, vertexElement.count, 16384),
+		tbb::parallel_for(tbb::blocked_range<size_t>(0, vertexCount, 16384),
 			[&](const tbb::blocked_range<size_t> &r) {
 				for (size_t i = r.begin(); i < r.end(); ++i) {
 					const unsigned char * const record = vertexData + i * vertexStride;
-					points[i] = Point(
-						static_cast<float>(PlyPropValue(record + xOffset, xType, bigEndian)),
-						static_cast<float>(PlyPropValue(record + yOffset, yType, bigEndian)),
-						static_cast<float>(PlyPropValue(record + zOffset, zType, bigEndian)));
+					for (const PlyField &field : fields) {
+						const double value = PlyPropValue(record + field.offset, field.type, bigEndian);
+
+						if (field.target < PLY_FIELD_LAYER_BASE) {
+							if (field.target < PLY_FIELD_NX)
+								points[i][field.target - PLY_FIELD_X] = static_cast<float>(value);
+							else
+								normals[i][field.target - PLY_FIELD_NX] = static_cast<float>(value);
+							continue;
+						}
+
+						const u_int layer = (field.target - PLY_FIELD_LAYER_BASE) / PLY_FIELD_LAYER_COUNT;
+						const u_int kind = (field.target - PLY_FIELD_LAYER_BASE) % PLY_FIELD_LAYER_COUNT;
+						// The colors and alphas of type uchar are scaled
+						// to [0, 1], like in ColorCB and AlphaCB
+						const float scaled = field.uchar ?
+							static_cast<float>(value / 255.0) : static_cast<float>(value);
+						switch (kind) {
+							case PLY_FIELD_U:
+								uvs[layer][i].u = static_cast<float>(value);
+								break;
+							case PLY_FIELD_V:
+								uvs[layer][i].v = static_cast<float>(value);
+								break;
+							case PLY_FIELD_RED:
+							case PLY_FIELD_GREEN:
+							case PLY_FIELD_BLUE:
+								cols[layer][i].c[kind - PLY_FIELD_RED] = scaled;
+								break;
+							case PLY_FIELD_ALPHA:
+								alphas[layer][i] = scaled;
+								break;
+						}
+					}
 				}
 			});
 	}
@@ -634,13 +758,8 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 			return nullptr;
 	}
 
-	// The mesh of the fast path carries no normals, uvs, colors,
-	// alphas or AOVs: the header checks above rejected the files
+	// No triangle AOVs: the header checks above rejected the files
 	// carrying them
-	NormalBuffer n;
-	ExtMeshProp<UV> uvs;
-	ExtMeshProp<Spectrum> cols;
-	ExtMeshProp<float> alphas;
 	ExtMeshProp<float> triAOVs;
 	auto mesh = std::make_unique<ExtTriangleMesh>(std::move(p), std::move(tris),
 			std::move(n), uvs, cols, alphas);

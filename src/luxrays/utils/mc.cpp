@@ -18,6 +18,8 @@
 
 #include <limits>
 
+#include "oneapi/tbb.h"
+
 #include "luxrays/core/epsilon.h"
 #include "luxrays/core/randomgen.h"
 #include "luxrays/utils/mc.h"
@@ -431,12 +433,15 @@ float Distribution1D::Pdf(float u, float *du) const {
 BOOST_CLASS_EXPORT_IMPLEMENT(luxrays::Distribution2D)
 
 Distribution2D::Distribution2D(std::span<float> data,  u_int nu, u_int nv) {
-	pConditionalV.reserve(nv);
-	// Compute conditional sampling distribution for $\tilde{v}$
-	for (u_int v = 0; v < nv; ++v)
-		pConditionalV.push_back(
-			std::make_unique<Distribution1D>(data.subspan(v * nu, nu))
-		);
+	// Compute conditional sampling distribution for $\tilde{v}$: the rows
+	// are independent, built in parallel (an environment map has millions
+	// of pixels)
+	pConditionalV.resize(nv);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, nv, 16),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int v = r.begin(); v < r.end(); ++v)
+				pConditionalV[v] = std::make_unique<Distribution1D>(data.subspan(v * nu, nu));
+		});
 	// Compute marginal sampling distribution $p[\tilde{v}]$
 	std::vector<float> marginalFunc;
 	marginalFunc.reserve(nv);

@@ -494,6 +494,9 @@ void Scene::Parse(PropertiesRPtr props) {
 
 	SDL_LOG("Parsing lights");
 	ParseLights(*props);
+
+	// The image maps preloaded for lights that didn't ask for them
+	imgMapCache.ClearPreloadedImageMaps();
 }
 
 

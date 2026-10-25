@@ -72,7 +72,17 @@ public:
 	// finds them. A file that can't be loaded is left to GetImageMap(), which
 	// fails as it does without the preload. Only with the resize policy that
 	// loads the file as it is.
-	void PreloadImageMaps(const std::vector<std::pair<std::string, ImageMapConfig>> &requests);
+	//
+	// The laterRequests are the files that GetImageMap(file, config, false) is
+	// going to be asked for later (the image maps of the lights, parsed after
+	// the materials and the objects, which can add image maps of their own):
+	// they are decoded with the others but added to the cache only when
+	// GetImageMap() asks for them, so the order of the cache is the same as
+	// without the preload. ClearPreloadedImageMaps() drops the ones nobody
+	// asked for.
+	void PreloadImageMaps(const std::vector<std::pair<std::string, ImageMapConfig>> &requests,
+			const std::vector<std::pair<std::string, ImageMapConfig>> &laterRequests = {});
+	void ClearPreloadedImageMaps() { preloadedImageMaps.clear(); }
 
 	void DeleteImageMap(ImageMapConstRef im);
 
@@ -145,6 +155,10 @@ private:
 	ImageMapResizePolicy *resizePolicy;
 	WorkingColorSpace workingColorSpace;
 	std::vector<bool> resizePolicyToApply;
+
+	// The image maps of the laterRequests of PreloadImageMaps(), by cache key,
+	// not in the cache yet (not serialized: they live only during a parse)
+	std::unordered_map<std::string, ImageMapUPtr> preloadedImageMaps;
 };
 
 

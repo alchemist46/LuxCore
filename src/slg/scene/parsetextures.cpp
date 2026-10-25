@@ -113,7 +113,33 @@ void Scene::ParseTextures(const Properties &props) {
 					ImageMapConfig(props, propName));
 		}
 	}
-	imgMapCache.PreloadImageMaps(imgMapRequests);
+
+	// The image maps of the infinite and projection lights are decoded with
+	// them, for CreateLightSource()
+	vector<pair<string, ImageMapConfig>> lightImgMapRequests;
+	auto addLightRequest = [&](const string &propName, const string &lightType) {
+		if (lightType == "infinite")
+			lightImgMapRequests.emplace_back(
+					props.Get(Property(propName + ".file")("image.png")).Get<string>(),
+					ImageMapConfig(props, propName));
+		else if (lightType == "projection") {
+			const string imageName = props.Get(Property(propName + ".mapfile")("")).Get<string>();
+			if (imageName != "")
+				lightImgMapRequests.emplace_back(imageName, ImageMapConfig(props, propName));
+		}
+	};
+	if (props.HaveNames("scene.infinitelight"))
+		addLightRequest("scene.infinitelight", "infinite");
+	for (const string &key : props.GetAllUniqueSubNames("scene.lights")) {
+		const string lightName = Property::ExtractField(key, 2);
+		if (lightName == "")
+			continue;
+
+		const string propName = "scene.lights." + lightName;
+		addLightRequest(propName, props.Get(Property(propName + ".type")("sky2")).Get<string>());
+	}
+
+	imgMapCache.PreloadImageMaps(imgMapRequests, lightImgMapRequests);
 
 	for(const string &key: texKeys) {
 		// Extract the texture name

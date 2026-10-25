@@ -16,7 +16,10 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <atomic>
 #include <memory>
+
+#include "oneapi/tbb.h"
 
 #include "luxrays/usings.h"
 #include "slg/bsdf/bsdf.h"
@@ -45,27 +48,38 @@ void InfiniteLight::Preprocess() {
 
 	auto& imageMapStorage = imageMap->GetStorage();
 
-	std::vector<float> data(imageMap->GetWidth() * imageMap->GetHeight());
-	//float maxVal = -INFINITY;
-	//float minVal = INFINITY;
-	for (u_int y = 0; y < imageMap->GetHeight(); ++y) {
-		for (u_int x = 0; x < imageMap->GetWidth(); ++x) {
-			const u_int index = x + y * imageMap->GetWidth();
+	const u_int width = imageMap->GetWidth();
+	const u_int height = imageMap->GetHeight();
+	std::vector<float> data(width * height);
+	// The rows in parallel; the error names the first invalid pixel in
+	// the order of the rows, as the serial loop did
+	std::atomic<u_int> firstInvalid(NULL_INDEX);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, height, 16),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int y = r.begin(); y < r.end(); ++y) {
+				for (u_int x = 0; x < width; ++x) {
+					const u_int index = x + y * width;
 
-			if (sampleUpperHemisphereOnly && (y > imageMap->GetHeight() / 2))
-				data[index] = 0.f;
-			else
-				data[index] = imageMapStorage.GetFloat(index);
+					if (sampleUpperHemisphereOnly && (y > height / 2))
+						data[index] = 0.f;
+					else
+						data[index] = imageMapStorage.GetFloat(index);
 
-			if (!IsValid(data[index]))
-				throw runtime_error("Pixel (" + ToString(x) + ", " + ToString(y) + ") in infinite light has an invalid value: " + ToString(data[index]));
+					if (!IsValid(data[index])) {
+						u_int current = firstInvalid.load();
+						while ((index < current) && !firstInvalid.compare_exchange_weak(current, index))
+							;
+						break;
+					}
+				}
+			}
+		});
 
-			//maxVal = Max(data[index], maxVal);
-			//minVal = Min(data[index], minVal);
-		}
+	if (firstInvalid != NULL_INDEX) {
+		const u_int index = firstInvalid;
+		throw runtime_error("Pixel (" + ToString(index % width) + ", " + ToString(index / width) +
+				") in infinite light has an invalid value: " + ToString(data[index]));
 	}
-	
-	//SLG_LOG("InfiniteLight luminance  Max=" << maxVal << " Min=" << minVal);
 
 	imageMapDistribution =
 		std::make_unique<Distribution2D>(
