@@ -147,6 +147,17 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	intersectionDevice.EnqueueKernel(initSeedKernel,
 			HardwareDeviceRange(engine->taskCount), HardwareDeviceRange(initWorkGroupSize));
 
+	// The tasks start new samples again: a restart after a scene edit follows
+	// a halt whose paths were drained (DrainPaths()), and the sampler shared
+	// data is initialized only once, by InitRender(). Left set, each task
+	// finished the sample it had and the render stalled at taskCount samples
+	// (20 spp on a 160x160 film).
+	if (engine->oclSampler->type == slg::ocl::SOBOL) {
+		const u_int noDrain = 0;
+		intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+				offsetof(slg::ocl::SobolSamplerSharedData, drain), sizeof(u_int), &noDrain);
+	}
+
 	// Initialize the tasks buffer
 	intersectionDevice.EnqueueKernel(initKernel,
 			HardwareDeviceRange(engine->taskCount), HardwareDeviceRange(initWorkGroupSize));

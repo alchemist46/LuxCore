@@ -150,13 +150,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: cornell-glass with `path.photongi.caustic.enabled = 1`, `caustic.lookup.radius = 0.1`, `photon.maxcount = 4000000`, `caustic.updatespp = 0`, hybrid off, PATHOCL 200x200 at 64 spp: kernels 23.6 s in one run, 341 s in another (same build, `lc-work/ca1/timing.py`).
 - Notes: not investigated: not a regression of CA1 (the base build shows both). A cap on the photons per lookup (the old `caustic.lookup.maxcount`, commented out in `scenes/causticcube/render.cfg`) or a k-nearest lookup would bound it.
 
-### PATHOCL stops at about 20 spp after a scene edit with a halt spp
-- Found: 2026-10-23
-- Area: engine (PATHOCL halt, scene edits)
-- Problem: a session with `batch.haltspp = 64` renders its 64 spp, then after `BeginSceneEdit()`/`EndSceneEdit()` (a camera move) the film stops at 20 spp: `HasDone()` stays false and the pass count does not move for minutes. With `batch.haltspp = 32` the session reports done at 20 spp. Same with every cache off and on the build before CA1 (244d25614), so not PhotonGI.
-- Reproduce: `EDIT="scene.camera.lookat.orig = -2.5 -8. 2.9" SPP=64 out/venvtest/Scripts/python -u lc-work/ca1/edit_halt_repro.py PATHOCL "path.photongi.indirect.enabled = 0;path.photongi.caustic.enabled = 0"` (cornell-glass 160x160, HIP).
-- Notes: suspect the per-thread halt check (`PathOCLOpenCLRenderThread::RenderThreadImpl()`: `haltSPP`, `GetThreadFilmsEyeSPP()`, the spp-per-iteration estimate) counting the samples of before the edit. Found during CA1; the PhotonGI edit test there halts by hand instead.
-
 ### The light tree's learning biases the direct light on the CPU
 - Found: 2026-10-23
 - Area: light (light tree learning), engine (PATHCPU)
