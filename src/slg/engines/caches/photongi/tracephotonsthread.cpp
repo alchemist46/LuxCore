@@ -38,6 +38,14 @@ using namespace slg;
 // TracePhotonsThread
 //------------------------------------------------------------------------------
 
+// The caustic map is done when it has stored no photon after this many: the
+// scene has no caustic path the cache could hold (no nearly specular surface
+// between a light and a visible one), and the map would never fill (the
+// furnace sphere traced its 100M photons at 0.1M photons/s, the Metropolis
+// sampler finding no useful path). PhotonGICache::Preprocess() then disables
+// the caustic cache.
+static const u_int PGIC_EMPTY_CAUSTIC_PHOTONS = 1000000;
+
 TracePhotonsThread::TracePhotonsThread(PhotonGICache &cache, const u_int index,
 		const u_int seed, const u_int photonCount,
 		const bool indirectCacheDone, const bool causticCacheDone,
@@ -348,7 +356,8 @@ void TracePhotonsThread::RenderFunc(std::stop_token stop_token) {
 		indirectDone = indirectDone || (!pgic.params.indirect.enabled) ||
 				((pgic.params.indirect.maxSize > 0) && (globalIndirectSize >= pgic.params.indirect.maxSize));
 		causticDone = causticDone || (!pgic.params.caustic.enabled) ||
-				(globalCausticSize >= pgic.params.caustic.maxSize);
+				(globalCausticSize >= pgic.params.caustic.maxSize) ||
+				((globalCausticSize == 0) && (globalCausticPhotonsTraced >= PGIC_EMPTY_CAUSTIC_PHOTONS));
 
 		// Check if it is time to stop
 		if (indirectDone && causticDone)

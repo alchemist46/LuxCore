@@ -480,6 +480,16 @@ void PhotonGICache::Preprocess(const u_int threadCnt) {
 	if (params.caustic.enabled) {
 		SLG_LOG("PhotonGI tracing caustic cache photons");
 		TracePhotons(false, true);
+
+		// No caustic photon (TracePhotonsThread gives up after a share of the
+		// photons): the eye paths keep the caustic paths, which they would
+		// otherwise drop for the cache
+		if (causticPhotons.empty()) {
+			SLG_LOG("PhotonGI found no caustic photon after " << causticPhotonTracedCount <<
+					" photons: the caustic cache is disabled");
+			params.caustic.enabled = false;
+			params.caustic.maxSize = 0;
+		}
 	}
 
 	//--------------------------------------------------------------------------

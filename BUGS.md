@@ -171,13 +171,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.indirect.enabled=1 scene.volumes.v.photongi.enable=1` (not run yet).
 - Notes: found while fixing the caustic cache in volumes (10x too bright); by reading only. Volumes have `photongi.enable` false by default.
 
-### PhotonGI caustic cache traces for hours on a scene without caustics
-- Found: 2026-10-23
-- Area: caches (PhotonGI)
-- Problem: on the white furnace matte sphere (no specular surface) the caustic cache with the default settings never fills: it traces the whole `photon.maxcount` (100M) at about 0.1M photons/s, and again at each caustic update. BIDIRCPU took 6704 s for one 256 spp case; PATHOCL more than 20 minutes. The same on the build before this one (565ebf8df).
-- Reproduce: `tests/furnace/furnace.py BIDIRCPU matte path.photongi.caustic.enabled=1` (or PATHCPU/PATHOCL).
-- Notes: the Metropolis photon sampler finds no useful path. Stop when nothing is stored after a share of the photons, or skip the caustic cache when the scene has no specular or nearly specular surface.
-
 ### PATHCPU crashes in the second PhotonGI session of a process
 - Found: 2026-10-24
 - Area: engine (PATHCPU), caches (PhotonGI)
