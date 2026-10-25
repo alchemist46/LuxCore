@@ -18,6 +18,8 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "oneapi/tbb.h"
+
 #include "luxrays/usings.h"
 #include "slg/scene/scene.h"
 #include "slg/lights/trianglelight.h"
@@ -64,24 +66,39 @@ void SceneObjectDefinitions::DefineIntersectableLights
 	// Add all new triangle lights
 
 	const string prefix = Scene::EncodeTriangleLightNamePrefix(obj.GetName());
-	for (u_int i = 0; i < mesh.GetTotalTriangleCount(); ++i) {
-		auto tl = std::make_unique<TriangleLight>();
+	const u_int triangleCount = mesh.GetTotalTriangleCount();
 
-		// I use here boost::lexical_cast instead of ToString() because it is a
-		// lot faster and there can not be locale related problems with integers
-		//tl->SetName(prefix + ToString(i));
-		tl->SetName(prefix + boost::lexical_cast<string>(i));
+	// The lights are built in parallel (a scene can have millions of triangle
+	// lights) and defined in the order of the triangles. The mesh area is
+	// cached by the mesh on its first call, before the threads read it.
+	Transform localToWorld;
+	mesh.GetLocal2World(0.f, localToWorld);
+	mesh.GetMeshArea(localToWorld);
 
-		tl->lightMaterial = &obj.GetMaterial();
-		tl->volume = tl->lightMaterial->GetExteriorVolume();
-		tl->sceneObject = &obj;
-		// This is initialized in LightSourceDefinitions::Preprocess()
-		tl->meshIndex = NULL_INDEX;
-		tl->triangleIndex = i;
-		tl->Preprocess();
+	vector<std::unique_ptr<TriangleLight>> triLights(triangleCount);
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, triangleCount, 1024),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int i = r.begin(); i < r.end(); ++i) {
+				auto tl = std::make_unique<TriangleLight>();
 
+				// I use here boost::lexical_cast instead of ToString() because it is a
+				// lot faster and there can not be locale related problems with integers
+				tl->SetName(prefix + boost::lexical_cast<string>(i));
+
+				tl->lightMaterial = &obj.GetMaterial();
+				tl->volume = tl->lightMaterial->GetExteriorVolume();
+				tl->sceneObject = &obj;
+				// This is initialized in LightSourceDefinitions::Preprocess()
+				tl->meshIndex = NULL_INDEX;
+				tl->triangleIndex = i;
+				tl->Preprocess();
+
+				triLights[i] = std::move(tl);
+			}
+		});
+
+	for (auto &tl : triLights)
 		lightDefs.DefineLightSource(std::move(tl));
-	}
 }
 
 void SceneObjectDefinitions::UpdateMaterialReferences(MaterialConstRef oldMat, MaterialRef newMat) {

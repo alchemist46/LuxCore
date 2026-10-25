@@ -20,6 +20,8 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 
+#include "oneapi/tbb.h"
+
 #include "slg/lights/light.h"
 #include "slg/scene/scene.h"
 #include "slg/lights/trianglelight.h"
@@ -46,6 +48,22 @@ LightSourceDefinitions::LightSourceDefinitions() :
 }
 
 LightSourceDefinitions::~LightSourceDefinitions() {
+	// The lights of a scene with millions of triangle lights are freed in
+	// parallel: one at a time, it took longer than defining them (each light
+	// and its name are separate heap blocks)
+	if (lightsByName.size() > 65536) {
+		vector<LightSourceUPtr> allLights;
+		allLights.reserve(lightsByName.size());
+		for (auto &e : lightsByName)
+			allLights.push_back(std::move(e.second));
+		lightsByName.clear();
+
+		tbb::parallel_for(tbb::blocked_range<size_t>(0, allLights.size(), 4096),
+			[&](const tbb::blocked_range<size_t> &r) {
+				for (size_t i = r.begin(); i < r.end(); ++i)
+					allLights[i].reset();
+			});
+	}
 }
 
 /// Insert a new light source in the container
@@ -53,22 +71,24 @@ LightSourceDefinitions::~LightSourceDefinitions() {
 /// If a light source with the same name already exists in the container,
 /// it is extracted and returned.
 LightSourceUPtr LightSourceDefinitions::DefineLightSource(LightSourceUPtr&& newLight) {
-	const string &name = newLight->GetName();
+	// The key is the name of the light it owns
+	const string_view name = newLight->GetName();
 
-	auto e = lightsByName.find(name);
+	auto [e, inserted] = lightsByName.try_emplace(name);
 
-	if (e != lightsByName.end()) {
+	if (inserted) {
+		// Add the new LightSource
+		e->second = std::move(newLight);
+		return LightSourceUPtr();
+	} else {
 		// Light source already exists
 		auto oldLight = std::move(e->second);
 
-		// Update name/LightSource definition
+		// Update name/LightSource definition (the key of the old entry is the
+		// name of the old light)
 		lightsByName.erase(e);
 		lightsByName[name] = std::move(newLight);
 		return oldLight;
-	} else {
-		// Add the new LightSource
-		lightsByName[name] = std::move(newLight);
-		return LightSourceUPtr();
 	}
 }
 
@@ -127,7 +147,7 @@ vector<string> LightSourceDefinitions::GetLightSourceNames() const {
 	vector<string> names;
 	names.reserve(lights.size());
 	for (auto const &e : lightsByName)
-		names.push_back(e.first);
+		names.push_back(string(e.first));
 
 	return names;
 }
@@ -153,10 +173,10 @@ std::vector<LightSourceUPtr> LightSourceDefinitions::DeleteLightSourceStartWith(
 	// Build the list of lights to delete
 	std::vector<string> nameList;
 	for (auto const &e : lightsByName) {
-		const string &name = e.first;
+		const string_view name = e.first;
 
 		if (name.starts_with(namePrefix))
-			nameList.push_back(name);
+			nameList.push_back(string(name));
 	}
 
 	// Remove the lights from the container and return the removed lights
@@ -176,14 +196,13 @@ std::vector<LightSourceUPtr> LightSourceDefinitions::DeleteLightSourceByMaterial
 	// Build the list of lights to delete
 	std::vector<string> nameList;
 	for (auto const &e : lightsByName) {
-		const string &name = e.first;
 		auto& l = *e.second;
 
 		if (
 			l.GetType() == TYPE_TRIANGLE
 			&& (static_cast<const TriangleLight&>(l)).lightMaterial == &mat
 		) {
-			nameList.push_back(name);
+			nameList.push_back(string(e.first));
 		}
 	}
 

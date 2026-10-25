@@ -16,6 +16,10 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <filesystem>
+
+#include "oneapi/tbb.h"
+
 #include "slg/scene/scene.h"
 #include "slg/utils/filenameresolver.h"
 
@@ -27,12 +31,69 @@ namespace slg {
 atomic<u_int> defaultObjectIDIndex(0);
 }
 
+Scene::PreloadedMeshes Scene::PreloadMeshFiles(const vector<pair<string, string>> &files) {
+	PreloadedMeshes meshes;
+	// Only the PLY files: the .bpy ones go through boost serialization
+	vector<pair<string, string>> jobs;
+	for (const auto &file : files) {
+		if ((std::filesystem::path(file.second).extension() == ".ply") && !meshes.count(file.first)) {
+			meshes[file.first] = nullptr;
+			jobs.push_back(file);
+		}
+	}
+	if (jobs.size() < 2)
+		return PreloadedMeshes();
+
+	const double startTime = WallClockTime();
+
+	// One file per task (a large file parses its own elements in parallel)
+	vector<ExtTriangleMeshUPtr> loaded(jobs.size());
+	tbb::parallel_for(tbb::blocked_range<size_t>(0, jobs.size(), 1),
+		[&](const tbb::blocked_range<size_t> &r) {
+			for (size_t i = r.begin(); i < r.end(); ++i) {
+				try {
+					loaded[i] = ExtTriangleMesh::Load(jobs[i].second);
+				} catch (...) {
+					// The caller loads the file again and reports the error
+				}
+			}
+		});
+
+	meshes.clear();
+	for (size_t i = 0; i < jobs.size(); ++i) {
+		if (loaded[i])
+			meshes[jobs[i].first] = std::move(loaded[i]);
+	}
+
+	SDL_LOG("Preloaded " << meshes.size() << " mesh files in " <<
+			int((WallClockTime() - startTime) * 1000.0) << "ms");
+
+	return meshes;
+}
+
 void Scene::ParseObjects(const Properties &props) {
 	std::vector<string> objKeys = props.GetAllUniqueSubNames("scene.objects");
 	if (objKeys.size() == 0) {
 		// There are not object definitions
 		return;
 	}
+
+	// The mesh files of the objects (the old syntax, ".ply") that are not
+	// defined yet, loaded in parallel: most of the time of loading a scene
+	// with large meshes. They are defined in the order of the objects, as
+	// without the preload
+	vector<pair<string, string>> meshFiles;
+	for (const string &key : objKeys) {
+		const string objName = Property::ExtractField(key, 2);
+		const string propName = "scene.objects." + objName;
+		if ((objName == "") || !props.IsDefined(propName + ".ply"))
+			continue;
+
+		const string shapeName = props.Get(propName + ".ply").Get<string>();
+		if (!extMeshCache.IsExtMeshDefined(shapeName))
+			meshFiles.emplace_back(shapeName, SLG_FileNameResolver.ResolveFile(shapeName));
+	}
+	PreloadedMeshes preloadedMeshes = PreloadMeshFiles(meshFiles);
 
 	double lastPrint = WallClockTime();
 	u_int objCount = 0;
@@ -61,7 +122,7 @@ void Scene::ParseObjects(const Properties &props) {
 		const u_int objID = ((u_int)(RadicalInverse(index + 1, 2) * 255.f + .5f)) |
 				(((u_int)(RadicalInverse(index + 1, 3) * 255.f + .5f)) << 8) |
 				(((u_int)(RadicalInverse(index + 1, 5) * 255.f + .5f)) << 16);
-		auto objptr = CreateObject(objID, objName, props);
+		auto objptr = CreateObject(objID, objName, props, &preloadedMeshes);
 		//SceneObjectRef obj = objDefs.DefineSceneObject(objptr);
 		auto [obj, oldObjPtr] = objDefs.DefineSceneObject(std::move(objptr));
 
@@ -86,7 +147,8 @@ void Scene::ParseObjects(const Properties &props) {
 	editActions.AddActions(GEOMETRY_EDIT);
 }
 
-SceneObjectUPtr Scene::CreateObject(const u_int defaultObjID, const string &objName, const Properties &props) {
+SceneObjectUPtr Scene::CreateObject(const u_int defaultObjID, const string &objName, const Properties &props,
+		PreloadedMeshes *preloadedMeshes) {
 	const string propName = "scene.objects." + objName;
 
 	// Extract the material name
@@ -107,7 +169,16 @@ SceneObjectUPtr Scene::CreateObject(const u_int defaultObjID, const string &objN
 
 		if (!extMeshCache.IsExtMeshDefined(shapeName)) {
 			// It is a mesh to define
-			auto mesh = ExtTriangleMesh::Load(SLG_FileNameResolver.ResolveFile(shapeName));
+			ExtTriangleMeshUPtr mesh;
+			if (preloadedMeshes) {
+				auto preloaded = preloadedMeshes->find(shapeName);
+				if (preloaded != preloadedMeshes->end()) {
+					mesh = std::move(preloaded->second);
+					preloadedMeshes->erase(preloaded);
+				}
+			}
+			if (!mesh)
+				mesh = ExtTriangleMesh::Load(SLG_FileNameResolver.ResolveFile(shapeName));
 			mesh->SetName(shapeName);
 
 			const Matrix4x4 mat = props.Get(Property(propName +

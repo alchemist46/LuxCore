@@ -22,6 +22,9 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "luxrays/core/exttrianglemesh.h"
 #include "luxrays/core/geometry/bsphere.h"
@@ -367,8 +370,18 @@ private:
 	// there is none), see OpenPBRMaterial::GetInteriorVolumeName()
 	VolumeConstPtr DefineOpenPBRInterior(const OpenPBRMaterial &mat);
 
-	luxrays::ExtTriangleMeshUPtr CreateShape(const std::string &shapeName, const luxrays::Properties &props);
-	SceneObjectUPtr CreateObject(const u_int defaultObjID, const std::string &objName, const luxrays::Properties &props);
+	// The mesh files of the shapes and objects being parsed, loaded in parallel
+	// by PreloadMeshFiles(), by their name in the properties (CreateShape() and
+	// CreateObject() take them from there; a file that failed to load is not
+	// there, and is loaded again where it reports the error)
+	using PreloadedMeshes = std::unordered_map<std::string, luxrays::ExtTriangleMeshUPtr>;
+	// The pairs are (name in the properties, resolved file name)
+	static PreloadedMeshes PreloadMeshFiles(const std::vector<std::pair<std::string, std::string>> &files);
+
+	luxrays::ExtTriangleMeshUPtr CreateShape(const std::string &shapeName, const luxrays::Properties &props,
+			PreloadedMeshes *preloadedMeshes = nullptr);
+	SceneObjectUPtr CreateObject(const u_int defaultObjID, const std::string &objName, const luxrays::Properties &props,
+			PreloadedMeshes *preloadedMeshes = nullptr);
 	LightSourceUPtr CreateLightSource(const std::string &lightName, const luxrays::Properties &props);
 
 	// Create directly in cache, so result is just a reference

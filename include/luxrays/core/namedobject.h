@@ -46,6 +46,7 @@ public:
 
 	const std::string &GetName() const { return name; }
 	void SetName(const std::string &nm) { name = nm; }
+	void SetName(std::string &&nm) { name = std::move(nm); }
 
 	// Returns the Properties required to create this object
 	virtual luxrays::PropertiesUPtr ToProperties() const;

@@ -24,6 +24,8 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
 
+#include "oneapi/tbb.h"
+
 #include "slg/engines/pathoclbase/compiledscene.h"
 #include "slg/kernels/kernels.h"
 
@@ -34,17 +36,18 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
-void CompiledScene::AddToImageMapMem(slg::ocl::ImageMap &im, const void *data, const size_t dataSize) {
+void CompiledScene::AddToImageMapMem(slg::ocl::ImageMap &im, const size_t dataSize, vector<size_t> &pageSizes) {
 	const size_t memSize = RoundUp(dataSize, sizeof(float));
 
 	if (memSize > maxMemPageSize)
 		throw runtime_error("An image data block is too big to fit in a single block of memory");
 
+	// pageSizes are in floats
 	bool found = false;
 	u_int page;
-	for (u_int j = 0; j < imageMapMemBlocks.size(); ++j) {
+	for (u_int j = 0; j < pageSizes.size(); ++j) {
 		// Check if it fits in this page
-		if (memSize + imageMapMemBlocks[j].size() * sizeof(float) <= maxMemPageSize) {
+		if (memSize + pageSizes[j] * sizeof(float) <= maxMemPageSize) {
 			found = true;
 			page = j;
 			break;
@@ -53,20 +56,16 @@ void CompiledScene::AddToImageMapMem(slg::ocl::ImageMap &im, const void *data, c
 
 	if (!found) {
 		// Check if I can add a new page
-		if (imageMapMemBlocks.size() > 8)
+		if (pageSizes.size() > 8)
 			throw runtime_error("More than 8 blocks of memory are required for image maps");
 
 		// Add a new page
-		imageMapMemBlocks.push_back(vector<float>());
-		page = imageMapMemBlocks.size() - 1;
+		pageSizes.push_back(0);
+		page = pageSizes.size() - 1;
 	}
 
-	vector<float> &imageMapMemBlock = imageMapMemBlocks[page];
-
-	const size_t start = imageMapMemBlock.size();
-	const size_t memSizeInFloat = memSize / sizeof(float);
-	imageMapMemBlock.resize(start + memSizeInFloat);
-	memcpy(&imageMapMemBlock[start], data, dataSize);
+	const size_t start = pageSizes[page];
+	pageSizes[page] += memSize / sizeof(float);
 
 	im.pageIndex = page;
 	im.pixelsIndex = start;
@@ -75,7 +74,7 @@ void CompiledScene::AddToImageMapMem(slg::ocl::ImageMap &im, const void *data, c
 	im.texelTextureObject = 0;
 }
 
-u_int CompiledScene::CompileImageMap(ImageMapConstRef im) {
+u_int CompiledScene::CompileImageMap(ImageMapConstRef im, vector<size_t> &pageSizes) {
 	const u_int imgMapIndex = imageMapDescs.size();
 
 	imageMapDescs.resize(imageMapDescs.size() + 1);
@@ -130,9 +129,7 @@ u_int CompiledScene::CompileImageMap(ImageMapConstRef im) {
 					ToString(im.GetStorage().GetStorageType()));
 	}
 
-	AddToImageMapMem(
-		*imd, im.GetStorage().GetPixelsData(), im.GetStorage().GetMemorySize()
-	);
+	AddToImageMapMem(*imd, im.GetStorage().GetMemorySize(), pageSizes);
 
 	return imgMapIndex;
 }
@@ -153,8 +150,25 @@ void CompiledScene::CompileImageMaps() {
 	vector<std::reference_wrapper<const ImageMap> > ims;
 	scene.GetImageMaps().GetImageMaps(ims);
 
+	vector<size_t> pageSizes;
 	for (u_int i = 0; i < ims.size(); ++i)
-		CompileImageMap(ims[i]);
+		CompileImageMap(ims[i], pageSizes);
+
+	// Each page is allocated once (the rounding of an image map's size to a
+	// float stays zero) and the pixels are copied in parallel: hundreds of MB
+	// in a scene with large textures
+	imageMapMemBlocks.resize(pageSizes.size());
+	for (u_int i = 0; i < pageSizes.size(); ++i)
+		imageMapMemBlocks[i].resize(pageSizes[i]);
+	tbb::parallel_for(tbb::blocked_range<size_t>(0, ims.size(), 1),
+		[&](const tbb::blocked_range<size_t> &r) {
+			for (size_t i = r.begin(); i < r.end(); ++i) {
+				const ImageMapStorage &storage = ims[i].get().GetStorage();
+				const slg::ocl::ImageMap &imd = imageMapDescs[i];
+				memcpy(&imageMapMemBlocks[imd.pageIndex][imd.pixelsIndex],
+						storage.GetPixelsData(), storage.GetMemorySize());
+			}
+		});
 
 	SLG_LOG("Image maps page(s) count: " << imageMapMemBlocks.size());
 	for (u_int i = 0; i < imageMapMemBlocks.size(); ++i)

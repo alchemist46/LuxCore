@@ -51,6 +51,17 @@ void Scene::ParseShapes(const Properties &props) {
 		return;
 	}
 
+	// The files of the mesh shapes, loaded in parallel (see ParseObjects())
+	vector<pair<string, string>> meshFiles;
+	for (const string &key : shapeKeys) {
+		const string shapeName = Property::ExtractField(key, 2);
+		const string propName = "scene.shapes." + shapeName;
+		if ((shapeName != "") && (props.Get(Property(propName + ".type")("mesh")).Get<string>() == "mesh"))
+			meshFiles.emplace_back(shapeName, SLG_FileNameResolver.ResolveFile(
+					props.Get(Property(propName + ".ply")("")).Get<string>()));
+	}
+	PreloadedMeshes preloadedMeshes = PreloadMeshFiles(meshFiles);
+
 	double lastPrint = WallClockTime();
 	u_int shapeCount = 0;
 	for(const string &key: shapeKeys) {
@@ -59,7 +70,7 @@ void Scene::ParseShapes(const Properties &props) {
 		if (shapeName == "")
 			throw runtime_error("Syntax error in shape definition: " + shapeName);
 
-		auto mesh = CreateShape(shapeName, props);
+		auto mesh = CreateShape(shapeName, props, &preloadedMeshes);
 		DefineMesh(std::move(mesh));
 		++shapeCount;
 
@@ -140,7 +151,8 @@ ExtTriangleMeshUPtr Scene::CreateInlinedMesh(const string &shapeName, const stri
 	);
 }
 
-ExtTriangleMeshUPtr Scene::CreateShape(const string &shapeName, const Properties &props) {
+ExtTriangleMeshUPtr Scene::CreateShape(const string &shapeName, const Properties &props,
+		PreloadedMeshes *preloadedMeshes) {
 	const string propName = "scene.shapes." + shapeName;
 
 	// Get the shape type
@@ -155,7 +167,16 @@ ExtTriangleMeshUPtr Scene::CreateShape(const string &shapeName, const Properties
 			props.Get(Property(propName + ".ply")("")).Get<string>()
 		);
 
-		auto meshShape = std::make_unique<MeshShape>(meshFileName);
+		std::unique_ptr<MeshShape> meshShape;
+		if (preloadedMeshes) {
+			auto preloaded = preloadedMeshes->find(shapeName);
+			if (preloaded != preloadedMeshes->end()) {
+				meshShape = std::make_unique<MeshShape>(std::move(preloaded->second));
+				preloadedMeshes->erase(preloaded);
+			}
+		}
+		if (!meshShape)
+			meshShape = std::make_unique<MeshShape>(meshFileName);
 
 		if (props.IsDefined(propName + ".transformation")) {
 			// Apply the transformation

@@ -366,6 +366,9 @@ void PathOCLBaseOCLRenderThread::CreateImageMapTextures(vector<slg::ocl::ImageMa
 
 	CompiledScene *cscene = renderEngine->compiledScene;
 
+	const double startTime = WallClockTime();
+	size_t textureBytes = 0;
+
 	vector<bool> densityGrid(imageMapDescs.size(), false);
 	for (auto &tex : cscene->texs) {
 		if (tex.type == slg::ocl::DENSITYGRID_TEX)
@@ -410,13 +413,16 @@ void PathOCLBaseOCLRenderThread::CreateImageMapTextures(vector<slg::ocl::ImageMa
 				im.width, im.height, im.channelCount, channelSize,
 				im.filterType == slg::ocl::FILTER_LINEAR, addressMode, 0.f,
 				"ImageMap", &im.texelTextureObject);
-		if (im.textureObject)
+		if (im.textureObject) {
 			imageMapTextures.push_back(im.textureObject);
+			textureBytes += (size_t)im.width * im.height * im.channelCount * channelSize;
+		}
 	}
 
 	if (imageMapTextures.size() > 0)
 		SLG_LOG("[PathOCLBaseRenderThread::" << threadIndex << "] Image maps read with the texture hardware: " <<
-				imageMapTextures.size() << "/" << imageMapDescs.size());
+				imageMapTextures.size() << "/" << imageMapDescs.size() << " (" << textureBytes / (1024 * 1024) <<
+				"MB uploaded in " << int((WallClockTime() - startTime) * 1000.0) << "ms)");
 #endif
 }
 

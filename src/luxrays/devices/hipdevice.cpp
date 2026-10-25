@@ -25,7 +25,10 @@
 #include <fstream>
 #include <cstring>
 #include <iomanip>
+#include <memory>
 #include <sstream>
+
+#include "oneapi/tbb.h"
 
 #include "luxrays/devices/ocldevice.h"
 #include "luxrays/devices/hipdevice.h"
@@ -878,6 +881,21 @@ void HIPDevice::FreeBuffer(HardwareDeviceBuffer **buff) {
 // Textures for the texture hardware
 //------------------------------------------------------------------------------
 
+// The texels [begin, end) of an RGB image as RGBA, with an alpha of 0 (T is a
+// channel of 1, 2 or 4 bytes)
+template<typename T>
+static void PadRGBToRGBA(const unsigned char *src, unsigned char *dst,
+		const size_t begin, const size_t end) {
+	const T *s = reinterpret_cast<const T *>(src) + begin * 3;
+	T *d = reinterpret_cast<T *>(dst) + begin * 4;
+	for (size_t i = begin; i < end; ++i, s += 3, d += 4) {
+		d[0] = s[0];
+		d[1] = s[1];
+		d[2] = s[2];
+		d[3] = 0;
+	}
+}
+
 unsigned long long HIPDevice::CreateTexture2D(const void *pixels,
 		const u_int width, const u_int height,
 		const u_int channelCount, const u_int channelSize,
@@ -911,13 +929,29 @@ unsigned long long HIPDevice::CreateTexture2D(const void *pixels,
 		CHECK_HIP_ERROR(hipMemcpy2DToArray(array, 0, 0, pixels, width * texelSize,
 				width * texelSize, height, hipMemcpyHostToDevice));
 	} else {
-		// Pad the RGB texels to RGBA (the alpha is not read)
-		vector<unsigned char> padded((size_t)width * height * arrayTexelSize, 0);
+		// Pad the RGB texels to RGBA (the alpha is not read, set to 0), the
+		// rows in parallel: a 4096x4096 image has 16M texels
+		const size_t texelCount = (size_t)width * height;
+		std::unique_ptr<unsigned char[]> padded(new unsigned char[texelCount * arrayTexelSize]);
 		const unsigned char *src = (const unsigned char *)pixels;
-		for (size_t i = 0; i < (size_t)width * height; ++i)
-			memcpy(&padded[i * arrayTexelSize], &src[i * texelSize], texelSize);
+		tbb::parallel_for(tbb::blocked_range<size_t>(0, height, 16),
+			[&](const tbb::blocked_range<size_t> &r) {
+				const size_t begin = r.begin() * width;
+				const size_t end = r.end() * width;
+				switch (channelSize) {
+					case 1:
+						PadRGBToRGBA<uint8_t>(src, padded.get(), begin, end);
+						break;
+					case 2:
+						PadRGBToRGBA<uint16_t>(src, padded.get(), begin, end);
+						break;
+					default:
+						PadRGBToRGBA<uint32_t>(src, padded.get(), begin, end);
+						break;
+				}
+			});
 
-		CHECK_HIP_ERROR(hipMemcpy2DToArray(array, 0, 0, &padded[0], width * arrayTexelSize,
+		CHECK_HIP_ERROR(hipMemcpy2DToArray(array, 0, 0, padded.get(), width * arrayTexelSize,
 				width * arrayTexelSize, height, hipMemcpyHostToDevice));
 	}
 

@@ -159,8 +159,10 @@ public:
 		wasPhotonGICompiled;
 
 private:
-	void AddToImageMapMem(slg::ocl::ImageMap &im, const void *data, const size_t memSize);
-	u_int CompileImageMap(ImageMapConstRef im);
+	// The place of an image map's pixels in the pages: the pages are allocated
+	// and filled once every image map has its place (CompileImageMaps())
+	void AddToImageMapMem(slg::ocl::ImageMap &im, const size_t memSize, std::vector<size_t> &pageSizes);
+	u_int CompileImageMap(ImageMapConstRef im, std::vector<size_t> &pageSizes);
 
 	void CompileCamera();
 	void CompileSceneObjects();

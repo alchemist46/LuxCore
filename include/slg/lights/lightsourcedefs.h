@@ -20,6 +20,7 @@
 #define	_SLG_LIGHTSOURCEDEFINITIONS_H
 
 #include <functional>
+#include <string_view>
 #include <robin_hood.h>
 
 #include "luxrays/utils/properties.h"
@@ -142,8 +143,20 @@ private:
 
 	std::vector<u_int> lightTypeCount;
 
-	// Below, the actual owner of Light objects
-	robin_hood::unordered_flat_map<std::string, LightSourceUPtr> lightsByName;
+	// Below, the actual owner of Light objects. The key is the name of the
+	// light it owns (a light is not renamed once defined): a scene can have
+	// millions of triangle lights, each named after its object, and a copy of
+	// the name as the key was one more allocation per light. The hash is the
+	// one robin_hood uses for a std::string, so the order of the lights (their
+	// index, see Preprocess()) is the same as with string keys: robin_hood's
+	// own hash of a string_view is enabled only when __cplusplus says C++17,
+	// which MSVC doesn't without /Zc:__cplusplus, and std::hash is another one.
+	struct NameHash {
+		size_t operator()(const std::string_view name) const noexcept {
+			return robin_hood::hash_bytes(name.data(), name.size());
+		}
+	};
+	robin_hood::unordered_flat_map<std::string_view, LightSourceUPtr, NameHash> lightsByName;
 
 	// Following containers just store references to lights
 	std::vector<std::reference_wrapper<LightSource>> lights;
