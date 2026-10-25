@@ -106,18 +106,20 @@ void Scene::Preprocess(Context& ctx, const u_int filmWidth, const u_int filmHeig
 	// Check if something has changed in light sources
 	//--------------------------------------------------------------------------
 
-	if (editActions.Has(GEOMETRY_EDIT) ||
+	const bool lightsEdited = editActions.Has(GEOMETRY_EDIT) ||
 			editActions.Has(GEOMETRY_TRANS_EDIT) ||
 			editActions.Has(MATERIALS_EDIT) ||
 			editActions.Has(MATERIAL_TYPES_EDIT) ||
 			editActions.Has(LIGHTS_EDIT) ||
 			editActions.Has(LIGHT_TYPES_EDIT) ||
-			editActions.Has(IMAGEMAPS_EDIT)) {
+			editActions.Has(IMAGEMAPS_EDIT);
+	if (lightsEdited)
 		lightDefs.Preprocess(*this, useRTMode);
-	}
 
-	// And for visibility maps
-	lightDefs.UpdateVisibilityMaps(*this, useRTMode);
+	// And for visibility maps: built again only after the same edits (a
+	// camera edit keeps them, the points the old camera did not see use
+	// the light's own distribution)
+	lightDefs.UpdateVisibilityMaps(*this, useRTMode, lightsEdited);
 
 	//--------------------------------------------------------------------------
 	// Preprocess image maps according resize policy

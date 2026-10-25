@@ -551,9 +551,10 @@ void LightSourceDefinitions::PairQuadLights(SceneConstRef scene) {
 		SLG_LOG("Triangle lights sampled as quads: " << quadCount.load());
 }
 
-void LightSourceDefinitions::UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode) {
+void LightSourceDefinitions::UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode,
+		const bool sceneEdited) {
 	// Build visibility maps for Env. lights
 	for (EnvLightSource& envLight : GetEnvLightSources())
-		envLight.UpdateVisibilityMap(scene, useRTMode);
+		envLight.UpdateVisibilityMap(scene, useRTMode, sceneEdited);
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

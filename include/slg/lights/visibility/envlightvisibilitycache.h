@@ -246,9 +246,12 @@ public:
 
 	void Build();
 
-	void Sample(const BSDF &bsdf, const float u0, const float u1,
+	// Both return false when no cache entry with a visibility map is near
+	// the point: the light then samples, and evaluates the pdf of, its own
+	// distribution there
+	bool Sample(const BSDF &bsdf, const float u0, const float u1,
 			float uv[2], float *pdf) const;
-	float Pdf(const BSDF &bsdf, const float u, const float v) const;
+	bool Pdf(const BSDF &bsdf, const float u, const float v, float *pdf) const;
 
 	static ELVCParams Properties2Params(const std::string &prefix, luxrays::PropertiesConstRef props);
 	static luxrays::PropertiesUPtr Params2Props(const std::string &prefix, const ELVCParams &params);

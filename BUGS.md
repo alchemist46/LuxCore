@@ -94,12 +94,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/benchmark/parity.py render <dir> luxball-hdr-vol` (TILEPATHOCL, seed 1, aa 8, 320x240, HIP device) six times with the same build, then `compare`: 2 of 6 runs at HEAD `aa2fa98c1` had the other value.
 - Notes: always the same pixel and the same two values, so one sample takes one of two discrete outcomes depending on timing, not accumulation order. Suspects: something read across tasks or threads in the volume path (the null-shell boundary init of V4, the pass-through of V1, the ray-hit buffers of the volume continuation, the homogeneous volume's scattering, the film write of a sample from two tasks). It can make a bit-identical check of `parity.py` fail on this scene: re-run it before looking for a change. Seen again on 2026-10-24 with the build of the GGX minimum roughness fix (1 of 3 runs, the red channel of the same pixel; the scene has only matte and null materials, so that change cannot reach it).
 
-### ELVC: rebuilt on every preprocess, one per scene on the GPU, tile distributions lost from the file, sky2 transform, pdf 0 with no entry
+### ELVC: one cache per scene on the GPU
 - Found: 2026-10-22
 - Area: light
-- Problem: `UpdateVisibilityMaps()` runs on every `Scene::Preprocess` whatever the edit flags (`scenepreprocess.cpp:106`), camera-only edits included; `CompileELVC` keeps one cache per scene and drops the others with a warning (`compilelights.cpp:417-425`); a persistent file skips `BuildTileDistributions()` (`envlightvisibilitycache.cpp:686-696`), so it samples uniformly within a tile; sky2 with a `.transformation` is binned in light-local lat-long (`:346`) while it samples in world lat-long (`sky2light.cpp:345, :430`), an efficiency loss; `Sample()` returns pdf 0 where no entry is near, so the env light gets no light sampling there (the comment promises a fallback to the map that does not exist).
-- Reproduce: a sky2 light with `visibilitymapcache.enable = 1` and a transform; an RTPATHCPU session with a camera edit (the rebuild time).
-- Notes: ROADMAP CA3.
+- Problem: `CompileELVC` keeps one visibility map cache per scene and drops the others with a warning (`compilelights.cpp:417-425`): with two environment lights that have `visibilitymapcache.enable = 1`, the second one samples its own distribution on the GPU (unbiased since the cache falls back to it where it has no map, an efficiency loss only).
+- Reproduce: an infinite light and a sky2 light, both with the cache on, PATHOCL: the log prints "OpenCL rendering supports only one EnvLightVisibilityCache".
+- Notes: ROADMAP CA3. The GPU would need the cache data of each light at its own offsets (entries, BVH nodes, tile distributions, radius, normal angle) in the light record. The other parts of the old entry were fixed on 2026-10-25 (rebuilt only on visibility edits, tile distributions rebuilt after loading a file, binning in each light's own uv mapping, the light's own distribution where the cache has no map).
 
 ### The caches' eye-path tracer differs from the render's
 - Found: 2026-10-22

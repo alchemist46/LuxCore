@@ -42,7 +42,8 @@ public:
 		float *iTermData, float *radianceTermData
 	) const;
 
-	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode);
+	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode,
+			const bool sceneEdited);
 
 	virtual LightSourceType GetType() const { return TYPE_IL_SKY2; }
 	virtual float GetPower(SceneConstRef scene) const;

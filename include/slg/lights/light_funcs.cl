@@ -58,20 +58,16 @@ OPENCL_FORCE_INLINE float3 ConstantInfiniteLight_GetRadiance(__global const Ligh
 		LIGHTS_PARAM_DECL) {
 	const bool useVisibilityMapCache = constantInfiniteLight->notIntersectable.constantInfinite.useVisibilityMapCache;
 
-	if (useVisibilityMapCache && (!bsdf || EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM))) {
-		const float3 localDir = normalize(Transform_InvApplyVector(&constantInfiniteLight->notIntersectable.light2World, -dir));
+	*directPdfA = bsdf ? UniformSpherePdf() : 0.f;
 
-		float u, v, latLongMappingPdf;
-		EnvLightSource_ToLatLongMapping(localDir, &u, &v, &latLongMappingPdf);
-		if (latLongMappingPdf == 0.f)
-			return BLACK;
-
-		if (bsdf)
-			*directPdfA = EnvLightVisibilityCache_Pdf(bsdf, u, v LIGHTS_PARAM) * latLongMappingPdf;
-		else
-			*directPdfA = 0.f;
-	} else
-		*directPdfA = bsdf ? UniformSpherePdf() : 0.f;
+	if (bsdf && useVisibilityMapCache && EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
+		// The world lat-long mapping, the one ConstantInfiniteLight_Illuminate()
+		// samples
+		float u, v, latLongMappingPdf, cachePdf;
+		EnvLightSource_ToLatLongMapping(-dir, &u, &v, &latLongMappingPdf);
+		if (EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM))
+			*directPdfA = cachePdf * latLongMappingPdf;
+	}
 
 	return VLOAD3F(constantInfiniteLight->notIntersectable.temperatureScale.c) *
 			VLOAD3F(constantInfiniteLight->notIntersectable.gain.c) *
@@ -87,11 +83,10 @@ OPENCL_FORCE_INLINE float3 ConstantInfiniteLight_Illuminate(__global const Light
 	const bool useVisibilityMapCache = constantInfiniteLight->notIntersectable.constantInfinite.useVisibilityMapCache;
 
 	float3 shadowRayDir;
-	if (useVisibilityMapCache && EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
-		float2 sampleUV;
-		float distPdf;
-
-		EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM);
+	float2 sampleUV;
+	float distPdf;
+	if (useVisibilityMapCache && EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) &&
+			EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM)) {
 		if (distPdf == 0.f)
 			return BLACK;
 
@@ -147,11 +142,13 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_GetRadiance(__global const LightSource 
 	if (latLongMappingPdf == 0.f)
 		return BLACK;
 
+	float cachePdf;
 	if (!bsdf)
 		*directPdfA = 0.f;
 	else if (infiniteLight->notIntersectable.infinite.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
-		*directPdfA = EnvLightVisibilityCache_Pdf(bsdf, u, v LIGHTS_PARAM) * latLongMappingPdf;
+			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) &&
+			EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM)) {
+		*directPdfA = cachePdf * latLongMappingPdf;
 	} else {
 		// The pdf of the light sampling technique (MIS compensated)
 		__global const float *infiniteLightDist = &envLightDistribution[infiniteLight->notIntersectable.infinite.misDistributionOffset];
@@ -177,10 +174,9 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_Illuminate(__global const LightSource *
 		LIGHTS_PARAM_DECL) {
 	float2 sampleUV;
 	float distPdf;
-	if (infiniteLight->notIntersectable.infinite.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
-		EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM);
-	} else {
+	if (!infiniteLight->notIntersectable.infinite.useVisibilityMapCache ||
+			!EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) ||
+			!EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM)) {
 		__global const float *infiniteLightDistribution = &envLightDistribution[infiniteLight->notIntersectable.infinite.misDistributionOffset];
 
 		Distribution2D_SampleContinuous(infiniteLightDistribution, u0, u1, &sampleUV, &distPdf);
@@ -291,11 +287,13 @@ OPENCL_FORCE_INLINE float3 Sky2Light_GetRadiance(__global const LightSource *sky
 	if (latLongMappingPdf == 0.f)
 		return BLACK;
 
+	float cachePdf;
 	if (!bsdf)
 		*directPdfA = 0.f;
 	else if (sky2Light->notIntersectable.sky2.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
-		*directPdfA = EnvLightVisibilityCache_Pdf(bsdf, u, v LIGHTS_PARAM) * latLongMappingPdf;
+			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) &&
+			EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM)) {
+		*directPdfA = cachePdf * latLongMappingPdf;
 	} else {
 		__global const float *skyLightDist = &envLightDistribution[sky2Light->notIntersectable.sky2.misDistributionOffset];
 
@@ -314,10 +312,9 @@ OPENCL_FORCE_INLINE float3 Sky2Light_Illuminate(__global const LightSource *sky2
 		LIGHTS_PARAM_DECL) {
 	float2 sampleUV;
 	float distPdf;
-	if (sky2Light->notIntersectable.sky2.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
-		EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM);
-	} else {
+	if (!sky2Light->notIntersectable.sky2.useVisibilityMapCache ||
+			!EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) ||
+			!EnvLightVisibilityCache_Sample(bsdf, u0, u1, &sampleUV, &distPdf LIGHTS_PARAM)) {
 		__global const float *skyLightDistribution = &envLightDistribution[sky2Light->notIntersectable.sky2.misDistributionOffset];
 
 		Distribution2D_SampleContinuous(skyLightDistribution, u0, u1, &sampleUV, &distPdf);

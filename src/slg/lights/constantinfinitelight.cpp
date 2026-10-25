@@ -50,30 +50,20 @@ Spectrum ConstantInfiniteLight::GetRadiance(SceneConstRef scene,
 		const BSDF *bsdf, const Vector &dir, float *directPdfA, float *emissionPdfW) const {
 	const float envRadius = GetEnvRadius(scene);
 
-	if (visibilityMapCache && (!bsdf || visibilityMapCache->IsCacheEnabled(*bsdf))) {
-		const Vector localDir = Normalize(Inverse(lightToWorld) * -dir);
-		
-		float u, v, latLongMappingPdf;
-		ToLatLongMapping(localDir, &u, &v, &latLongMappingPdf);
-		if (latLongMappingPdf == 0.f)
-			return Spectrum();
+	if (directPdfA) {
+		*directPdfA = bsdf ? UniformSpherePdf() : 0.f;
 
-		if (directPdfA) {
-			if (bsdf)
-				*directPdfA =  visibilityMapCache->Pdf(*bsdf, u, v) * latLongMappingPdf;
-			else
-				*directPdfA = 0.f;
+		if (bsdf && visibilityMapCache && visibilityMapCache->IsCacheEnabled(*bsdf)) {
+			// The world lat-long mapping, the one Illuminate() samples
+			float u, v, latLongMappingPdf, cachePdf;
+			ToLatLongMapping(Normalize(-dir), &u, &v, &latLongMappingPdf);
+			if (visibilityMapCache->Pdf(*bsdf, u, v, &cachePdf))
+				*directPdfA = cachePdf * latLongMappingPdf;
 		}
-
-		if (emissionPdfW)
-			*emissionPdfW = UniformSpherePdf() / (M_PI * envRadius * envRadius);
-	} else {
-		if (directPdfA)
-			*directPdfA = bsdf ? UniformSpherePdf() : 0.f;
-
-		if (emissionPdfW)
-			*emissionPdfW = UniformSpherePdf() / (M_PI * envRadius * envRadius);
 	}
+
+	if (emissionPdfW)
+		*emissionPdfW = UniformSpherePdf() / (M_PI * envRadius * envRadius);
 
 	return temperatureScale * gain * color;
 }
@@ -114,11 +104,10 @@ Spectrum ConstantInfiniteLight::Illuminate(SceneConstRef scene, const BSDF &bsdf
 	const float envRadius = GetEnvRadius(scene);
 
 	Vector shadowRayDir;
-	if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(bsdf)) {
-		float uv[2];
-		float distPdf;
-
-		visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf);
+	float uv[2];
+	float distPdf;
+	if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(bsdf) &&
+			visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf)) {
 		if (distPdf == 0.f)
 			return Spectrum();
 
@@ -171,7 +160,11 @@ UV ConstantInfiniteLight::GetEnvUV(const luxrays::Vector &dir) const {
 	return uv;
 }
 
-void ConstantInfiniteLight::UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode) {
+void ConstantInfiniteLight::UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode,
+		const bool sceneEdited) {
+	if (visibilityMapCache && !sceneEdited && !useRTMode && useVisibilityMapCache)
+		return;
+
 	visibilityMapCache.reset();
 
 	if (useRTMode)

@@ -342,16 +342,14 @@ void EnvLightVisibilityCache::BuildCacheEntry(
 		const Frame &frame = bsdf.GetFrame();
 		const Vector globalSamplingDir = frame.ToWorld(localSamplingDir);
 
-		// Get the map pixel x/y
-		const Vector localLightDir = Normalize(Inverse(envLight->lightToWorld) * globalSamplingDir);
+		// Get the map pixel x/y, in the light's own lat-long mapping (light
+		// space for the infinite light, world space for sky2 and the
+		// constant infinite light), the one it samples and evaluates the
+		// cache in
+		const UV uv = envLight->GetEnvUV(-globalSamplingDir);
 
-		float u, v, latLongMappingPdf;
-		EnvLightSource::ToLatLongMapping(localLightDir, &u, &v, &latLongMappingPdf);
-		if (latLongMappingPdf == 0.f)
-			continue;
-
-		const float s = u * mapWidth - .5f;
-		const float t = v * mapHeight - .5f;
+		const float s = uv.u * mapWidth - .5f;
+		const float t = uv.v * mapHeight - .5f;
 
 		const int s0 = Floor2Int(s);
 		const int t0 = Floor2Int(t);
@@ -686,12 +684,35 @@ void EnvLightVisibilityCache::Build() {
 	if (params.persistent.fileName != "") {
 		// Check if the file already exist
 		if (std::filesystem::exists(params.persistent.fileName)) {
+			const ELVCParams askedParams = params;
+			const u_int askedMapWidth = mapWidth;
+			const u_int askedMapHeight = mapHeight;
+
 			// Load the cache from the file
 			LoadPersistentCache(params.persistent.fileName);
 
-			return;
+			if ((mapWidth == askedMapWidth) && (mapHeight == askedMapHeight)) {
+				// The file has only the cache entries: the tile
+				// distributions come from the light's luminance map
+				if ((cacheEntries.size() > 0) && luminanceMapImage)
+					BuildTileDistributions();
+
+				return;
+			}
+
+			// A file of a light with another map size: computed again
+			// and overwritten
+			SLG_LOG("WARNING: EnvLightVisibilityCache persistent file of a map of " <<
+					mapWidth << "x" << mapHeight << " instead of " <<
+					askedMapWidth << "x" << askedMapHeight << ", the cache is computed again");
+			params = askedParams;
+			mapWidth = askedMapWidth;
+			mapHeight = askedMapHeight;
+			cacheEntries.clear();
+			delete cacheEntriesBVH;
+			cacheEntriesBVH = nullptr;
 		}
-		
+
 		// The file doesn't exist so I have to go trough normal pre-processing
 	}
 
@@ -771,68 +792,70 @@ Distribution2DRPtr EnvLightVisibilityCache::GetVisibilityMap(const BSDF &bsdf) c
 // Sample
 //------------------------------------------------------------------------------
 
-void EnvLightVisibilityCache::Sample(const BSDF &bsdf,
+bool EnvLightVisibilityCache::Sample(const BSDF &bsdf,
 		const float u0, const float u1,
 		float uv[2], float *pdf) const {
+	Distribution2DRPtr cacheDist = GetVisibilityMap(bsdf);
+	if (!cacheDist)
+		return false;
+
 	*pdf = 0.f;
 
-	Distribution2DRPtr cacheDist = GetVisibilityMap(bsdf);
+	u_int cacheDistXY[2];
+	float cacheDistPdf, du0, du1;
+	cacheDist->SampleDiscrete(u0, u1, cacheDistXY, &cacheDistPdf, &du0, &du1);
 
-	if (cacheDist) {
-		u_int cacheDistXY[2];
-		float cacheDistPdf, du0, du1;
-		cacheDist->SampleDiscrete(u0, u1, cacheDistXY, &cacheDistPdf, &du0, &du1);
+	if (cacheDistPdf > 0.f) {
+		if (tileDistributions.size() > 0) {
+			const auto& tileDistribution = tileDistributions[cacheDistXY[0] + cacheDistXY[1] * tilesXCount];
 
-		if (cacheDistPdf > 0.f) {
-			if (tileDistributions.size() > 0) {
-				const auto& tileDistribution = tileDistributions[cacheDistXY[0] + cacheDistXY[1] * tilesXCount];
+			float tileXY[2];
+			float tileDistPdf;
+			tileDistribution->SampleContinuous(du0, du1, tileXY, &tileDistPdf);
 
-				float tileXY[2];
-				float tileDistPdf;
-				tileDistribution->SampleContinuous(du0, du1, tileXY, &tileDistPdf);
+			if (tileDistPdf > 0.f) {
+				uv[0] = (cacheDistXY[0] + tileXY[0]) / tilesXCount;
+				uv[1] = (cacheDistXY[1] + tileXY[1]) / tilesYCount;
 
-				if (tileDistPdf > 0.f) {
-					uv[0] = (cacheDistXY[0] + tileXY[0]) / tilesXCount;
-					uv[1] = (cacheDistXY[1] + tileXY[1]) / tilesYCount;
-
-					*pdf = cacheDistPdf * tileDistPdf * (tilesXCount * tilesYCount);
-				}
-			} else {
-				uv[0] = (cacheDistXY[0] + du0) / tilesXCount;
-				uv[1] = (cacheDistXY[1] + du1) / tilesYCount;
-
-				*pdf = cacheDistPdf * (tilesXCount * tilesYCount);
+				*pdf = cacheDistPdf * tileDistPdf * (tilesXCount * tilesYCount);
 			}
+		} else {
+			uv[0] = (cacheDistXY[0] + du0) / tilesXCount;
+			uv[1] = (cacheDistXY[1] + du1) / tilesYCount;
+
+			*pdf = cacheDistPdf * (tilesXCount * tilesYCount);
 		}
 	}
+
+	return true;
 }
 
 //------------------------------------------------------------------------------
 // Pdf
 //------------------------------------------------------------------------------
 
-float EnvLightVisibilityCache::Pdf(const BSDF &bsdf, const float u, const float v) const {
-	float pdf = 0.f;
-
+bool EnvLightVisibilityCache::Pdf(const BSDF &bsdf, const float u, const float v, float *pdf) const {
 	auto& cacheDist = GetVisibilityMap(bsdf);
+	if (!cacheDist)
+		return false;
 
-	if (cacheDist) {
-		u_int offsetU, offsetV;
-		float du, dv;
-		const float cacheDistPdf = cacheDist->Pdf(u, v, &du, &dv, &offsetU, &offsetV);
+	*pdf = 0.f;
 
-		if (cacheDistPdf > 0.f) {
-			if (tileDistributions.size() > 0) {
-				auto& tileDistribution = tileDistributions[offsetU + offsetV * tilesXCount];
-				const float tileDistPdf = tileDistribution->Pdf(du, dv);
+	u_int offsetU, offsetV;
+	float du, dv;
+	const float cacheDistPdf = cacheDist->Pdf(u, v, &du, &dv, &offsetU, &offsetV);
 
-				pdf = cacheDistPdf * tileDistPdf;
-			} else
-				pdf = cacheDistPdf;
-		}
+	if (cacheDistPdf > 0.f) {
+		if (tileDistributions.size() > 0) {
+			auto& tileDistribution = tileDistributions[offsetU + offsetV * tilesXCount];
+			const float tileDistPdf = tileDistribution->Pdf(du, dv);
+
+			*pdf = cacheDistPdf * tileDistPdf;
+		} else
+			*pdf = cacheDistPdf;
 	}
 
-	return pdf;
+	return true;
 }
 
 //------------------------------------------------------------------------------

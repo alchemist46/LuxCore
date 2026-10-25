@@ -45,7 +45,8 @@ public:
 
 	void SetLightStrategy(const luxrays::Properties &props);
 
-	void UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode);
+	void UpdateVisibilityMaps(SceneConstRef scene, const bool useRTMode,
+			const bool sceneEdited);
 
 	LightSourceUPtr DefineLightSource(LightSourceUPtr&& l);
 	// Defines the lights in their order, as DefineLightSource() each (the old

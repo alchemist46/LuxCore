@@ -234,7 +234,11 @@ public:
 	virtual luxrays::UV GetEnvUV(const luxrays::Vector &dir) const {
 		throw std::runtime_error("Internal error: called EnvLightSource::GetEnvUV()");
 	}
-	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode) { }
+	// sceneEdited: the scene had an edit that can change what the light
+	// sees (geometry, materials, lights or image maps) since the last call.
+	// A cache built before is kept otherwise, camera edits included
+	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode,
+			const bool sceneEdited) { }
 
 	// Note: bsdf parameter can be NULL if it is a camera ray
 	virtual luxrays::Spectrum GetRadiance(SceneConstRef scene,

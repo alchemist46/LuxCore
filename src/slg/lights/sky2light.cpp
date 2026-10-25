@@ -348,10 +348,12 @@ Spectrum SkyLight2::GetRadiance(SceneConstRef scene,
 	
 	const float distPdf = skyDistribution->Pdf(u, v);
 	if (directPdfA) {
+		float cachePdf;
 		if (!bsdf)
 			*directPdfA = 0.f;
-		else if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(*bsdf)) {
-			*directPdfA =  visibilityMapCache->Pdf(*bsdf, u, v) * latLongMappingPdf;
+		else if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(*bsdf) &&
+				visibilityMapCache->Pdf(*bsdf, u, v, &cachePdf)) {
+			*directPdfA = cachePdf * latLongMappingPdf;
 		} else
 			*directPdfA = GetMISDistribution().Pdf(u, v) * latLongMappingPdf;
 	}
@@ -418,9 +420,8 @@ Spectrum SkyLight2::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 		float *emissionPdfW, float *cosThetaAtLight) const {
 	float uv[2];
 	float distPdf;
-	if (visibilityMapCache && visibilityMapCache->IsCacheEnabled(bsdf))
-		visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf);
-	else
+	if (!visibilityMapCache || !visibilityMapCache->IsCacheEnabled(bsdf) ||
+			!visibilityMapCache->Sample(bsdf, u0, u1, uv, &distPdf))
 		GetMISDistribution().SampleContinuous(u0, u1, uv, &distPdf);
 	if (distPdf == 0.f)
 		return Spectrum();
@@ -469,7 +470,11 @@ UV SkyLight2::GetEnvUV(const luxrays::Vector &dir) const {
 	return uv;
 }
 
-void SkyLight2::UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode) {
+void SkyLight2::UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode,
+		const bool sceneEdited) {
+	if (visibilityMapCache && !sceneEdited && !useRTMode && useVisibilityMapCache)
+		return;
+
 	visibilityMapCache.reset();
 
 	if (useRTMode)

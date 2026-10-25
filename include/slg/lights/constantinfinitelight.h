@@ -35,7 +35,8 @@ public:
 
 	EnvLightVisibilityCacheRPtr GetPreprocessedData() const;
 
-	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode);
+	virtual void UpdateVisibilityMap(SceneConstRef scene, const bool useRTMode,
+			const bool sceneEdited);
 
 	virtual LightSourceType GetType() const { return TYPE_IL_CONSTANT; }
 	virtual float GetPower(SceneConstRef scene) const;
