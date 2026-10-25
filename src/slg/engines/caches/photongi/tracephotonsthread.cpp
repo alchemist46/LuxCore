@@ -178,7 +178,17 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					// Deposit photons only on diffuse surfaces
 					//----------------------------------------------------------
 
-					if (pgic.IsPhotonGIEnabled(bsdf) &&
+					// No photon on a surface that reflects nothing (a black
+					// diffuse emitter, like the mesh of an area light): the
+					// particles within the radius belong to other surfaces,
+					// which don't get this light. An area light just above
+					// a hole in a ceiling made the ceiling's top face and the
+					// light's underside trap direct light, counted for the
+					// ceiling's lower face (3.4x too bright around the light)
+					const bool reflectsNothing = bsdf.Albedo().Black() &&
+							!(bsdf.GetEventTypes() & GLOSSY);
+
+					if (pgic.IsPhotonGIEnabled(bsdf) && !reflectsNothing &&
 							// This is an anti-NaNs/Infs safety net to avoid poisoning
 							// the caches
 							lightPathFlux.IsValid()) {
