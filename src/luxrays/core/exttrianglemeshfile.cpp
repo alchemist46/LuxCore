@@ -112,6 +112,18 @@ static int UVCB(p_ply_argument argument) {
 	return 1;
 }
 
+// True when the value is an unsigned byte ("uchar" or "uint8": two
+// spellings of the same type, kept apart by rply), whose colors, alphas
+// and vertex AOVs are scaled to [0, 1]
+static bool IsPlyUnsignedByte(p_ply_argument argument) {
+	p_ply_property property = nullptr;
+	ply_get_argument_property(argument, &property, nullptr, nullptr);
+	e_ply_type dataType;
+	ply_get_property_info(property, nullptr, &dataType, nullptr, nullptr);
+
+	return (dataType == PLY_UCHAR) || (dataType == PLY_UINT8);
+}
+
 // rply color callback
 static int ColorCB(p_ply_argument argument) {
 	long userIndex = 0;
@@ -125,11 +137,7 @@ static int ColorCB(p_ply_argument argument) {
 	ply_get_argument_element(argument, nullptr, &colIndex);
 
 	// Check the type of value used
-	p_ply_property property = nullptr;
-	ply_get_argument_property(argument, &property, nullptr, nullptr);
-	e_ply_type dataType;
-	ply_get_property_info(property, nullptr, &dataType, nullptr, nullptr);
-	if (dataType == PLY_UCHAR) {
+	if (IsPlyUnsignedByte(argument)) {
 		if (userIndex == 0)
 			c[colIndex * 3] =
 				static_cast<float>(ply_get_argument_value(argument) / 255.0);
@@ -166,18 +174,14 @@ static int AlphaCB(p_ply_argument argument) {
 	ply_get_argument_element(argument, nullptr, &alphaIndex);
 
 	// Check the type of value used
-	p_ply_property property = nullptr;
-	ply_get_argument_property(argument, &property, nullptr, nullptr);
-	e_ply_type dataType;
-	ply_get_property_info(property, nullptr, &dataType, nullptr, nullptr);
-	if (dataType == PLY_UCHAR) {
+	if (IsPlyUnsignedByte(argument)) {
 		if (userIndex == 0)
 			c[alphaIndex] =
 				static_cast<float>(ply_get_argument_value(argument) / 255.0);
 	} else {
 		if (userIndex == 0)
 			c[alphaIndex] =
-				static_cast<float>(ply_get_argument_value(argument));		
+				static_cast<float>(ply_get_argument_value(argument));
 	}
 
 	return 1;
@@ -195,11 +199,7 @@ static int VertexAOVCB(p_ply_argument argument) {
 	ply_get_argument_element(argument, nullptr, &alphaIndex);
 
 	// Check the type of value used
-	p_ply_property property = nullptr;
-	ply_get_argument_property(argument, &property, nullptr, nullptr);
-	e_ply_type dataType;
-	ply_get_property_info(property, nullptr, &dataType, nullptr, nullptr);
-	if (dataType == PLY_UCHAR) {
+	if (IsPlyUnsignedByte(argument)) {
 		if (userIndex == 0)
 			c[alphaIndex] =
 				static_cast<float>(ply_get_argument_value(argument) / 255.0);
@@ -373,14 +373,15 @@ static double PlyPropValue(const unsigned char *p, const PlyPropType t,
 		case PlyPropType::UINT:
 			return PlyReadValue<uint32_t>(p, bigEndian);
 		case PlyPropType::FLOAT: {
-			// The NaN and infinite values are read as 0, like
-			// ibinary_float32 of rply does (exported meshes can have
-			// NaN normals)
+			// The NaN and infinite values are read as 0, like the float
+			// readers of rply do (exported meshes can have NaN normals)
 			const float v = PlyReadValue<float>(p, bigEndian);
 			return isfinite(v) ? v : 0.0;
 		}
-		case PlyPropType::DOUBLE:
-			return PlyReadValue<double>(p, bigEndian);
+		case PlyPropType::DOUBLE: {
+			const double v = PlyReadValue<double>(p, bigEndian);
+			return isfinite(v) ? v : 0.0;
+		}
 	}
 
 	return 0.0;
@@ -391,9 +392,6 @@ struct PlyProperty {
 	string name;
 	PlyPropType type = PlyPropType::FLOAT;
 	size_t offset = 0;
-	// Spelled "uchar", not "uint8": rply keeps the two apart and ColorCB
-	// and AlphaCB scale only the first one to [0, 1]
-	bool uchar = false;
 };
 
 // An element of the header
@@ -435,7 +433,6 @@ enum {
 struct PlyField {
 	size_t offset;
 	PlyPropType type;
-	bool uchar;
 	u_int target;
 };
 
@@ -560,7 +557,6 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 					if (!ss || !PlyParsePropType(type1, property.type))
 						return nullptr;
 					property.name = name;
-					property.uchar = (type1 == "uchar");
 					for (const PlyProperty &p : element.properties)
 						property.offset += PlyPropTypeSize(p.type);
 					element.properties.push_back(std::move(property));
@@ -611,7 +607,7 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 		if (fieldFound[target]++)
 			return nullptr;
 
-		fields.push_back(PlyField{property.offset, property.type, property.uchar, target});
+		fields.push_back(PlyField{property.offset, property.type, target});
 	}
 
 	// The positions are required and each group is either complete or
@@ -702,9 +698,9 @@ static ExtTriangleMeshUPtr ReadPlyBinary(const string &fileName) {
 
 						const u_int layer = (field.target - PLY_FIELD_LAYER_BASE) / PLY_FIELD_LAYER_COUNT;
 						const u_int kind = (field.target - PLY_FIELD_LAYER_BASE) % PLY_FIELD_LAYER_COUNT;
-						// The colors and alphas of type uchar are scaled
-						// to [0, 1], like in ColorCB and AlphaCB
-						const float scaled = field.uchar ?
+						// The colors and alphas of type uchar (or uint8)
+						// are scaled to [0, 1], like in ColorCB and AlphaCB
+						const float scaled = (field.type == PlyPropType::UCHAR) ?
 							static_cast<float>(value / 255.0) : static_cast<float>(value);
 						switch (kind) {
 							case PLY_FIELD_U:

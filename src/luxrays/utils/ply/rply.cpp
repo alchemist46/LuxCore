@@ -1348,11 +1348,14 @@ static int iascii_uint32(p_ply ply, double *value) {
     return 1;
 }
 
+/* The NaN and infinite values of every float reader are read as 0 */
 static int iascii_float32(p_ply ply, double *value) {
     char *end;
     if (!ply_read_word(ply)) return 0;
     *value = strtod(BWORD(ply), &end);
-    if (*end || *value < -FLT_MAX || *value > FLT_MAX) return 0;
+    if (*end) return 0;
+    if (isnan(*value) || isinf(*value)) *value = 0.0;
+    if (*value < -FLT_MAX || *value > FLT_MAX) return 0;
     return 1;
 }
 
@@ -1360,7 +1363,8 @@ static int iascii_float64(p_ply ply, double *value) {
     char *end;
     if (!ply_read_word(ply)) return 0;
     *value = strtod(BWORD(ply), &end);
-    if (*end || *value < -DBL_MAX || *value > DBL_MAX) return 0;
+    if (*end) return 0;
+    if (isnan(*value) || isinf(*value)) *value = 0.0;
     return 1;
 }
 
@@ -1414,12 +1418,14 @@ static int ibinary_float32(p_ply ply, double *value) {
     *value = float32;
     if (isnan(*value) || isinf(*value))
        *value = 0.f;
-    ply_reverse(&float32, sizeof(float32));
     return 1;
 }
 
 static int ibinary_float64(p_ply ply, double *value) {
-    return ply->idriver->ichunk(ply, value, sizeof(double));
+    if (!ply->idriver->ichunk(ply, value, sizeof(double))) return 0;
+    if (isnan(*value) || isinf(*value))
+       *value = 0.0;
+    return 1;
 }
 
 /* ----------------------------------------------------------------------

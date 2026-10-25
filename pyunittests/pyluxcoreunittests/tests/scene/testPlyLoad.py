@@ -157,23 +157,32 @@ class PlyLoad(unittest.TestCase):
 				self.assertEqual(binaryMesh, asciiMesh)
 
 	def test_PlyLoad_Values(self):
-		# The rules of the rply path: the binary float NaN and infinite values
-		# read as 0, the colors and alphas of type "uchar" (not "uint8") scaled
-		# to [0, 1]
+		# The rules of every reader: the float and double NaN and infinite
+		# values read as 0, the colors and alphas of type "uchar" or "uint8"
+		# (two spellings of the same type) scaled to [0, 1]. The binary file
+		# goes through the fast path, the binary file with triangle AOVs
+		# through the binary rply reader and the ASCII file through the
+		# ASCII one
 		nan, inf = float("nan"), float("inf")
-		props = P + N + UV + [("red", "uchar"), ("green", "uchar"), ("blue", "uchar"), ("alpha", "uchar"),
+		props = P + N + [("s", "double"), ("t", "double"),
+				("red", "uchar"), ("green", "uchar"), ("blue", "uchar"), ("alpha", "uchar"),
 				("red1", "uint8"), ("green1", "uint8"), ("blue1", "uint8")]
 		vertices = [
-			[1.0, 2.0, 3.0, nan, nan, nan, inf, -inf, 255, 0, 51, 102, 255, 0, 51],
+			[1.0, 2.0, 3.0, nan, inf, -inf, nan, inf, 255, 0, 51, 102, 255, 0, 51],
 			[0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.25, 0.5, 0, 0, 0, 0, 1, 2, 3],
 			[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.75, 1.0, 0, 0, 0, 0, 1, 2, 3]]
-		WritePly(os.path.join(self.directory, "values.ply"), props, vertices, [[0, 1, 2]], True)
+		f32 = lambda x: struct.unpack("f", struct.pack("f", x))[0]
 
-		v = ReadSavedVertices(LoadAndSave(self.directory, "values.ply"))
-		self.assertEqual([v[0][k] for k in ("x", "y", "z")], [1.0, 2.0, 3.0])
-		self.assertEqual([v[0][k] for k in ("nx", "ny", "nz", "s", "t")], [0.0] * 5)
-		self.assertEqual([v[1][k] for k in ("s", "t")], [0.25, 0.5])
-		self.assertEqual([v[0][k] for k in ("red", "green", "blue", "alpha")],
-				[1.0, 0.0, struct.unpack("f", struct.pack("f", 51 / 255.0))[0],
-				struct.unpack("f", struct.pack("f", 102 / 255.0))[0]])
-		self.assertEqual([v[0][k] for k in ("red1", "green1", "blue1")], [255.0, 0.0, 51.0])
+		for binary, faceAOVs in ((True, False), (True, True), (False, False)):
+			with self.subTest(binary = binary, faceAOVs = faceAOVs):
+				name = "values-%d-%d.ply" % (binary, faceAOVs)
+				WritePly(os.path.join(self.directory, name), props, vertices, [[0, 1, 2]], binary, faceAOVs)
+
+				v = ReadSavedVertices(LoadAndSave(self.directory, name))
+				self.assertEqual([v[0][k] for k in ("x", "y", "z")], [1.0, 2.0, 3.0])
+				self.assertEqual([v[0][k] for k in ("nx", "ny", "nz", "s", "t")], [0.0] * 5)
+				self.assertEqual([v[1][k] for k in ("s", "t")], [0.25, 0.5])
+				self.assertEqual([v[0][k] for k in ("red", "green", "blue", "alpha")],
+						[1.0, 0.0, f32(51 / 255.0), f32(102 / 255.0)])
+				self.assertEqual([v[0][k] for k in ("red1", "green1", "blue1")],
+						[1.0, 0.0, f32(51 / 255.0)])
