@@ -46,21 +46,22 @@ OPENCL_FORCE_INLINE float AdvancePaths_NextPassThroughEvent(__global float *firs
 	return passThroughEvent;
 }
 
-#if defined(LUXRAYS_CUDA_DEVICE)
 // The members of the vertex BSDF that the next iteration reads when it doesn't
 // sample the BSDF: AdvancePaths_ShadowRayHit() (event types, shading normal),
 // AdvancePaths_HitNothing() (the environment light visibility cache, the shadow
 // transparency flag) and Scene_Intersect() on a miss (the light ID of a volume
-// emission)
-OPENCL_FORCE_INLINE void AdvancePaths_SaveVertexBSDF(__global BSDF *dst, const BSDF *src) {
+// emission). The event types and BSDF_IsDelta() depend on the regularization.
+// On CUDA and HIP src is the private BSDF of the vertex (__global is empty),
+// on OpenCL the vertex BSDF itself.
+OPENCL_FORCE_INLINE void AdvancePaths_SaveVertexBSDF(__global BSDF *dst, __global const BSDF *src) {
 	dst->materialIndex = src->materialIndex;
 	dst->isVolume = src->isVolume;
 	dst->hitPoint.p = src->hitPoint.p;
 	dst->hitPoint.shadeN = src->hitPoint.shadeN;
 	dst->hitPoint.intoObject = src->hitPoint.intoObject;
 	dst->hitPoint.throughShadowTransparency = src->hitPoint.throughShadowTransparency;
+	dst->hitPoint.regularization = src->hitPoint.regularization;
 }
-#endif
 
 //------------------------------------------------------------------------------
 // Random-walk subsurface scattering (see SubsurfaceMaterial and
@@ -978,6 +979,11 @@ __kernel void AdvancePaths_MK_RT(
 		if (taskConfig->film.hasChannelRayCount && !subsurfaceExit)
 			sampleResult->rayCount += 1;
 
+#if !defined(LUXRAYS_CUDA_DEVICE)
+		// The first trace of the vertex ray, not its continuation after a
+		// pass-through surface
+		const bool firstTrace = (taskState->firstPassThroughEvent >= 0.f);
+#endif
 		const float passThroughEvent = AdvancePaths_NextPassThroughEvent(
 				&taskState->firstPassThroughEvent, &taskState->seedPassThroughEvent);
 
@@ -1013,6 +1019,12 @@ __kernel void AdvancePaths_MK_RT(
 			// vertex for the emission of a volume
 			if (rayHits[gid].meshIndex == NULL_INDEX)
 				bsdf->materialIndex = prevBsdf->materialIndex;
+#else
+			// Scene_Intersect() initializes the vertex BSDF itself on OpenCL,
+			// at pass-through surfaces too: keep what a miss after them reads
+			// of the vertex (see the end of this block)
+			if (firstTrace && (rayHits[gid].meshIndex != NULL_INDEX))
+				AdvancePaths_SaveVertexBSDF(&taskTmp->tmpBsdf, vertexBsdf);
 #endif
 
 			float3 connectionThroughput;
@@ -1036,7 +1048,16 @@ __kernel void AdvancePaths_MK_RT(
 		// If continueToTrace, there is nothing to do, just keep the same state
 		if (!continueToTrace) {
 			if (rayHits[gid].meshIndex == NULL_INDEX) {
-				AdvancePaths_HitNothing(taskConfig, taskState, prevBsdf, pathInfo, &rays[gid], sampleResult
+				// The BSDF of the last scattering vertex, not of a
+				// pass-through surface the ray went through: the environment
+				// lights take the pdf of the MIS weight there
+				AdvancePaths_HitNothing(taskConfig, taskState,
+#if defined(LUXRAYS_CUDA_DEVICE)
+						prevBsdf,
+#else
+						firstTrace ? prevBsdf : &taskTmp->tmpBsdf,
+#endif
+						pathInfo, &rays[gid], sampleResult
 						LIGHTS_PARAM);
 
 				pathState = MK_SPLAT_SAMPLE;
@@ -1112,8 +1133,11 @@ __kernel void AdvancePaths_MK_RT(
 
 #if defined(LUXRAYS_CUDA_DEVICE)
 		// Keep what the next iteration reads of the BSDF (there is one if
-		// something was hit, or on a volume scatter event)
-		if (rayHits[gid].meshIndex != NULL_INDEX) {
+		// something was hit, or on a volume scatter event). A pass-through
+		// surface (continueToTrace) is not a vertex: the next iteration
+		// continues the same vertex ray, and if it misses, the environment
+		// lights read the BSDF of the vertex the ray left from.
+		if ((rayHits[gid].meshIndex != NULL_INDEX) && !continueToTrace) {
 			if ((pathState == MK_RT_DL) && !sampleResult->lastPathVertex)
 				*vertexBsdf = *bsdf;
 			else

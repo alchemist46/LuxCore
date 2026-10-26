@@ -918,6 +918,11 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 			eyeSampleResult.shadingNormal = Normal();
 			bool photonGICausticCacheUsed = false;
 			bool isTransmittedEyePath = true;
+			// The BSDF Scene::Intersect() initializes at each hit, pass-through
+			// surfaces included: eyeVertex.bsdf stays the one of the last
+			// scattering vertex until something is hit, for the pdf of an
+			// environment light on a miss
+			BSDF hitBsdf;
 			while (eyeVertex.depth <= engine->maxEyePathDepth) {
 				eyeSampleResult.firstPathVertex = (eyeVertex.depth == 1);
 				eyeSampleResult.lastPathVertex = (eyeVertex.depth == engine->maxEyePathDepth);
@@ -933,7 +938,7 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 						luxrays::make_observer(device),
 						EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 						&eyeVertex.volInfo, sampler->GetSample(sampleOffset),
-						&eyeRay, &eyeRayHit, &eyeVertex.bsdf,
+						&eyeRay, &eyeRayHit, &hitBsdf,
 						&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult);
 
 				if (!hit) {
@@ -968,6 +973,7 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				eyeVertex.throughput *= connectionThroughput;
 
 				// Something was hit
+				eyeVertex.bsdf = hitBsdf;
 
 				eyeVertex.SetDispersion();
 

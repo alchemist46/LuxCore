@@ -183,6 +183,11 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 			eyeVertex.dVM = 1.f;
 
 			eyeVertex.depth = 1;
+			// The BSDF Scene::Intersect() initializes at each hit, pass-through
+			// surfaces included: eyeVertex.bsdf stays the one of the last
+			// scattering vertex until something is hit, for the pdf of an
+			// environment light on a miss
+			BSDF hitBsdf;
 			while (eyeVertex.depth <= engine->maxEyePathDepth) {
 				eyeSampleResult.firstPathVertex = (eyeVertex.depth == 1);
 				eyeSampleResult.lastPathVertex = (eyeVertex.depth == engine->maxEyePathDepth);
@@ -199,7 +204,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 					EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : GENERIC_RAY),
 					&eyeVertex.volInfo,
 					sampler->GetSample(sampleOffset),
-					&eyeRay, &eyeRayHit, &eyeVertex.bsdf,
+					&eyeRay, &eyeRayHit, &hitBsdf,
 					&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult
 				);
 
@@ -222,6 +227,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				eyeVertex.throughput *= connectionThroughput;
 
 				// Something was hit
+				eyeVertex.bsdf = hitBsdf;
 				eyeVertex.SetDispersion();
 				if (eyeSampleResult.firstPathVertex) {
 					eyeSampleResult.alpha = 1.f;

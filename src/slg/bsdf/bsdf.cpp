@@ -187,6 +187,12 @@ void BSDF::Init(
 	hitPoint.fromLight = fixedFromLight;
 	hitPoint.throughShadowTransparency = throughShadowTransparency;
 	hitPoint.passThroughEvent = passThroughEvent;
+	// As HitPoint::Init() and BSDF_InitVolume(): nothing is left of the BSDF
+	// this one was before
+	hitPoint.regularization = 0.f;
+	hitPoint.subsurface = HITPOINT_SSS_SURFACE;
+	hitPoint.wavelength = 0.f;
+	hitPoint.dispersionTinted = false;
 
 	hitPoint.p = ray(t);
 	hitPoint.fixedDir = -ray.d;

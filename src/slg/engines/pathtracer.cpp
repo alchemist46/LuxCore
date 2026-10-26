@@ -27,6 +27,7 @@
 #include "slg/utils/varianceclamping.h"
 #include <boost/algorithm/string.hpp>
 #include <cstring>
+#include <utility>
 
 #include "slg/cameras/camera.h"
 
@@ -533,9 +534,15 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 	sampleResult.albedo = Spectrum(); // Just in case albedoToDo is never true
 	sampleResult.shadingNormal = Normal();
 	Spectrum pathThroughput(eyeTroughput);
-	BSDF bsdf;
-	// The vertex is the exit point of a subsurface random walk: bsdf is
-	// already initialized and there is no ray to trace
+	// The BSDF of the path vertex and the one Scene::Intersect() initializes at
+	// each hit of the next vertex ray, pass-through surfaces included. They
+	// swap at each new vertex, so on a miss the environment lights still have
+	// the BSDF of the last scattering vertex for the pdf of the MIS weight.
+	BSDF bsdfs[2];
+	BSDF *vertexBsdf = &bsdfs[0];
+	BSDF *hitBsdf = &bsdfs[1];
+	// The vertex is the exit point of a subsurface random walk: the vertex
+	// BSDF is already initialized and there is no ray to trace
 	bool subsurfaceExit = false;
 	for (;;) {
 		sampleResult.firstPathVertex = (pathInfo.depth.depth == 0);
@@ -555,7 +562,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 					IntersectionDevicePtr(&device),
 					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&pathInfo.volume, passThrough,
-					&eyeRay, &eyeRayHit, &bsdf, &connectionThroughput,
+					&eyeRay, &eyeRayHit, hitBsdf, &connectionThroughput,
 					&pathThroughput, &sampleResult);
 			pathThroughput *= connectionThroughput;
 			// Note: pass-through check is done inside Scene::Intersect()
@@ -573,7 +580,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			if ((!(forceBlackBackground && pathInfo.isPassThroughPath) || !pathInfo.isPassThroughPath) &&
 					checkDirectLightHit) {
 				DirectHitInfiniteLight(scene, pathInfo, pathThroughput,
-						eyeRay, sampleResult.firstPathVertex ? nullptr : &bsdf,
+						eyeRay, sampleResult.firstPathVertex ? nullptr : vertexBsdf,
 						&sampleResult);
 			}
 
@@ -597,7 +604,10 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			break;
 		}
 
-		// Something was hit
+		// Something was hit: it is the new path vertex
+		if (!subsurfaceExit)
+			std::swap(vertexBsdf, hitBsdf);
+		BSDF &bsdf = *vertexBsdf;
 
 		pathInfo.SetDispersion(bsdf.hitPoint);
 
