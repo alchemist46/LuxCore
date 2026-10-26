@@ -131,6 +131,8 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	// OpenCL kernels
 	initSeedKernel = nullptr;
 	initKernel = nullptr;
+	metropolisBootstrapCopyKernel = nullptr;
+	metropolisBootstrapStartKernel = nullptr;
 	advancePathsKernel_MK_RT = nullptr;
 
 	initKernelArgsCount  = 0;

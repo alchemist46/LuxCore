@@ -75,17 +75,42 @@ void PathOCLOpenCLRenderThread::StartRenderThread() {
 	PathOCLBaseOCLRenderThread::StartRenderThread();
 }
 
+void PathOCLOpenCLRenderThread::SetDrain(const bool drain) {
+	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
+	const u_int value = drain ? 1 : 0;
+	const size_t offset = (engine->oclSampler->type == slg::ocl::METROPOLIS) ?
+		offsetof(slg::ocl::MetropolisSamplerSharedData, drain) :
+		offsetof(slg::ocl::SobolSamplerSharedData, drain);
+	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+			offset, sizeof(u_int), &value);
+}
+
 // At the halt, the paths in flight finish instead of being dropped: the ones
 // still running are the long paths (deep bounces, subsurface walks), so the
 // finished samples alone would be biased. The tasks start no new sample
-// (SobolSamplerSharedData::drain) and the kernels run until all are done.
+// (the drain flag of the sampler shared data) and the kernels run until all
+// are done. A Metropolis chain also splats the weight its current sample has
+// gathered (see MetropolisSampler_SplatSample()).
 void PathOCLOpenCLRenderThread::DrainPaths() {
 	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
 	const u_int taskCount = engine->taskCount;
 
-	const u_int drain = 1;
-	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
-			offsetof(slg::ocl::SobolSamplerSharedData, drain), sizeof(u_int), &drain);
+	SetDrain(true);
+	FinishPaths();
+
+	// The sample count of the finished paths
+	intersectionDevice.EnqueueReadBuffer(taskStatsBuff, CL_TRUE,
+			sizeof(slg::ocl::pathoclbase::GPUTaskStats) * taskCount,
+			gpuTaskStats.get());
+	double totalCount = 0.0;
+	for (size_t i = 0; i < taskCount; ++i)
+		totalCount += gpuTaskStats[i].sampleCount;
+	threadFilms[0]->GetFilm().SetSampleCount(totalCount, totalCount, 0.0);
+}
+
+void PathOCLOpenCLRenderThread::FinishPaths() {
+	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
+	const u_int taskCount = engine->taskCount;
 
 	// The longest path: 2 iterations per vertex, plus the steps of its
 	// subsurface walks, up to SSS_MAX_BOUNCES (65536, subsurface_funcs.cl)
@@ -114,15 +139,111 @@ void PathOCLOpenCLRenderThread::DrainPaths() {
 		if (done)
 			break;
 	}
+}
 
-	// The sample count of the finished paths
-	intersectionDevice.EnqueueReadBuffer(taskStatsBuff, CL_TRUE,
-			sizeof(slg::ocl::pathoclbase::GPUTaskStats) * taskCount,
-			gpuTaskStats.get());
-	double totalCount = 0.0;
-	for (size_t i = 0; i < taskCount; ++i)
-		totalCount += gpuTaskStats[i].sampleCount;
-	threadFilms[0]->GetFilm().SetSampleCount(totalCount, totalCount, 0.0);
+// Kelemen's Metropolis chains converge to the image once they have forgotten
+// their start: a chain started at a uniform sample first under-samples the
+// bright parts of the image, and a chain's own estimate of the mean image
+// luminance (the normalization of the estimator) is poor while it is short.
+// The CPU engines run a few long chains; here every task runs one, and on a
+// small film or at a few samples per pixel they are short (16 samples per
+// chain at 16 spp: -3.2% on the simple scene, 150x100). So, as the bootstrap
+// of PSSMLT (Kelemen et al. 2002, pbrt-v3 MLTIntegrator), every task first
+// renders one uniform sample (the drain stops it after that sample), then
+// each chain starts from one of these samples, drawn in proportion to its
+// luminance: the chains start close to their stationary distribution. The
+// mean luminance of the samples is the first estimate of the normalization,
+// refined from the large steps of all the tasks (UpdateMetropolisLuminance()).
+void PathOCLOpenCLRenderThread::MetropolisBootstrap() {
+	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
+	const u_int taskCount = engine->taskCount;
+	const double startTime = WallClockTime();
+
+	// The first sample of every task (the drain is set before the Init kernel)
+	FinishPaths();
+
+	// Their luminance
+	const size_t headerSize = sizeof(slg::ocl::MetropolisSamplerSharedData);
+	vector<char> data(headerSize + sizeof(slg::ocl::MetropolisTaskLuminance) * taskCount);
+	intersectionDevice.EnqueueReadBuffer(samplerSharedDataBuff, CL_TRUE, data.size(), &data[0]);
+	const slg::ocl::MetropolisTaskLuminance *luminances =
+			(const slg::ocl::MetropolisTaskLuminance *)&data[headerSize];
+
+	double totalI = 0.0;
+	for (u_int i = 0; i < taskCount; ++i)
+		totalI += luminances[i].totalI;
+
+	// The start of each chain: stratified resampling, the k-th task takes the
+	// sample of the cumulative luminance (k + u) / taskCount
+	vector<u_int> startTasks(taskCount);
+	if (totalI > 0.0) {
+		RandomGenerator rnd(engine->seedBase + threadIndex);
+
+		u_int j = 0;
+		double cumulativeI = luminances[0].totalI;
+		for (u_int k = 0; k < taskCount; ++k) {
+			const double u = (k + rnd.floatValue()) / taskCount * totalI;
+			while ((cumulativeI <= u) && (j < taskCount - 1))
+				cumulativeI += luminances[++j].totalI;
+			startTasks[k] = j;
+		}
+	} else {
+		// A black image: the chains start from their own sample
+		for (u_int k = 0; k < taskCount; ++k)
+			startTasks[k] = k;
+	}
+
+	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+			data.size(), sizeof(u_int) * taskCount, &startTasks[0]);
+
+	const float invMeanI = (totalI > 0.0) ? (float)(taskCount / totalI) : 1.f;
+	intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+			offsetof(slg::ocl::MetropolisSamplerSharedData, invMeanI), sizeof(float), &invMeanI);
+
+	// Copy the start samples, then start the chains
+	intersectionDevice.EnqueueKernel(metropolisBootstrapCopyKernel,
+			HardwareDeviceRange(taskCount), HardwareDeviceRange(metropolisBootstrapWorkGroupSize));
+	intersectionDevice.EnqueueKernel(metropolisBootstrapStartKernel,
+			HardwareDeviceRange(taskCount), HardwareDeviceRange(metropolisBootstrapWorkGroupSize));
+
+	SetDrain(false);
+
+	SLG_LOG("[PathOCLRenderThread::" << threadIndex << "] Metropolis bootstrap: " << taskCount <<
+			" samples, mean luminance " << (totalI / taskCount) << ", in " <<
+			int((WallClockTime() - startTime) * 1000.0) << "ms");
+}
+
+void PathOCLOpenCLRenderThread::UpdateMetropolisLuminance(const double sampleCount) {
+	PathOCLRenderEngine *engine = (PathOCLRenderEngine *)renderEngine;
+	const u_int taskCount = engine->taskCount;
+
+	// The large steps done so far are not a uniform sample of the image: the
+	// ones still in flight are the long paths, so the first ones done are
+	// the short paths (on luxball-hdr, the bright environment seen directly:
+	// the mean luminance read +9% after the first iterations, and the image
+	// +0.15% at 1024 spp). The bias falls with the share of the steps in
+	// flight, one per task: the estimate of the bootstrap (whose samples are
+	// all done) is kept until the tasks have done 8 large steps each.
+	if (sampleCount * engine->oclSampler->metropolis.largeMutationProbability < 8.0 * taskCount)
+		return;
+
+	const size_t headerSize = sizeof(slg::ocl::MetropolisSamplerSharedData);
+	vector<char> data(headerSize + sizeof(slg::ocl::MetropolisTaskLuminance) * taskCount);
+	intersectionDevice.EnqueueReadBuffer(samplerSharedDataBuff, CL_TRUE, data.size(), &data[0]);
+	const slg::ocl::MetropolisTaskLuminance *luminances =
+			(const slg::ocl::MetropolisTaskLuminance *)&data[headerSize];
+
+	double totalI = 0.0, count = 0.0;
+	for (u_int i = 0; i < taskCount; ++i) {
+		totalI += luminances[i].totalI;
+		count += luminances[i].largeMutationCount;
+	}
+
+	if (totalI > 0.0) {
+		const float invMeanI = (float)(count / totalI);
+		intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+				offsetof(slg::ocl::MetropolisSamplerSharedData, invMeanI), sizeof(float), &invMeanI);
+	}
 }
 
 void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
@@ -151,12 +272,11 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	// a halt whose paths were drained (DrainPaths()), and the sampler shared
 	// data is initialized only once, by InitRender(). Left set, each task
 	// finished the sample it had and the render stalled at taskCount samples
-	// (20 spp on a 160x160 film).
-	if (engine->oclSampler->type == slg::ocl::SOBOL) {
-		const u_int noDrain = 0;
-		intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
-				offsetof(slg::ocl::SobolSamplerSharedData, drain), sizeof(u_int), &noDrain);
-	}
+	// (20 spp on a 160x160 film). With Metropolis, the tasks first render one
+	// sample each, the bootstrap (MetropolisBootstrap()).
+	const bool metropolis = (engine->oclSampler->type == slg::ocl::METROPOLIS);
+	if ((engine->oclSampler->type == slg::ocl::SOBOL) || metropolis)
+		SetDrain(metropolis);
 
 	// Initialize the tasks buffer
 	intersectionDevice.EnqueueKernel(initKernel,
@@ -165,6 +285,9 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	// Check if I have to load the start film
 	if (engine->hasStartFilm && (threadIndex == 0))
 		threadFilms[0]->SendFilm(intersectionDevice);
+
+	if (metropolis)
+		MetropolisBootstrap();
 
 	//----------------------------------------------------------------------
 	// Rendering loop
@@ -179,10 +302,10 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	// The halt spp: the transfers predict when the next batch of kernels
 	// reaches it, from the spp done per kernel iteration (see below)
 	const u_int haltSPP = engine->GetEyeHaltSPP();
-	// With the Sobol sampler, the paths in flight finish at the halt
-	// (DrainPaths()): one sample per task of every device is still to come,
-	// so the halt is reached that many samples earlier
-	const bool drainAtHalt = (engine->oclSampler->type == slg::ocl::SOBOL);
+	// With the Sobol and Metropolis samplers, the paths in flight finish at
+	// the halt (DrainPaths()): one sample per task of every device is still
+	// to come, so the halt is reached that many samples earlier
+	const bool drainAtHalt = (engine->oclSampler->type == slg::ocl::SOBOL) || metropolis;
 	bool drain = false;
 	const u_int *subRegion = engine->GetFilm().GetSubRegion();
 	const double regionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
@@ -191,7 +314,12 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 	double haltCheckSPP = 0.0, sppPerIteration = 0.0;
 	u_int iterationsSinceHaltCheck = 0;
 	// The first transfer with samples: the spp per iteration is averaged from
-	// there (before, the first paths are not done yet)
+	// there (before, the first paths are not done yet). The samples of the
+	// Metropolis bootstrap don't count: they are done before the loop, and
+	// with them the rate was measured while the first paths of the chains
+	// were still in flight, far too low (a halt of 64 spp rendered 114).
+	const double bootstrapSPP = metropolis ?
+		(double(taskCount) * engine->renderOCLThreads.size() / regionPixelCount) : 0.0;
 	double rateStartSPP = -1.0;
 	u_int rateStartIterations = 0;
 
@@ -276,6 +404,9 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
 			UpdateLightTreeLearning(totalCount);
 
+			if (metropolis)
+				UpdateMetropolisLuminance(totalCount);
+
 			totalTransferTime += WallClockTime() - timeTransferStart;
 			++transferCount;
 
@@ -287,7 +418,7 @@ void PathOCLOpenCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 				// and a GPU renders well past the halt point in the meantime
 				const double spp = engine->GetThreadFilmsEyeSPP();
 				if (rateStartSPP < 0.0) {
-					if (spp > 0.0) {
+					if (spp > bootstrapSPP) {
 						rateStartSPP = spp;
 						rateStartIterations = totalIterations;
 					}

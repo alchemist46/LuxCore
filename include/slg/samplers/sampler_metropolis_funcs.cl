@@ -114,12 +114,20 @@ OPENCL_FORCE_INLINE void SmallStep(__constant const GPUTaskConfiguration* restri
 		proposedU[i] = Mutate(currentU[i], Rnd_FloatValue(seed));
 }
 
+OPENCL_FORCE_INLINE __global MetropolisTaskLuminance *MetropolisSampler_GetTaskLuminances(
+		__global void *samplerSharedDataBuff) {
+	return (__global MetropolisTaskLuminance *)((__global char *)samplerSharedDataBuff +
+			sizeof(MetropolisSamplerSharedData));
+}
+
 OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 		__constant const GPUTaskConfiguration* restrict taskConfig
 		SAMPLER_PARAM_DECL
 		FILM_PARAM_DECL
 		) {
 	const size_t gid = get_global_id(0);
+	__global MetropolisSamplerSharedData *sharedData = (__global MetropolisSamplerSharedData *)samplerSharedDataBuff;
+	__global MetropolisTaskLuminance *taskLuminance = &MetropolisSampler_GetTaskLuminances(samplerSharedDataBuff)[gid];
 	__global MetropolisSample *samples = (__global MetropolisSample *)samplesBuff;
 	__global MetropolisSample *sample = &samples[gid];
 	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
@@ -132,15 +140,21 @@ OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 	uint proposed = sample->proposed;
 
 	if (current == NULL_INDEX) {
-		// It is the very first sample, I have still to initialize the current
-		// sample
+		// It is the very first sample of the task, a uniform one (the
+		// bootstrap, see PathOCLOpenCLRenderThread::MetropolisBootstrap()):
+		// it is splat as such, it is the first large step of the luminance
+		// estimate and a candidate for the start of the chains
 
 		Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
 				sampleResult, 1.f, false
 				FILM_PARAM);
 
 		sample->currentResult = *sampleResult;
-		sample->totalI = SampleResult_GetRadianceY(&taskConfig->film, sampleResult);
+
+		float firstI = SampleResult_GetRadianceY(&taskConfig->film, sampleResult);
+		firstI = (isnan(firstI) || isinf(firstI)) ? 0.f : firstI;
+		taskLuminance->totalI = firstI;
+		taskLuminance->largeMutationCount = 1;
 
 		current = proposed;
 		proposed ^= 1;
@@ -150,19 +164,16 @@ OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 		float proposedI = SampleResult_GetRadianceY(&taskConfig->film, sampleResult);
 		proposedI = (isnan(proposedI) || isinf(proposedI)) ? 0.f : proposedI;
 
-		float totalI = sample->totalI;
-		uint largeMutationCount = sample->largeMutationCount;
 		uint smallMutationCount = sample->smallMutationCount;
 		if (smallMutationCount == 0) {
 			// It is a large mutation
-			totalI += proposedI;
-			largeMutationCount += 1;
-
-			sample->totalI = totalI;
-			sample->largeMutationCount = largeMutationCount;
+			taskLuminance->totalI += proposedI;
+			taskLuminance->largeMutationCount += 1;
 		}
 
-		const float invMeanI = (totalI > 0.f) ? (largeMutationCount / totalI) : 1.f;
+		// The mean luminance of the image, from the large steps of all the
+		// tasks: a chain's own estimate is poor when the chain is short
+		const float invMeanI = sharedData->invMeanI;
 
 		// Calculate accept probability from old and new image sample
 		uint consecutiveRejects = sample->consecutiveRejects;
@@ -228,6 +239,24 @@ OPENCL_FORCE_INLINE void MetropolisSampler_SplatSample(
 					FILM_PARAM);
 		}
 
+		if (sharedData->drain) {
+			// The chain ends with this sample (the halt): the weight its
+			// current sample has gathered is splat too. Left out, the
+			// short chains of the GPU lost the bright samples most, as the
+			// chains stay longer on them (-1.5% at 16 spp).
+			const bool accepted = (consecutiveRejects == 0);
+			const float lastNorm = weight / ((accepted ? proposedI : currentI) * invMeanI +
+					taskConfig->sampler.metropolis.largeMutationProbability);
+			if (lastNorm > 0.f) {
+				__global SampleResult *last = accepted ? sampleResult : &sample->currentResult;
+				Film_AddSample(last->pixelX, last->pixelY,
+						last, lastNorm, false
+						FILM_PARAM);
+			}
+
+			weight = 0.f;
+		}
+
 		// Check if it is an accepted mutation
 		if (consecutiveRejects == 0) {
 			// I can now (after Film_SplatSample()) overwrite sample->currentResult and sampleResult
@@ -283,9 +312,6 @@ OPENCL_FORCE_INLINE bool MetropolisSampler_Init(
 	const size_t gid = get_global_id(0);
 	__global MetropolisSample *samples = (__global MetropolisSample *)samplesBuff;
 	__global MetropolisSample *sample = &samples[gid];
-
-	sample->totalI = 0.f;
-	sample->largeMutationCount = 1.f;
 
 	sample->current = NULL_INDEX;
 	sample->proposed = 1;

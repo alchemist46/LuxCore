@@ -1209,11 +1209,15 @@ __kernel void AdvancePaths_MK_RT(
 
 #if !defined(RENDER_ENGINE_TILEPATHOCL) && !defined(RENDER_ENGINE_RTPATHOCL)
 		// At the halt spp, the host lets the paths in flight finish (with the
-		// Sobol sampler): no new sample is started. Dropping them instead
-		// would leave out the long paths.
+		// Sobol and Metropolis samplers): no new sample is started. Dropping
+		// them instead would leave out the long paths. With Metropolis, the
+		// tasks also stop after their first sample, the bootstrap (see
+		// PathOCLOpenCLRenderThread::MetropolisBootstrap()).
 		if (((pathState == MK_NEXT_SAMPLE) || (pathState == MK_GENERATE_CAMERA_RAY)) &&
-				(taskConfig->sampler.type == SOBOL) &&
-				((__global SobolSamplerSharedData *)samplerSharedDataBuff)->drain) {
+				(((taskConfig->sampler.type == SOBOL) &&
+					((__global SobolSamplerSharedData *)samplerSharedDataBuff)->drain) ||
+				((taskConfig->sampler.type == METROPOLIS) &&
+					((__global MetropolisSamplerSharedData *)samplerSharedDataBuff)->drain))) {
 			pathState = MK_DONE;
 			// Mark the ray like like one to NOT trace
 			rays[gid].flags = RAY_FLAGS_MASKED;

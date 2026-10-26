@@ -85,10 +85,8 @@ OPENCL_FORCE_INLINE bool Sampler_IsHalfSample(const uint sampleIndex) {
 //------------------------------------------------------------------------------
 
 typedef struct {
-	float totalI;
-
 	// Using ushort here totally freeze the ATI driver
-	unsigned int largeMutationCount, smallMutationCount;
+	unsigned int smallMutationCount;
 	unsigned int current, proposed, consecutiveRejects;
 
 	float weight;
@@ -142,6 +140,35 @@ typedef struct {
 	// Plus Sobol directions array
 	// Plus the list of the pixels to converge (with the per-pixel halt test)
 } SobolSamplerSharedData;
+
+// The large steps of a Metropolis chain (PATHOCL): the sum of their luminance
+// and their count
+typedef struct {
+	float totalI;
+	unsigned int largeMutationCount;
+} MetropolisTaskLuminance;
+
+// The chains of the tasks of a device share the normalization of Kelemen's
+// estimator, the mean luminance of the image, and start from a sample drawn
+// in proportion to its luminance (see PathOCLOpenCLRenderThread::
+// MetropolisBootstrap()): with a luminance estimated per task and a uniform
+// start, the many short chains of the GPU were biased (-3% at 16 spp).
+typedef struct {
+	// Set by PATHOCL for the first sample of each task (the bootstrap) and
+	// at the halt: the tasks finish the paths in flight and start no new
+	// sample
+	unsigned int drain;
+
+	// The inverse of the mean luminance of the image, from the large steps
+	// of all the tasks (see PathOCLOpenCLRenderThread::
+	// UpdateMetropolisLuminance())
+	float invMeanI;
+
+	unsigned int taskCount;
+
+	// Plus a MetropolisTaskLuminance for each task
+	// Plus the task whose first sample starts the chain of each task
+} MetropolisSamplerSharedData;
 
 typedef struct {
 	// cameraFilmWidth/cameraFilmHeight and filmWidth/filmHeight are usually

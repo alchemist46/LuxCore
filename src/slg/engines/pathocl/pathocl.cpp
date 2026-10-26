@@ -234,13 +234,14 @@ void PathOCLRenderEngine::UpdateTaskCount() {
 		if (cfg.Get(Property("opencl.task.count")("AUTO")).Get<string>() == "AUTO") {
 			taskCount = taskCap;
 
-			// Each task runs its own Metropolis chain, and a chain is biased
-			// until it has run long enough to forget its starting point: with
-			// more tasks than pixels (small films), the chains stay short and
-			// the image brightness depends on the sample count. One task per
-			// pixel (over all the OpenCL/CUDA/HIP devices, the native threads
-			// run few long chains) gives each chain at least as many samples as
-			// the pixels have
+			// Each task runs its own Metropolis chain. The chains start from
+			// the bootstrap (PathOCLOpenCLRenderThread::MetropolisBootstrap()),
+			// but a short chain still misses the rare bright paths the
+			// bootstrap didn't find, and explores less: with more tasks than
+			// pixels (small films), the chains stay short. One task per pixel
+			// (over all the OpenCL/CUDA/HIP devices, the native threads run few
+			// long chains) gives each chain at least as many samples as the
+			// pixels have
 			if (cfg.Get(Property("sampler.type")(SobolSampler::GetObjectTag())).Get<string>() ==
 					MetropolisSampler::GetObjectTag()) {
 				const u_int filmPixelCount = GetFilm().GetWidth() * GetFilm().GetHeight();

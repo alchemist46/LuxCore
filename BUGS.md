@@ -66,12 +66,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: classroom scene.
 - Notes: the light tree keeps the limit (measured 2026-10-16): lifting it lets decorative lamp meshes take the picks of the real lights next to them.
 
-### GPU Metropolis sampler bias with short chains
-- Found: 2026-10-17
-- Area: engine (PATHOCL)
-- Problem: each task estimates the mean image luminance (the Kelemen normalization) from its own large steps, and each chain starts at a uniform sample, not at one drawn proportionally to the luminance. Both bias short chains in opposite directions (simple scene, 150x100, one task per pixel, at the test halt: +0.9%; with a fixed exact luminance and 512K tasks the start-up alone is -20% at 267 spp).
-- Reproduce: `*_PATHOCL_METROPOLIS` tests; small films or few spp.
-- Notes: a global luminance estimate (a reduction over the tasks) and a resampled start (PSSMLT bootstrap) would remove both. Only matters when the chains are short: a chain gets about spp x pixels / tasks samples, about 1000 for a 1080p render at 256 spp with the default 512K tasks (a small bias), 8 for the 150x100 test film. Decided 2026-10-22 to leave it as a known limitation (the GPU renders use Sobol by default, and the hybrid light tracing, PhotonGI's caustic cache and the light tree cover most of Metropolis' scenes). Workarounds for small films or previews: fewer tasks (`opencl.task.count`) for longer chains, or the CPU engines, whose few chains are long.
+### GPU Metropolis: short chains still read dark on some scenes
+- Found: 2026-10-17 (as "GPU Metropolis sampler bias with short chains"), narrowed on 2026-10-26 by ROADMAP GM
+- Area: engine (PATHOCL, Metropolis sampler)
+- Problem: since GM the chains start from the bootstrap, share one luminance estimate and splat their last sample at the halt, which removed most of the bias, but short chains still read dark on some scenes: PATHOCL against the Sobol mean, 4 seeds, at 16/64/256 spp: the `simple` scene (150x100) -1.0/-0.5/-0.2% (with 65536 tasks -1.3/-1.4/-0.6%), LynxSpider (300x200) -2.4/-1.2/-0.05%; the SDL `cornell` (+0.4/+0.1/0.0%) and `luxball-hdr` (-0.1/0.0/0.0%) are within the noise from 64 spp. A chain gets about spp x pixels / tasks samples (one task per pixel on a small film).
+- Reproduce: `lc-work/gm/mr.py scenes/simple/simple.cfg out.npz --sampler METROPOLIS --spp 16,64,256 --seeds 1,2,3,4 --size 150x100` against the same with `--sampler SOBOL` (`lc-work/gm/an.py`).
+- Notes: the start draws from one uniform sample per task, so the bright paths rarer than about one per task count are missing from the start, and a short chain doesn't reach them in its own steps while the estimator gives them the weight of a chain that would (a toy of the estimator with a heavy-tailed integrand shows the same, 200K chains of 16 steps -1.8%; it is exact for a light-tailed one). A larger bootstrap (several uniform samples per task, one kept in proportion to its luminance) would cover more of them. Ruled out: the luminance estimate (an exact constant gives the same), the flush of the last sample (the eager splat of every step gives the same), the forced accept after 512 rejects (`luxball-hdr` the same with 99999), the path lengths of the drain (a toy with costs is unbiased). Workarounds: fewer tasks (`opencl.task.count`) for longer chains, or the CPU engines, whose few chains are long (PATHCPU within 0.2% from 64 spp on the four scenes).
 
 ### BiDir darkens the silhouette of the furnace sphere
 - Found: 2026-10-22

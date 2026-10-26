@@ -317,6 +317,11 @@ protected:
 	luxrays::HardwareDeviceKernelUPtr initSeedKernel;
 	luxrays::HardwareDeviceKernelUPtr initKernel;
 	size_t initWorkGroupSize;
+	// The start of the Metropolis chains (see
+	// PathOCLOpenCLRenderThread::MetropolisBootstrap())
+	luxrays::HardwareDeviceKernelUPtr metropolisBootstrapCopyKernel;
+	luxrays::HardwareDeviceKernelUPtr metropolisBootstrapStartKernel;
+	size_t metropolisBootstrapWorkGroupSize;
 	luxrays::HardwareDeviceKernelUPtr advancePathsKernel_MK_RT;
 	size_t advancePathsWorkGroupSize;
 

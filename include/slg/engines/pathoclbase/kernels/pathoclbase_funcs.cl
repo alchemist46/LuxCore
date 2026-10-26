@@ -680,4 +680,61 @@ __kernel void Init(
 	__global GPUTaskStats *taskStat = &taskStats[gid];
 	taskStat->sampleCount = 0;
 }
+
+//------------------------------------------------------------------------------
+// The start of the Metropolis chains (PATHOCL, see
+// PathOCLOpenCLRenderThread::MetropolisBootstrap()): each task takes as its
+// current sample the first sample of the task the bootstrap picked for it.
+// The first kernel copies the samples into the free slots (the proposed
+// sample vector and the sample result), so no task overwrites a sample
+// another one is still to read; the second one makes them the current ones
+// and starts the chains.
+//------------------------------------------------------------------------------
+
+__kernel void MetropolisSampler_BootstrapCopy(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global void *samplerSharedDataBuff,
+		__global void *samplesBuff,
+		__global float *samplesDataBuff,
+		__global SampleResult *sampleResultsBuff) {
+	const size_t gid = get_global_id(0);
+	const uint taskCount = ((__global MetropolisSamplerSharedData *)samplerSharedDataBuff)->taskCount;
+	if (gid >= taskCount)
+		return;
+
+	__global const uint *startTasks = (__global const uint *)(MetropolisSampler_GetTaskLuminances(samplerSharedDataBuff) + taskCount);
+	const uint startTask = startTasks[gid];
+
+	__global MetropolisSample *samples = (__global MetropolisSample *)samplesBuff;
+	const uint sampleSize = taskConfig->pathTracer.eyeSampleSize;
+	__global const float *srcU = &samplesDataBuff[(startTask * 2 + samples[startTask].current) * sampleSize];
+	__global float *dstU = &samplesDataBuff[(gid * 2 + samples[gid].proposed) * sampleSize];
+	for (uint i = 0; i < sampleSize; ++i)
+		dstU[i] = srcU[i];
+
+	sampleResultsBuff[gid] = samples[startTask].currentResult;
+}
+
+__kernel void MetropolisSampler_BootstrapStart(
+		__global void *samplesBuff,
+		__global SampleResult *sampleResultsBuff,
+		__global PathState *pathStates,
+		const uint taskCount) {
+	const size_t gid = get_global_id(0);
+	if (gid >= taskCount)
+		return;
+
+	__global MetropolisSample *sample = &((__global MetropolisSample *)samplesBuff)[gid];
+	sample->currentResult = sampleResultsBuff[gid];
+
+	const uint current = sample->current;
+	sample->current = sample->proposed;
+	sample->proposed = current;
+
+	sample->weight = 0.f;
+	sample->consecutiveRejects = 0;
+
+	// The next sample is a mutation of the new current one
+	pathStates[gid] = MK_NEXT_SAMPLE;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

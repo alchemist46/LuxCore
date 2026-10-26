@@ -268,8 +268,15 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 	}
 
 	// The learned slots of the tree: the cells start with no learned weight
-	// and the sums at zero (each render starts learning afresh)
-	if ((cscene->lightTreeLightIndex.size() > 0) && (cscene->lightTreeLearnCellCount > 0)) {
+	// and the sums at zero (each render starts learning afresh). Not with the
+	// Metropolis sampler: each epoch of the learning changes the light
+	// sampling, so the samples the chains stand on no longer have the
+	// luminance the next steps are compared with, and the many short chains
+	// of the GPU start again from a sample that is not drawn in proportion to
+	// the new luminance (the simple scene, 150x100: -2.2% at 64 spp with the
+	// learning, -0.5% without). The tree is used without learning.
+	if ((cscene->lightTreeLightIndex.size() > 0) && (cscene->lightTreeLearnCellCount > 0) &&
+			(renderEngine->oclSampler->type != slg::ocl::METROPOLIS)) {
 		const u_int cellCount = cscene->lightTreeLearnCellCount;
 		const u_int slotCount = cscene->lightTreeLearn.slotCount;
 		lightTreeLearnCells.assign((size_t)cellCount * (slotCount + 1), 0.f);
@@ -546,7 +553,11 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 
 	size_t size = 0;
 	if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {
-		// Nothing
+		size += sizeof(slg::ocl::MetropolisSamplerSharedData);
+
+		// Plus the luminance of the large steps of each task and the task
+		// whose first sample starts its chain
+		size += (sizeof(slg::ocl::MetropolisTaskLuminance) + sizeof(u_int)) * renderEngine->taskCount;
 	} else if (renderEngine->oclSampler->type == slg::ocl::SOBOL) {
 		size += sizeof(slg::ocl::SobolSamplerSharedData);
 
@@ -615,7 +626,17 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 
 		// Write the data
 		intersectionDevice.EnqueueWriteBuffer(samplerSharedDataBuff, CL_TRUE, size, buffer);
-		
+
+	} else if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {
+		// The per task data is written by the kernels and by
+		// PathOCLOpenCLRenderThread::MetropolisBootstrap()
+		slg::ocl::MetropolisSamplerSharedData msd;
+		msd.drain = 0;
+		msd.invMeanI = 1.f;
+		msd.taskCount = renderEngine->taskCount;
+
+		intersectionDevice.EnqueueWriteBufferRange(samplerSharedDataBuff, CL_TRUE,
+				0, sizeof(msd), &msd);
 	} else if (renderEngine->oclSampler->type == slg::ocl::TILEPATHSAMPLER) {
 		// TilePathSamplerSharedData is updated in PathOCLBaseOCLRenderThread::UpdateSamplerData()
 		
@@ -688,8 +709,7 @@ void PathOCLBaseOCLRenderThread::InitSamplesBuffer() {
 	// Add Sample memory size
 	switch (renderEngine->oclSampler->type) {
 		case  slg::ocl::METROPOLIS: {
-			const size_t sampleResultSize = sizeof(slg::ocl::SampleResult);
-			sampleSize += 2 * sizeof(float) + 5 * sizeof(u_int) + sampleResultSize;	
+			sampleSize += sizeof(slg::ocl::MetropolisSample);
 			break;
 		}
 		case slg::ocl::SOBOL: {

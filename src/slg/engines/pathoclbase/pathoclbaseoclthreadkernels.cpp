@@ -267,6 +267,8 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		{filmClearKernel, filmClearWorkGroupSize, "Film_Clear"},
 		{initSeedKernel, initWorkGroupSize, "InitSeed"},
 		{initKernel, initWorkGroupSize, "Init"},
+		{metropolisBootstrapCopyKernel, metropolisBootstrapWorkGroupSize, "MetropolisSampler_BootstrapCopy"},
+		{metropolisBootstrapStartKernel, metropolisBootstrapWorkGroupSize, "MetropolisSampler_BootstrapStart"},
 	};
 
 	for (auto& [kernel, workGroupSize, name] : kernels) {
@@ -354,6 +356,22 @@ void PathOCLBaseOCLRenderThread::SetInitKernelArgs(const u_int filmIndex) {
 	argIndex = threadFilms[filmIndex]->SetFilmKernelArgs(intersectionDevice, initKernel, argIndex);
 
 	initKernelArgsCount = argIndex;
+
+	// The start of the Metropolis chains
+	if (renderEngine->oclSampler->type == slg::ocl::METROPOLIS) {
+		argIndex = 0;
+		intersectionDevice.SetKernelArg(metropolisBootstrapCopyKernel, argIndex++, taskConfigBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapCopyKernel, argIndex++, samplerSharedDataBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapCopyKernel, argIndex++, samplesBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapCopyKernel, argIndex++, sampleDataBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapCopyKernel, argIndex++, sampleResultsBuff);
+
+		argIndex = 0;
+		intersectionDevice.SetKernelArg(metropolisBootstrapStartKernel, argIndex++, samplesBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapStartKernel, argIndex++, sampleResultsBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapStartKernel, argIndex++, pathStatesBuff);
+		intersectionDevice.SetKernelArg(metropolisBootstrapStartKernel, argIndex++, renderEngine->taskCount);
+	}
 }
 
 void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(

@@ -45,7 +45,20 @@ public:
 protected:
 	virtual void GetThreadFilmSize(u_int *filmWidth, u_int *filmHeight, u_int *filmSubRegion);
 	virtual void RenderThreadImpl(std::stop_token stop_token);
+	// Runs the kernels until every task is done (the paths in flight of a
+	// drain finished)
+	void FinishPaths();
 	void DrainPaths();
+	// The drain flag of the sampler shared data (Sobol and Metropolis)
+	void SetDrain(const bool drain);
+
+	// The start of the Metropolis chains: the first sample of each task is a
+	// uniform one, each chain starts from one of them picked in proportion to
+	// its luminance (Kelemen's chains start from the stationary distribution)
+	void MetropolisBootstrap();
+	// The mean image luminance of the Metropolis chains, from the large steps
+	// of all the tasks
+	void UpdateMetropolisLuminance(const double sampleCount);
 };
 
 //------------------------------------------------------------------------------
