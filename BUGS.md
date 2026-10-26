@@ -101,6 +101,20 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: an infinite light and a sky2 light, both with the cache on, PATHOCL: the log prints "OpenCL rendering supports only one EnvLightVisibilityCache".
 - Notes: ROADMAP CA3. The GPU would need the cache data of each light at its own offsets (entries, BVH nodes, tile distributions, radius, normal angle) in the light record. The other parts of the old entry were fixed on 2026-10-25 (rebuilt only on visibility edits, tile distributions rebuilt after loading a file, binning in each light's own uv mapping, the light's own distribution where the cache has no map).
 
+### ELVC: the env light pdf after a pass-through surface comes from that surface, +17% on DanishMood
+- Found: 2026-10-26 (ROADMAP CA3 gate)
+- Area: light, engine (both devices)
+- Problem: with `visibilitymapcache.enable = 1` on its world light, `scenes/DanishMood` (archglass windows) renders 17.5% brighter than with the cache off, on PATHOCL and PATHCPU, everywhere in the room (blocks +8% to +28%). The cache off is right: a render where the world light is reached only by BSDF sampling (`importance = 0`, clamping off) gives 0.10222, the cache off 0.10218, the cache on 0.12002.
+- Reproduce: `C:/Users/Ricardo/lc-work/ca3/run.sh` (`elvc.py`: the scene's settings, PhotonGI off, uniform Sobol), `dm:0,1`, 212x285 or 423x570, 64 spp, 4 seeds; `an.py` compares the means. The same with the build of 2026-10-23 (before the ELVC fixes of 93e23dcb3).
+- Notes: cause found for most of it: when a BSDF ray goes through a pass-through surface (archglass, null, a transparency texture) and then escapes, the light pdf of the MIS weight is computed with the BSDF of the pass-through surface instead of the last scattering vertex. With the cache off the env pdf does not depend on the point, so nothing shows; with the cache it reads the cache of another point, or none (a delta surface: the luminance pdf), so the two MIS weights no longer sum to 1. CPU: `Scene::Intersect()` re-initializes the `bsdf` it is given at every pass-through hit and `RenderEyePath()` passes that `bsdf` to `DirectHitInfiniteLight()` on the miss. GPU: the end of the vertex-ray block of `AdvancePaths_MK_RT` (`pathoclbase_kernels_micro.cl`, "Keep what the next iteration reads of the BSDF") saves the vertex BSDF on any hit, a pass-through one included (`continueToTrace`). A kernel experiment that skips that save when `continueToTrace` (`lc-work/ca3/kfix`) brings DanishMood from +17.5% to +1.25% (423x570, 8 seeds, 64/128/256 spp, the cache-off image unchanged); the CPU needs the vertex BSDF kept apart from the one `Scene::Intersect()` fills (or the point, landing normal, volume and delta flags the cache lookup reads). The +1.25% left is not explained: with the windows as null it is the same, with them as glass (no light sampling through them) -0.17%. The addon's render settings helper turns the cache on for "Indoors". Not fixed in CA3 (a measurement); the DanishMood figures of the gate are from the patched kernel. LynxSpider's -1% with the cache is a separate entry.
+
+### ELVC: LynxSpider 1% dark with the cache on
+- Found: 2026-10-26 (ROADMAP CA3 gate)
+- Area: light, engine
+- Problem: `scenes/LynxSpider` with `visibilitymapcache.enable = 1` on its world light reads 1.0% darker than with the cache off (PATHOCL, 450x300, 8 seeds, 64/128/256 spp: -1.00% +- 0.01-0.03%, most 8x8 blocks over 3 sigma).
+- Reproduce: `lc-work/ca3/run.sh` `ly:0,1` (the scene's settings, uniform Sobol), `an.py`.
+- Notes: not the clamping (the same with it off), not the last path vertex (the same at depth 32), not the pass-through BSDF of the entry above (the patched kernel gives -1.2%). With the transparency textures of the ten transparent materials (Background, Bokeh, Leaf and the spider's) set to opaque the means agree (-0.004% +- 0.12%), so it comes with the transparency. Possibly the same cause as "LynxSpider: the Russian roulette depth changes the image by 1%".
+
 ### The caches' eye-path tracer differs from the render's
 - Found: 2026-10-22
 - Area: engine, caches
