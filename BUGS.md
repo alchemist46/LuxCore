@@ -139,13 +139,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: not reproduced yet. `tests/furnace/furnace.py PATHCPU glass-vol-s1 path.photongi.indirect.enabled=1 scene.volumes.v.photongi.enable=1` (and `null-vol-s1`) render bit-identical images with and without the cache (2026-10-25: the cache is built, 4 s -> 15 s, but no volume vertex reads it: the lookup needs the previous vertex cache-enabled and a ray longer than the usage threshold, `pathtracer.cpp:706`). A larger medium (a room-sized fog) is needed to reach the formula.
 - Notes: found while fixing the caustic cache in volumes (10x too bright); by reading only. Volumes have `photongi.enable` false by default.
 
-### PATHCPU crashes in the second PhotonGI session of a process
-- Found: 2026-10-24
-- Area: engine (PATHCPU), caches (PhotonGI)
-- Problem: a Python process that renders two furnace cases one after the other with the caustic cache segfaults (exit 139) now and then in the second one: `metal2-a0.05` then `glossy2-coat-a0.05` crashed on 565ebf8df and passed on the next build in one try each; the whole furnace list with the caustic cache (or both caches) crashed at `glossy2-coat-a0.05` in five runs of both builds, and with both caches the `glossycoating` group crashed after `glossycoating-white-a0.05`. Each case alone passes.
-- Reproduce: `tests/furnace/furnace.py PATHCPU metal2-a0.05,glossy2-coat-a0.05 path.photongi.caustic.enabled=1 path.photongi.photon.maxcount=2000000 path.photongi.caustic.updatespp=0`, a few runs; `all` instead of the two names crashes every time at the 18th case.
-- Notes: not investigated (the K4 ASan build would show it). Suspect state the first session's cache leaves behind (the caustic update barrier or its threads, a scene or BVH pointer). Still there on 2026-10-25 (4900f79c9): the `all` list crashed (exit 139) at the 18th case, `metal2-a0.05`, the first one after `roughglass-a0.05`.
-
 ### CannelleEtFromage: PATHOCL reads 3% brighter than PATHCPU without clamping
 - Found: 2026-10-25
 - Area: engine (PATHOCL against PATHCPU), material (glass caustics?)

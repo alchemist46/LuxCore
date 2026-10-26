@@ -484,7 +484,14 @@ void TracePhotonsThread::RenderFunc(std::stop_token stop_token) {
 						const float R = acceptedCount / (float)mutatedCount;
 						// 0.234 => the optimal asymptotic acceptance ratio has been
 						// derived 23.4% [Roberts et al. 1997]
-						mutationSize += (R - .234f) / mutatedCount;
+						//
+						// Kept positive: with few accepted mutations (a sharp
+						// glossy caustic) the sum of -.234 / mutatedCount
+						// diverges, and a negative size made Mutate()'s steps
+						// infinite, then the samples NaN (an out of bounds light
+						// pick, a crash now and then). At 1/1024 the steps are
+						// tiny, the acceptance rises and the size grows again
+						mutationSize = Max(mutationSize + (R - .234f) / mutatedCount, 1.f / 1024.f);
 					}
 
 #ifdef WIN32
