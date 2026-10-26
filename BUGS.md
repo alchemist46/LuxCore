@@ -113,7 +113,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Area: engine (PATHOCL), caches
 - Problem: the same render takes 24 s or 341 s of kernel time depending on the run: each run traces its own caustic photons (Metropolis) and the GPU lookup visits every photon within the radius (`PGICPhotonBvh_ConnectAllNearEntries()`), so a dense caustic spot costs a lot.
 - Reproduce: cornell-glass with `path.photongi.caustic.enabled = 1`, `caustic.lookup.radius = 0.1`, `photon.maxcount = 4000000`, `caustic.updatespp = 0`, hybrid off, PATHOCL 200x200 at 64 spp: kernels 23.6 s in one run, 341 s in another (same build, `lc-work/ca1/timing.py`).
-- Notes: not investigated: not a regression of CA1 (the base build shows both). A cap on the photons per lookup (the old `caustic.lookup.maxcount`, commented out in `scenes/causticcube/render.cfg`) or a k-nearest lookup would bound it.
+- Notes: not reproduced on 2026-10-26: 4 runs at 07b887ffa (with the Metropolis mutation size fix) and 4 on the CA2 build (`out/venvca2`, without it) all took 77-78 s in total (`timing.py glass-caustic 64`), the low case. Not investigated before: not a regression of CA1 (the base build shows both). A cap on the photons per lookup (the old `caustic.lookup.maxcount`, commented out in `scenes/causticcube/render.cfg`) or a k-nearest lookup would bound it.
 
 ### The light tree's learning biases the direct light
 - Found: 2026-10-23
