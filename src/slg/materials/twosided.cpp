@@ -117,6 +117,16 @@ Spectrum TwoSidedMaterial::GetPassThroughTransparency(const HitPoint &hitPoint,
 	}
 }
 
+float TwoSidedMaterial::GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const {
+	if (frontTransparencyTex || backTransparencyTex)
+		return Material::GetVertexPassThroughEvent(hitPoint, passThroughEvent, backTracing);
+	else if (hitPoint.intoObject)
+		return frontMat->GetVertexPassThroughEvent(hitPoint, passThroughEvent, backTracing);
+	else
+		return backMat->GetVertexPassThroughEvent(hitPoint, passThroughEvent, backTracing);
+}
+
 float TwoSidedMaterial::GetEmittedRadianceY(const float oneOverPrimitiveArea) const {
 	if (emittedTex)
 		return Material::GetEmittedRadianceY(oneOverPrimitiveArea);

@@ -907,6 +907,10 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 				if (!transp.Black()) {
 					*connectionThroughput *= transp;
 					continueToTrace = true;
+				} else {
+					// A vertex: the material's own choices need the
+					// pass-through event uniform again
+					bsdf->SetVertexPassThroughEvent(*this, backTracing, volInfo);
 				}
 			}
 

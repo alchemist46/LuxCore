@@ -73,8 +73,10 @@ OPENCL_FORCE_INLINE void NullMaterial_GetPassThroughTransparency(__global const 
 			transp = blendColor;
 	} else
 		transp = WHITE;
-	
+
 	EvalStack_PushFloat3(transp);
+	// Never a vertex: the pass-through event stays
+	EvalStack_PushFloat(-1.f);
 }
 
 OPENCL_FORCE_INLINE void NullMaterial_GetEmittedRadiance(__global const Material* restrict material,

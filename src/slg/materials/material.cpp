@@ -112,6 +112,21 @@ Spectrum Material::GetPassThroughTransparency(const HitPoint &hitPoint,
 		return Spectrum(0.f);
 }
 
+float Material::GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const {
+	TextureConstPtr transparencyTex = (hitPoint.intoObject != backTracing) ? frontTransparencyTex : backTransparencyTex;
+
+	if (transparencyTex) {
+		const float weight = Clamp(transparencyTex->GetFloatValue(hitPoint), 0.f, 1.f);
+
+		// A vertex has u <= weight: u / weight is uniform in [0, 1]
+		if ((weight > 0.f) && (passThroughEvent <= weight))
+			return Min(passThroughEvent / weight, .99999994f);
+	}
+
+	return passThroughEvent;
+}
+
 Spectrum Material::GetEmittedRadiance(const HitPoint &hitPoint, const float oneOverPrimitiveArea) const {
 	if (emittedTex) {
 		return (emittedFactor * (usePrimitiveArea ? oneOverPrimitiveArea : 1.f)) *

@@ -155,13 +155,31 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 
 		// Check if it is a pass through point
 		if (!continueToTrace) {
-			const float3 passThroughTrans = BSDF_GetPassThroughTransparency(bsdf, backTracing
+			float vertexPassThroughEvent = -1.f;
+			const float3 passThroughTrans = BSDF_GetPassThroughTransparency(bsdf, backTracing,
+				&vertexPassThroughEvent
 				MATERIALS_PARAM);
 			if (!Spectrum_IsBlack(passThroughTrans)) {
 				*connectionThroughput *= passThroughTrans;
 
 				// It is a pass through point, continue to trace the ray
 				continueToTrace = true;
+			} else if (vertexPassThroughEvent >= 0.f) {
+				// A vertex: the material's own choices need the pass-through
+				// event uniform again (as BSDF::SetVertexPassThroughEvent())
+				bsdf->hitPoint.passThroughEvent = vertexPassThroughEvent;
+				const uint matIndex = bsdf->materialIndex;
+				if (!mats[matIndex].constVolumes)
+					PathVolumeInfo_SetHitPointVolumes(
+							volInfo,
+							&bsdf->hitPoint,
+							Material_GetInteriorVolume(matIndex, &bsdf->hitPoint,
+								vertexPassThroughEvent
+								MATERIALS_PARAM),
+							Material_GetExteriorVolume(matIndex, &bsdf->hitPoint,
+								vertexPassThroughEvent
+								MATERIALS_PARAM)
+							MATERIALS_PARAM);
 			}
 		}
 

@@ -166,6 +166,8 @@ OPENCL_FORCE_INLINE void MixMaterial_GetPassThroughTransparencySetUp2(__global c
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
+	float vertexPassThroughEvent1;
+	EvalStack_PopFloat(vertexPassThroughEvent1);
 	float3 transp1;
 	EvalStack_PopFloat3(transp1);
 
@@ -192,6 +194,7 @@ OPENCL_FORCE_INLINE void MixMaterial_GetPassThroughTransparencySetUp2(__global c
 	EvalStack_PushFloat(factor);
 
 	EvalStack_PushFloat3(transp1);
+	EvalStack_PushFloat(vertexPassThroughEvent1);
 
 	// To setup the following EVAL_GET_PASS_TROUGH_TRANSPARENCY evaluation of second sub-nodes
 	EvalStack_PushFloat3(localFixedDir);
@@ -204,7 +207,10 @@ OPENCL_FORCE_INLINE void MixMaterial_GetPassThroughTransparency(__global const M
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	float3 transp1, transp2;
+	float vertexPassThroughEvent1, vertexPassThroughEvent2;
+	EvalStack_PopFloat(vertexPassThroughEvent2);
 	EvalStack_PopFloat3(transp2);
+	EvalStack_PopFloat(vertexPassThroughEvent1);
 	EvalStack_PopFloat3(transp1);
 
 	float factor;
@@ -220,21 +226,41 @@ OPENCL_FORCE_INLINE void MixMaterial_GetPassThroughTransparency(__global const M
 	const uint transpTexIndex = (hitPoint->intoObject != backTracing) ?
 		material->frontTranspTexIndex : material->backTranspTexIndex;
 
+	// The pass-through event at a vertex (see
+	// MixMaterial::GetVertexPassThroughEvent()), -1 if it stays
 	float3 transp;
+	float vertexPassThroughEvent = -1.f;
 	if (transpTexIndex != NULL_INDEX) {
 		const float weight = clamp(
 				Texture_GetFloatValue(transpTexIndex, hitPoint TEXTURES_PARAM),
 				0.f, 1.f);
 
-		transp = (passThroughEvent > weight) ? WHITE : BLACK;
+		if (passThroughEvent > weight)
+			transp = WHITE;
+		else {
+			transp = BLACK;
+			if (weight > 0.f)
+				vertexPassThroughEvent = fmin(passThroughEvent / weight, .99999994f);
+		}
 	} else {
 		const float weight2 = clamp(factor, 0.f, 1.f);
 		const float weight1 = 1.f - weight2;
 
-		transp = (passThroughEvent < weight1) ? transp1 : transp2;
+		// u stays in the interval of the sub-material, remapped inside it
+		// as the sub-material remaps its own
+		if (passThroughEvent < weight1) {
+			transp = transp1;
+			if (vertexPassThroughEvent1 >= 0.f)
+				vertexPassThroughEvent = weight1 * vertexPassThroughEvent1;
+		} else {
+			transp = transp2;
+			if (vertexPassThroughEvent2 >= 0.f)
+				vertexPassThroughEvent = fmin(weight1 + weight2 * vertexPassThroughEvent2, .99999994f);
+		}
 	}
 
 	EvalStack_PushFloat3(transp);
+	EvalStack_PushFloat(vertexPassThroughEvent);
 }
 
 OPENCL_FORCE_INLINE void MixMaterial_GetEmittedRadianceSetUp1(__global const Material* restrict material,

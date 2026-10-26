@@ -110,7 +110,13 @@ public:
 	// material may depend on it (Mix), so they are chosen again
 	void SetPassThroughEvent(SceneConstRef scene, const float passThroughEvent,
 			const PathVolumeInfo *volInfo);
-	
+	// At a vertex, after GetPassThroughTransparency() was black: the
+	// pass-through event the material's own choices read (its lobe, the
+	// sub-material of a Mix), uniform again (see
+	// Material::GetVertexPassThroughEvent())
+	void SetVertexPassThroughEvent(SceneConstRef scene, const bool backTracing,
+			const PathVolumeInfo *volInfo);
+
 	bool IsEmpty() const { return (not material); }
 	bool IsLightSource() const { return material->IsLightSource(); }
 	// At a regularized vertex (see HitPoint::regularization) the delta lobes

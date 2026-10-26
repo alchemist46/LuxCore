@@ -240,6 +240,17 @@ void BSDF::SetPassThroughEvent(SceneConstRef scene, const float passThroughEvent
 	);
 }
 
+void BSDF::SetVertexPassThroughEvent(SceneConstRef scene, const bool backTracing,
+		const PathVolumeInfo *volInfo) {
+	if (!material->HasPassThroughTransparency())
+		return;
+
+	const float passThroughEvent = material->GetVertexPassThroughEvent(hitPoint,
+			hitPoint.passThroughEvent, backTracing);
+	if (passThroughEvent != hitPoint.passThroughEvent)
+		SetPassThroughEvent(scene, passThroughEvent, volInfo);
+}
+
 void BSDF::MoveHitPoint(const Point &p, const Normal &n) {
 	hitPoint.p = p;
 	hitPoint.geometryN = n;

@@ -162,6 +162,15 @@ public:
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
 		const bool backTracing) const;
+	// A ray goes through a transparency texture of value w when its
+	// pass-through event u is above w (GetPassThroughTransparency()), so at a
+	// vertex u is in [0, w]. The material's own choices made with u (its lobe,
+	// the sub-material of a Mix) need it uniform in [0, 1) again: u / w. A Mix
+	// keeps u in the interval of its sub-material and remaps it inside it. Called
+	// at a vertex, after GetPassThroughTransparency() was black; returns u when
+	// nothing decided the vertex with it.
+	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const;
 	// Returns false if GetPassThroughTransparency() always returns black
 	virtual bool HasPassThroughTransparency() const {
 		return frontTransparencyTex || backTransparencyTex;

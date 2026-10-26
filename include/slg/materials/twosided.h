@@ -50,6 +50,8 @@ public:
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint  &hitPoint,
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
 		const bool backTracing) const;
+	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const;
 	virtual bool HasPassThroughTransparency() const {
 		return Material::HasPassThroughTransparency() ||
 				frontMat->HasPassThroughTransparency() || backMat->HasPassThroughTransparency();

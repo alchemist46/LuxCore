@@ -39,6 +39,11 @@ public:
 		const luxrays::Vector &localFixedDir, const float passThroughEvent,
 		const bool backTracing) const;
 	virtual bool HasPassThroughTransparency() const { return true; }
+	// Never a vertex
+	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const {
+		return passThroughEvent;
+	}
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 

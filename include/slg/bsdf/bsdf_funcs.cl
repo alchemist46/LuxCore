@@ -392,7 +392,10 @@ OPENCL_FORCE_INLINE float3 BSDF_GetEmittedRadiance(__global const BSDF *bsdf, fl
 				LIGHTS_PARAM);
 }
 
-OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughTransparency(__global const BSDF *bsdf, const bool backTracing
+// vertexPassThroughEvent: see Material_GetPassThroughTransparency(), left as
+// it is when the material has no transparency to evaluate
+OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughTransparency(__global const BSDF *bsdf, const bool backTracing,
+		float *vertexPassThroughEvent
 		MATERIALS_PARAM_DECL) {
 	if (mats[bsdf->materialIndex].noPassThroughTransparency)
 		return BLACK;
@@ -402,7 +405,8 @@ OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughTransparency(__global const BSDF *
 	const float3 localFixedDir = Frame_ToLocal(&bsdf->frame, VLOAD3F(&bsdf->hitPoint.fixedDir.x));
 
 	return Material_GetPassThroughTransparency(bsdf->materialIndex,
-			&bsdf->hitPoint, localFixedDir, bsdf->hitPoint.passThroughEvent,backTracing
+			&bsdf->hitPoint, localFixedDir, bsdf->hitPoint.passThroughEvent, backTracing,
+			vertexPassThroughEvent
 			MATERIALS_PARAM);
 }
 

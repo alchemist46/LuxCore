@@ -157,6 +157,36 @@ bool CompiledScene::MaterialHasBump(const u_int matIndex) const {
 		return (mat->bumpTexIndex != NULL_INDEX);
 }
 
+// False if the pass through transparency op of the material always returns
+// black with no new vertex pass-through event (as
+// Material::HasPassThroughTransparency()): no transparency texture that the
+// op reads, no NULLMAT or ARCHGLASS, down the tree
+bool CompiledScene::MaterialHasPassThroughTransparency(const u_int matIndex) const {
+	const slg::ocl::Material *mat = &mats[matIndex];
+	const bool ownTransparency = (mat->frontTranspTexIndex != NULL_INDEX) ||
+			(mat->backTranspTexIndex != NULL_INDEX);
+
+	switch (mat->type) {
+		case slg::ocl::NULLMAT:
+		case slg::ocl::ARCHGLASS:
+			return true;
+		case slg::ocl::MIX:
+			return ownTransparency ||
+					MaterialHasPassThroughTransparency(mat->mix.matAIndex) ||
+					MaterialHasPassThroughTransparency(mat->mix.matBIndex);
+		case slg::ocl::GLOSSYCOATING:
+			// Its own transparency textures are not read
+			// (GlossyCoatingMaterial_GetPassThroughTransparency())
+			return MaterialHasPassThroughTransparency(mat->glossycoating.matBaseIndex);
+		case slg::ocl::TWOSIDED:
+			return ownTransparency ||
+					MaterialHasPassThroughTransparency(mat->twosided.frontMatIndex) ||
+					MaterialHasPassThroughTransparency(mat->twosided.backMatIndex);
+		default:
+			return ownTransparency;
+	}
+}
+
 // The bump cache slots of the tree of a material: one per bumped sub-material
 // of a MIX or GLOSSYCOATING node (a TWOSIDED node has none of its own: its
 // parent bumps it with the front or back bump), in the order of
@@ -264,7 +294,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 3;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
-					// 5 x parameters and 3 x results
+					// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
@@ -336,11 +366,11 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 3;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP1:
-					// 5 x parameters and 3 x results
+					// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP2:
-					// 5 x parameters and 3 x results
+					// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
@@ -349,7 +379,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP2, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, bumpSlotBaseB, evalOps);
 
-					// 5 x parameter and 3 x result
+					// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_EVALUATE_MIX_SETUP1:
@@ -420,7 +450,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 				case slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY:
 					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_GET_PASS_TROUGH_TRANSPARENCY, bumpSlotBaseA, evalOps);
 
-					// 5 x parameters and 3 x results
+					// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_EVALUATE_GLOSSYCOATING_SETUP:
@@ -537,7 +567,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 
 						addDefaultOp = false;
 					} else {
-						// 5 x parameters and 3 x results
+						// 5 x parameters and 4 x results (the transparency and the vertex pass-through event)
 						evalOpStackSize += 5;
 					}
 					break;
@@ -595,13 +625,12 @@ void CompiledScene::CompileMaterialOps() {
 		slg::ocl::Material *mat = &mats[i];
 
 		// The queries the kernels answer without the interpreter: a leaf
-		// material's volumes are its own, and its pass through transparency
-		// is black without a transparency texture (DefaultMaterial_*())
+		// material's volumes are its own, and the pass through transparency
+		// of a tree without a transparency texture, NULLMAT or ARCHGLASS is
+		// black (DefaultMaterial_*(), the Mix ops)
 		const bool leaf = IsLeafMaterial(mat->type);
 		mat->constVolumes = leaf;
-		mat->noPassThroughTransparency = leaf &&
-				(mat->type != slg::ocl::NULLMAT) && (mat->type != slg::ocl::ARCHGLASS) &&
-				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
+		mat->noPassThroughTransparency = !MaterialHasPassThroughTransparency(i);
 		mat->nullPassThrough = (mat->type == slg::ocl::NULLMAT) &&
 				(mat->frontTranspTexIndex == NULL_INDEX) && (mat->backTranspTexIndex == NULL_INDEX);
 		mat->defaultEmittedRadiance = leaf;

@@ -203,9 +203,12 @@ OPENCL_HOT_FUNCTION float3 Material_Sample(const uint matIndex, __global const H
 // Material_GetPassThroughTransparency
 //------------------------------------------------------------------------------
 
+// vertexPassThroughEvent: the pass-through event at a vertex when the result is
+// black (see Material::GetVertexPassThroughEvent()), -1 if it stays
 OPENCL_HOT_FUNCTION float3 Material_GetPassThroughTransparency(const uint matIndex,
 		__global const HitPoint *hitPoint,
-		const float3 localFixedDir, const float passThroughEvent, const bool backTracing
+		const float3 localFixedDir, const float passThroughEvent, const bool backTracing,
+		float *vertexPassThroughEvent
 		MATERIALS_PARAM_DECL) {
 #if defined(DEBUG_PRINTF_MATERIAL_EVAL)
 	printf("===============================================================\n");
@@ -242,13 +245,17 @@ OPENCL_HOT_FUNCTION float3 Material_GetPassThroughTransparency(const uint matInd
 #if defined(DEBUG_PRINTF_MATERIAL_EVAL)
 	printf("evalStackOffset=#%d\n", evalStackOffsetVal);
 #endif
-	
+
+	float vertexPassThroughEventResult;
+	EvalStack_PopFloat(vertexPassThroughEventResult);
 	float3 result;
 	EvalStack_PopFloat3(result);
 
 #if defined(DEBUG_PRINTF_MATERIAL_EVAL)
-	printf("Result=(%f, %f, %f)\n", result.s0, result.s1, result.s2);
+	printf("Result=(%f, %f, %f) %f\n", result.s0, result.s1, result.s2, vertexPassThroughEventResult);
 #endif
+
+	*vertexPassThroughEvent = vertexPassThroughEventResult;
 
 	return result;
 }

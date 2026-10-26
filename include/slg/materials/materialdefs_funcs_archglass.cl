@@ -197,6 +197,9 @@ OPENCL_FORCE_INLINE void ArchGlassMaterial_GetPassThroughTransparency(__global c
 	}
 
 	EvalStack_PushFloat3(transp);
+	// ArchGlassMaterial_Sample() relies on the reflection interval: the
+	// pass-through event stays
+	EvalStack_PushFloat(-1.f);
 }
 
 OPENCL_FORCE_INLINE void ArchGlassMaterial_GetEmittedRadiance(__global const Material* restrict material,

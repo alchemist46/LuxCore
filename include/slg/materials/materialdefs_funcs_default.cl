@@ -73,16 +73,27 @@ OPENCL_FORCE_INLINE void DefaultMaterial_GetPassThroughTransparency(__global con
 		material->frontTranspTexIndex : material->backTranspTexIndex;
 
 	float3 transp;
+	// The pass-through event at a vertex (see
+	// Material::GetVertexPassThroughEvent()): u <= weight there, u / weight
+	// is uniform again; -1 if it stays
+	float vertexPassThroughEvent = -1.f;
 	if (transpTexIndex != NULL_INDEX) {
 		const float weight = clamp(
 				Texture_GetFloatValue(transpTexIndex, hitPoint TEXTURES_PARAM),
 				0.f, 1.f);
 
-		transp = (passThroughEvent > weight) ? WHITE : BLACK;
+		if (passThroughEvent > weight)
+			transp = WHITE;
+		else {
+			transp = BLACK;
+			if (weight > 0.f)
+				vertexPassThroughEvent = fmin(passThroughEvent / weight, .99999994f);
+		}
 	} else
 		transp = BLACK;
-	
+
 	EvalStack_PushFloat3(transp);
+	EvalStack_PushFloat(vertexPassThroughEvent);
 }
 
 //------------------------------------------------------------------------------

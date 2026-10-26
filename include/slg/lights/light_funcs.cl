@@ -675,8 +675,9 @@ OPENCL_FORCE_INLINE float3 TriangleLight_Illuminate(__global const LightSource *
 		Frame frame;
 		HitPoint_GetFrame(tmpHitPoint, &frame);
 		const float3 localFixedDir = Frame_ToLocal_Private(&frame, -sampleDir);
+		float vertexPassThroughEvent;
 		result *= Spectrum_Clamp(WHITE - Material_GetPassThroughTransparency(materialIndex,
-				tmpHitPoint, localFixedDir, passThroughEvent, false
+				tmpHitPoint, localFixedDir, passThroughEvent, false, &vertexPassThroughEvent
 				MATERIALS_PARAM));
 	}
 

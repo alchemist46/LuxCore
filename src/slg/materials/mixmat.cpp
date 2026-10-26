@@ -140,6 +140,30 @@ Spectrum MixMaterial::GetPassThroughTransparency(const HitPoint &hitPoint,
 	}
 }
 
+float MixMaterial::GetVertexPassThroughEvent(const HitPoint &hitPoint,
+		const float passThroughEvent, const bool backTracing) const {
+	if (frontTransparencyTex || backTransparencyTex)
+		return Material::GetVertexPassThroughEvent(hitPoint, passThroughEvent, backTracing);
+
+	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float weight1 = 1.f - weight2;
+
+	// u stays in the interval of the sub-material that decided the vertex
+	// (GetPassThroughTransparency()), remapped inside it as the sub-material
+	// remaps its own
+	if (passThroughEvent < weight1) {
+		const float u = passThroughEvent / weight1;
+		const float vertexU = matA->GetVertexPassThroughEvent(hitPoint, u, backTracing);
+
+		return (vertexU != u) ? (weight1 * vertexU) : passThroughEvent;
+	} else {
+		const float u = (passThroughEvent - weight1) / weight2;
+		const float vertexU = matB->GetVertexPassThroughEvent(hitPoint, u, backTracing);
+
+		return (vertexU != u) ? Min(weight1 + weight2 * vertexU, .99999994f) : passThroughEvent;
+	}
+}
+
 float MixMaterial::GetEmittedRadianceY(const float oneOverPrimitiveArea) const {
 	if (emittedTex)
 		return Material::GetEmittedRadianceY(oneOverPrimitiveArea);

@@ -196,6 +196,7 @@ private:
 			const u_int matBIndex, const slg::ocl::MaterialEvalOpType opTypeB, const u_int bumpSlotBaseB,
 			std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
 	bool MaterialHasBump(const u_int matIndex) const;
+	bool MaterialHasPassThroughTransparency(const u_int matIndex) const;
 	u_int MaterialBumpSlotCount(const u_int matIndex) const;
 	u_int CompileMaterialOps(const u_int matIndex, const slg::ocl::MaterialEvalOpType opType,
 			const u_int bumpSlotBase, std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
