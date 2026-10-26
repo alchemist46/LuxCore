@@ -67,7 +67,7 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Notes: the light tree keeps the limit (measured 2026-10-16): lifting it lets decorative lamp meshes take the picks of the real lights next to them.
 
 ### GPU Metropolis: short chains still read dark on some scenes
-- Found: 2026-10-17 (as "GPU Metropolis sampler bias with short chains"), narrowed on 2026-10-26 by ROADMAP GM
+- Found: 2026-10-17 (as "GPU Metropolis sampler bias with short chains"), narrowed on 2026-10-26 by ROADMAP GM; left as a known limitation (the user, 2026-10-26: Metropolis is not used on the GPU, GM dropped)
 - Area: engine (PATHOCL, Metropolis sampler)
 - Problem: since GM the chains start from the bootstrap, share one luminance estimate and splat their last sample at the halt, which removed most of the bias, but short chains still read dark on some scenes: PATHOCL against the Sobol mean, 4 seeds, at 16/64/256 spp: the `simple` scene (150x100) -1.0/-0.5/-0.2% (with 65536 tasks -1.3/-1.4/-0.6%), LynxSpider (300x200) -2.4/-1.2/-0.05%; the SDL `cornell` (+0.4/+0.1/0.0%) and `luxball-hdr` (-0.1/0.0/0.0%) are within the noise from 64 spp. A chain gets about spp x pixels / tasks samples (one task per pixel on a small film).
 - Reproduce: `lc-work/gm/mr.py scenes/simple/simple.cfg out.npz --sampler METROPOLIS --spp 16,64,256 --seeds 1,2,3,4 --size 150x100` against the same with `--sampler SOBOL` (`lc-work/gm/an.py`).
