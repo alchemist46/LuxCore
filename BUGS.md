@@ -174,10 +174,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `out/venvb0` (af4f833ea) with `B0_HIPRT_DIR=C:\Users\Ricardo\lc-hiprt\dist\bin\Release`, `opencl.native.threads.count=0`, `C:\Users\Ricardo\lc-work\b0\render_b0.py 16 320 240`.
 - Notes: found while building the pre-optimization wheel; HEAD is not affected. It matters only for old builds or a return to `hiprtBuildTraceKernels`. Ruled out: the work group size, the DataSet race fixed in c5dc429b2, stale caches.
 
-### PhotonGI indirect cache: walls and ceiling 2-5% darker than path tracing
-- Found: 2026-10-24
+### PhotonGI indirect cache: the image mean moves by -2% to +19% against path tracing
+- Found: 2026-10-24 (LuxCore2.1Benchmark); the other scenes 2026-10-26 (CA4)
 - Area: caches (PhotonGI)
 - Problem: LuxCore2.1Benchmark (the scene's own PhotonGI settings, PATHOCL, half size, 1024 spp, clamping off) with the indirect cache against without: whole image -2.5%, walls -2.7%, ceiling -5.4%, floor -1%, a little warmer (R/B +0.3%). With the scene's clamping: -1.6%, -1.7%, -4.5%.
+- CA4 (2026-10-26, HEAD `d155f7e07`, PATHOCL, every path depth and the photon depth 64 on both sides so that both converge, no clamping, 8 seeds at 256 spp, a new cache each render): SDL `classroom` 640x480 **+18.5%** (+-0.1%), SDL `cornell` 400x400 +5.4%, DanishMood (its own PhotonGI settings, half size) +1.05%, the native Cornell box (`Cornell Box Luxcore.blend` export, 540x540) +0.17%, LuxCore2.1Benchmark -2.0%. On the classroom the `lc-pgiarea` test build (`faf955d7d` plus the switches below) reads +18.6% and +1.8% with `LUX_PGI_AREA=disc` (4 seeds): it is error 1 below, the hit-based area of a visibility particle, largest in a cluttered room lit mostly indirectly (its matte materials have the exact albedo, so error 2 does not offset it there). The cache's mean also varies by about +-0.5% from one cache to the next on the classroom.
+- Reproduce (CA4): `DEEP=1 bash C:/Users/Ricardo/lc-work/ca4/run.sh D cls:0,1` then `an.py r/clsD-p0.npz r/clsD-p1.npz`.
 - Reproduce: `tests/benchmark/native_render.py --scene LuxCore2.1Benchmark --spp 1024 --set path.clamping.variance.maxvalue=0` against the same with `--set path.photongi.indirect.enabled=0`.
 - Notes: The ceiling is lit only indirectly, so the cache's share is largest there. Suspects: the area estimate of a visibility particle (`PGICVisibilityParticle::ComputeRadiance()`, from the mean distance of its hits), the 10 degree normal angle and the radius blur at the panel mouldings, the stop at 15M photons with the error still at 11%. Cannelle with the cache: mean within 0.05%.
 - Notes (2026-10-25, Cornell Box Luxcore and the SDL `cornell`, PATHCPU, deep paths): two estimator errors of opposite sign, measured with test switches in a worktree build (`LUX_PGI_AREA=disc`, `LUX_PGI_ALBEDO=albedo` in `C:\Users\Ricardo\lc-pgiarea`, not committed).
