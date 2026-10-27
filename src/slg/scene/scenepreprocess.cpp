@@ -36,6 +36,11 @@ void Scene::PreprocessCamera(const u_int filmWidth, const u_int filmHeight, cons
 
 void Scene::Preprocess(Context& ctx, const u_int filmWidth, const u_int filmHeight,
 		const u_int *filmSubRegion, const bool useRTMode) {
+	// Before anything that reads the materials (the light sources, the
+	// compiled scene)
+	if (editActions.Has(MATERIALS_EDIT) || editActions.Has(MATERIAL_TYPES_EDIT))
+		matDefs.UpdateMixVertexWeights();
+
 	//--------------------------------------------------------------------------
 	// Check if I have to update geometry
 	//--------------------------------------------------------------------------

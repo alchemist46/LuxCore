@@ -44,6 +44,8 @@ public:
 		const float passThroughEvent, const bool backTracing) const {
 		return passThroughEvent;
 	}
+	virtual float GetVertexProbability(const HitPoint &hitPoint) const { return 0.f; }
+	virtual bool HasPointVertexProbability() const { return true; }
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 

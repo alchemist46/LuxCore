@@ -197,6 +197,10 @@ private:
 			std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;
 	bool MaterialHasBump(const u_int matIndex) const;
 	bool MaterialHasPassThroughTransparency(const u_int matIndex) const;
+	u_int AddVertexFactorTexture(const slg::ocl::Texture &tex);
+	u_int AddVertexFactorConstTexture(const float value);
+	u_int CompileVertexProbabilityTexture(const Material &material);
+	void CompileMixVertexFactors();
 	u_int MaterialBumpSlotCount(const u_int matIndex) const;
 	u_int CompileMaterialOps(const u_int matIndex, const slg::ocl::MaterialEvalOpType opType,
 			const u_int bumpSlotBase, std::vector<slg::ocl::MaterialEvalOp> &evalOps) const;

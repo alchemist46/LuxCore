@@ -72,6 +72,12 @@ public:
 		const float passThroughEvent, const bool backTracing) const {
 		return matBase->GetVertexPassThroughEvent(hitPoint, passThroughEvent, backTracing);
 	}
+	virtual float GetVertexProbability(const HitPoint &hitPoint) const {
+		return matBase->GetVertexProbability(hitPoint);
+	}
+	virtual bool HasPointVertexProbability() const {
+		return matBase->HasPointVertexProbability();
+	}
 	virtual bool HasPassThroughTransparency() const {
 		return Material::HasPassThroughTransparency() || matBase->HasPassThroughTransparency();
 	}

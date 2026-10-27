@@ -18,6 +18,10 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+// At a vertex, the weight of material B is the one of vertexFactorTexIndex,
+// the mix factor or, with vertex weights, the weight conditioned on the
+// vertex (MixMaterial::GetVertexWeight2(), CompiledScene::CompileMixVertexFactors())
+
 OPENCL_FORCE_INLINE void MixMaterial_Albedo(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -26,7 +30,7 @@ OPENCL_FORCE_INLINE void MixMaterial_Albedo(__global const Material* restrict ma
 	EvalStack_PopFloat3(albedo2);
 	EvalStack_PopFloat3(albedo1);
 
-	const float factor = Texture_GetFloatValue(material->mix.mixFactorTexIndex, hitPoint TEXTURES_PARAM);
+	const float factor = Texture_GetFloatValue(material->mix.vertexFactorTexIndex, hitPoint TEXTURES_PARAM);
 	const float weight2 = clamp(factor, 0.f, 1.f);
 	const float weight1 = 1.f - weight2;
 
@@ -306,7 +310,7 @@ OPENCL_FORCE_INLINE void MixMaterial_GetEmittedRadiance(__global const Material*
 		float oneOverPrimitiveArea;
 		EvalStack_PopFloat(oneOverPrimitiveArea);
 
-		const float factor = Texture_GetFloatValue(material->mix.mixFactorTexIndex, hitPoint TEXTURES_PARAM);
+		const float factor = Texture_GetFloatValue(material->mix.vertexFactorTexIndex, hitPoint TEXTURES_PARAM);
 		const float weight2 = clamp(factor, 0.f, 1.f);
 		const float weight1 = 1.f - weight2;
 
@@ -472,7 +476,7 @@ OPENCL_FORCE_INLINE void MixMaterial_Evaluate(__global const Material* restrict 
 	// material referencing other materials
 	const float isTransmitEval = (signbit(lightDir.z) != signbit(eyeDir.z));
 
-	const float factor = Texture_GetFloatValue(material->mix.mixFactorTexIndex, hitPoint TEXTURES_PARAM);
+	const float factor = Texture_GetFloatValue(material->mix.vertexFactorTexIndex, hitPoint TEXTURES_PARAM);
 	const float weight2 = clamp(factor, 0.f, 1.f);
 	const float weight1 = 1.f - weight2;
 
@@ -532,7 +536,11 @@ OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp1(__global const Material* restr
 	const float weight2 = clamp(factor, 0.f, 1.f);
 	const float weight1 = 1.f - weight2;
 
+	// The sub-material is picked with the mix factor's weights, and weighed
+	// with its weight at the vertex (MixMaterial::Sample())
 	const bool sampleMatA = (passThroughEvent < weight1);
+	const float vertexFactor = (material->mix.vertexFactorTexIndex == material->mix.mixFactorTexIndex) ?
+		factor : Texture_GetFloatValue(material->mix.vertexFactorTexIndex, hitPoint TEXTURES_PARAM);
 	const float passThroughEventFirst = sampleMatA ? (passThroughEvent / weight1) : (passThroughEvent - weight1) / weight2;
 	const uint matIndexFirst = sampleMatA ? material->mix.matAIndex : material->mix.matBIndex;
 
@@ -560,7 +568,7 @@ OPENCL_FORCE_INLINE void MixMaterial_SampleSetUp1(__global const Material* restr
 	EvalStack_PushFloat(passThroughEvent);
 
 	// Save factor
-	EvalStack_PushFloat(factor);
+	EvalStack_PushFloat(vertexFactor);
 	// Save sampleMatA
 	EvalStack_PushInt(sampleMatA);
 
@@ -747,6 +755,12 @@ OPENCL_FORCE_INLINE void MixMaterial_Sample(__global const Material* restrict ma
 	const float weight1 = 1.f - weight2;
 	const float weightFirst = sampleMatA ? weight1 : weight2;
 	const float weightSecond = sampleMatA ? weight2 : weight1;
+
+	// Only where the sub-material can't make a vertex (u = 0 on a transparency
+	// of 0)
+	if (weightFirst <= 0.f) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
 
 	float pdfW = weightFirst * pdfWFirst;
 

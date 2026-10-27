@@ -127,6 +127,12 @@ float Material::GetVertexPassThroughEvent(const HitPoint &hitPoint,
 	return passThroughEvent;
 }
 
+float Material::GetVertexProbability(const HitPoint &hitPoint) const {
+	TextureConstPtr transparencyTex = hitPoint.intoObject ? frontTransparencyTex : backTransparencyTex;
+
+	return transparencyTex ? Clamp(transparencyTex->GetFloatValue(hitPoint), 0.f, 1.f) : 1.f;
+}
+
 Spectrum Material::GetEmittedRadiance(const HitPoint &hitPoint, const float oneOverPrimitiveArea) const {
 	if (emittedTex) {
 		return (emittedFactor * (usePrimitiveArea ? oneOverPrimitiveArea : 1.f)) *

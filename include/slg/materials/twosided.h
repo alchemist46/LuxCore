@@ -56,6 +56,12 @@ public:
 		return Material::HasPassThroughTransparency() ||
 				frontMat->HasPassThroughTransparency() || backMat->HasPassThroughTransparency();
 	}
+	// Without its own transparency textures, the one of the side's
+	// sub-material: true only if neither lets a ray through
+	virtual bool HasPointVertexProbability() const {
+		return (frontTransparencyTex || backTransparencyTex) ? Material::HasPointVertexProbability() :
+				!(frontMat->HasPassThroughTransparency() || backMat->HasPassThroughTransparency());
+	}
 
 	virtual VolumeConstPtr GetInteriorVolume(const HitPoint &hitPoint,
 		const float passThroughEvent) const;

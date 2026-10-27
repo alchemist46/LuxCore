@@ -171,6 +171,20 @@ public:
 	// nothing decided the vertex with it.
 	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,
 		const float passThroughEvent, const bool backTracing) const;
+	// The probability that GetPassThroughTransparency() is black for a uniform
+	// pass-through event, i.e. that a ray stops on the material and makes a
+	// vertex there, seen from hitPoint.fixedDir (the side of a vertex, not back
+	// tracing): 1 for an opaque material, the value w of a transparency
+	// texture, 0 for null; a Mix without its own transparency weighs the ones
+	// of its sub-materials. A Mix uses it to weigh its sub-materials at a vertex
+	// (MixMaterial::GetVertexWeight2()).
+	virtual float GetVertexProbability(const HitPoint &hitPoint) const;
+	// True if GetVertexProbability() depends only on the hit point, not on the
+	// side or the direction: a Mix weighs its sub-materials at a vertex only
+	// then (on the GPU the weight is a texture, CompiledScene::CompileMixVertexFactors())
+	virtual bool HasPointVertexProbability() const {
+		return frontTransparencyTex == backTransparencyTex;
+	}
 	// Returns false if GetPassThroughTransparency() always returns black
 	virtual bool HasPassThroughTransparency() const {
 		return frontTransparencyTex || backTransparencyTex;

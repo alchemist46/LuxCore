@@ -135,6 +135,10 @@ typedef struct {
 typedef struct {
 	unsigned int matAIndex, matBIndex;
 	unsigned int mixFactorTexIndex;
+	// The weight of material B at a vertex (MixMaterial::GetVertexWeight2()):
+	// mixFactorTexIndex itself or, with vertex weights, a texture of the
+	// compiled scene (CompiledScene::CompileMixVertexFactors())
+	unsigned int vertexFactorTexIndex;
 } MixParam;
 
 typedef struct {

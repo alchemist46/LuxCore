@@ -22,6 +22,7 @@
 #include "luxrays/core/namedobject.h"
 #include "luxrays/usings.h"
 #include "slg/materials/material.h"
+#include "slg/materials/mix.h"
 #include "slg/usings.h"
 
 using namespace std;
@@ -55,6 +56,30 @@ void MaterialDefinitions::UpdateTextureReferences(
 	TextureConstRef oldTex, TextureRef newTex) {
 	for(NamedObjectRef mat: mats.GetObjs())
 		dynamic_cast<MaterialRef>(mat).UpdateTextureReferences(oldTex, newTex);
+}
+
+void MaterialDefinitions::UpdateMixVertexWeights() {
+	// The materials under one whose own transparency texture decides the
+	// pass-through. A Mix used both there and elsewhere keeps the plain
+	// weights everywhere.
+	unordered_set<const Material *> underOwnTransparency;
+	for (NamedObjectRef o : mats.ViewObjs()) {
+		auto &m = dynamic_cast<MaterialConstRef>(o);
+		if (((m.GetType() == MIX) || (m.GetType() == TWOSIDED)) &&
+				(m.GetFrontTransparencyTexture() || m.GetBackTransparencyTexture())) {
+			unordered_set<const Material *> subMats;
+			m.AddReferencedMaterials(subMats);
+			subMats.erase(&m);
+			underOwnTransparency.insert(subMats.begin(), subMats.end());
+		}
+	}
+
+	for (NamedObjectRef o : mats.ViewObjs()) {
+		auto &m = dynamic_cast<MaterialRef>(o);
+		if (m.GetType() == MIX)
+			dynamic_cast<MixMaterial &>(m).SetPassThroughDecidesVertex(
+					underOwnTransparency.find(&m) == underOwnTransparency.end());
+	}
 }
 
 void MaterialDefinitions::GetMaterialSortedNames(vector<std::string> &names) const {

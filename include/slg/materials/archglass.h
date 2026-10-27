@@ -44,6 +44,9 @@ public:
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint, const luxrays::Vector &localFixedDir,
 		const float passThroughEvent, const bool backTracing) const;
 	virtual bool HasPassThroughTransparency() const { return true; }
+	// It lets through the transmission, which depends on the direction: a Mix
+	// over it keeps its plain weights at a vertex
+	virtual bool HasPointVertexProbability() const { return false; }
 	// Sample() relies on u being in the reflection interval of
 	// GetPassThroughTransparency(), which ignores the transparency textures
 	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,

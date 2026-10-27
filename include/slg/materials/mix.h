@@ -51,6 +51,17 @@ public:
 		const bool backTracing) const;
 	virtual float GetVertexPassThroughEvent(const HitPoint &hitPoint,
 		const float passThroughEvent, const bool backTracing) const;
+	virtual float GetVertexProbability(const HitPoint &hitPoint) const;
+	virtual bool HasPointVertexProbability() const {
+		return (frontTransparencyTex || backTransparencyTex) ? Material::HasPointVertexProbability() :
+				(matA->HasPointVertexProbability() && matB->HasPointVertexProbability());
+	}
+	// True if it weighs its sub-materials at a vertex with their vertex
+	// probabilities (GetVertexWeight2())
+	bool HasVertexWeights() const { return vertexWeights; }
+	// False when the Mix is under a material whose own transparency texture
+	// decides the pass-through (MaterialDefinitions::UpdateMixVertexWeights())
+	void SetPassThroughDecidesVertex(const bool decides);
 	virtual bool HasPassThroughTransparency() const {
 		return Material::HasPassThroughTransparency() ||
 				matA->HasPassThroughTransparency() || matB->HasPassThroughTransparency();
@@ -102,7 +113,13 @@ private:
 	bool IsDeltaImpl() const;
 
 	void Preprocess();
+	void UpdateVertexWeights();
 
+	// The weight of material B at a vertex, from the clamped mix factor
+	// weight2: weight2 itself or, when the sub-materials decide the
+	// pass-through (vertexWeights), the weight conditioned on the vertex,
+	// w2 o_B / (w1 o_A + w2 o_B) with o the GetVertexProbability() of each
+	float GetVertexWeight2(const HitPoint &hitPoint, const float weight2) const;
 	MaterialConstPtr matA;
 	MaterialConstPtr matB;
 	TextureConstPtr mixFactor;
@@ -110,6 +127,16 @@ private:
 	// Cached values for performance with very large material node trees
 	BSDFEvent eventTypes;
 	bool isLightSource, isDelta;
+	// No transparency texture of its own and a sub-material that can let a
+	// ray through: a vertex is reached through one of the sub-materials only
+	// with its vertex probability. Only when the vertex probabilities depend
+	// only on the hit point (HasPointVertexProbability()) and its own
+	// pass-through decides its vertices (passThroughDecidesVertex).
+	bool vertexWeights;
+	bool passThroughDecidesVertex = true;
+	// The vertex probabilities of the sub-materials when they are constant,
+	// -1 otherwise
+	float constVertexProbA, constVertexProbB;
 
 };
 

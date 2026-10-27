@@ -83,6 +83,12 @@ public:
  
 	void GetMaterialSortedNames(std::vector<std::string> &names) const;
 
+	// Tells each Mix whether its own pass-through decides its vertices (see
+	// MixMaterial::GetVertexWeight2()): not under a Mix or two-sided material
+	// with a transparency texture of its own, whose own transparency decides
+	// the pass-through of its whole tree
+	void UpdateMixVertexWeights();
+
 private:
 	void GetMaterialSortedNamesImpl(MaterialConstRef m, std::vector<std::string> &names,
 			std::unordered_set<std::string> &doneNames) const;

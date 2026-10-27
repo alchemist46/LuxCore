@@ -17,6 +17,8 @@
  ***************************************************************************/
 
 #include "slg/materials/mix.h"
+#include "slg/materials/glossycoating.h"
+#include "slg/textures/constfloat.h"
 
 using namespace std;
 using namespace luxrays;
@@ -74,6 +76,116 @@ void MixMaterial::Preprocess() {
 
 	isLightSource = IsLightSourceImpl();
 	isDelta = IsDeltaImpl();
+
+	UpdateVertexWeights();
+}
+
+// Material::GetVertexProbability() when it is the same at every hit point,
+// -1 otherwise (as CompiledScene::CompileVertexProbabilityTexture())
+static float ConstVertexProbability(const Material &material) {
+	if (!material.HasPassThroughTransparency())
+		return 1.f;
+
+	auto constValue = [](const Texture *tex) {
+		return (tex->GetType() == CONST_FLOAT) ?
+			Clamp(static_cast<const ConstFloatTexture *>(tex)->GetValue(), 0.f, 1.f) : -1.f;
+	};
+
+	auto frontTex = material.GetFrontTransparencyTexture();
+	auto backTex = material.GetBackTransparencyTexture();
+	switch (material.GetType()) {
+		case NULLMAT:
+			return 0.f;
+		case MIX:
+			if (!frontTex && !backTex) {
+				auto &mm = static_cast<const MixMaterial &>(material);
+				const float probA = ConstVertexProbability(mm.GetMaterialA());
+				const float probB = ConstVertexProbability(mm.GetMaterialB());
+				const float weight2 = constValue(&mm.GetMixFactor());
+				return ((probA >= 0.f) && (probB >= 0.f) && (weight2 >= 0.f)) ?
+					Lerp(weight2, probA, probB) : -1.f;
+			}
+			break;
+		case GLOSSYCOATING:
+			return ConstVertexProbability(*static_cast<const GlossyCoatingMaterial &>(material).GetMaterialBase());
+		default:
+			break;
+	}
+
+	if (frontTex != backTex)
+		return -1.f;
+	return frontTex ? constValue(frontTex.get()) : 1.f;
+}
+
+void MixMaterial::UpdateVertexWeights() {
+	vertexWeights = passThroughDecidesVertex &&
+			!frontTransparencyTex && !backTransparencyTex &&
+			(matA->HasPassThroughTransparency() || matB->HasPassThroughTransparency()) &&
+			matA->HasPointVertexProbability() && matB->HasPointVertexProbability();
+
+	// The constant vertex probabilities spare GetVertexWeight2() the calls; two
+	// equal ones leave the weights as they are (as on the GPU,
+	// CompiledScene::CompileMixVertexFactors())
+	constVertexProbA = vertexWeights ? ConstVertexProbability(*matA) : -1.f;
+	constVertexProbB = vertexWeights ? ConstVertexProbability(*matB) : -1.f;
+	if ((constVertexProbA >= 0.f) && (constVertexProbA == constVertexProbB))
+		vertexWeights = false;
+}
+
+void MixMaterial::SetPassThroughDecidesVertex(const bool decides) {
+	passThroughDecidesVertex = decides;
+	UpdateVertexWeights();
+}
+
+// A Mix without a transparency texture of its own lets a ray through with the
+// sub-material its pass-through event picks (GetPassThroughTransparency()):
+// sub-material i, of weight w_i and vertex probability o_i, makes the vertex
+// with probability w_i o_i, and the Mix with o = w_A o_A + w_B o_B. The
+// surface's BSDF without the pass-through part is w_A o_A f_A + w_B o_B f_B
+// (f_i the BSDF of sub-material i at its vertex, its Evaluate()), so at a
+// vertex, which the path reaches with probability o, the BSDF is that divided
+// by o: w'_A f_A + w'_B f_B with w'_i = w_i o_i / o. Evaluate(), Sample() and
+// Pdf() use these weights, and so do GetEmittedRadiance() and Albedo().
+// Sample() picks the sub-material with the plain weights from the vertex
+// event, which lies in the interval of the sub-material that made the vertex
+// (GetVertexPassThroughEvent()): sub-material i with probability w'_i, as the
+// weights need (the volumes are picked the same way). The plain weights would
+// count w_i twice: Mix(null, X, w) is a vertex with probability w and its
+// light sampling estimated w f_X there. Only when every o_i depends on the hit
+// point alone (HasPointVertexProbability(): not an archglass, which lets its
+// transmission through, nor a side-dependent transparency), and only where
+// the Mix's own pass-through decides its vertices: under a Mix or two-sided
+// material with a transparency texture of its own, the vertex is that
+// material's and the Mix a plain mix whose null lets the path through as a
+// BSDF lobe (SetPassThroughDecidesVertex(),
+// MaterialDefinitions::UpdateMixVertexWeights()). The other Mixes keep the
+// plain weights (BUGS.md). On the GPU, w'_B is a texture
+// (CompiledScene::CompileMixVertexFactors()).
+float MixMaterial::GetVertexWeight2(const HitPoint &hitPoint, const float weight2) const {
+	if (!vertexWeights)
+		return weight2;
+
+	const float probA = (constVertexProbA >= 0.f) ? constVertexProbA : matA->GetVertexProbability(hitPoint);
+	const float probB = (constVertexProbB >= 0.f) ? constVertexProbB : matB->GetVertexProbability(hitPoint);
+	const float v1 = (1.f - weight2) * probA;
+	const float v2 = weight2 * probB;
+	const float v = v1 + v2;
+
+	// v = 0: never a vertex
+	return (v > 0.f) ? (v2 / v) : weight2;
+}
+
+float MixMaterial::GetVertexProbability(const HitPoint &hitPoint) const {
+	if (frontTransparencyTex || backTransparencyTex)
+		return Material::GetVertexProbability(hitPoint);
+	if (!HasPassThroughTransparency())
+		return 1.f;
+
+	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float weight1 = 1.f - weight2;
+
+	return weight1 * matA->GetVertexProbability(hitPoint) +
+			weight2 * matB->GetVertexProbability(hitPoint);
 }
 
 VolumeConstPtr MixMaterial::GetInteriorVolume(const HitPoint &hitPoint,
@@ -177,7 +289,7 @@ Spectrum MixMaterial::GetEmittedRadiance(const HitPoint &hitPoint, const float o
 	else {
 		Spectrum result;
 
-		const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+		const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
 		const float weight1 = 1.f - weight2;
 
 		if (matA->IsLightSource() && (weight1 > 0.f))
@@ -190,7 +302,7 @@ Spectrum MixMaterial::GetEmittedRadiance(const HitPoint &hitPoint, const float o
 }
 
 Spectrum MixMaterial::Albedo(const HitPoint &hitPoint) const {
-	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
 	const float weight1 = 1.f - weight2;
 
 	return weight1 * matA->Albedo(hitPoint) + weight2 * matB->Albedo(hitPoint);
@@ -205,8 +317,8 @@ Spectrum MixMaterial::Evaluate(const HitPoint &hitPoint,
 	// This test is usually done by BSDF::Evaluate() and must be repeated in
 	// material referencing other materials
 	const float isTransmitEval = (Sgn(localLightDir.z) != Sgn(localEyeDir.z));
-	
-	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+
+	const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
 	const float weight1 = 1.f - weight2;
 
 	if (directPdfW)
@@ -288,10 +400,20 @@ Spectrum MixMaterial::Sample(const HitPoint &hitPoint,
 	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
 	const float weight1 = 1.f - weight2;
 
+	// The sub-material is picked with the mix factor's weights: at a vertex u
+	// lies in the interval of the sub-material that decided it
+	// (GetVertexPassThroughEvent()), which is sub-material i with probability
+	// w'_i (GetVertexWeight2()), the weight its BSDF has here
 	const bool sampleMatA = (passThroughEvent < weight1);
 
-	const float weightFirst = sampleMatA ? weight1 : weight2;
-	const float weightSecond = sampleMatA ? weight2 : weight1;
+	const float vertexWeight2 = GetVertexWeight2(hitPoint, weight2);
+	const float vertexWeight1 = 1.f - vertexWeight2;
+	const float weightFirst = sampleMatA ? vertexWeight1 : vertexWeight2;
+	const float weightSecond = sampleMatA ? vertexWeight2 : vertexWeight1;
+	// Only where the sub-material can't make a vertex (u = 0 on a
+	// transparency of 0)
+	if (weightFirst <= 0.f)
+		return Spectrum();
 
 	const float passThroughEventFirst = sampleMatA ? (passThroughEvent / weight1) : (passThroughEvent - weight1) / weight2;
 
@@ -350,7 +472,7 @@ void MixMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
 	const Frame frame(hitPoint.GetFrame());
-	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
 	const float weight1 = 1.f - weight2;
 
 	float directPdfWMatA = 1.f;

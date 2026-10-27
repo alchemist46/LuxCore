@@ -187,6 +187,169 @@ bool CompiledScene::MaterialHasPassThroughTransparency(const u_int matIndex) con
 	}
 }
 
+//------------------------------------------------------------------------------
+// The weights of the Mix materials at a vertex
+//------------------------------------------------------------------------------
+
+u_int CompiledScene::AddVertexFactorTexture(const slg::ocl::Texture &tex) {
+	texs.push_back(tex);
+
+	return texs.size() - 1;
+}
+
+u_int CompiledScene::AddVertexFactorConstTexture(const float value) {
+	slg::ocl::Texture tex;
+	memset(&tex, 0, sizeof(tex));
+	tex.type = slg::ocl::CONST_FLOAT;
+	tex.constFloat.value = value;
+
+	return AddVertexFactorTexture(tex);
+}
+
+// Material::GetVertexProbability() as a texture, for a material in the tree of
+// a Mix with vertex weights: it depends only on the hit point
+// (Material::HasPointVertexProbability())
+u_int CompiledScene::CompileVertexProbabilityTexture(const Material &material) {
+	if (!material.HasPassThroughTransparency())
+		return AddVertexFactorConstTexture(1.f);
+
+	const bool ownTransparency = material.GetFrontTransparencyTexture() ||
+			material.GetBackTransparencyTexture();
+	switch (material.GetType()) {
+		case NULLMAT:
+			return AddVertexFactorConstTexture(0.f);
+		case MIX:
+			if (!ownTransparency) {
+				// w1 o_A + w2 o_B (MixMaterial::GetVertexProbability()): the
+				// mix texture clamps its amount as the Mix clamps its factor
+				auto &mm = dynamic_cast<const MixMaterial &>(material);
+				slg::ocl::Texture tex;
+				memset(&tex, 0, sizeof(tex));
+				tex.type = slg::ocl::MIX_TEX;
+				tex.mixTex.amountTexIndex = scene.GetTextures().GetTextureIndex(mm.GetMixFactor());
+				tex.mixTex.tex1Index = CompileVertexProbabilityTexture(mm.GetMaterialA());
+				tex.mixTex.tex2Index = CompileVertexProbabilityTexture(mm.GetMaterialB());
+
+				return AddVertexFactorTexture(tex);
+			}
+			break;
+		case GLOSSYCOATING:
+			return CompileVertexProbabilityTexture(
+					*dynamic_cast<const GlossyCoatingMaterial &>(material).GetMaterialBase());
+		default:
+			break;
+	}
+
+	// The material's own transparency texture, the same on both sides
+	auto transpTex = material.GetFrontTransparencyTexture();
+	if (!transpTex)
+		return AddVertexFactorConstTexture(1.f);
+
+	const u_int transpTexIndex = scene.GetTextures().GetTextureIndex(transpTex);
+	if (texs[transpTexIndex].type == slg::ocl::CONST_FLOAT)
+		return AddVertexFactorConstTexture(Clamp(texs[transpTexIndex].constFloat.value, 0.f, 1.f));
+
+	slg::ocl::Texture tex;
+	memset(&tex, 0, sizeof(tex));
+	tex.type = slg::ocl::CLAMP_TEX;
+	tex.clampTex.texIndex = transpTexIndex;
+	tex.clampTex.minVal = 0.f;
+	tex.clampTex.maxVal = 1.f;
+
+	return AddVertexFactorTexture(tex);
+}
+
+// The weight of material B at a vertex (MixMaterial::GetVertexWeight2()) of
+// each Mix, in MixParam::vertexFactorTexIndex: the mix factor or, for a Mix with
+// vertex weights, a texture added to the scene's ones, w2 o_B / (w1 o_A +
+// w2 o_B) with o the vertex probability of a sub-material
+// (Material::GetVertexProbability()). A texture instead of a computation in
+// the Mix ops, and the pass-through op as it was (MixMaterial::Sample() picks
+// the sub-material with the mix factor): the speed of the path kernel on
+// every scene moves with any code under Material_EvalOp() (2026-10-26, gfx1030:
+// a walk of the sub-materials in the Mix ops took 3-16% more time per sample,
+// on scenes with or without such a Mix, and the vertex weights in the
+// pass-through op, which runs in the intersection loop, 4-11% more on the
+// scenes with one).
+void CompiledScene::CompileMixVertexFactors() {
+	const size_t texsCount = texs.size();
+
+	for (u_int i = 0; i < mats.size(); ++i) {
+		slg::ocl::Material *mat = &mats[i];
+		if (mat->type != slg::ocl::MIX)
+			continue;
+
+		mat->mix.vertexFactorTexIndex = mat->mix.mixFactorTexIndex;
+
+		auto &mm = dynamic_cast<const MixMaterial &>(scene.GetMaterials().GetMaterial(i));
+		if (!mm.HasVertexWeights())
+			continue;
+
+		const u_int probA = CompileVertexProbabilityTexture(mm.GetMaterialA());
+		const u_int probB = CompileVertexProbabilityTexture(mm.GetMaterialB());
+		const bool constA = (texs[probA].type == slg::ocl::CONST_FLOAT);
+		const bool constB = (texs[probB].type == slg::ocl::CONST_FLOAT);
+		const float valueA = constA ? texs[probA].constFloat.value : -1.f;
+		const float valueB = constB ? texs[probB].constFloat.value : -1.f;
+
+		if (constA && constB && (valueA == valueB)) {
+			// The weights stay the factor's
+			continue;
+		} else if (constA && (valueA == 0.f)) {
+			// Only material B makes a vertex. (Compiling the Mix as material B
+			// for the evaluations at a vertex is not the same: the Mix's ops
+			// repeat the reflection/transmission test of BSDF_Evaluate() with
+			// the event types of the sub-material.)
+			mat->mix.vertexFactorTexIndex = AddVertexFactorConstTexture(1.f);
+		} else if (constB && (valueB == 0.f)) {
+			// Only material A
+			mat->mix.vertexFactorTexIndex = AddVertexFactorConstTexture(0.f);
+		} else {
+			// w2, clamped as the Mix clamps it
+			slg::ocl::Texture weight2Tex;
+			memset(&weight2Tex, 0, sizeof(weight2Tex));
+			weight2Tex.type = slg::ocl::CLAMP_TEX;
+			weight2Tex.clampTex.texIndex = mat->mix.mixFactorTexIndex;
+			weight2Tex.clampTex.minVal = 0.f;
+			weight2Tex.clampTex.maxVal = 1.f;
+			const u_int weight2 = AddVertexFactorTexture(weight2Tex);
+
+			// w2 o_B
+			u_int v2 = weight2;
+			if (!constB || (valueB != 1.f)) {
+				slg::ocl::Texture tex;
+				memset(&tex, 0, sizeof(tex));
+				tex.type = slg::ocl::SCALE_TEX;
+				tex.scaleTex.tex1Index = weight2;
+				tex.scaleTex.tex2Index = probB;
+				v2 = AddVertexFactorTexture(tex);
+			}
+
+			// w1 o_A + w2 o_B
+			slg::ocl::Texture vTex;
+			memset(&vTex, 0, sizeof(vTex));
+			vTex.type = slg::ocl::MIX_TEX;
+			vTex.mixTex.amountTexIndex = weight2;
+			vTex.mixTex.tex1Index = probA;
+			vTex.mixTex.tex2Index = probB;
+			const u_int v = AddVertexFactorTexture(vTex);
+
+			// The quotient, 0 where v = 0 (never a vertex)
+			slg::ocl::Texture tex;
+			memset(&tex, 0, sizeof(tex));
+			tex.type = slg::ocl::DIVIDE_TEX;
+			tex.divideTex.tex1Index = v2;
+			tex.divideTex.tex2Index = v;
+			mat->mix.vertexFactorTexIndex = AddVertexFactorTexture(tex);
+		}
+	}
+
+	if (texs.size() != texsCount) {
+		SLG_LOG("Mix vertex weights: " << (texs.size() - texsCount) << " textures");
+		CompileTextureOps();
+	}
+}
+
 // The bump cache slots of the tree of a material: one per bumped sub-material
 // of a MIX or GLOSSYCOATING node (a TWOSIDED node has none of its own: its
 // parent bumps it with the front or back bump), in the order of
@@ -921,6 +1084,8 @@ void CompiledScene::CompileMaterials() {
 				mat->mix.matAIndex = scene.GetMaterials().GetMaterialIndex(mm.GetMaterialA());
 				mat->mix.matBIndex = scene.GetMaterials().GetMaterialIndex(mm.GetMaterialB());
 				mat->mix.mixFactorTexIndex = scene.GetTextures().GetTextureIndex(mm.GetMixFactor());
+				// Set by CompileMixVertexFactors()
+				mat->mix.vertexFactorTexIndex = mat->mix.mixFactorTexIndex;
 				break;
 			}
 			case NULLMAT: {
@@ -1230,6 +1395,10 @@ void CompiledScene::CompileMaterials() {
 	//--------------------------------------------------------------------------
 	// Material evaluation ops
 	//--------------------------------------------------------------------------
+
+	// The weights of the Mix materials at a vertex: textures, compiled with
+	// the others
+	CompileMixVertexFactors();
 
 	CompileMaterialOps();
 

@@ -310,6 +310,37 @@ def cases():
               "scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
               "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
               "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.0))
+    # A Mix whose sub-materials let rays through: at a vertex its weights are
+    # conditioned on the vertex (MixMaterial::GetVertexWeight2())
+    c.append(("mix-null", "scene.materials.a.type = null\n"
+              "scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
+              "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
+              "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.0))
+    c.append(("mix-transparent", WHITE_FRESNEL +
+              "scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
+              "scene.materials.a.transparency = 0.5\n"
+              "scene.materials.b.type = metal2\nscene.materials.b.fresnel = fr\n"
+              "scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
+              "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
+              "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.0))
+    c.append(("mix-null-nested", "scene.materials.n.type = null\n"
+              "scene.materials.c.type = matte\nscene.materials.c.kd = 1 1 1\n"
+              "scene.materials.a.type = mix\nscene.materials.a.material1 = n\n"
+              "scene.materials.a.material2 = c\nscene.materials.a.amount = 0.6\n"
+              "scene.materials.b.type = mattetranslucent\n"
+              "scene.materials.b.kr = 0.5 0.5 0.5\nscene.materials.b.kt = 1 1 1\n"
+              "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
+              "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.3\n", 1.0))
+    # Under a Mix with a transparency of its own, the inner Mix's null is a
+    # BSDF lobe again (MaterialDefinitions::UpdateMixVertexWeights())
+    c.append(("mix-null-under-transparency", "scene.materials.n.type = null\n"
+              "scene.materials.c.type = matte\nscene.materials.c.kd = 1 1 1\n"
+              "scene.materials.a.type = mix\nscene.materials.a.material1 = n\n"
+              "scene.materials.a.material2 = c\nscene.materials.a.amount = 0.6\n"
+              "scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
+              "scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
+              "scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n"
+              "scene.materials.m.transparency = 0.5\n", 1.0))
     c.append(("twosided", "scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
               "scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
               "scene.materials.m.type = twosided\nscene.materials.m.frontmaterial = a\n"
