@@ -21,6 +21,8 @@
 #include <boost/format.hpp>
 #include <filesystem>
 
+#include "oneapi/tbb.h"
+
 #include "luxrays/utils/thread.h"
 #include "luxrays/utils/strutils.h"
 
@@ -75,6 +77,17 @@ bool PhotonGICache::IsPhotonGIEnabled(const BSDF &bsdf) const {
 		return false;
 	else
 		return bsdf.IsPhotonGIEnabled();
+}
+
+bool PhotonGICache::IsPhotonDepositEnabled(const BSDF &bsdf) const {
+	// No photon on a surface that reflects nothing (a black diffuse emitter,
+	// like the mesh of an area light): the particles within the radius belong
+	// to other surfaces, which don't get this light. An area light just above
+	// a hole in a ceiling made the ceiling's top face and the light's
+	// underside trap direct light, counted for the ceiling's lower face (3.4x
+	// too bright around the light)
+	return IsPhotonGIEnabled(bsdf) &&
+			!(bsdf.Albedo().Black() && !(bsdf.GetEventTypes() & GLOSSY));
 }
 
 float PhotonGICache::GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
@@ -160,20 +173,35 @@ void PhotonGICache::TracePhotons(const u_int seedBase, const u_int photonTracedC
 	for (size_t i = 0; i < renderThreadCount; ++i) {
 		renderThreads[i]->Join();
 
-		// Copy all photons
-		for (auto const &p : renderThreads[i]->indirectPhotons) {
-			PGICVisibilityParticle &vp = visibilityParticles[p.visibilityParticelIndex];
-
-			vp.alphaAccumulated.Add(p.lightID, p.alpha);
-		}
-		indirectPhotonStored += renderThreads[i]->indirectPhotons.size();
+		indirectPhotonStored += renderThreads[i]->indirectPhotonStored;
 
 		causticPhotons.insert(causticPhotons.end(), renderThreads[i]->causticPhotons.begin(),
 				renderThreads[i]->causticPhotons.end());
 		causticPhotonStored += renderThreads[i]->causticPhotons.size();
-
-		renderThreads[i].reset();
 	}
+
+	// Add the indirect photons of each thread to the particles
+	if (indirectPhotonStored > 0) {
+		tbb::parallel_for(tbb::blocked_range<size_t>(0, visibilityParticles.size(), 1024),
+			[&](const tbb::blocked_range<size_t> &range) {
+				for (size_t index = range.begin(); index != range.end(); ++index) {
+					PGICVisibilityParticle &vp = visibilityParticles[index];
+
+					for (auto const &renderThread : renderThreads) {
+						if (renderThread->indirectAlpha.empty())
+							continue;
+
+						const u_int lightGroupCount = renderThread->lightGroupCount;
+						const Spectrum *alpha = &renderThread->indirectAlpha[index * lightGroupCount];
+						for (u_int lightID = 0; lightID < lightGroupCount; ++lightID) {
+							if (!alpha[lightID].Black())
+								vp.alphaAccumulated.Add(lightID, alpha[lightID]);
+						}
+					}
+				}
+			});
+	}
+	renderThreads.clear();
 
 	// Update the count only if I have traced this kind of photons
 	if (!indirectCacheDone)
@@ -206,6 +234,15 @@ void PhotonGICache::TracePhotons(const bool indirectEnabled, const bool causticE
 	if (indirectEnabled && (params.indirect.maxSize == 0)) {
 		// Automatic indirect cache convergence test is required
 
+		// The test reads the radiance of the photons as if gathered over the
+		// whole lookup disc: each particle is weighed with its share of the
+		// disc, so that the few photons of a particle on a thin leg or in a
+		// corner don't hold the whole pre-pass
+		const float discArea = M_PI * params.indirect.lookUpRadius2;
+		auto testArea = [&](const PGICVisibilityParticle &vp) {
+			return vp.isVolume ? vp.GetHitsArea(params.indirect.lookUpRadius2) : discArea;
+		};
+
 		const u_int photonTracedStep = 2000000;
 		u_int photonTracedCount = 0;
 		vector<SpectrumGroup> lastAlpha(visibilityParticles.size());
@@ -228,9 +265,9 @@ void PhotonGICache::TracePhotons(const bool indirectEnabled, const bool causticE
 				// Compute current alpha
 
 				for (u_int i = 0; i < visibilityParticles.size(); ++i) {
-					const PGICVisibilityParticle vp = visibilityParticles[i];
+					const PGICVisibilityParticle &vp = visibilityParticles[i];
 
-					currentAlpha[i] = vp.ComputeRadiance(params.indirect.lookUpRadius2, indirectPhotonTracedCount);
+					currentAlpha[i] = vp.ComputeRadiance(testArea(vp), indirectPhotonTracedCount);
 				}
 
 				// Filter outgoing radiance
@@ -294,9 +331,9 @@ void PhotonGICache::TracePhotons(const bool indirectEnabled, const bool causticE
 				// Update last alpha cache entries
 
 				for (u_int i = 0; i < visibilityParticles.size(); ++i) {
-					const PGICVisibilityParticle vp = visibilityParticles[i];
+					const PGICVisibilityParticle &vp = visibilityParticles[i];
 
-					lastAlpha[i] = vp.ComputeRadiance(params.indirect.lookUpRadius2, indirectPhotonTracedCount);
+					lastAlpha[i] = vp.ComputeRadiance(testArea(vp), indirectPhotonTracedCount);
 				}
 			}
 			
@@ -358,7 +395,7 @@ void PhotonGICache::CreateRadiancePhotons() {
 	for (u_int index = 0 ; index < visibilityParticles.size(); ++index) {
 		const PGICVisibilityParticle &vp = visibilityParticles[index];
 
-		outgoingRadianceValues[index] = vp.ComputeRadiance(params.indirect.lookUpRadius2, indirectPhotonTracedCount);
+		outgoingRadianceValues[index] = vp.ComputeRadiance(GetVisibilityParticleArea(index), indirectPhotonTracedCount);
 		assert (outgoingRadianceValues[index].IsValid());
 	}
 
@@ -464,6 +501,9 @@ void PhotonGICache::Preprocess(const u_int threadCnt) {
 		SLG_LOG("PhotonGI WARNING: nothing is visible and/or cache enabled.");
 		return;
 	}
+
+	if (params.indirect.enabled)
+		ComputeVisibilityParticlesArea();
 
 	//--------------------------------------------------------------------------
 	// Fill all photon vectors

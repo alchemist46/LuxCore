@@ -101,8 +101,10 @@ string PhotonGICache::ComputeSignature() const {
 			" visibility " << params.visibility.lookUpRadius << " " << params.visibility.lookUpNormalAngle <<
 			" " << params.visibility.targetHitRate << " " << params.visibility.maxSampleCount <<
 			" glossiness " << params.glossinessUsageThreshold;
+	// "area 1": the measured gather area of the visibility particles (the
+	// files before it hold the radiance of the area estimated from the hits)
 	if (params.indirect.enabled)
-		ss << " indirect " << params.indirect.maxSize << " " << params.indirect.haltThreshold <<
+		ss << " indirect area 1 " << params.indirect.maxSize << " " << params.indirect.haltThreshold <<
 				" " << params.indirect.lookUpRadius << " " << params.indirect.lookUpNormalAngle <<
 				" " << params.indirect.usageThresholdScale << " " << params.indirect.filterRadiusScale;
 	if (params.caustic.enabled)

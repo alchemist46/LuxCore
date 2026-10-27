@@ -68,6 +68,10 @@ TracePhotonsThread::~TracePhotonsThread() {
 
 void TracePhotonsThread::Start() {
 	indirectPhotons.clear();
+	indirectAlpha.clear();
+	// The light IDs are the light groups
+	lightGroupCount = pgic.scene->GetLightSources().GetLightGroupCount();
+	indirectPhotonStored = 0;
 	causticPhotons.clear();
 
 	renderThread = std::make_unique<luxrays::JThread>(
@@ -178,17 +182,7 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					// Deposit photons only on diffuse surfaces
 					//----------------------------------------------------------
 
-					// No photon on a surface that reflects nothing (a black
-					// diffuse emitter, like the mesh of an area light): the
-					// particles within the radius belong to other surfaces,
-					// which don't get this light. An area light just above
-					// a hole in a ceiling made the ceiling's top face and the
-					// light's underside trap direct light, counted for the
-					// ceiling's lower face (3.4x too bright around the light)
-					const bool reflectsNothing = bsdf.Albedo().Black() &&
-							!(bsdf.GetEventTypes() & GLOSSY);
-
-					if (pgic.IsPhotonGIEnabled(bsdf) && !reflectsNothing &&
+					if (pgic.IsPhotonDepositEnabled(bsdf) &&
 							// This is an anti-NaNs/Infs safety net to avoid poisoning
 							// the caches
 							lightPathFlux.IsValid()) {
@@ -544,6 +538,19 @@ void TracePhotonsThread::RenderFunc(std::stop_token stop_token) {
 		// Update size counters
 		globalIndirectSize += indirectPhotons.size() - indirectPhotonsStart;
 		globalCausticSize += causticPhotons.size() - causticPhotonsStart;
+
+		// Sum the indirect photons of the bucket
+		if (!indirectPhotons.empty()) {
+			if (indirectAlpha.empty())
+				indirectAlpha.resize(pgic.visibilityParticles.size() * lightGroupCount);
+
+			for (auto const &photon : indirectPhotons) {
+				assert (photon.lightID < lightGroupCount);
+				indirectAlpha[photon.visibilityParticelIndex * lightGroupCount + photon.lightID] += photon.alpha;
+			}
+			indirectPhotonStored += indirectPhotons.size();
+			indirectPhotons.clear();
+		}
 	}
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

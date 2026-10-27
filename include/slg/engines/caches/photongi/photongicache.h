@@ -79,12 +79,17 @@ struct PGICVisibilityParticle : GenericPhoton {
 		hitsCount(0)
 	{}
 
-	luxrays::SpectrumGroup ComputeRadiance(const float radius2, const float photonTraced) const {
-		if (hitsCount > 0) {
-			// The estimated area covered by the entry (if I have enough hits)
-			const float area = (hitsCount < 16) ?  (radius2 * M_PI) :
-				(luxrays::Sqr(2.f * hitsAccumulatedDistance / hitsCount) * M_PI);
+	// The area estimated from the hits: used for the particles in a volume
+	// (the ones on a surface have the area measured by
+	// PhotonGICache::ComputeVisibilityParticlesArea())
+	float GetHitsArea(const float radius2) const {
+		return (hitsCount < 16) ?  (radius2 * M_PI) :
+			(luxrays::Sqr(2.f * hitsAccumulatedDistance / hitsCount) * M_PI);
+	}
 
+	// area is the area of the surface the photons were gathered from
+	luxrays::SpectrumGroup ComputeRadiance(const float area, const float photonTraced) const {
+		if (hitsCount > 0) {
 			luxrays::SpectrumGroup result = alphaAccumulated;
 			result *= (bsdfEvaluateTotal * INV_PI) / (photonTraced * area);
 
@@ -97,8 +102,8 @@ struct PGICVisibilityParticle : GenericPhoton {
 	luxrays::Spectrum bsdfEvaluateTotal;
 	luxrays::SpectrumGroup alphaAccumulated;
 
-	// The following counters are used to estimate the surface covered by
-	// this entry.
+	// The following counters are used to estimate the area covered by
+	// this entry (only for the particles in a volume).
 	float hitsAccumulatedDistance;
 	u_int hitsCount;
 
@@ -287,6 +292,8 @@ public:
 	bool IsIndirectEnabled() const { return params.indirect.enabled; }
 	bool IsCausticEnabled() const { return params.caustic.enabled; }
 	bool IsPhotonGIEnabled(const BSDF &bsdf) const;
+	// The surfaces where a photon is stored (TracePhotonsThread)
+	bool IsPhotonDepositEnabled(const BSDF &bsdf) const;
 	float GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
 			const float lastGlossiness, const float u0) const;
 	// The caustic cache owns the light paths it stores: the light hit, or the
@@ -361,6 +368,8 @@ private:
 	void EvaluateBestRadiusImpl(const u_int threadIndex, const u_int workSize,
 			float &accumulatedRadiusSize, u_int &radiusSizeCount) const;
 	void TraceVisibilityParticles();
+	void ComputeVisibilityParticlesArea();
+	float GetVisibilityParticleArea(const u_int index) const;
 	void TracePhotons(const u_int seedBase, const u_int photonTracedCount,
 		const bool indirectCacheDone, const bool causticCacheDone,
 		std::atomic<u_int> &globalIndirectPhotonsTraced,
@@ -395,6 +404,10 @@ private:
 	// Visibility map
 	std::vector<PGICVisibilityParticle> visibilityParticles;
 	PGICKdTree *visibilityParticlesKdTree;
+	// The area of the surface each visibility particle gathers its photons
+	// from (computed by the pre-processing, not saved: the radiance photons
+	// have it)
+	std::vector<float> visibilityParticlesArea;
 
 	// Radiance photon map
 	std::vector<RadiancePhoton> radiancePhotons;

@@ -173,12 +173,16 @@ Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {
 	// Note: may be, this should become a configurable parameter
 	const u_int samplesCount = 64;
 
+	// The fixed direction and the sampled one from separate dimensions (the
+	// same u1, u2 for both read the EON roughmatte albedo 16-25% low)
 	Spectrum result;
 	for (u_int i = 0; i < samplesCount; ++i) {
-		const float u1 = RadicalInverse(i, 3);
-		const float u2 = RadicalInverse(i, 5);
-		const float u3 = RadicalInverse(i, 7);
-		
+		const float u1 = RadicalInverse(i, 2);
+		const float u2 = RadicalInverse(i, 3);
+		const float u3 = RadicalInverse(i, 5);
+		const float u4 = RadicalInverse(i, 7);
+		const float u5 = RadicalInverse(i, 11);
+
 		const Vector fixedDir = UniformSampleHemisphere(u1, u2);
 		const float fixedDirPdf = UniformHemispherePdf(u1, u2);
 
@@ -186,7 +190,7 @@ Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {
 		Vector sampledDir;
 		float sampledDirPdf;
 		Spectrum bsdfSample = Sample(hitPoint, fixedDir, &sampledDir,
-					u1, u2,	u3, &sampledDirPdf, &event);
+					u3, u4,	u5, &sampledDirPdf, &event);
 
 		if (!bsdfSample.Black() && (CosTheta(sampledDir) > 0.f))
 				result += bsdfSample * CosTheta(fixedDir) / fixedDirPdf;

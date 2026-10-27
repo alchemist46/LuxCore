@@ -61,7 +61,14 @@ public:
 	void Start();
 	void Join();
 
+	// The indirect photons of the work bucket being traced: at the end of the
+	// bucket they are summed in indirectAlpha, one entry per visibility
+	// particle and light group (a list of all the photons took hundreds of MB
+	// and a serial merge)
 	std::vector<RadiancePhotonEntry> indirectPhotons;
+	std::vector<luxrays::Spectrum> indirectAlpha;
+	u_int lightGroupCount;
+	u_int indirectPhotonStored;
 	std::vector<Photon> causticPhotons;
 
 	friend class PhotonGICache;
