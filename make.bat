@@ -58,12 +58,12 @@ if "%COMMAND%" == "" (
     call :Clear
 ) else if "%COMMAND%" == "deps" (
     call :Deps
-) else if "%COMMAND%" == "win-recompose" (
-    call :WinRecompose %2
 ) else if "%COMMAND%" == "list-presets" (
     call :ListPresets
-) else if "%COMMAND%" == "wheel-test" (
-    call :WheelTest
+) else if "%COMMAND%" == "wheel" (
+    call :Wheel
+) else if "%COMMAND%" == "repair-wheel" (
+    call :RepairWheel %2 %3
 ) else if "%COMMAND%" == "msvc-init" (
     call :MsvcInit
 ) else if "%COMMAND%" == "windebug" (
@@ -109,16 +109,19 @@ IF "%~1" == "" (
 )
 goto :EOF
 
-:WinRecompose
-call %LUXMAKE% win-recompose %1
-goto :EOF
 
 :Clean
 call %LUXMAKE% clean
 goto :EOF
 
-:WheelTest
-call %LUXMAKE% wheel-test
+:Wheel
+REM Build the pyluxcore wheel (into out\install\<build type>\wheel)
+call %LUXMAKE% wheel
+goto :EOF
+
+:RepairWheel
+REM make repair-wheel <wheel> <dest dir>
+call %LUXMAKE% repair-wheel %1 %2
 goto :EOF
 
 :MsvcInit

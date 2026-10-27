@@ -7,7 +7,13 @@
   },
   "Dependencies": {
     "user": "LuxCoreRender",
-    "release": "2.2.4"
+    "release": "2.2.4",
+    "sha256": {
+      "Windows-X64": "b2cff731cf46a02ee3a4dd65766d04f369f2738035e897fbe48d374ac695a1a2",
+      "Linux-X64": "15b76aabb12d11adc7755dc2e88ebc771bcdaee1f517a434059346d84b9022a9",
+      "macOS-ARM64": "47ec625fa40bd0f42ac5d74cb996c32decb5fe8e3a8817d76f15fa755c0555ac",
+      "macOS-X64": "d9bb812baf2918563241c960db3e18993ad1e20e9f01113dbf9f9e7586ecde29"
+    }
   },
   "HIPRT": {
     "ref": "3.1.0.cb09c56",

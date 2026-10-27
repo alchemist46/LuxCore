@@ -63,16 +63,15 @@ cmake.source-dir = "."
 build.targets = ["pyluxcore"]
 wheel.cmake = true
 wheel.packages = ["python/pyluxcore", "python/pyluxcoretest", "python/pyluxcoretools"]
-build-dir = "out"
+build-dir = "out/build"
 ninja.make-fallback = false
 install.components = ["pyluxcore"]
 experimental = true
 
-[tool.scikit-build.cmake.define]
-CMAKE_INSTALL_PREFIX = "install"
-#CMAKE_TOOLCHAIN_FILE = "out/build/Release/conan_toolchain.cmake"
-
-[tool.scikit-build.metadata.version]
+# The version is read from the SKVERSION file, written by the wheel build
+# (CI, or 'make wheel') from build-system/build-settings.json
+[[tool.dynamic-metadata]]
+field = "version"
 provider = "scikit_build_core.metadata.regex"
 regex = "(?P<version>.*)"
 input = "SKVERSION"

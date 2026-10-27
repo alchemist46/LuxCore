@@ -54,7 +54,7 @@ class Parameters:
 
     @property
     def WHEEL_HOOK(self):
-        return os.getenv(  # Hook to execute after wheel-test build
+        return os.getenv(  # Hook to execute after the wheel build
             "LUX_WHEEL_HOOK",
             "",
         )

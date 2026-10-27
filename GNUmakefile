@@ -14,7 +14,7 @@ LUX-CMAKE = $(PYTHON) -m build-system.luxmake
 
 build-targets = pyluxcore luxcoreui luxcoreconsole luxcore doc
 
-.PHONY: deps list-presets config spirv hiprt luxcore pyluxcore luxcoreui luxcoreconsole install clean clear doc wheel-test
+.PHONY: deps list-presets config spirv hiprt luxcore pyluxcore luxcoreui luxcoreconsole install clean clear doc wheel repair-wheel
 
 all: luxcore pyluxcore luxcoreui luxcoreconsole
 
@@ -47,11 +47,13 @@ install:
 package:
 	$(LUX-CMAKE) build-and-install package
 
-wheel-test:
-	$(LUX-CMAKE) wheel-test
+# Build the pyluxcore wheel (into out/install/<build type>/wheel)
+wheel:
+	$(LUX-CMAKE) wheel
 
-win-recompose:
-	$(LUX-CMAKE) win-recompose $(filter-out $@,$(MAKECMDGOALS))
+# Repair a raw wheel: make repair-wheel WHEEL=<wheel> DEST=<dir>
+repair-wheel:
+	$(LUX-CMAKE) repair-wheel $(WHEEL) $(DEST)
 
 clean:
 	$(LUX-CMAKE) clean

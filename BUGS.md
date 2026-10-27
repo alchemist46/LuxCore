@@ -17,6 +17,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### The configure prints 1072 "IMPORTED_LOCATION not set" errors for the Debug configuration
+- Found: 2026-10-27
+- Area: build (Windows)
+- Problem: `make config` (and the wheel build, which configures the same tree) prints 1072 `CMake Error in CMakeLists.txt: IMPORTED_LOCATION not set for imported target "CONAN_LIB::boost_..._RELEASE" configuration "Debug"` blocks between "Generating done" and "Build files have been written", yet exits with 0 and the Release build is fine. The Ninja Multi-Config generator evaluates the Release-only conan imported targets for the Debug configuration too.
+- Reproduce: on the Windows machine, `cmake --preset conan-default -S .` in the configured `out/build` (with the cache as it was before 2026-10-27 as well); count the `CMake Error` lines.
+- Notes: harmless for the Release build, but it hides real errors in the configure output. Suspect: the `install(RUNTIME_DEPENDENCY_SET)` of luxcoreui/luxcoreconsole (7a358cfc0), which generates install rules for every configuration, with deps deployed for Release only. Not checked on Linux (single-config generator).
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests

@@ -14,7 +14,7 @@ build-system/build-settings.json pins it, and the wheel builds download it
 
     make hiprt
         Download the pinned HIPRT build into out/hiprt. The next 'make config'
-        (and 'make wheel-test') ships it. With --archive <zip>, install a
+        (and 'make wheel') ships it. With --archive <zip>, install a
         downloaded or locally built archive instead.
 
     python -m build-system.luxmake hiprt --build <HIPRT source tree> [--hip-path <dir>]

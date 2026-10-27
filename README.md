@@ -35,8 +35,9 @@ the PATH:
 
 [Optional, but recommended] In addition, you may install the following
 software:
-- [Github CLI](https://cli.github.com/) (for dependency signature checking)
-- [repairwheel](https://pypi.org/project/repairwheel/) (to build test wheels)
+- To build the pyluxcore wheel (`make wheel`): `pip install build scikit-build-core`
+  and the wheel repair tool of the platform, `delvewheel` (Windows),
+  `auditwheel` (Linux) or `delocate` (macOS)
 - [nektos/act](https://github.com/nektos/act) (to test Github scripts locally)
 - [Doxygen](https://www.doxygen.nl/download.html) (to generate development documentation)
 
@@ -75,6 +76,8 @@ Available build types are `Release` and `Debug` (case sensitive). Default is
 - `make config`: configure/reconfigure project
 - `make deps`: update dependencies
 - `make doc`: build Doxygen documentation
+- `make wheel`: build the pyluxcore wheel, into `out/install/<build type>/wheel`
+  (the same build and repair as the CI wheels)
 
 
 

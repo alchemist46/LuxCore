@@ -5,6 +5,7 @@
 """This script downloads and installs dependencies for LuxCore build."""
 
 import os
+import hashlib
 import tempfile
 from urllib.request import urlretrieve
 from urllib.parse import urlparse
@@ -133,11 +134,21 @@ def run_conan(
         return lines
 
 
+def sha256sum(path):
+    """Return the SHA-256 of a file."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download(
     url,
     destdir,
+    expected_sha256=None,
 ):
-    """Download file from url into destdir."""
+    """Download file from url into destdir and check its checksum."""
     # Download artifact
     destdir = Path(destdir)
     filename = urlparse(url).path.split("/")[-1]
@@ -150,73 +161,28 @@ def download(
         filename=filepath,
     )
 
-    # Check attestation
-    logger.info(
-        "Checking '%s'",
-        local_filename,
-    )
-
-    if not (gh_app := shutil.which("gh")):
-        msg = (
-            Colors.WARNING,
-            "SIGNATURE CHECKING ERROR",
-            Colors.ENDC,
-        )
-        msg = "".join(msg)
-        logger.warning(msg)
-        msg = (
-            Colors.WARNING,
-            "Cannot find 'gh' application - ",
-            "Dependencies origin cannot be checked.",
-            Colors.ENDC,
-        )
-        msg = "".join(msg)
-        logger.warning(msg)
-    else:
-        gh_cmd = [
-            gh_app,
-            "attestation",
-            "verify",
-            "-oLuxCoreRender",
-            "--format",
-            "json",
-            filepath,
-        ]
-        errormsg = f"{Colors.WARNING}SIGNATURE CHECKING ERROR{Colors.ENDC}"
-        try:
-            gh_output = subprocess.check_output(
-                gh_cmd,
-                text=True,
-            )
-        except subprocess.CalledProcessError as err:
-            logger.warning(errormsg)
-            logger.warning(
-                "gh return code: %s",
-                err.returncode,
-            )
-            logger.warning(err.output)
-        except OSError as err:
-            logger.warning(errormsg)
-            logger.warning(str(err))
-        else:
-            msg = f"{Colors.OKGREEN}'%s': found certificate - OK{Colors.ENDC}"
-            logger.info(
-                msg,
+    # The archive is a binary build shipped in the wheels: its checksum is
+    # pinned in build-settings.json (Dependencies.sha256.<platform>)
+    actual = sha256sum(local_filename)
+    if expected_sha256:
+        if actual != expected_sha256:
+            fail(
+                "Checksum mismatch for '%s': %s, expected %s",
                 filename,
+                actual,
+                expected_sha256,
             )
-            (
-                signature,
-                *_,
-            ) = json.loads(gh_output)
-            certificate = signature["verificationResult"]["signature"][
-                "certificate"
-            ]
-            logger.debug(
-                json.dumps(
-                    certificate,
-                    indent=2,
-                )
-            )
+        logger.info("'%s': checksum OK", filename)
+    else:
+        logger.warning(
+            "%sNo checksum pinned for '%s' in build-settings.json "
+            "(Dependencies.sha256.%s): its SHA-256 is %s%s",
+            Colors.WARNING,
+            filename,
+            find_platform(),
+            actual,
+            Colors.ENDC,
+        )
 
     # Unzip
     with ZipFile(local_filename) as downloaded:
@@ -473,9 +439,19 @@ def main(
                 "Downloading dependencies (url='%s')",
                 url,
             )
+            # The pinned checksum only applies to the pinned release
+            if args.user or args.release:
+                expected_sha256 = None
+            else:
+                expected_sha256 = (
+                    settings["Dependencies"]
+                    .get("sha256", {})
+                    .get(find_platform())
+                )
             download(
                 url,
                 tmpdir,
+                expected_sha256,
             )
         else:
             logger.info(

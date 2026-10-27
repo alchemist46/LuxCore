@@ -36,8 +36,6 @@ REQUIREMENTS = (
     Require("cmake", (3, 29), True),
     Require("git", None, True),
     Require("act", None, False),
-    Require("gh", None, False),
-    Require("repairwheel", None, False),
 )
 
 

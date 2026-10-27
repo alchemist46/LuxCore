@@ -4,7 +4,7 @@ Dependencies
 The tests run against the pyluxcore module installed in the Python
 environment. To test a local build:
 
-make wheel-test   (LUX_BUILD_TYPE=Release for a Release build)
+make wheel   (LUX_BUILD_TYPE=Debug for a Debug build)
 pip install out/install/<build type>/wheel/*.whl
 
 List of python packages required to run the tests and demos:

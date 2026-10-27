@@ -2,277 +2,234 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Make wheel command."""
+"""Wheel commands: 'make wheel' builds and repairs the pyluxcore wheel.
 
-import sys
+The wheel is built by scikit-build-core (pyproject.toml), the same backend
+CI uses through cibuildwheel, in the configured build tree (so an up-to-date
+tree only relinks pyluxcore), then repaired with the platform's tool
+(delvewheel, auditwheel, delocate) by repair_wheel(), which CI also calls for
+its wheels ('make repair-wheel'). The result is a wheel equal to a CI one.
+"""
+
+import importlib.util
 import json
-import subprocess
-import tempfile
-import shutil
-import platform
 import os
+import platform
 import shlex
-import itertools
-import re
-import sysconfig
-import logging
+import shutil
+import subprocess
 import sys
-import runpy
+import tempfile
 from pathlib import Path
 
 from .constants import PARAMS
-from .utils import logger, pack, fail, Colors, get_dep_version, run_module
-from .build import build_and_install
+from .utils import logger, fail
 from .config import config
-from .windows import win_recompose
 
-# Following snippets are intended to wheel reconstruction
-_WHEEL_SNIPPET = """\
-Wheel-Version: 1.0
-Generator: fake 0.0.0
-Root-Is-Purelib: false
-Tag: {}
-"""
+# The build backend and front end (installed in the Python running luxmake)
+BUILD_MODULES = (("build", "build"), ("scikit_build_core", "scikit-build-core"))
 
-_METADATA_SNIPPET = """\
-Metadata-Version: 2.2
-Name: pyluxcore
-Version: {}
-Summary: LuxCore Python bindings
-Keywords: raytracing,ray tracing,rendering,pbr,physical based rendering,path tracing
-Author: LuxCoreRender
-Requires-Python: >=3.10
-Requires-Dist: {}; sys_platform != "darwin"
-"""
-
-_ENTRYPOINTS_SNIPPET = """\
-[console_scripts]
-pyluxcoretest = pyluxcoretest:main
-pyluxcore-console = pyluxcoretools.console.cmd:main
-pyluxcore-maketx = pyluxcoretools.maketx.cmd:main
-pyluxcore-merge = pyluxcoretools.merge.cmd:main
-pyluxcore-netmenu = pyluxcoretools.netmenu.cmd:main
-pyluxcore-netconsole = pyluxcoretools.netconsole.cmd:main
-pyluxcore-netnode = pyluxcoretools.netnode.cmd:main
-
-[gui_scripts]
-pyluxcore-netconsole-ui = pyluxcoretools.netconsole.ui:main
-pyluxcore-netnode-ui = pyluxcoretools.netnode.ui:main
-"""
+# The wheel repair tool of each platform: (module, pip package, command)
+REPAIR_TOOLS = {
+    "Windows": ("delvewheel", "delvewheel", "delvewheel"),
+    "Linux": ("auditwheel", "auditwheel", "auditwheel"),
+    "Darwin": ("delocate", "delocate", "delocate-wheel"),
+}
 
 
-def _compute_platform_tag():
-    """Compute tag.
-
-    This tag may not be totally correct. Do not use in production.
-    https://packaging.python.org/en/latest/specifications/platform-compatibility-tags
-    """
-    system, machine = platform.system(), platform.machine()
-    if system == "Linux":
-        return "linux_x86_64"
-    if system == "Windows":
-        if machine.lower() == "arm64":
-            return "win_arm64"
-        return "win_amd64"
-    if system == "Darwin" and machine == "x86_64":
-        return "macosx_13_0"
-    if system == "Darwin" and machine == "arm64":
-        return "macosx_14_2"
-
-    # Failed:
-    return fail("Unknown platform/system: '%s' / '%s'", platform, machine)
+def _version():
+    """The version of build-settings.json, as 'major.minor.patch[-pre]'."""
+    settings_file = PARAMS.SOURCE_DIR / "build-system" / "build-settings.json"
+    with open(settings_file, encoding="utf-8") as in_file:
+        default_version = json.load(in_file)["DefaultVersion"]
+    version = ".".join(default_version[i] for i in ("major", "minor", "patch"))
+    if prerelease := default_version.get("prerelease"):
+        version = f"{version}-{prerelease}"
+    return version
 
 
-def _get_lib_paths():
-    """Get library paths for dependencies."""
+def _check_module(module, package):
+    """Fail with an install hint when a Python module is missing."""
+    if importlib.util.find_spec(module) is None:
+        fail(
+            "Python module '%s' not found: run '%s -m pip install %s'",
+            module,
+            sys.executable,
+            package,
+        )
+
+
+def _tool_command(module, package, command):
+    """The command line of a tool: its executable, or 'python -m module'."""
+    if executable := shutil.which(command):
+        return [executable]
+    _check_module(module, package)
+    return [sys.executable, "-m", module]
+
+
+def _run(cmd, **kwargs):
+    """Run a command, failing on error."""
+    cmd = [str(c) for c in cmd]
+    logger.info("Running: %s", shlex.join(cmd))
+    if subprocess.run(cmd, check=False, **kwargs).returncode:
+        fail("Error while executing %s", cmd[0])
+
+
+def _dependency_dirs(name):
+    """The '<name>' directories of the deployed dependencies (bin, lib...)."""
     base = PARAMS.BINARY_DIR / "dependencies" / "full_deploy" / "host"
-    paths_bin = (str(p.absolute()) for p in base.rglob("**/bin"))
-    paths_lib = (str(p.absolute()) for p in base.rglob("**/lib"))
-    paths = itertools.chain(paths_bin, paths_lib)
-    result = [["-l", Path(p)] for p in paths]
-    result = list(itertools.chain.from_iterable(result))
-    return result
-
-
-def _check_repairwheel():
-    output = run_module("repairwheel", ["-V"])
-    logger.info("repairwheel version: %s", output)
-    version = output.split(".")
-    if version < ["0", "7", "0"]:
-        fail("repairwheel >= 0.7.0 is required")
+    return [str(p.absolute()) for p in base.rglob(name) if p.is_dir()]
 
 
 def make_wheel(args):
-    """Build a wheel."""
-    # Check repairwheel
-    _check_repairwheel()
+    """Build the pyluxcore wheel into PARAMS.WHEELHOUSE_DIR."""
+    for module, package in BUILD_MODULES:
+        _check_module(module, package)
+    system = platform.system()
+    if system not in REPAIR_TOOLS:
+        fail("Unknown platform: '%s'", system)
+    repair_tool = _tool_command(*REPAIR_TOOLS[system])
 
-    # Set default build type to debug
-    PARAMS.DEFAULT_BUILD_TYPE = "Debug"
-
-    # Build and install pyluxcore
-    args.target = "pyluxcore"
+    # Configure: checks that 'make deps' was run, and ships the pre-baked
+    # SPIR-V modules and the HIPRT library when they are there
     config(args)
-    build_and_install(args)
 
-    # Disclaim
-    disclaimer = (
-        f"{Colors.WARNING2}"
-        "This command builds a TEST wheel, "
-        "not fully compliant to standard "
-        "and only intended for test. "
-        f"{Colors.WARNING3}"
-        "DO NOT USE IN PRODUCTION."
-        f"{Colors.ENDC}"
+    # The version read by pyproject.toml
+    version = _version()
+    (PARAMS.SOURCE_DIR / "SKVERSION").write_text(
+        version + "\n", encoding="utf-8"
     )
-    logger.warning(disclaimer)
+    logger.info("Building the pyluxcore wheel, version '%s'", version)
 
-    # Compute version
-    build_settings_file = Path("build-system", "build-settings.json")
-    with open(build_settings_file, encoding="utf-8") as in_file:
-        default_version = json.load(in_file)["DefaultVersion"]
-    version = ".".join(default_version[i] for i in ("major", "minor", "patch"))
+    # The same CMake arguments as the CI build (wheel-builder.yml): the conan
+    # preset of 'make deps', its generator, and the version
+    env = os.environ.copy()
+    env["SKBUILD_CMAKE_ARGS"] = ";".join(
+        (
+            "--preset conan-default",
+            f"-DLUXCORE_VERSION={version}",
+            "-G Ninja Multi-Config",
+        )
+    )
+    env["SKBUILD_CMAKE_BUILD_TYPE"] = PARAMS.BUILD_TYPE
+    env["SKBUILD_BUILD_DIR"] = str(PARAMS.BUILD_DIR.absolute())
 
-    # Compute tag
-    vinfo = sys.version_info
-    python_tag = f"cp{vinfo.major}{vinfo.minor}"
-    abi_tag = python_tag
-    platform_tag = _compute_platform_tag()
-    tag = f"{python_tag}-{abi_tag}-{platform_tag}"
+    with tempfile.TemporaryDirectory() as raw_dir:
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--no-isolation",
+                "--outdir",
+                raw_dir,
+                PARAMS.SOURCE_DIR,
+            ],
+            env=env,
+        )
+        wheels = list(Path(raw_dir).glob("*.whl"))
+        if len(wheels) != 1:
+            fail("Expected one wheel in '%s', found %s", raw_dir, len(wheels))
+        repair_wheel(wheels[0], PARAMS.WHEELHOUSE_DIR, repair_tool)
 
-    logger.info("Making wheel for version '%s' and tag '%s'", version, tag)
-    with (
-        tempfile.TemporaryDirectory() as wheeltree,
-        tempfile.TemporaryDirectory() as raw_wheel,
-    ):
-        # We create an install tree, with all the wheel components, then we
-        # pack it into a raw wheel and eventually we repair it.
-        #
-        # Additionnally, on Windows, we recompose the wheel (restablishing
-        # oidnDenoise.exe and OpenImageDenoise_device_cpu.dll)
-
-        # Set destination folders
-        wheeltree = Path(wheeltree)
-        raw_wheel_dir = Path(raw_wheel)
-
-        # Check Python version in extension
-        extension_path = PARAMS.INSTALL_DIR / "pyluxcore"
-        extensions = [
-            f.name
-            for f in extension_path.iterdir()
-            if f.is_file() and f.name.startswith("pyluxcore")
-        ]
-        for extension in extensions:
-            break
-        else:
-            raise RuntimeError(f"No extension in {extension_path}")
-        ext_version = None
+    # Finally, execute hook if exists
+    if PARAMS.WHEEL_HOOK:
+        logger.info("Executing hook: %s", PARAMS.WHEEL_HOOK)
         try:
-            ext_version = re.search(r"\.[^.]*?(\d+)", extension).group(1)
-        except AttributeError:
-            logger.warn(
-                f"{Colors.WARNING2}"
-                "Could not get version tag from extension name "
-                f"('{extension}'). "
-                "Compatibility between extension tag and wheel tag could not "
-                "be verified."
-                f"{Colors.ENDC}"
+            result = subprocess.check_output(
+                shlex.split(PARAMS.WHEEL_HOOK), text=True
             )
+        except subprocess.CalledProcessError as err:
+            fail(err)
+        logger.info(result)
 
-        soabi = sysconfig.get_config_var("SOABI")
-        abi_version = re.search(r"(\d+)", soabi).group(1)
 
-        if ext_version is not None and ext_version != abi_version:
-            raise RuntimeError(
-                "Cannot build wheel: "
-                f"Extension Python version ({ext_version}) is different "
-                f"from Wheel Python version ({abi_version})."
-            )
+def repair_wheel(wheel, dest_dir, tool=None):
+    """Repair a raw pyluxcore wheel into dest_dir: vendor the libraries it
+    needs, with the platform's tool."""
+    wheel = Path(wheel).absolute()
+    dest_dir = Path(dest_dir).absolute()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    system = platform.system()
+    if system not in REPAIR_TOOLS:
+        fail("Unknown platform: '%s'", system)
+    if tool is None:
+        tool = _tool_command(*REPAIR_TOOLS[system])
+    logger.info("Repairing '%s' into '%s'", wheel, dest_dir)
+    if system == "Windows":
+        _repair_windows(wheel, dest_dir, tool)
+    elif system == "Linux":
+        _repair_linux(wheel, dest_dir, tool)
+    else:
+        _repair_macos(wheel, dest_dir, tool)
+    logger.info("Wheel: '%s'", dest_dir / wheel.name)
 
-        # Create dist-info folder
-        dist_info = wheeltree / f"pyluxcore-{version}.dist-info"
-        dist_info.mkdir(exist_ok=True)
 
-        # Export WHEEL file
-        with open(dist_info / "WHEEL", "w", encoding="utf-8") as f:
-            f.write(_WHEEL_SNIPPET.format(tag))
-
-        # Export METADATA file
-        with open(dist_info / "METADATA", "w", encoding="utf-8") as f:
-            nvrtc_version = get_dep_version("nvrtc")
-            logger.info("NVRTC version: %s", nvrtc_version)
-            major = int(nvrtc_version.split(".")[0])
-            requirement = (
-                f"nvidia-cuda-nvrtc-cu{major}=={nvrtc_version}"
-                if major <= 12
-                else f"nvidia-cuda-nvrtc=={nvrtc_version}"
-            )
-
-            f.write(_METADATA_SNIPPET.format(version, requirement))
-
-        # Export entry_points.txt file
-        with open(dist_info / "entry_points.txt", "w", encoding="utf-8") as f:
-            f.write(_ENTRYPOINTS_SNIPPET)
-
-        # Copy subfolders into tree
-        shutil.copytree(
-            PARAMS.SOURCE_DIR / "python" / "pyluxcore",
-            wheeltree / "pyluxcore",
-            dirs_exist_ok=True,
+def _repair_windows(wheel, dest_dir, tool):
+    """delvewheel: the dependencies' DLLs and the MSVC runtime, from the
+    deployed dependencies and the Visual C++ redistributable of the
+    compiler (VCToolsRedistDir, set by vcvars)."""
+    paths = _dependency_dirs("bin")
+    redist = os.environ.get("VCToolsRedistDir", "") + os.environ.get(
+        "Platform", ""
+    )
+    if redist and Path(redist).is_dir():
+        paths.append(redist)
+        paths += [str(p) for p in Path(redist).rglob("*") if p.is_dir()]
+    else:
+        logger.warning(
+            "VCToolsRedistDir is not set (no vcvars?): the MSVC runtime DLLs "
+            "will be taken from the PATH"
         )
-        shutil.copytree(
-            PARAMS.SOURCE_DIR / "python" / "pyluxcoretest",
-            wheeltree / "pyluxcoretest",
-            dirs_exist_ok=True,
-        )
-        shutil.copytree(
-            PARAMS.SOURCE_DIR / "python" / "pyluxcoretools",
-            wheeltree / "pyluxcoretools",
-            dirs_exist_ok=True,
-        )
-        shutil.copytree(
-            PARAMS.INSTALL_DIR / "pyluxcore",
-            wheeltree / "pyluxcore",
-            dirs_exist_ok=True,
-        )
-        shutil.copytree(
-            PARAMS.INSTALL_DIR / "pyluxcore.libs",
-            wheeltree / "pyluxcore.libs",
-            dirs_exist_ok=True,
-        )
-
-        # Pack wheel
-        logger.info("Packing wheel")
-        pack(wheeltree, raw_wheel)
-        wheelname = f"pyluxcore-{version}-{tag}.whl"
-
-        # Then repair
-        wheel_lib_dir = PARAMS.INSTALL_DIR / "lib"
-        logger.info("Repairing wheel")
-        input_path = raw_wheel_dir / wheelname
-        logging.basicConfig(level=logging.DEBUG)
-        repair_args = [
-            "-l",
-            wheel_lib_dir,
-            *_get_lib_paths(),
-            "-o",
-            PARAMS.WHEELHOUSE_DIR,
-            input_path,
+    _run(
+        tool
+        + [
+            "repair",
+            "-v",
+            "--add-path",
+            os.pathsep.join(paths),
+            # Also patch the imports of the libraries the install puts in
+            # the wheel (the OIDN CPU device module, loaded by OIDN at run
+            # time under its own name; the HIPRT library), without
+            # renaming them
+            "--analyze-existing",
+            "-w",
+            dest_dir,
+            wheel,
         ]
-        run_module("repairwheel", repair_args)
+    )
 
-        # And, for Windows, recompose
-        if platform.system() == "Windows":
-            args.wheel = PARAMS.WHEELHOUSE_DIR / wheelname
-            win_recompose(args)
 
-        # Finally, execute hook if exists
-        if PARAMS.WHEEL_HOOK:
-            logger.info("Executing hook: %s", PARAMS.WHEEL_HOOK)
-            try:
-                result = subprocess.check_output(
-                    shlex.split(PARAMS.WHEEL_HOOK), text=True
-                )
-            except subprocess.CalledProcessError as err:
-                fail(err)
-            logger.info(result)
+def _repair_linux(wheel, dest_dir, tool):
+    """auditwheel: the dependencies' shared libraries, for the manylinux
+    platform of GLIBC_VERSION (default 2_28, as CI)."""
+    env = os.environ.copy()
+    lib_dirs = _dependency_dirs("lib") + _dependency_dirs("lib64")
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        lib_dirs + [p for p in (env.get("LD_LIBRARY_PATH"),) if p]
+    )
+    plat = f"manylinux_{env.get('GLIBC_VERSION', '2_28')}_{platform.machine()}"
+    cmd = tool + ["repair", "-w", dest_dir, "--plat", plat, "--only-plat"]
+    if PARAMS.BUILD_TYPE == "Release":
+        cmd.append("--strip")
+    _run(cmd + [wheel], env=env)
+
+
+def _repair_macos(wheel, dest_dir, tool):
+    """delocate: the dependencies' dynamic libraries."""
+    env = os.environ.copy()
+    lib_dirs = _dependency_dirs("lib")
+    env["DYLD_LIBRARY_PATH"] = os.pathsep.join(
+        lib_dirs + [p for p in (env.get("DYLD_LIBRARY_PATH"),) if p]
+    )
+    _run(
+        tool
+        + ["--require-archs", platform.machine(), "-w", dest_dir, "-v", wheel],
+        env=env,
+    )
+
+
+def repair(args):
+    """'make repair-wheel <wheel> <dest_dir>'."""
+    repair_wheel(args.wheel, args.dest_dir)

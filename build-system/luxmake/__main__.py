@@ -14,11 +14,10 @@ from .deps import deps
 from .presets import list_presets
 from .config import config
 from .build import build_and_install, install
-from .wheel import make_wheel
+from .wheel import make_wheel, repair
 from .clear import clean, clear
 from .spirv import spirv
 from .hiprt import hiprt
-from .windows import win_recompose
 
 
 def main():
@@ -59,13 +58,14 @@ def main():
     parser_install.set_defaults(func=install)
 
     # Wheel
-    parser_wheel = subparsers.add_parser("wheel-test")
+    parser_wheel = subparsers.add_parser("wheel")
     parser_wheel.set_defaults(func=make_wheel)
 
-    # Windows wheel recomposing
-    parser_wheel = subparsers.add_parser("win-recompose")
-    parser_wheel.add_argument("wheel")
-    parser_wheel.set_defaults(func=win_recompose)
+    # Wheel repair (also used by CI for the cibuildwheel wheels)
+    parser_repair = subparsers.add_parser("repair-wheel")
+    parser_repair.add_argument("wheel")
+    parser_repair.add_argument("dest_dir")
+    parser_repair.set_defaults(func=repair)
 
     # Spirv
     parser_spirv = subparsers.add_parser("spirv")

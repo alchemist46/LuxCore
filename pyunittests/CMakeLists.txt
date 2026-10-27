@@ -23,7 +23,7 @@
 #############################################################################
 
 # The tests run against the pyluxcore module installed in the Python
-# environment (i.e. the wheel built by 'make wheel-test' and installed with
+# environment (i.e. the wheel built by 'make wheel' and installed with
 # pip, see README.txt), so they don't depend on the pyluxcore target
 
 add_custom_target(tests

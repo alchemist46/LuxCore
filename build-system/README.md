@@ -8,5 +8,4 @@ Folder contents:
 - `cmake`: additional modules for CMake. Used by CMakeLists.txt.
 - `conan`: project's conan recipe. Used by `make` helpers (see below)
 - `debug`: (handcrafted) scripts for build debugging. Run on command line
-- `luxmake`: underlying Python scripts of `make` wrapper - enabling `make deps`, `make <target>`, `make clean` etc. Called by `GNUMakefile` and `make.bat`
-- `wheels`: helpers for wheel building. Called by Github Workflows.
+- `luxmake`: underlying Python scripts of `make` wrapper - enabling `make deps`, `make <target>`, `make wheel`, `make clean` etc. Called by `GNUMakefile` and `make.bat`. `make wheel` builds the pyluxcore wheel with scikit-build-core (`pyproject.toml`) and repairs it (`luxmake/wheel.py`); the CI wheel builder (cibuildwheel) uses the same backend and calls the same repair (`make repair-wheel`).

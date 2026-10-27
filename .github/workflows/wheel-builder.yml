@@ -213,7 +213,6 @@ jobs:
       CXX_VERSION: 20
       GCC_VERSION: 14
       GLIBC_VERSION: 2_28
-      GH_TOKEN: ${{ github.token }}
       PYTHON_MINOR: ${{ matrix.python-minor }}
     outputs:
       commit: ${{ steps.current-commit.outputs.commit }}
@@ -461,7 +460,6 @@ jobs:
           CIBW_ENVIRONMENT: >
             SKBUILD_CMAKE_ARGS='--preset conan-default;--log-level=VERBOSE;-DLUXCORE_VERSION=${{ steps.output-version.outputs.version }};-G Ninja Multi-Config'
             SKBUILD_CMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-            GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
             LUX_BUILD_TYPE=${{ env.BUILD_TYPE }}
             DEPS_WITHOUT_SUDO=1
           # Note: CIBW_ENVIRONMENT_LINUX REPLACES CIBW_ENVIRONMENT (not in
@@ -471,7 +469,6 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             SKBUILD_CMAKE_ARGS='--preset conan-default;--log-level=VERBOSE;-DLUXCORE_VERSION=${{ steps.output-version.outputs.version }};-G Ninja Multi-Config'
             SKBUILD_CMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-            GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
             LUX_BUILD_TYPE=${{ env.BUILD_TYPE }}
             DEPS_WITHOUT_SUDO=1
             LUXRAYS_SPIRV_BAKED_DIR=/project/spirv-baked
@@ -510,25 +507,6 @@ jobs:
             dnf install -y perl-IPC-Cmd perl-Digest-SHA
             dnf install -y ninja-build
 
-            # Install gh (via conda)
-            dnf install -y wget
-            mkdir -p miniconda3
-            wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda3/miniconda.sh
-            bash miniconda3/miniconda.sh -b -u -p miniconda3
-            rm miniconda3/miniconda.sh
-            source miniconda3/bin/activate
-            conda init --all
-
-            # Accept conda terms of service
-            conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
-            conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
-
-            # Install gh. No 'gh auth login' here: the GH_TOKEN environment
-            # variable (set through CIBW_ENVIRONMENT) already authenticates
-            # gh and 'gh auth login' would refuse to run while it is set,
-            # aborting the script BEFORE 'make deps' runs
-            conda install gh --channel conda-forge -y
-
             # Manylinux_2_34 compatibility (for future use)
             if [[ ${{ env.GLIBC_VERSION }} != 2_28 ]]; then
               dnf install -y perl-FindBin perl-lib
@@ -544,32 +522,15 @@ jobs:
             pip install "conan==2.21" && pip install wheel && make deps
 
 
+          # The repair is the one of 'make wheel' (build-system/luxmake/wheel.py:
+          # auditwheel, delvewheel or delocate on the deployed dependencies),
+          # run from the project directory
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
-            paths=$(find /project -type d -wholename "*/lib" -print0 | xargs -0 realpath | tr "\n" ":")
-            LD_LIBRARY_PATH=$paths:$LD_LIBRARY_PATH
-            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-            export LD_LIBRARY_PATH
-
-            ## Check build data
-            unzip {wheel} -d /tmp/wheel
-
-            auditwheel \
-              --verbose repair -w {dest_dir} \
-              --plat manylinux_${{ env.GLIBC_VERSION }}_x86_64 \
-              --only-plat \
-              ${{ env.BUILD_TYPE == 'Release' && '--strip' || '' }} \
-              {wheel}
-
+            cd /project && python3 -m build-system.luxmake repair-wheel {wheel} {dest_dir}
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: |
-            bash.exe ${{ env.WORKSPACE }}/build-system/wheels/repair_wheel_windows.sh '{wheel}' '{dest_dir}' '%VCToolsRedistDir%%Platform%' '${{ env.WORKSPACE }}'
+            python -m build-system.luxmake repair-wheel {wheel} {dest_dir}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
-            cp {wheel} ${{ env.WORKSPACE }}
-            paths=$(find ${{ env.WORKSPACE }} -type d -wholename "*/lib" -print0 | xargs -0 realpath | tr "\n" ":")
-            DYLD_LIBRARY_PATH=$paths:$DYLD_LIBRARY_PATH
-            echo "DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}"
-            export DYLD_LIBRARY_PATH
-            delocate-listdeps -v {wheel}
-            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+            python3 -m build-system.luxmake repair-wheel {wheel} {dest_dir}
           CIBW_TEST_COMMAND_LINUX: pyluxcoretest
           CIBW_TEST_COMMAND_WINDOWS: pyluxcoretest
           CIBW_TEST_COMMAND_MACOS: pyluxcoretest
@@ -701,7 +662,6 @@ jobs:
     timeout-minutes: 300
     env:
       PYTHON_MINOR: 13
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Configure git for long paths
@@ -749,7 +709,7 @@ jobs:
           LUX_BUILD_TYPE: Release
           LUX_SANITIZE: 1
         run: |
-          pip install "conan==2.21" wheel repairwheel && make deps && make wheel-test
+          pip install "conan==2.21" build scikit-build-core delvewheel && make deps && make wheel
 
       - name: Install the wheel
         shell: bash
