@@ -1,0 +1,84 @@
+name: BlendLuxCore Bundles
+
+# Builds the BlendLuxCore extension zips that contain pyluxcore: one per
+# platform (windows-x64, linux-x64, ...). The user installs the zip of their
+# platform with "Install from Disk"; Blender installs the bundled wheels by
+# itself, with no download and no settings file.
+#
+# The wheels come from the wheel builder (artifacts `cibw-wheels-*`): of the
+# same run when called by the releaser, or of the run given by `wheels-run-id`.
+
+on:
+  workflow_call:
+    inputs:
+      addon-ref:
+        description: "Branch, tag or SHA of the BlendLuxCore repository"
+        required: false
+        default: ''
+        type: string
+  workflow_dispatch:
+    inputs:
+      wheels-run-id:
+        description: "Run of 'LuxCore Python Wheels Builder' to take the wheels from"
+        required: true
+        type: string
+      addon-ref:
+        description: "Branch, tag or SHA of the BlendLuxCore repository"
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  bundles:
+    name: Build the platform zips
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout BlendLuxCore
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/BlendLuxCore
+          ref: ${{ inputs.addon-ref }}
+          path: addon
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Download the wheels
+        uses: actions/download-artifact@v7
+        with:
+          pattern: cibw-wheels-*
+          path: ${{ github.workspace }}/wheels
+          merge-multiple: true
+          run-id: ${{ inputs.wheels-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download Blender
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only `blender --command extension build` is used, so any 4.5+ will do
+          BLENDER_DIR="$HOME/blender"
+          mkdir -p "$BLENDER_DIR"
+          wget -q -O /tmp/blender.tar.xz \
+            "https://download.blender.org/release/Blender5.1/blender-5.1.1-linux-x64.tar.xz"
+          tar -xf /tmp/blender.tar.xz -C "$BLENDER_DIR" --strip-components=1
+          echo "$BLENDER_DIR" >> "$GITHUB_PATH"
+          sudo apt-get update -y
+          sudo apt-get install -y libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libgl1 libsm6 libxrender1
+
+      - name: Build the platform zips
+        working-directory: addon
+        run: |
+          ls -l ${{ github.workspace }}/wheels
+          python scripts/package_bundle.py \
+            --wheels ${{ github.workspace }}/wheels \
+            --out ${{ github.workspace }}/bundles
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: BlendLuxCore-bundles
+          path: ${{ github.workspace }}/bundles/BlendLuxCore-*.zip

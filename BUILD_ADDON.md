@@ -4,7 +4,22 @@ How to build the addon zip on the Windows machine and where it goes. The zip lan
 
 The addon repo is `C:\Users\Ricardo\Documents\GitHub\BlendLuxCore`. The zip is built from a clean `git archive HEAD` copy, not from the working tree, so **commit the addon changes first**. The CMake configure wipes `wheels/` and rewrites the `wheels` line of the manifest, which must not happen in the repo.
 
-The zip does not contain `pyluxcore`: the addon installs it at runtime (see `luxloader/__init__.py` in the addon).
+There are two kinds of zip:
+
+- **Platform zips** (`BlendLuxCore-<version>-<platform>.zip`, for the users): `pyluxcore` is inside, listed in the `wheels` of the manifest, and Blender installs it by itself, offline, with "Install from Disk". Built by `scripts/package_bundle.py` (below) and by CI (`addon-bundle.yml`, called by the wheel releaser, which adds the zips to the release).
+- **The slim zip** (the CMake build below, no platform in its name): no `pyluxcore`, the addon downloads it at the first start (see `luxloader/__init__.py` in the addon) or takes the wheel of `blc_settings.json`. This is what the install-into-Blender scripts here use, with the settings file of this machine pointing at the local wheel.
+
+When the zip holds a `pyluxcore` wheel, the loader skips the download, unless `blc_settings.json` exists (the developer override).
+
+## Build the platform zips
+
+```bash
+python scripts/package_bundle.py --wheels <folder with the pyluxcore wheels> --platform windows-x64 --out dist
+```
+
+Run in the addon repo, with `blender` in the PATH. It picks the wheels of the platform for Python 3.11 (Blender 4.5) and 3.13 (Blender 5.x), plus the CUDA NVRTC wheel pyluxcore requires (taken from the folder, or downloaded with pip). A platform with no wheel in the folder is skipped. It packages `git archive HEAD`, so commit first; `--worktree` packages the working tree, to test. The Windows zip with both Pythons is about 250 MB (the pyluxcore wheel is 90 MB, NVRTC 76 MB).
+
+Check a zip in a clean profile, offline, with no settings file: `BLENDER_USER_RESOURCES=<empty dir> blender --offline-mode --command extension install-file -r user_default --enable <zip>`, then enable the extension in `blender -b` and check `BlendLuxCore <version> registered (with pyluxcore <version>)`.
 
 ## Build the zip and copy it to `dist/`
 
