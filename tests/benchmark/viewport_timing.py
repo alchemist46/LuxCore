@@ -19,7 +19,8 @@ the 3D view from a timer and measures:
   meanwhile;
 - the camera-move latency: from setting the view to the first draw whose
   screen probe is closer to the new view's converged image than to the old
-  one's, both while rendering and after the halt (paused);
+  one's, both while rendering and after the halt (paused: each move is
+  labelled by the state of the render when it is made);
 - the resize latency (LuxCore only): from leaving the full-screen area to the
   first draw of a film from the new session.
 
@@ -55,6 +56,8 @@ parser.add_argument("--device", default="OCL", choices=("OCL", "CPU"),
 parser.add_argument("--pixel-size", default="1", choices=("1", "2", "4", "8"))
 parser.add_argument("--halt", type=int, default=6, help="viewport halt time (s)")
 parser.add_argument("--moves", type=int, default=4, help="camera moves while rendering")
+parser.add_argument("--paused-moves", type=int, default=3,
+                    help="camera moves after the halt (at least 2: the first two set the references)")
 parser.add_argument("--move-gap", type=float, default=1.5,
                     help="seconds of rendering before each move while rendering")
 parser.add_argument("--move-angle", type=float, default=8.0,
@@ -354,6 +357,26 @@ def wait_paused(timeout):
     event("pause_timeout")
 
 
+def session_paused():
+    """Whether the render is paused (Cycles: the halt time since the last move)"""
+    if args.engine == "CYCLES":
+        return now() - state.get("last_move", 0.0) >= args.halt
+    try:
+        engine = state["engine"]
+        return bool(engine and engine.session and engine.session.IsInPause())
+    except ReferenceError:
+        return False
+
+
+def move():
+    source = state["view"]
+    target = "A" if source == "B" else "B"
+    kind = "paused" if session_paused() else "running"
+    set_view(target)
+    state["last_move"] = now()
+    event("move", kind=kind, source=source, target=target)
+
+
 def plan():
     yield 1.0
     toggle_full_area()
@@ -385,27 +408,23 @@ def plan():
     event("ref", view="A")
     yield 0.3
 
-    set_view("B")
-    event("move", kind="paused", source="A", target="B")
+    move()
     yield 1.0
     yield from wait_paused(args.halt + 30)
     yield 0.5
     event("ref", view="B")
     yield 0.3
 
+    # The first move resumes the render, the next ones come while it runs
+    move()
     for _ in range(args.moves):
         yield args.move_gap
-        source = state["view"]
-        target = "A" if source == "B" else "B"
-        set_view(target)
-        event("move", kind="running", source=source, target=target)
-    yield 1.0
-    yield from wait_paused(args.halt + 30)
-    yield 0.5
-    source = state["view"]
-    target = "A" if source == "B" else "B"
-    set_view(target)
-    event("move", kind="paused", source=source, target=target)
+        move()
+    for _ in range(args.paused_moves - 2):
+        yield 1.0
+        yield from wait_paused(args.halt + 30)
+        yield 0.5
+        move()
     yield 1.5
 
     if not args.no_resize:
