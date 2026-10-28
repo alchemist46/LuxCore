@@ -270,6 +270,10 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
         if (stop_token.stop_requested())
 		SLG_LOG("[TilePathOCLRenderThread::" << threadIndex << "] Rendering thread halted");
 
+	const string kernelTimingReport = intersectionDevice.GetKernelTimingReport();
+	if (kernelTimingReport.length() > 0)
+		SLG_LOG("[TilePathOCLRenderThread::" << threadIndex << "] " << kernelTimingReport);
+
 	threadDone = true;
 
 	// This is done to stop threads pending on barrier wait

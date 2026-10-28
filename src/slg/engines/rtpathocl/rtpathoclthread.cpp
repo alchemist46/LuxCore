@@ -334,6 +334,9 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 		SLG_LOG("[RTPathOCLRenderThread::" << threadIndex << "] Rendering thread halted");
 
 	intersectionDevice.FinishQueue();
+	const string kernelTimingReport = intersectionDevice.GetKernelTimingReport();
+	if (kernelTimingReport.length() > 0)
+		SLG_LOG("[RTPathOCLRenderThread::" << threadIndex << "] " << kernelTimingReport);
 
 	threadDone = true;
 	
