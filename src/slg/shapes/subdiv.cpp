@@ -594,10 +594,12 @@ struct EdgeInfo {
     int v0, v1;          // Vertex indices (always stored with v0 < v1)
     float sharpness;     // Sharpness value (0.0 = smooth, 1.0 = sharp)
     float creaseWeight;  // Crease weight for subdivision
+    size_t adjacentTris[2];  // The first two triangles sharing the edge
+    size_t adjacentTriCount;
 
     EdgeInfo(int vertex0, int vertex1)
         : v0(std::min(vertex0, vertex1)), v1(std::max(vertex0, vertex1)),
-          sharpness(0.0f), creaseWeight(0.0f) {}
+          sharpness(0.0f), creaseWeight(0.0f), adjacentTriCount(0) {}
 };
 
 // Calculate face normal for a triangle
@@ -642,8 +644,11 @@ void processEdgesForSharpness(const ExtTriangleMesh &mesh,
     // Clear any existing edge information
     edgeMap.clear();
 
-    // First pass: build edge map
-	for (const auto& tri : triangles) {
+    // First pass: build edge map, with the triangles sharing each edge (a
+    // search of all the triangles per edge took 0.9 s on a mesh of 14k
+    // triangles)
+    for (size_t triIndex = 0; triIndex < triangles.size(); ++triIndex) {
+        const Triangle &tri = triangles[triIndex];
 
         // Process each edge of the triangle
         for (int i = 0; i < 3; ++i) {
@@ -654,9 +659,15 @@ void processEdgesForSharpness(const ExtTriangleMesh &mesh,
             auto edgeKey = std::make_pair(std::min(v0, v1), std::max(v0, v1));
 
             // If edge doesn't exist in map, create it
-            if (edgeMap.find(edgeKey) == edgeMap.end()) {
-                edgeMap.try_emplace(edgeKey, v0, v1);
-            }
+            EdgeInfo &edgeInfo = edgeMap.try_emplace(edgeKey, v0, v1).first->second;
+
+            // A degenerate triangle can have the same edge twice: count it once
+            if ((edgeInfo.adjacentTriCount > 0) &&
+                    (edgeInfo.adjacentTris[std::min<size_t>(edgeInfo.adjacentTriCount, 2) - 1] == triIndex))
+                continue;
+            if (edgeInfo.adjacentTriCount < 2)
+                edgeInfo.adjacentTris[edgeInfo.adjacentTriCount] = triIndex;
+            ++edgeInfo.adjacentTriCount;
         }
     }
 
@@ -666,32 +677,17 @@ void processEdgesForSharpness(const ExtTriangleMesh &mesh,
         int v0 = edgeInfo.v0;
         int v1 = edgeInfo.v1;
 
-        // Find all triangles that share this edge
-        std::vector<size_t> adjacentTris;
-        for (size_t triIndex = 0; triIndex < triangles.size(); ++triIndex) {
-            const Triangle &tri = triangles[triIndex];
-            // Check if triangle contains this edge (in either order)
-            if ((tri.v[0] == v0 && tri.v[1] == v1) ||
-                (tri.v[1] == v0 && tri.v[2] == v1) ||
-                (tri.v[2] == v0 && tri.v[0] == v1) ||
-                (tri.v[0] == v1 && tri.v[1] == v0) ||
-                (tri.v[1] == v1 && tri.v[2] == v0) ||
-                (tri.v[2] == v1 && tri.v[0] == v0)) {
-                adjacentTris.push_back(triIndex);
-            }
-        }
-
         // If edge is on boundary (only one adjacent triangle), mark as sharp
-        if (adjacentTris.size() == 1) {
+        if (edgeInfo.adjacentTriCount == 1) {
             edgeInfo.sharpness = 1.0f;
             edgeInfo.creaseWeight = 1.0f;
             continue;
         }
 
         // For internal edges, calculate dihedral angle
-        if (adjacentTris.size() >= 2) {
-            const Triangle &tri1 = triangles[adjacentTris[0]];
-            const Triangle &tri2 = triangles[adjacentTris[1]];
+        if (edgeInfo.adjacentTriCount >= 2) {
+            const Triangle &tri1 = triangles[edgeInfo.adjacentTris[0]];
+            const Triangle &tri2 = triangles[edgeInfo.adjacentTris[1]];
 
             const Vector normal1 = calculateTriangleNormal(mesh, tri1);
             const Vector normal2 = calculateTriangleNormal(mesh, tri2);
@@ -1521,10 +1517,12 @@ ExtTriangleMeshUPtr ApplySubdiv(
 		tessAlphas.releaseLayers()
 	);
 
-	// Handle AOVs
+	// Handle AOVs (the released layers have no size: GetLayerSpan() would
+	// give every layer, even a missing one, an empty buffer)
 	auto tessAOVs_released = tessAOVs.releaseLayers();
 	for (u_int i = 0; i < EXTMESH_MAX_DATA_COUNT; ++i) {
-		newMesh->SetVertexAOV(i, tessAOVs_released.GetLayerSpan(i));
+		if (tessAOVs_released.LayerHasValues(i))
+			newMesh->SetVertexAOV(i, tessAOVs_released.GetLayer(i), numPoints);
 	}
 
 	return newMesh;

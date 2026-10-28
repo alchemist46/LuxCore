@@ -286,6 +286,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/benchmark/viewport_film.py --config <renderconfig.bcf> --size 1920x1080 --draw-interval 0.033 [--set film.opencl.enable=0]` (`idle` against `draw`, `frame_time_ms`).
 - Notes: the same with the CPU pipeline, so not only the shared HIP stream: suspect `filmMutex`, which `GetOutputFloat()` holds through the pipeline and RT thread 0 needs for its merge (`tilerepository.cpp:510-525`). The addon also reads the film on draws without a new frame, which E6 Tier 1 step 2 removes.
 
+### LynxSpider's image pipeline makes each viewport read take 42-51 ms on the CPU
+- Found: 2026-10-28
+- Area: film (image pipeline plugins)
+- Problem: LynxSpider's pipeline (linear tone map, BLOOM radius 0.07 weight 0.06, COLOR_ABERRATION 0.02, VIGNETTING, WHITE_BALANCE) costs 42 ms per `GetOutputFloat(RGB_IMAGEPIPELINE)` at 1600x1000 with the session paused, 51 ms while RTPATHOCL renders; the tone map alone costs 5 ms. In Blender `view_draw()` takes 73 ms (59 ms of it in the read) and the main thread is blocked 3.6 s of every 3.8 s while the viewport renders, so the UI runs at about 12 draws/s. Per step, from the paused reads with one step left out: BLOOM ~26 ms, COLOR_ABERRATION ~10 ms, VIGNETTING ~3 ms, WHITE_BALANCE ~0.
+- Reproduce: `tests/benchmark/viewport_timing.py --save-config` on `scenes/LynxSpider/LynxSpider/LynxSpider.blend` (GPU, pixel size 1, 1600x1000 window), then `tests/benchmark/viewport_film.py --config <out>/renderconfig.bcf --size 1600x1000` with the whole `film.imagepipelines.000.*` set passed by `--set` minus one step (parsing one pipeline property redefines the whole pipeline, so a single `--set ...type=NOP` leaves a pipeline of one NOP).
+- Notes: BLOOM's filter is 112 px on each side at this width (225 taps per pixel in each of its two separable passes), already multithreaded and vectorized (`bloom.cpp` fast paths); a cheaper blur (a downsampled or recursive Gaussian) would change the image slightly. Both BLOOM's final blend loop and COLOR_ABERRATION's final `copy()` of the whole image run on one thread. The GPU pipeline is no way out in the viewport (see the entry on the GPU film image pipeline above).
+
 ### RTPATHOCL frames get 3x slower above ~450k tasks (1080p at resolution reduction 2)
 - Found: 2026-10-28
 - Area: engine (RTPATHOCL, HIP)
