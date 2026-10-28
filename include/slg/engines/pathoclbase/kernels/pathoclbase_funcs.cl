@@ -606,6 +606,17 @@ __kernel void Init(
 
 	__global GPUTaskState *taskState = &tasksState[gid];
 
+#if defined(RENDER_ENGINE_RTPATHOCL)
+	// RTPATHOCL doesn't wait for the paths of a frame that are still in flight
+	// after its rounds (the long random walks of a subsurface material, see
+	// TilePathOCLRenderThread::RenderTileWork()): such a path goes on in this
+	// frame and is added to the film when it ends, unless the film was reset
+	// since (the first pass after a reset or an edit starts every path anew)
+	if ((((__global TilePathSamplerSharedData *)samplerSharedDataBuff)->tilePass > 1) &&
+			(pathStates[gid] != MK_DONE))
+		return;
+#endif
+
 	// No shadow ray to trace in the second half of the ray buffer (the shadow
 	// rays traced with a vertex ray, see AdvancePaths_MK_RT)
 	rays[get_global_size(0) + gid].flags = RAY_FLAGS_MASKED;
