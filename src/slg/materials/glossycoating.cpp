@@ -256,7 +256,11 @@ Spectrum GlossyCoatingMaterial::Evaluate(const HitPoint &hitPoint,
 			*event = NONE;
 		}
 
-		*event |= GLOSSY | TRANSMIT;
+		// The base's event, as Sample() returns it: the coating is only crossed.
+		// A GLOSSY here made the depths count a glossy transmission, without
+		// the roulette depth of the sampled diffuse one, so the MIS weights of
+		// the two techniques did not sum to 1
+		*event |= TRANSMIT;
 
 		Spectrum ks = Ks->GetSpectrumValue(hitPoint);
 		const float i = index->GetFloatValue(hitPoint);
@@ -446,8 +450,13 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 	const Vector lightDirBase = frameBase.ToLocal(frame.ToWorld(localLightDir));
 	const Vector eyeDirBase = frameBase.ToLocal(frame.ToWorld(localEyeDir));
 	matBase->Pdf(hitPointBase, lightDirBase, eyeDirBase, directPdfW, reversePdfW);
+	// The coating is on the front face only, for each direction (as Evaluate():
+	// a transmission from the back face has the coating in its reverse pdf)
 	const Vector localFixedDir = hitPoint.fromLight ? localLightDir : localEyeDir;
-	if (!(localFixedDir.z > 0.f))
+	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
+	const bool fixedCoated = (localFixedDir.z > 0.f);
+	const bool sampledCoated = (localSampledDir.z > DEFAULT_COS_EPSILON_STATIC);
+	if (!fixedCoated && !(reversePdfW && sampledCoated))
 		return;
 
 	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
@@ -462,17 +471,16 @@ void GlossyCoatingMaterial::Pdf(const HitPoint &hitPoint,
 	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
 
 	// The same pdfs as Evaluate() (the coating pdf is not symmetric)
-	const Vector &localSampledDir = hitPoint.fromLight ? localEyeDir : localLightDir;
 	const bool reflection = (localFixedDir.z * localSampledDir.z > 0.f);
 
-	if (directPdfW) {
+	if (directPdfW && fixedCoated) {
 		const float wCoating = GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localFixedDir.z), ks));
 		*directPdfW = (1.f - wCoating) * *directPdfW +
 			(reflection ? wCoating * SchlickBSDF_CoatingPdf(u, v, localFixedDir, localSampledDir) : 0.f);
 	}
 
 	if (reversePdfW) {
-		const float wCoatingR = (localSampledDir.z > DEFAULT_COS_EPSILON_STATIC) ?
+		const float wCoatingR = sampledCoated ?
 			GlossyCoating_CoatProbability(ks, GGXEnergy_CoatE(u, v, fabsf(localSampledDir.z), ks)) : 0.f;
 		*reversePdfW = (1.f - wCoatingR) * *reversePdfW +
 			(reflection ? wCoatingR * SchlickBSDF_CoatingPdf(u, v, localSampledDir, localFixedDir) : 0.f);

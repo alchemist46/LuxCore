@@ -277,7 +277,8 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_Evaluate(__global const Material*
 			event = NONE;
 		}
 
-		event |= GLOSSY | TRANSMIT;
+		// The base's event, as the sampling returns it (see glossycoating.cpp)
+		event |= TRANSMIT;
 
 		float3 ks = Texture_GetSpectrumValue(material->glossycoating.ksTexIndex, hitPoint TEXTURES_PARAM);
 		const float i = Texture_GetFloatValue(material->glossycoating.indexTexIndex, hitPoint TEXTURES_PARAM);
