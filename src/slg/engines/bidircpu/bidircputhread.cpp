@@ -343,10 +343,12 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 				const float lightBsdfPdfA = PdfWtoA(lightBsdfPdfW,  p2pDistance, cosThetaAtCamera);
 
 				// MIS weights
+				float eyeDVCM, eyeDVC;
+				EyeMISQuantities(eyeVertex, lightVertex.depth, &eyeDVCM, &eyeDVC);
 				const float lightWeight = MIS(eyeBsdfPdfA) *
 					(misVmWeightFactor + lightVertex.dVCM + lightVertex.dVC * MIS(lightBsdfRevPdfW));
 				const float eyeWeight = MIS(lightBsdfPdfA) *
-					(misVmWeightFactor + eyeVertex.dVCM + eyeVertex.dVC * MIS(eyeBsdfRevPdfW));
+					(misVmWeightFactor + eyeDVCM + eyeDVC * MIS(eyeBsdfRevPdfW));
 
 				const float misWeight = 1.f / (lightWeight + 1.f + eyeWeight);
 
@@ -536,9 +538,11 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 						const float usedCosLight = light->IsEnvironmental() ? 1.f : cosThetaAtLight;
 
 						// emissionPdfA / directPdfA = emissionPdfW / directPdfW
+						float eyeDVCM, eyeDVC;
+						EyeMISQuantities(eyeVertex, 0, &eyeDVCM, &eyeDVC);
 						const float weightLight = MIS(bsdfPdfW / directLightSamplingPdfW);
 						const float weightCamera = MIS(emissionPdfW * cosThetaToLight / (directPdfW * usedCosLight)) *
-								(misVmWeightFactor + eyeVertex.dVCM + eyeVertex.dVC * MIS(bsdfRevPdfW));
+								(misVmWeightFactor + eyeDVCM + eyeDVC * MIS(bsdfRevPdfW));
 						// Disable MIS if we have gone trough a shadow transparent object
 						const float misWeight = shadowBsdf.hitPoint.throughShadowTransparency ?
 							1.f : (1.f / (weightLight + 1.f + weightCamera));
@@ -588,8 +592,10 @@ void BiDirCPURenderThread::DirectHitLight(
 	);
 
 	// MIS weight
-	const float weightCamera = MIS(directPdfA * lightPickPdf) * eyeVertex.dVCM +
-		MIS(emissionPdfW * lightPickPdf) * eyeVertex.dVC;
+	float eyeDVCM, eyeDVC;
+	EyeMISQuantities(eyeVertex, -1, &eyeDVCM, &eyeDVC);
+	const float weightCamera = MIS(directPdfA * lightPickPdf) * eyeDVCM +
+		MIS(emissionPdfW * lightPickPdf) * eyeDVC;
 	const float misWeight = 1.f / (weightCamera + 1.f);
 
 	*radiance += misWeight * eyeVertex.throughput * lightRadiance;
@@ -749,7 +755,7 @@ bool BiDirCPURenderThread::TraceLightPath(const float time, const float waveleng
 				// Build the next vertex path ray
 				//--------------------------------------------------------------
 
-				if (!Bounce(time, sampler, sampleOffset + 2, &lightVertex, &lightRay))
+				if (!Bounce(time, sampler, sampleOffset + 2, &lightVertex, &lightRay, false))
 					break;
 			} else {
 				// Ray lost in space...
@@ -761,8 +767,33 @@ bool BiDirCPURenderThread::TraceLightPath(const float time, const float waveleng
 	return true;
 }
 
+void BiDirCPURenderThread::EyeMISQuantities(const PathVertexVM &eyeVertex, const int lightDepth,
+		float *dVCM, float *dVC) const {
+	BiDirCPURenderEngine *engine = (BiDirCPURenderEngine *)renderEngine;
+
+	// The strategy that moves the connection j steps toward the camera has a
+	// light path vertex of depth lightDepth + j (j = depth: the light tracing),
+	// so the ones beyond light.maxdepth are left out
+	const int maxJ = (int)engine->maxLightPathDepth - lightDepth;
+	if (!engine->lightDepthCutsStrategies || (maxJ >= (int)eyeVertex.depth)) {
+		*dVCM = eyeVertex.dVCM;
+		*dVC = eyeVertex.dVC;
+		return;
+	}
+
+	assert (eyeVertex.dVCTerms.size() + 1 == eyeVertex.depth);
+	*dVCM = (maxJ >= 1) ? eyeVertex.dVCM : 0.f;
+	// dVCTerms[size - (j - 1)] is the term j
+	const int size = (int)eyeVertex.dVCTerms.size();
+	float sum = 0.f;
+	for (int j = 2; j <= maxJ; ++j)
+		sum += eyeVertex.dVCTerms[size - (j - 1)];
+	*dVC = sum;
+}
+
 bool BiDirCPURenderThread::Bounce(const float time, const SamplerUPtr& sampler,
-		const u_int sampleOffset, PathVertexVM *pathVertex, Ray *nextEventRay) const {
+		const u_int sampleOffset, PathVertexVM *pathVertex, Ray *nextEventRay,
+		const bool eyePath) const {
 	BiDirCPURenderEngine *engine = (BiDirCPURenderEngine *)renderEngine;
 
 	Vector sampledDir;
@@ -800,6 +831,18 @@ bool BiDirCPURenderThread::Bounce(const float time, const SamplerUPtr& sampler,
 	// result multiplied by cosSampledDir / bsdfPdfW
 	pathVertex->throughput *= bsdfSample;
 	assert (!pathVertex->throughput.IsNaN() && !pathVertex->throughput.IsInf());
+
+	// The terms of dVC (see PathVertexVM::dVCTerms), as dVC below: each one a
+	// step further from the connection, and a new term j = 2 from dVCM (none
+	// at a specular vertex, which can't be connected)
+	if (eyePath && engine->lightDepthCutsStrategies) {
+		const float stepFactor = (event & SPECULAR) ?
+			MIS(cosSampledDir) : (MIS(cosSampledDir / bsdfPdfW) * MIS(bsdfRevPdfW));
+		for (float &term : pathVertex->dVCTerms)
+			term *= stepFactor;
+		pathVertex->dVCTerms.push_back((event & SPECULAR) ?
+			0.f : (MIS(cosSampledDir / bsdfPdfW) * (pathVertex->dVCM + misVmWeightFactor)));
+	}
 
 	// New MIS weights
 	if (event & SPECULAR) {
@@ -1046,6 +1089,8 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				eyeVertex.dVCM *= (orthographicFirstVertex ? 1.f : MIS(t_MIS * t_MIS)) * factor;
 				eyeVertex.dVC *= factor;
 				eyeVertex.dVM *= factor;
+				for (float &term : eyeVertex.dVCTerms)
+					term *= factor;
 
 				// Check if it is a light source
 				if (eyeVertex.bsdf.IsLightSource() &&
@@ -1054,6 +1099,12 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 					!photonGICausticCacheUsed){
 					DirectHitLight(true, eyeVertex, eyeSampleResult);
 				}
+
+				// A path of path.maxdepth segments ends here: the light
+				// sample, the connections and the caustic cache would make it
+				// longer
+				if (eyeVertex.depth >= engine->maxEyePathDepth)
+					break;
 
 				// Note: pass-through check is done inside Scene::Intersect()
 		
@@ -1098,11 +1149,16 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				//--------------------------------------------------------------
 
 				if (!eyeVertex.bsdf.IsDelta()) {
+					// The light path vertices are in increasing depth: the
+					// first one that makes the path longer than path.maxdepth
+					// ends the loop
 					for (vector<PathVertexVM>::const_iterator lightPathVertex = lightPathVertices.begin();
-							lightPathVertex < lightPathVertices.end(); ++lightPathVertex)
+							(lightPathVertex < lightPathVertices.end()) &&
+							(lightPathVertex->depth + eyeVertex.depth + 1 <= engine->maxEyePathDepth);
+							++lightPathVertex)
 						ConnectVertices(time, eyeVertex, *lightPathVertex, eyeSampleResult,
 								sampler->GetSample(sampleOffset + 6));
-					
+
 					assert (eyeSampleResult.IsValid());
 				}
 
@@ -1110,7 +1166,7 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				// Build the next vertex path ray
 				//--------------------------------------------------------------
 
-				if (!Bounce(time, sampler, sampleOffset + 7, &eyeVertex, &eyeRay))
+				if (!Bounce(time, sampler, sampleOffset + 7, &eyeVertex, &eyeRay, true))
 					break;
 				
 				isTransmittedEyePath = isTransmittedEyePath && (eyeVertex.bsdfEvent & TRANSMIT);

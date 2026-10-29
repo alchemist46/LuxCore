@@ -244,6 +244,11 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				if (eyeVertex.bsdf.IsLightSource())
 					DirectHitLight(true, eyeVertex, eyeSampleResult);
 
+				// A path of path.maxdepth segments ends here (see
+				// BiDirCPURenderThread::RenderFunc())
+				if (eyeVertex.depth >= engine->maxEyePathDepth)
+					break;
+
 				// Note: pass-through check is done inside Scene::Intersect()
 
 				//--------------------------------------------------------------
@@ -265,7 +270,9 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 			
 					const vector<PathVertexVM> &lightPathVertices = lightPathsVertices[samplerIndex];
 					for (vector<PathVertexVM>::const_iterator lightPathVertex = lightPathVertices.begin();
-							lightPathVertex < lightPathVertices.end(); ++lightPathVertex)
+							(lightPathVertex < lightPathVertices.end()) &&
+							(lightPathVertex->depth + eyeVertex.depth + 1 <= engine->maxEyePathDepth);
+							++lightPathVertex)
 						ConnectVertices(time,
 								eyeVertex, *lightPathVertex, eyeSampleResult,
 								sampler->GetSample(sampleOffset + 6));
@@ -281,7 +288,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				// Build the next vertex path ray
 				//--------------------------------------------------------------
 
-				if (!Bounce(time, sampler, sampleOffset + 7, &eyeVertex, &eyeRay))
+				if (!Bounce(time, sampler, sampleOffset + 7, &eyeVertex, &eyeRay, true))
 					break;
 			}
 		}

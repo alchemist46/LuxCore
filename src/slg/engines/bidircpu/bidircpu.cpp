@@ -63,9 +63,23 @@ void BiDirCPURenderEngine::StartLockLess() {
 	// Rendering parameters
 	//--------------------------------------------------------------------------
 
+	// path.maxdepth limits the length of a path for every strategy, as in
+	// SmallVCM: the weights of a path sum to 1 over strategies that all exist.
+	// A light path is at most one segment shorter (the connection to the
+	// camera); light.maxdepth can make it shorter still, then the weights
+	// leave out the strategies it lacks
 	maxEyePathDepth = (u_int)Max(1, cfg.Get(GetDefaultProps()->Get("path.maxdepth")).Get<int>());
-	maxLightPathDepth = (u_int)Max(1, cfg.Get(GetDefaultProps()->Get("light.maxdepth")).Get<int>());
-	
+	maxLightPathDepth = Min((u_int)Max(1, cfg.Get(GetDefaultProps()->Get("light.maxdepth")).Get<int>()),
+			maxEyePathDepth - 1);
+	lightDepthCutsStrategies = (maxLightPathDepth < maxEyePathDepth - 1);
+	if (lightDepthCutsStrategies && (GetType() == BIDIRVMCPU)) {
+		// The merges' weights don't leave out the missing strategies
+		SLG_LOG("BIDIRVMCPU: light.maxdepth below path.maxdepth - 1 is not supported, using " <<
+				(maxEyePathDepth - 1));
+		maxLightPathDepth = maxEyePathDepth - 1;
+		lightDepthCutsStrategies = false;
+	}
+
 	rrDepth = (u_int)Max(1, cfg.Get(GetDefaultProps()->Get("path.russianroulette.depth")).Get<int>());
 	rrImportanceCap = Clamp(cfg.Get(GetDefaultProps()->Get("path.russianroulette.cap")).Get<double>(), 0.0, 1.0);
 
@@ -212,8 +226,8 @@ PropertiesUPtr BiDirCPURenderEngine::GetDefaultProps() {
 	*props <<
 		CPUNoTileRenderEngine::GetDefaultProps() <<
 		Property("renderengine.type")(GetObjectTag()) <<
-		Property("path.maxdepth")(5) <<
-		Property("light.maxdepth")(5) <<
+		Property("path.maxdepth")(10) <<
+		Property("light.maxdepth")(10) <<
 		Property("path.aovs.warmup.spp")(0) <<
 		Property("path.russianroulette.depth")(3) <<
 		Property("path.russianroulette.cap")(.5f) <<

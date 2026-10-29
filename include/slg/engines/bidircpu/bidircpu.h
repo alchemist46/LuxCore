@@ -48,6 +48,13 @@ typedef struct PathVertexVM {
 	float dVC;  // MIS quantity used for vertex connection
 	float dVM;  // MIS quantity used for vertex merging
 
+	// The terms of dVC of an eye vertex, one per strategy: the one that moves
+	// the connection j steps toward the camera (j = depth ... 2, the last one
+	// is j = 2; dVCM is j = 1). Kept only when light.maxdepth is below the
+	// path length, to leave out the strategies a light path can't make (see
+	// BiDirCPURenderThread::EyeMISQuantities()), empty otherwise
+	std::vector<float> dVCTerms;
+
 	// Volume rendering information
 	PathVolumeInfo volInfo;
 
@@ -132,7 +139,13 @@ protected:
 		std::vector<PathVertexVM> &lightPathVertices,
 		std::vector<SampleResult> &sampleResults) const;
 	bool Bounce(const float time, const SamplerUPtr& sampler, const u_int sampleOffset,
-		PathVertexVM *pathVertex, luxrays::Ray *nextEventRay) const;
+		PathVertexVM *pathVertex, luxrays::Ray *nextEventRay, const bool eyePath) const;
+
+	// The dVCM and dVC of eyeVertex for a connection to a light path vertex
+	// of depth lightDepth (0: the light, as the direct light sampling; -1: a
+	// light the eye path hits)
+	void EyeMISQuantities(const PathVertexVM &eyeVertex, const int lightDepth,
+		float *dVCM, float *dVC) const;
 
 	float misVmWeightFactor; // Weight of vertex merging (used in VC)
     float misVcWeightFactor; // Weight of vertex connection (used in VM)
@@ -163,8 +176,13 @@ public:
 	static luxrays::PropertiesUPtr ToProperties(const luxrays::Properties &cfg);
 	static RenderEngine *FromProperties(RenderConfigRef rcfg);
 
-	// Signed because of the delta parameter
+	// maxEyePathDepth is the longest path, in segments (path.maxdepth, as
+	// PATH's depth), for every strategy; maxLightPathDepth the longest light
+	// path (light.maxdepth, at most path.maxdepth - 1)
 	u_int maxEyePathDepth, maxLightPathDepth;
+	// light.maxdepth is below path.maxdepth - 1: the paths that would need a
+	// longer light path lack strategies, which their MIS weights leave out
+	bool lightDepthCutsStrategies;
 
 	// Used for vertex merging, it enables VM if it is > 0
 	u_int lightPathsCount;

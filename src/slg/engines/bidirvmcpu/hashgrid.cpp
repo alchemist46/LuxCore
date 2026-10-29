@@ -132,6 +132,11 @@ void HashGrid::Process(const BiDirVMCPURenderThread *thread,
 void HashGrid::Process(const BiDirVMCPURenderThread *thread,
 		const PathVertexVM &eyeVertex, const PathVertexVM *lightVertex,
 		Spectrum *radiance) const {
+	// A merge makes a path of the two depths: not longer than path.maxdepth
+	// (see BiDirCPURenderThread::RenderFunc())
+	if (lightVertex->depth + eyeVertex.depth > ((const BiDirVMCPURenderEngine *)thread->renderEngine)->maxEyePathDepth)
+		return;
+
 	const float distance2 = (lightVertex->bsdf.hitPoint.p - eyeVertex.bsdf.hitPoint.p).LengthSquared();
 
 	if (distance2 <= radius2) {
