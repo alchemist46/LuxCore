@@ -685,7 +685,20 @@ bool BiDirCPURenderThread::TraceLightPath(const float time, const float waveleng
 				// Update the new light vertex
 				lightVertex.SetDispersion();
 				lightVertex.throughput *= connectionThroughput;
-		
+
+				// The direct light sampling at the first vertex picks the
+				// direction of an environmental light with its visibility map
+				// cache or its MIS distribution, not with the distribution
+				// Emit() samples and returns the pdf of
+				if ((lightVertex.depth == 1) && light->IsEnvironmental()) {
+					// Left at -1 when the direction has no lat-long mapping
+					float hitDirectPdfW = -1.f;
+					static_cast<const EnvLightSource &>(*light).GetRadiance(scene,
+							&lightVertex.bsdf, lightRay.d, &hitDirectPdfW);
+					if (hitDirectPdfW >= 0.f)
+						lightVertex.dVCM = MIS(hitDirectPdfW * lightPickPdf / lightEmitPdfW);
+				}
+
 				// Infinite lights use MIS based on solid angle instead of area
 				if((lightVertex.depth > 1) || !light->IsEnvironmental())
 					lightVertex.dVCM *= MIS(nextEventRayHit.t * nextEventRayHit.t);

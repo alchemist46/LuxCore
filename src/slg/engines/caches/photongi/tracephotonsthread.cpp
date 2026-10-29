@@ -250,6 +250,19 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					if (bsdfSample.Black())
 						break;
 
+					// A light the eye paths can hit, hidden from their specular
+					// bounces (visibility.indirect.specular.enable = 0), is
+					// reached after such a bounce by neither the BSDF hit nor
+					// the direct light sampling (a delta lobe can't be sampled
+					// toward a light), so the render has none of its light
+					// after a specular bounce: nor do the photons. The diffuse
+					// and glossy flags hide only the BSDF hit, the direct light
+					// sampling takes its full weight there
+					if ((pathInfo.depth.depth == 0) && (bsdfEvent & SPECULAR) &&
+							(light->IsIntersectable() || light->IsEnvironmental()) &&
+							!light->IsVisibleIndirectSpecular())
+						break;
+
 					pathInfo.AddVertex(bsdf, bsdfEvent, pgic.params.glossinessUsageThreshold);
 
 					// If I have to fill only the caustic cache and last BSDF event

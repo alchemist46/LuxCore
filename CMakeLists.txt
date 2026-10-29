@@ -298,6 +298,29 @@ find_package(imguifiledialog)
 # Documentation
 find_package(Doxygen)
 
+# The per-configuration library targets of conan (CONAN_LIB::<lib>_RELEASE,
+# _DEBUG) have a location for their own configuration only, and are linked
+# only in it (through $<CONFIG:...> in the package targets). The codemodel of
+# the CMake File API (queried by scikit-build-core, which leaves its query in
+# the build tree) lists every imported target in every configuration of the
+# multi-config generator, and prints an "IMPORTED_LOCATION not set" error for
+# each other one (1072 on Windows). Their own location as the fallback for the
+# other configurations silences it without changing what is linked.
+if(CMAKE_CONFIGURATION_TYPES)
+  get_property(_lux_imported_targets DIRECTORY PROPERTY IMPORTED_TARGETS)
+  foreach(_lux_target IN LISTS _lux_imported_targets)
+    if(_lux_target MATCHES "^CONAN_LIB::.*_([A-Z]+)$")
+      set(_lux_config_suffix "_${CMAKE_MATCH_1}")
+      foreach(_lux_property IMPORTED_LOCATION IMPORTED_IMPLIB)
+        get_target_property(_lux_value ${_lux_target} ${_lux_property}${_lux_config_suffix})
+        if(_lux_value)
+          set_target_properties(${_lux_target} PROPERTIES ${_lux_property} "${_lux_value}")
+        endif()
+      endforeach()
+    endif()
+  endforeach()
+endif()
+
 
 ################################################################################
 #

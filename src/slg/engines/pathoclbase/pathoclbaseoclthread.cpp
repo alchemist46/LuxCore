@@ -412,9 +412,10 @@ void PathOCLBaseOCLRenderThread::UpdateLightTreeLearning(const double sampleCoun
 	if (!lightTreeLearnCellsBuff)
 		return;
 
-	// The epochs: a quarter of a sample per pixel, then each doubling
+	// The epochs: a quarter of a sample per pixel of the image (a thread
+	// film of TILEPATHOCL is a tile), then each doubling
 	if (lightTreeLearnNextSamples <= 0.0)
-		lightTreeLearnNextSamples = .25 * threadFilms[0]->GetFilm().GetWidth() * threadFilms[0]->GetFilm().GetHeight();
+		lightTreeLearnNextSamples = .25 * renderEngine->GetFilm().GetWidth() * renderEngine->GetFilm().GetHeight();
 	if (sampleCount < lightTreeLearnNextSamples)
 		return;
 	lightTreeLearnNextSamples = 2.0 * sampleCount;

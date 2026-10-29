@@ -196,6 +196,8 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
         };
         // The caustic map this device has (uploaded at the start)
         u_int pgicUpdateGeneration = engine->photonGICache ? engine->photonGICache->GetUpdateGeneration() : 0;
+        // The samples rendered, for the epochs of the light tree learning
+        double lightTreeLearnSampleCount = 0.0;
 
         while (!stop_token.stop_requested()) {
                 // Check if we are in pause mode
@@ -219,6 +221,8 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
                                 // Render the tile
                                 RenderTileWork(tileWorks[i], samplerDatas[i], i);
+                                lightTreeLearnSampleCount += (double)tileWorks[i].GetCoord().width * tileWorks[i].GetCoord().height *
+                                                engine->aaSamples * engine->aaSamples;
 
                                 allTileDone = false;
                         } else
@@ -233,6 +237,8 @@ void TilePathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                         gpuTaskStats.get());
 
                 intersectionDevice.FinishQueue();
+
+                UpdateLightTreeLearning(lightTreeLearnSampleCount);
 
                 const double t1 = WallClockTime();
                 const double renderingTime = t1 - t0;
