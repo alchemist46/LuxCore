@@ -256,6 +256,9 @@ void SceneVisibility<T>::TraceVisibilityThread::RenderFunc(std::stop_token stop_
 				volInfo.Update(lastBSDFEvent, bsdf);
 
 				eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+				// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+				if (bsdf.IsVolume())
+					eyeRay.mint = 0.f;
 			}
 
 			sampler.NextSample(sampleResults);

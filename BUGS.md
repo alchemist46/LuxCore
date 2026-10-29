@@ -223,12 +223,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py BIDIRCPU roughglass-a0.5 spp=1024 size=64 light.maxdepth=1`; `C:/Users/Ricardo/lc-work/passthru`: `SPP=64 bash run.sh venvtest BIDIRCPU x null:L` against PATHCPU (`EXTRA="--set path.maxdepth=8 --set light.maxdepth=8"`).
 - Notes: SmallVCM limits the total path length in every technique, so the weights of a path that fits sum to 1 over techniques that all exist. A fix here: skip a connection (and a light-traced vertex) whose total length exceeds `path.maxdepth`, and run the light path to `path.maxdepth` too; `light.maxdepth` would then only be able to lower it, which needs the weights to leave out the missing strategies. It changes the image of every BiDir scene with paths longer than the depth, so not done without a decision. Compare BiDir with PATH at depths that the paths of the scene don't reach (32 here).
 
-### A few paths leave a dense medium with the medium still in their volume list
+### Embree misses a ray through a shared edge of a mesh (CPU)
 - Found: 2026-10-29
-- Area: volumes (the boundary crossing)
-- Problem: a path that leaves a `null` sphere with a white scattering interior sometimes keeps the interior as its current volume: it then scatters in the empty space around the sphere until the depth limit, and its light samples from there go through the medium too. Seen with a probe in the eye path: vertices at a radius of 4 to 10 around the unit sphere (sigma_s 4, PATHCPU, 64x64, 256 spp, depth 400), a handful per render. They cost less than 1e-4 of the furnace (BSDF sampling only, `env=boxnodls`, depth 400: 1.0000), but before the environment lights stopped lighting points outside their sphere (2026-10-29) each of them was a firefly of up to 1e18.
-- Reproduce: `tests/furnace/furnace.py PATHCPU null-vol-s4 spp=256 size=64` with every depth at 400 and a probe that logs the radius of the volume vertices beyond depth 100.
-- Notes: not investigated. Suspects: a vertex closer to the boundary than the epsilon of the next ray's start (the ray misses the crossing), or a crossing at a shared edge of the mesh.
+- Area: build (Embree), volumes
+- Problem: the CPU accelerator is built without `RTC_SCENE_FLAG_ROBUST` (`embreeaccel.cpp`), so Embree's triangle test is not watertight: a ray through the edge shared by two triangles can miss both. A path that crosses the boundary of a medium that way keeps the medium in its volume list and scatters in the empty space around the object up to the depth limit. One such path in the furnace `null-vol-s4` render (PATHCPU, 64x64, 256 spp, every depth at 400): its ray crosses the UV sphere on the edge of triangles 7613 and 7614 at a barycentric distance of 4e-8 and hits neither. Too rare to show in the image there; through a glass surface such a ray would skip a refraction.
+- Reproduce: `tests/furnace/furnace.py PATHCPU null-vol-s4 spp=256 size=64` with every depth at 400 and a probe in the eye path that logs the first volume vertex outside the sphere (radius above 1.02) with its ray.
+- Notes: `RTC_SCENE_FLAG_ROBUST` would make the test watertight; its cost on the CPU scenes is not measured. The HIPRT side is not checked.
 
 ### BiDir with an orthographic camera close to the object reads 0.04% dark
 - Found: 2026-10-29

@@ -184,6 +184,9 @@ void BiDirCPURenderThread::AOVWarmUp(
 			volInfo.Update(lastBSDFEvent, bsdf);
 
 			eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+			// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+			if (bsdf.IsVolume())
+				eyeRay.mint = 0.f;
 		}
 
 		sampler.NextSample(sampleResults);
@@ -307,6 +310,11 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 					shadowRayDistance,
 					time);
 			p2pRay.UpdateMinMaxWithEpsilon();
+			// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+			if (eyeVertex.bsdf.IsVolume())
+				p2pRay.mint = 0.f;
+			if (lightVertex.bsdf.IsVolume())
+				p2pRay.maxt = shadowRayDistance;
 
 			RayHit p2pRayHit;
 			BSDF bsdfConn;
@@ -810,6 +818,9 @@ bool BiDirCPURenderThread::Bounce(const float time, const SamplerUPtr& sampler,
 
 	*nextEventRay = Ray(pathVertex->bsdf.GetRayOrigin(sampledDir), sampledDir);
 	nextEventRay->UpdateMinMaxWithEpsilon();
+	// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+	if (pathVertex->bsdf.IsVolume())
+		nextEventRay->mint = 0.f;
 	nextEventRay->time = time;
 
 	++pathVertex->depth;

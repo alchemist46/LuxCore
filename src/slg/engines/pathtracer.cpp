@@ -863,6 +863,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		subsurfaceExit = false;
 
 		eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+		// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+		if (bsdf.IsVolume())
+			eyeRay.mint = 0.f;
 	}
 
 	sampleResult.rayCount += static_cast<float>(device.GetTotalRaysCount() - deviceRayCount);
@@ -969,7 +972,11 @@ void PathTracer::ConnectToEye(IntersectionDeviceRef device,
 					eyeDistance - eyeRay.maxt,
 					eyeDistance - eyeRay.mint,
 					time);
+			const float vertexMinT = traceRay.mint;
 			traceRay.UpdateMinMaxWithEpsilon();
+			// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+			if (bsdf.IsVolume())
+				traceRay.mint = vertexMinT;
 			RayHit traceRayHit;
 
 			BSDF bsdfConn;
@@ -1159,6 +1166,9 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 			verify (!lightPathFlux.IsNaN() && !lightPathFlux.IsInf());
 
 			nextEventRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+			// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+			if (bsdf.IsVolume())
+				nextEventRay.mint = 0.f;
 		}
 	}
 }

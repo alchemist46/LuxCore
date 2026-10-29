@@ -284,6 +284,9 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					assert (lightPathFlux.IsValid());
 
 					nextEventRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+					// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+					if (bsdf.IsVolume())
+						nextEventRay.mint = 0.f;
 				} else {
 					// Ray lost in space...
 					break;

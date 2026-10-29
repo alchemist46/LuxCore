@@ -260,6 +260,9 @@ static void Film2SceneRadiusThread(Film2SceneRadiusThreadParams &params) {
 			volInfo.Update(lastBSDFEvent, bsdf);
 
 			eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+			// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+			if (bsdf.IsVolume())
+				eyeRay.mint = 0.f;
 		}
 
 		sampler.NextSample(sampleResults);

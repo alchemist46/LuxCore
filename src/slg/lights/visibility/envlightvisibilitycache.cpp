@@ -366,6 +366,9 @@ void EnvLightVisibilityCache::BuildCacheEntry(
 
 		// Set up the shadow ray
 		Ray shadowRay(bsdf.GetRayOrigin(globalSamplingDir), globalSamplingDir);
+		// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+		if (bsdf.IsVolume())
+			shadowRay.mint = 0.f;
 		shadowRay.time = u3;
 
 		// Check if the light source is visible

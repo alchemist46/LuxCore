@@ -204,6 +204,12 @@ public:
 	LightSourceConstPtr GetLightSource() const { return triangleLightSource; }
 	TriangleLightConstPtr GetTriangleLightSource() const { return triangleLightSource; }
 
+	// A ray from a point in a volume starts at the point (a mint of 0, as the
+	// steps of a subsurface walk): the point is on no surface to leave, and a
+	// ray that skipped the usual epsilon from a scatter point closer than that
+	// to the medium's boundary left the medium without crossing the boundary,
+	// with the medium still in the path's volume list (a path then scattered
+	// around the object up to the depth limit)
 	luxrays::Point GetRayOrigin(const luxrays::Vector &sampleDir) const {
 		if (IsVolume())
 			return hitPoint.p;

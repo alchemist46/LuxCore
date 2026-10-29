@@ -226,6 +226,9 @@ void ImageMapResizePolicy::RenderFunc(
 					volInfo.Update(lastBSDFEvent, bsdf);
 
 					eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
+					// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+					if (bsdf.IsVolume())
+						eyeRay.mint = 0.f;
 				}
 
 				/*const u_int frameBufferX = floorf(sampleResult.filmX);

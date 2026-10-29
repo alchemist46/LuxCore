@@ -308,6 +308,9 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 			VSTORE3F(throughputFactor * VLOAD3F(sampleResult->irradiancePathThroughput.c), sampleResult->irradiancePathThroughput.c);
 
 		Ray_Init2(ray, BSDF_GetRayOrigin(bsdf, sampledDir), sampledDir, ray->time);
+		// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()
+		if (bsdf->isVolume)
+			ray->mint = 0.f;
 
 		sampleResult->firstPathVertex = false;
 

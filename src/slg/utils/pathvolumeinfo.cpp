@@ -100,8 +100,11 @@ void PathVolumeInfo::RemoveVolume(VolumeConstPtr vol) {
 		}
 	}
 
-	// Update the list size
-	--volumeListSize;
+	// Update the list size. A volume that isn't in the list (the path leaves
+	// an object it didn't enter, as one that starts inside it) leaves the
+	// list as it was: the list lost its last volume instead
+	if (found)
+		--volumeListSize;
 }
 
 VolumeConstPtr PathVolumeInfo::SimulateAddVolume(VolumeConstPtr vol) const {

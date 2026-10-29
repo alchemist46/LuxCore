@@ -85,8 +85,10 @@ OPENCL_FORCE_INLINE void PathVolumeInfo_RemoveVolume(__global PathVolumeInfo *pv
 	}
 	pvi->currentVolumeIndex = newCurrentVolumeIndex;
 
-	// Update the list size
-	--(pvi->volumeIndexListSize);
+	// Update the list size. A volume that isn't in the list leaves the list
+	// as it was, see PathVolumeInfo::RemoveVolume()
+	if (found)
+		--(pvi->volumeIndexListSize);
 }
 
 OPENCL_FORCE_INLINE uint PathVolumeInfo_SimulateAddVolume(__global PathVolumeInfo *pvi, const uint volIndex
