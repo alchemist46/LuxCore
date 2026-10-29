@@ -118,14 +118,15 @@ Spectrum RoughGlassMaterial::EvaluateRough(const HitPoint &hitPoint,
 		if (reversePdfW)
 			*reversePdfW = threshold * Microfacet_PdfH(u, v, localSampledDir, wh) * (hitPoint.fromLight ? (fabsf(cosThetaOH) * eta * eta) : fabsf(cosThetaIH)) / lengthSquared;
 
-		// The radiance form f_rad |cos light| on eye paths. Light paths need
-		// the adjoint (importance) BTDF, f_imp = f_rad (eta_light / eta_eye)^2,
-		// i.e. f_rad eta^2.
+		// The radiance form f_rad |cos light|, on light paths too: the path
+		// integral has the radiance BTDF of the physical pair (light to eye)
+		// at every vertex, whichever side sampled it. Only a delta refraction
+		// differs between the two (the Jacobian of its delta, see
+		// GlassMaterial), not a rough one (as pbrt's MicrofacetTransmission,
+		// equal in its Radiance and Importance modes)
 		Spectrum result = (fabsf(cosThetaOH) * cosThetaIH * D *
 			G / (cosThetaI * lengthSquared)) *
 			kt * (1.f - F) * msScale;
-		if (hitPoint.fromLight)
-			result *= eta * eta;
 		if (localFilmThickness > 0.f) {
 			// The film of the microfacet, seen from the light side: a lossless
 			// film transmits what it does not reflect (the same from both sides)

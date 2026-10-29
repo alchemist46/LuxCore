@@ -476,8 +476,16 @@ Spectrum BSDF::Sample(Vector *sampledDir,
 	if (result.Black())
 		return result;
 
-	*absCosSampledDir = fabsf(CosTheta(localSampledDir));
 	*sampledDir = frame.ToWorld(localSampledDir);
+
+	// A volume scatter point has no surface: its "normal" is the fixed
+	// direction, so no cosine and no adjoint correction (as Evaluate())
+	if (IsVolume()) {
+		*absCosSampledDir = 1.f;
+		return result;
+	}
+
+	*absCosSampledDir = fabsf(CosTheta(localSampledDir));
 
 	// Shadow terminator artefact avoidance
 	if ((*event & REFLECT) &&

@@ -284,9 +284,10 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 		const Spectrum lightBsdfEval = lightVertex.bsdf.Evaluate(-p2pDir, &lightEvent, &lightBsdfPdfW, &lightBsdfRevPdfW);
 
 		if (!lightBsdfEval.Black()) {
-			// Check if the 2 surfaces can see each other
-			const float cosThetaAtCamera = Dot(eyeVertex.bsdf.hitPoint.shadeN, p2pDir);
-			const float cosThetaAtLight = Dot(lightVertex.bsdf.hitPoint.shadeN, -p2pDir);
+			// Check if the 2 surfaces can see each other (a volume vertex has
+			// no cosine: its shadeN is the fixed direction)
+			const float cosThetaAtCamera = eyeVertex.bsdf.IsVolume() ? 1.f : Dot(eyeVertex.bsdf.hitPoint.shadeN, p2pDir);
+			const float cosThetaAtLight = lightVertex.bsdf.IsVolume() ? 1.f : Dot(lightVertex.bsdf.hitPoint.shadeN, -p2pDir);
 			// Was:
 			//  const float geometryTerm = cosThetaAtCamera * cosThetaAtLight / eyeDistance2;
 			//
@@ -386,8 +387,9 @@ void BiDirCPURenderThread::ConnectToEye(const float time,
 		Ray eyeRay;
 		
 		if (scene.GetCamera().GetType() == Camera::ORTHOGRAPHIC){
-			Vector rayDir(lightVertex.bsdf.hitPoint.p - lensPoint);
-			eyeRay = Ray(lightVertex.bsdf.hitPoint.p, rayDir,
+			// Along the camera direction, as the camera's rays: the vertex is
+			// seen from the film point it projects to, not from lensPoint
+			eyeRay = Ray(lightVertex.bsdf.hitPoint.p, eyeDir,
 				0.f,
 				eyeDistance,
 				time);
@@ -426,19 +428,21 @@ void BiDirCPURenderThread::ConnectToEye(const float time,
 
 				// No Russian roulette in the MIS weights, see ConnectVertices()
 
-				const float cosToCamera = Dot(lightVertex.bsdf.hitPoint.shadeN, -eyeDir);
+				// A volume vertex has no cosine (its shadeN is the fixed direction)
+				const float cosToCamera = lightVertex.bsdf.IsVolume() ? 1.f : Dot(lightVertex.bsdf.hitPoint.shadeN, -eyeDir);
 				float cameraPdfW, fluxToRadianceFactor;
 				scene.GetCamera().GetPDF(eyeRay, eyeDistance, filmX, filmY, &cameraPdfW, &fluxToRadianceFactor);
-				const float cameraPdfA = PdfWtoA(cameraPdfW, eyeDistance, cosToCamera);
+				// The orthographic camera's pdf is per area of its film plane,
+				// which its parallel rays project with the cosine alone
+				const float cameraPdfA = (scene.GetCamera().GetType() == Camera::ORTHOGRAPHIC) ?
+						(cameraPdfW * fabsf(cosToCamera)) :
+						PdfWtoA(cameraPdfW, eyeDistance, cosToCamera);
 				// Was:
-				//  const float fluxToRadianceFactor = cameraPdfA;	
-				//	
-				// but now BSDF::Evaluate() follows LuxRender habit to return the	
-				// result multiplied by cosThetaToLight
+				//  const float fluxToRadianceFactor = cameraPdfA;
 				//
-				// However this is not true for volumes (see bug
-				// report http://forums.luxcorerender.org/viewtopic.php?f=4&t=1146&start=10#p13491)
-				fluxToRadianceFactor *= lightVertex.bsdf.IsVolume() ? fabsf(cosToCamera) : 1.f;
+				// but now BSDF::Evaluate() follows LuxRender habit to return the
+				// result multiplied by cosThetaToLight, and the phase function of
+				// a volume has no cosine to add (as PathTracer::ConnectToEye())
 
 				const float weightLight = MIS(cameraPdfA) *
 					(misVmWeightFactor + lightVertex.dVCM + lightVertex.dVC * MIS(bsdfRevPdfW));
@@ -513,7 +517,7 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 
 						// No Russian roulette in the MIS weights, see ConnectVertices()
 
-						const float cosThetaToLight = AbsDot(shadowRay.d, eyeVertex.bsdf.hitPoint.shadeN);
+						const float cosThetaToLight = eyeVertex.bsdf.IsVolume() ? 1.f : AbsDot(shadowRay.d, eyeVertex.bsdf.hitPoint.shadeN);
 						const float directLightSamplingPdfW = directPdfW * lightPickPdf;
 
 						// emissionPdfA / directPdfA = emissionPdfW / directPdfW
@@ -1015,9 +1019,13 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 					t_MIS = eyeRayHit.t;
 				}
 
-				// Update MIS constants
+				// Update MIS constants. The rays of an orthographic camera are
+				// parallel: the area pdf of its first vertex has no 1 / t^2
+				// (as ConnectToEye())
 				const float factor = 1.f / MIS(AbsDot(eyeVertex.bsdf.hitPoint.shadeN, eyeVertex.bsdf.hitPoint.fixedDir));
-				eyeVertex.dVCM *= MIS(t_MIS * t_MIS) * factor;
+				const bool orthographicFirstVertex = eyeSampleResult.firstPathVertex &&
+						(camera.GetType() == Camera::ORTHOGRAPHIC);
+				eyeVertex.dVCM *= (orthographicFirstVertex ? 1.f : MIS(t_MIS * t_MIS)) * factor;
 				eyeVertex.dVC *= factor;
 				eyeVertex.dVM *= factor;
 

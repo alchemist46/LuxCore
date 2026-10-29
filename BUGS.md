@@ -41,16 +41,9 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 ### Dense scattering media behind a delta glass read wrong in the furnace
 - Found: 2026-10-18 (the sigma_s 1 loss, fixed 2026-10-21); this part 2026-10-21
 - Area: material, engine (volumes)
-- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) before the fix: not re-measured. BIDIRCPU reads 1.059 at sigma_s 1 and 1.145 at sigma_s 4 (2026-10-22, 256 spp).
+- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) before the fix: not re-measured. BIDIRCPU read 1.059 at sigma_s 1 and 1.145 at sigma_s 4 (2026-10-22, 256 spp), 0.998 and 1.077 (relative std 0.59, fireflies) since the volume vertex fix of 2026-10-29 (1024 spp). The OpenPBR glass with a white scattering interior (`openpbr-glass-depth-s1`, roughness 0.3, sigma_s 1) reads 1.072 with PATHCPU (relative std 1.2, fireflies; the same in the build before 2026-10-29) and 1.003 with BIDIRCPU (1024 spp, 64x64).
 - Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s4 spp=1024` (and PATHOCL).
 - Notes: the sigma_s 1 loss (0.630) was the correlation of the volume's scatter decision with the glass lobe choice (both read the same pass-through event), fixed by remapping the event for the surface. The CPU and GPU disagree at sigma_s 4 in opposite directions, so it is not a shared estimator bias; the fireflies come from long internal paths with the lobe probability clamped to [0.25, 0.75].
-
-### BiDir reads 2-4% low on rough glass
-- Found: 2026-10-18
-- Area: engine (BIDIRCPU), material
-- Problem: BiDir is 2-4% low on rough glass and on the OpenPBR glass alike (OpenPBR 0.990/0.973/0.966 at alpha 0.2/0.5/1, half glass over a white base 0.955). The path engines read 0.997/0.992 at alpha 0.5/1.
-- Reproduce: white furnace with a rough glass sphere, BIDIRCPU against PATHCPU.
-- Notes: not the interface's compensation. The `fromLight` branches of `Sample()` have not been derived against the adjoint BSDF. Leaving the Russian roulette out of the MIS weights (2026-10-22) did not change it: 0.969/0.974/0.961 for rough glass, OpenPBR glass and half glass at alpha 0.5 (256 spp).
 
 ### Caustics seen through a specular surface are missing with light tracing
 - Found: 2026-10-16
@@ -72,13 +65,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Problem: since GM the chains start from the bootstrap, share one luminance estimate and splat their last sample at the halt, which removed most of the bias, but short chains still read dark on some scenes: PATHOCL against the Sobol mean, 4 seeds, at 16/64/256 spp: the `simple` scene (150x100) -1.0/-0.5/-0.2% (with 65536 tasks -1.3/-1.4/-0.6%), LynxSpider (300x200) -2.4/-1.2/-0.05%; the SDL `cornell` (+0.4/+0.1/0.0%) and `luxball-hdr` (-0.1/0.0/0.0%) are within the noise from 64 spp. A chain gets about spp x pixels / tasks samples (one task per pixel on a small film).
 - Reproduce: `lc-work/gm/mr.py scenes/simple/simple.cfg out.npz --sampler METROPOLIS --spp 16,64,256 --seeds 1,2,3,4 --size 150x100` against the same with `--sampler SOBOL` (`lc-work/gm/an.py`).
 - Notes: the start draws from one uniform sample per task, so the bright paths rarer than about one per task count are missing from the start, and a short chain doesn't reach them in its own steps while the estimator gives them the weight of a chain that would (a toy of the estimator with a heavy-tailed integrand shows the same, 200K chains of 16 steps -1.8%; it is exact for a light-tailed one). A larger bootstrap (several uniform samples per task, one kept in proportion to its luminance) would cover more of them. Ruled out: the luminance estimate (an exact constant gives the same), the flush of the last sample (the eager splat of every step gives the same), the forced accept after 512 rejects (`luxball-hdr` the same with 99999), the path lengths of the drain (a toy with costs is unbiased). Workarounds: fewer tasks (`opencl.task.count`) for longer chains, or the CPU engines, whose few chains are long (PATHCPU within 0.2% from 64 spp on the four scenes).
-
-### BiDir darkens the silhouette of the furnace sphere
-- Found: 2026-10-22
-- Area: engine (BIDIRCPU)
-- Problem: in the white furnace the pixels on the outline of the sphere read 0.6-0.7 with BIDIRCPU, whatever the material (matte too), and the image mean is 0.973 against 0.9999 with PATHCPU; the inner disk is right (0.999). The "mu < .2" band of `tests/furnace/furnace.py` shows it (0.40 for matte).
-- Reproduce: a white matte sphere under a constant white environment, orthographic camera, 48x48, no pixel filter, BIDIRCPU 512 spp: the first and the last pixel on the sphere of the centre row and column read 0.6.
-- Notes: in the build before the camera row fix (b22905df5) the dark ring was one row off (row 0 on top, the third last row at the bottom); now it is symmetric. Suspects: the light-traced connections to the camera at grazing angles. Not investigated.
 
 ### TILEPATHOCL is slow with dense, nearly white subsurface media
 - Found: 2026-10-22
@@ -208,13 +194,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `C:/Users/Ricardo/lc-work/mixnull`: `SPP=256 SEEDS=1,2,3,4,5,6,7,8 bash run.sh venvtest PATHOCL x gco:L,B`, then `python means.py r/gco-L-PATHOCL-x.npz r/gco-B-PATHOCL-x.npz`.
 - Notes: the same before and after the Mix vertex-weight fix (2026-10-26), so not the pass-through. The pane is seen and lit from both sides: the coating is only on the front face (`GlossyCoatingMaterial::Sample()` sets wCoating 0 for a fixed direction on the back), so a suspect is the back-side or transmission case of `Evaluate()` against `Sample()`/`Pdf()`. Not investigated. LynxSpider has `mattetranslucent` and `mix` materials under a glossy coating (see "LynxSpider: the Russian roulette depth changes the image by 1%").
 
-### BiDir: a Mix of matte and mattetranslucent reads 5% dark in the furnace
-- Found: 2026-10-26
-- Area: engine (BIDIRCPU), material (Mix)
-- Problem: the white furnace (`tests/furnace/furnace.py`, constant infinite light, depths 32) of Mix(matte kd 1, mattetranslucent kr 0.5 kt 1, amount 0.3) reads 0.947 with BIDIRCPU and 1.000 with PATHCPU; each material alone reads 0.995 with BiDir (its known silhouette loss), Mix(matte, metal2) 0.999. The furnace case `mix-null-nested` (a Mix(null, matte) mixed with the mattetranslucent) reads 0.963 with BiDir for the same reason.
-- Reproduce: `out/venvtest/Scripts/python tests/furnace/furnace.py BIDIRCPU mix-null-nested spp=256 env=inf path.maxdepth=32 light.maxdepth=32`; the plain Mix(matte, mattetranslucent) case is in `C:/Users/Ricardo/lc-work/mixnull/furnace_t.py` (`t-matte-mt`).
-- Notes: the same before the Mix vertex-weight fix. Suspect: the reverse pdf of a Mix with a reflection-only and a reflection-and-transmission sub-material in BiDir's MIS (`MixMaterial::Evaluate()`/`Pdf()` sum the sub-materials' reverse pdfs only for the ones whose event types match the evaluated direction's side). Not investigated.
-
 ### Mix vertex weights: the Mixes that keep the plain weights
 - Found: 2026-10-26
 - Area: material (Mix), both devices
@@ -237,19 +216,27 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Notes: before the Mix vertex-weight fix the difference was -2.0% (nest -5.4%), the double weight of the Mix's BSDF; the rest is the cache's.
 - Notes (2026-10-27): transparency alone does it too. White furnace (PATHCPU, 256 spp, `path.photongi.indirect.enabled=1 path.photongi.photon.maxcount=2000000`): a matte kd 1 with `transparency = 0.5` reads 0.985 with the hit-based area and 0.980 with the measured one (the probes stop on the transparent surface with its stop probability, as the photons); Mix(that, matte) 0.985 / 0.976; the furnace case `mix-transparent` 0.990 / 0.983 (1.000 without the cache). The plain matte, `mix` and `mix-null` read 1.000 with the cache. Cases in `C:/Users/Ricardo/lc-work/pgiarea/furnace_p.py` (`t-matte`, `t-mix-mattes`). Not investigated: a suspect is a per-material decision of the cache (where photons are stored or looked up, by event types or glossiness) that differs between a Mix with a null, whose event types include the null's specular transmission, and the leaf.
 
-### BiDir: the environment light visibility cache biases the pass-through test scene by +0.4%
-- Found: 2026-10-26; narrowed 2026-10-29
-- Area: engine (BIDIRCPU), light
-- Problem: with `visibilitymapcache.enable = 1` BIDIRCPU reads +0.52% +- 0.03% on the pass-through test scene (null pane, sky2 and a lamp, 240x180, 4 seeds, 64 spp; +0.42% with `lightstrategy.type = POWER`) against the cache off; PATH agrees within the noise. It was +1.2% there and +0.11% on luxball-hdr before the fix of 2026-10-29 (the light path's first vertex took the light's direct pdf from `Emit()`, the image map distribution, where the direct light sampling at that vertex samples the cache's or the MIS distribution: it now reads it with `GetRadiance()` at the hit), after which luxball-hdr agrees (-0.000% +- 0.006%).
-- Reproduce: `C:/Users/Ricardo/lc-work/passthru`: `SPP=64 bash run.sh venvtest BIDIRCPU new null:L,E`; `means.py r/null-L-BIDIRCPU-new.npz r/null-E-BIDIRCPU-new.npz`.
-- Notes: BiDir is itself off on this scene with the cache off (see "BiDir reads 1.6% dark on the pass-through test scene"), so the rest may be that bias weighted differently by the cache's light sampling rather than an ELVC pdf mismatch. Not checked: the light pick of the light path (the emit strategy's position-free `SampleLights()`) against the position-dependent pick of the direct light sampling at the vertex with the light tree (POWER gives about the same).
-
-### BiDir reads 1.6% dark on the pass-through test scene
+### BiDir: paths longer than the depth limits keep the MIS weight of the strategies they lack
 - Found: 2026-10-29
 - Area: engine (BIDIRCPU)
-- Problem: the pass-through test scene with its null pane (a room lit by a sky2 through the pane and by a matte lamp, 240x180, 4 seeds, 64 spp, the environment cache off) reads 0.12331 with BIDIRCPU against 0.12540 with PATHCPU (-1.67% +- 0.03%, 59 of 64 8x8 blocks over 3 sigma; -1.55% with `lightstrategy.type = POWER`). On luxball-hdr (200x150) BiDir reads +0.16% against PATHCPU, with a few blocks far off (z up to 159), probably its known rough glass and silhouette losses.
-- Reproduce: `C:/Users/Ricardo/lc-work/passthru`: `SPP=64 bash run.sh venvtest PATHCPU new null:L` and `run.sh venvtest BIDIRCPU new null:L`, `means.py` of the two.
-- Notes: not split by path class or by pane material yet (the null pane against no pane, or `pane_transp`). The other BiDir entries (rough glass, the furnace silhouette, the Mix of matte and mattetranslucent) don't involve a null surface.
+- Problem: `path.maxdepth` limits the eye path and `light.maxdepth` the light path, but a connection is not limited by the total length, and the MIS weights count every strategy of a path, also the ones the limits leave out. So only the paths up to min(eye, light depth) are complete; the longer ones are counted in part, and the image is neither the image truncated at the depth nor the full one. White furnace, rough glass alpha 0.5 (`path.maxdepth = 48`): 0.77 at `light.maxdepth = 1`, 0.91 at 2, 0.94 at 3, 0.997 at 48; `null-vol-s4` 0.45 at `light.maxdepth = 1`. The pass-through test scene (its `path.pathdepth.total = 8`, which BiDir doesn't read) read -1.67% against PATHCPU with BiDir's default depths 5/5 and +0.35% at 8/8; at 32 on both engines they agree (-0.02% +- 0.03%), with the environment cache on as well (+0.02% +- 0.03%).
+- Reproduce: `tests/furnace/furnace.py BIDIRCPU roughglass-a0.5 spp=1024 size=64 light.maxdepth=1`; `C:/Users/Ricardo/lc-work/passthru`: `SPP=64 bash run.sh venvtest BIDIRCPU x null:L` against PATHCPU (`EXTRA="--set path.maxdepth=8 --set light.maxdepth=8"`).
+- Notes: SmallVCM limits the total path length in every technique, so the weights of a path that fits sum to 1 over techniques that all exist. A fix here: skip a connection (and a light-traced vertex) whose total length exceeds `path.maxdepth`, and run the light path to `path.maxdepth` too; `light.maxdepth` would then only be able to lower it, which needs the weights to leave out the missing strategies. It changes the image of every BiDir scene with paths longer than the depth, so not done without a decision. Compare BiDir with PATH at depths that the paths of the scene don't reach (32 here).
+
+### BiDir reads 1.5% dark on a dense scattering medium
+- Found: 2026-10-29
+- Area: engine (BIDIRCPU), volumes
+- Problem: white furnace, a unit sphere with a `null` boundary and a white homogeneous interior (`multiscattering = 1`) at sigma_s 4: BIDIRCPU reads 0.982 (orthographic camera) and 0.985 (perspective) against PATHCPU 0.999 and 1.005 (1024 spp, 64x64). At sigma_s 1 both read 1.000 (since the volume vertex fix of 2026-10-29; 1.033 before), and with single scattering (`multiscattering = 0`) BiDir and PATH agree at sigma_s 4 (0.255 / 0.256). The same at depth 200, so not the depth limits.
+- Reproduce: `tests/furnace/furnace.py BIDIRCPU null-vol-s4 spp=1024 size=64` against PATHCPU.
+- Notes: the MIS weights leave the distance sampling pdfs of the medium out (the same for every strategy, so it should cost noise, not bias). Ruled out: the hit distance across the null boundary (accumulated), the sampler dimensions (no overlap), the camera type.
+
+### BiDir with an orthographic camera close to the object reads 0.04% dark
+- Found: 2026-10-29
+- Area: engine (BIDIRCPU), camera
+- Problem: the white furnace matte sphere reads 0.9995 with the orthographic camera 0.5 in front of the sphere (`lookat.orig = 0 -1.5 0`), 0.9999 at 4 and at 49 (BIDIRCPU 4096 spp, 48x48, relative std 0.001; PATHCPU 0.9999 at all three).
+- Reproduce: a script that renders `tests/furnace/furnace.py`'s `matte` case with `scene.camera.lookat.orig` moved (`render_case()` with the property in the material string).
+- Notes: after the orthographic MIS fix of 2026-10-29 the weights no longer depend on the camera distance, so it is something else that does: the hither clip, the eye ray's start, or the light tracing's visibility ray near the camera plane. Small; not investigated.
+
 ### The AMD OpenCL compiler crashes on the path kernel (Windows)
 - Found: 2026-10-26
 - Area: build, device (OpenCL)

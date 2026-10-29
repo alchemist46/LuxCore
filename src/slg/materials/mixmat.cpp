@@ -475,9 +475,16 @@ void MixMaterial::Pdf(const HitPoint &hitPoint,
 	const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
 	const float weight1 = 1.f - weight2;
 
-	float directPdfWMatA = 1.f;
-	float reversePdfWMatA = 1.f;
-	if (weight1 > 0.f) {
+	// As in Evaluate(): a sub-material without an event on the side of the two
+	// directions can't sample one of them, so it adds nothing to the pdfs
+	const float isTransmitEval = (Sgn(localLightDir.z) != Sgn(localEyeDir.z));
+
+	float directPdfWMatA = 0.f;
+	float reversePdfWMatA = 0.f;
+	const BSDFEvent eventTypesMatA = matA->GetEventTypes();
+	if ((weight1 > 0.f) &&
+			((!isTransmitEval && (eventTypesMatA & REFLECT)) ||
+			(isTransmitEval && (eventTypesMatA & TRANSMIT)))) {
 		HitPoint hitPointA(hitPoint);
 		matA->Bump(&hitPointA);
 		const Frame frameA(hitPointA.GetFrame());
@@ -486,9 +493,12 @@ void MixMaterial::Pdf(const HitPoint &hitPoint,
 		matA->Pdf(hitPointA, lightDirA, eyeDirA, &directPdfWMatA, &reversePdfWMatA);
 	}
 
-	float directPdfWMatB = 1.f;
-	float reversePdfWMatB = 1.f;
-	if (weight2 > 0.f) {
+	float directPdfWMatB = 0.f;
+	float reversePdfWMatB = 0.f;
+	const BSDFEvent eventTypesMatB = matB->GetEventTypes();
+	if ((weight2 > 0.f) &&
+			((!isTransmitEval && (eventTypesMatB & REFLECT)) ||
+			(isTransmitEval && (eventTypesMatB & TRANSMIT)))) {
 		HitPoint hitPointB(hitPoint);
 		matB->Bump(&hitPointB);
 		const Frame frameB(hitPointB.GetFrame());

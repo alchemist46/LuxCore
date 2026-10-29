@@ -939,8 +939,10 @@ OPENCL_FORCE_INLINE bool OpenPBR_CanTransmit(const OpenPBRBSDF *b) {
 
 // f |cos light| for the local directions in the shading frame (of the delta
 // lobes when delta, of the others otherwise): the eye direction decides the
-// face. Light paths get the adjoint of the refraction, the radiance BTDF
-// times (eta_light / eta_eye)^2.
+// face. Light paths get the adjoint of a delta refraction, the radiance
+// BTDF times (eta_light / eta_eye)^2; a rough refraction has the same value
+// on both (the path integral has the radiance BTDF of the physical pair,
+// whichever side sampled it, see RoughGlassMaterial::EvaluateRough()).
 OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateLocal(const OpenPBRBSDF *b,
 		const float3 localLightDir, const float3 localEyeDir, const bool fromLight, const bool delta) {
 	const bool eyeOutside = (localEyeDir.z > 0.f);
@@ -952,7 +954,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateLocal(const OpenPBRBSDF *b,
 
 	const float3 result = OpenPBR_EvaluateFront(b, lightDir, eyeDir, etaEye, sssEntry, delta);
 
-	return (fromLight && (lightDir.z < 0.f) && !b->thinWalled) ? (result * (etaEye * etaEye)) : result;
+	return (fromLight && delta && (lightDir.z < 0.f) && !b->thinWalled) ? (result * (etaEye * etaEye)) : result;
 }
 
 // What the coat leaves of the base of a delta-only hit point seen from the eye

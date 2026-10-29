@@ -367,6 +367,14 @@ vector<TestCase> BuildTestCases() {
 		"scene.materials.b.uroughness = 0.3\nscene.materials.b.vroughness = 0.3\n"
 		"scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
 		"scene.materials.m.material2 = b\nscene.materials.m.amount = 0.5\n", 1.f, true });
+	// A reflection-only and a transmitting sub-material: the pdfs of a
+	// transmitted pair come from the second alone
+	cases.push_back({ "mix-matte-mattetranslucent",
+		"scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
+		"scene.materials.b.type = mattetranslucent\n"
+		"scene.materials.b.kr = 0.5 0.5 0.5\nscene.materials.b.kt = 1 1 1\n"
+		"scene.materials.m.type = mix\nscene.materials.m.material1 = a\n"
+		"scene.materials.m.material2 = b\nscene.materials.m.amount = 0.3\n", 1.f, true });
 	cases.push_back({ "twosided",
 		"scene.materials.a.type = matte\nscene.materials.a.kd = 1 1 1\n"
 		"scene.materials.b.type = matte\nscene.materials.b.kd = 1 1 1\n"
