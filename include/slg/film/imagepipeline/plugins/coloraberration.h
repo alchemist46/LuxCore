@@ -60,10 +60,6 @@ private:
 		ar & amountY;
 	}
 
-	static luxrays::Spectrum BilinearSampleImage(const luxrays::Spectrum *pixels,
-			const u_int width, const u_int height,
-			const float x, const float y);
-
 	luxrays::Spectrum *tmpBuffer;
 	size_t tmpBufferSize;
 

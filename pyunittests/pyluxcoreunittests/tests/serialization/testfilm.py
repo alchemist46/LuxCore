@@ -59,6 +59,39 @@ class TestFilm(unittest.TestCase):
 		(sameImage, diffCount, diffImage) = CompareImage(imageA, imageB)
 
 		self.assertTrue(sameImage)
-		
+
 		os.unlink("simple.flm")
+
+	def test_Film_AddFilm(self):
+		# Load the configuration from file
+		props = pyluxcore.Properties("resources/scenes/simple/simple.cfg")
+
+		# Change the render engine to PATHCPU
+		props.Set(pyluxcore.Property("renderengine.type", ["PATHCPU"]))
+		props.Set(pyluxcore.Property("sampler.type", ["SOBOL"]))
+		props.Set(GetDefaultEngineProperties("PATHCPU"))
+
+		config = pyluxcore.RenderConfig(props)
+		session = DoRenderSession(config)
+		session.GetFilm().SaveFilm("simple.flm")
+
+		filmA = pyluxcore.Film("simple.flm")
+		filmB = pyluxcore.Film("simple.flm")
+		os.unlink("simple.flm")
+
+		# Both films are still usable after AddFilm() (it used to take them by
+		# std::unique_ptr, so the call destroyed both)
+		filmB.Clear()
+		filmB.AddFilm(filmA)
+		imageA = GetImagePipelineImage(filmA)
+		imageB = GetImagePipelineImage(filmB)
+		(sameImage, diffCount, diffImage) = CompareImage(imageA, imageB)
+		self.assertTrue(sameImage)
+
+		# The version with a region
+		filmB.Clear()
+		filmB.AddFilm(filmA, 0, 0, filmA.GetWidth(), filmA.GetHeight(), 0, 0)
+		imageB = GetImagePipelineImage(filmB)
+		(sameImage, diffCount, diffImage) = CompareImage(imageA, imageB)
+		self.assertTrue(sameImage)
 

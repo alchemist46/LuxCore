@@ -917,22 +917,20 @@ static void Film_UpdateOutputUInt3(FilmImpl & film, const Film::FilmOutputType t
 
 //------------------------------------------------------------------------------
 
-static void Film_AddFilm1(
-	std::unique_ptr<luxcore::detail::FilmImpl> film,
-	std::unique_ptr<luxcore::detail::FilmImpl> srcFilm
-) {
-  film->AddFilm(*srcFilm);
+// The films are taken by reference: taken by std::unique_ptr, the call
+// disowned (and destroyed) both Python films
+static void Film_AddFilm1(FilmImpl &film, FilmImpl &srcFilm) {
+  film.AddFilm(srcFilm);
 }
 
 static void Film_AddFilm2(
-	std::unique_ptr<luxcore::detail::FilmImpl> film,
-	std::unique_ptr<luxcore::detail::FilmImpl> srcFilm,
+	FilmImpl &film, FilmImpl &srcFilm,
     const size_t srcOffsetX, const size_t srcOffsetY,
     const size_t srcWidth, const size_t srcHeight,
     const size_t dstOffsetX, const size_t dstOffsetY
 ) {
-	film->AddFilm(
-		*srcFilm, srcOffsetX, srcOffsetY, srcWidth,  srcHeight, dstOffsetX,  dstOffsetY
+	film.AddFilm(
+		srcFilm, srcOffsetX, srcOffsetY, srcWidth,  srcHeight, dstOffsetX,  dstOffsetY
 	);
 }
 
