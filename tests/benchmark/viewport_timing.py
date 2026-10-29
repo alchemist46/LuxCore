@@ -165,6 +165,10 @@ def instrument_luxcore():
     session.EndSceneEdit = timed("end_edit", session.EndSceneEdit)
     pyluxcore.Film.GetOutputFloat = timed("getoutput", pyluxcore.Film.GetOutputFloat)
     exporter.create_session = timed_call("create_session", exporter.create_session)
+    # A config change on the same scene (BlendLuxCore 1.5; older addons have no
+    # restart_session())
+    if hasattr(exporter, "restart_session"):
+        exporter.restart_session = timed_call("restart_session", exporter.restart_session)
 
     view_draw = viewport.view_draw
 
@@ -562,6 +566,8 @@ def analyze():
                 entry["latency_ms"] = round((later[0]["t"] + later[0]["total"] - t) * 1000, 1)
             entry["export_ms"] = [round(c[2] * 1000, 1) for c in calls
                                   if c[1] == "create_session" and t < c[0] < t_start]
+            entry["restart_ms"] = [round(c[2] * 1000, 1) for c in calls
+                                   if c[1] == "restart_session" and t < c[0] < t_start]
             entry["start_ms"] = round(new_sessions[0][2] * 1000, 1)
         entry["main_thread"] = gaps_in(t, t + entry.get("latency_ms", 3000) / 1000)
         resizes.append(entry)
