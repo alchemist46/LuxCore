@@ -320,13 +320,14 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 			BSDF bsdfConn;
 			Spectrum connectionThroughput;
 			PathVolumeInfo volInfo = eyeVertex.volInfo; // I need to use a copy here
-			// For the connection event, we need to evaluate the volume based
-			// on whether the shadow ray is going into the object or not
-			bool connectionIntoObject = (Dot(lightVertex.bsdf.hitPoint.geometryN, -shadowRayDir) < 0.f);
-			volInfo.SetCurrentVolume(connectionIntoObject ?
-				lightVertex.bsdf.hitPoint.interiorVolume :
-				lightVertex.bsdf.hitPoint.exteriorVolume
-			);
+			// The ray starts in the volume of the eye vertex's side it leaves,
+			// as in DirectLightSampling(). The volume of the light vertex's
+			// side (the old rule) is wrong when the segment crosses another
+			// object: with that object's interior as the current volume, the
+			// volume priority system passed the ray through its surface
+			// (PathVolumeInfo::ContinueToTrace()) instead of stopping it
+			if (!eyeVertex.bsdf.IsVolume() && (eyeEvent & TRANSMIT))
+				volInfo.Update(eyeEvent, eyeVertex.bsdf);
 			if (!scene.Intersect(
 					luxrays::make_observer(device),
 					LIGHT_RAY | INDIRECT_RAY | SHADOW_RAY,
