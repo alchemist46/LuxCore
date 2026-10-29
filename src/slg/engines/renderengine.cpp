@@ -223,7 +223,7 @@ void RenderEngine::UpdateFilm() {
 		UpdateFilmLockLess();
 		UpdateCounters();
 
-		film->RunTests();
+		film->RunTests(filmMutex);
 	}
 }
 

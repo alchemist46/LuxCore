@@ -12,7 +12,10 @@ the 3D view from a timer and measures:
   parts (the change check, the scene edit, WaitNewFrame(), UpdateStats(),
   GetOutputFloat(), the numpy and gpu.Buffer copies, the texture draw,
   get_pretty_stats()), by wrapping the addon's functions from here, so any
-  addon commit can be measured; whether the draw had new samples;
+  addon commit can be measured; whether the draw had new samples; with an
+  addon that reads the film in a thread (FrameBuffer.start_read()), "film" is
+  the main-thread part that shows a finished read, and the reads themselves
+  are timed apart ("reads");
 - draws/s, the stat stats.rtpathocl.frame.time;
 - the main-thread stalls, from the gaps of a timer that runs every loop;
 - the time to the first rendered frame on screen and the main-thread stall
@@ -43,6 +46,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -112,6 +116,7 @@ screen_draws = []  # POST_PIXEL calls
 ticks = []      # main-thread timer ticks
 events = []     # (t, name, details)
 calls = []      # (t, name, duration): session create/start, scene edits
+reads = []      # (t, duration): GetOutputFloat() calls outside the main thread
 state = {"current": None, "engine": None}
 
 
@@ -123,14 +128,18 @@ def event(name, **details):
 # Main-thread time of each view_draw() and of its parts (LuxCore)
 
 def timed(key, function):
+    """A part of view_draw(); a call from another thread goes to reads"""
     def wrapper(*a, **k):
-        record = state["current"]
+        main = threading.current_thread() is threading.main_thread()
+        record = state["current"] if main else None
         start = clock()
         try:
             return function(*a, **k)
         finally:
             if record is not None:
                 record[key] = record.get(key, 0.0) + clock() - start
+            elif not main:
+                reads.append((start - T0, clock() - start))
     return wrapper
 
 
@@ -152,7 +161,11 @@ def instrument_luxcore():
     framebuffer = g0_blc.submodule("draw.viewport").FrameBuffer
     exporter = g0_blc.submodule("export").Exporter
 
-    framebuffer.update = timed("film", framebuffer.update)
+    if hasattr(framebuffer, "start_read"):
+        # The film is read in a thread: the main thread shows a finished read
+        framebuffer._show_read = timed("film", framebuffer._show_read)
+    else:
+        framebuffer.update = timed("film", framebuffer.update)
     framebuffer.draw = timed("draw", framebuffer.draw)
     exporter.get_viewport_changes = timed("changes", exporter.get_viewport_changes)
     exporter.update = timed("edit", exporter.update)
@@ -613,6 +626,10 @@ def analyze():
             frame_times = [d["frame_time"] for d in ds if "frame_time" in d]
             if frame_times:
                 w["frame_time_ms"] = ms(stats(frame_times))
+        thread_reads = [d for t, d in reads if t0 <= t < t1]
+        if thread_reads:
+            w["thread_reads_per_s"] = round(len(thread_reads) / span, 1)
+            w["thread_read_ms"] = ms(stats(thread_reads))
         steady[name] = w
     result["steady"] = steady
     return result

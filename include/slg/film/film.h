@@ -29,6 +29,7 @@
 #include <vector>
 #include <unordered_set>
 #include <thread>
+#include <mutex>
 
 #include <bcd/core/SamplesAccumulator.h>
 
@@ -361,7 +362,9 @@ public:
 	//--------------------------------------------------------------------------
 
 	void ResetTests();
-	void RunTests();
+	// filmMutex (if not null) is held while a test executes an image pipeline
+	// or reads the film channels: a film read can run on another thread
+	void RunTests(std::mutex *filmMutex = nullptr);
 	// The noise threshold halt test estimates the error of each pixel from
 	// the *_HALF channels (the samplers then skip the converged pixels)
 	static bool IsHalfBufferHaltEnabled(const luxrays::Properties &cfg);

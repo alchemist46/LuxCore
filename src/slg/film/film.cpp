@@ -1435,7 +1435,7 @@ void Film::ResetTests() {
 		noiseEstimation->Reset();
 }
 
-void Film::RunTests() {
+void Film::RunTests(std::mutex *filmMutex) {
 	if (statsConvergence == 1.f)
 		return;
 
@@ -1494,6 +1494,13 @@ void Film::RunTests() {
 	const bool convTestHalfBuffer = (convTest && convTest->UsesHalfBuffer());
 	const bool noiseEstimationRequired = (noiseEstimation && !convTestHalfBuffer &&
 			noiseEstimation->IsTestUpdateRequired());
+
+	// Only when a test is due: a film read (FilmImplSession::GetOutput(),
+	// from any thread with pyluxcore) holds the lock while it executes an
+	// image pipeline
+	std::unique_lock<std::mutex> filmLock;
+	if (filmMutex && (convTestRequired || noiseEstimationRequired))
+		filmLock = std::unique_lock<std::mutex>(*filmMutex);
 
 	// Execute the image pipelines read by the tests only when a test is due,
 	// and each one only once (an image pipeline can include a denoiser). The
