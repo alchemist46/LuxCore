@@ -195,12 +195,18 @@ void BSDF::Init(
 	hitPoint.dispersionTinted = false;
 
 	hitPoint.p = ray(t);
-	hitPoint.fixedDir = -ray.d;
+	// A unit vector: the frame of the phase function is built on it, and the
+	// direction sampled in a frame with a Z of length a has a length of
+	// about a^3, so the rounding error of a ray direction doubled at each
+	// scatter until the path stopped moving (a dense medium read 20% bright
+	// with the light sampling, 1% dark without)
+	const Vector dir = Normalize(ray.d);
+	hitPoint.fixedDir = -dir;
 
 	sceneObject = nullptr;
 	material = &volume;
 
-	hitPoint.geometryN = Normal(-ray.d);
+	hitPoint.geometryN = Normal(-dir);
 	hitPoint.interpolatedN = hitPoint.geometryN;
 	hitPoint.shadeN = hitPoint.geometryN;
 

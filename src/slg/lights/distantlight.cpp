@@ -123,6 +123,9 @@ Spectrum DistantLight::Illuminate(SceneConstRef scene, const BSDF &bsdf,
 	const Point shadowRayOrig = bsdf.GetRayOrigin(shadowRayDir);
 	const Vector toCenter(worldCenter - shadowRayOrig);
 	const float centerDistanceSquared = Dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistanceSquared > envRadius * envRadius)
+		return Spectrum();
 	const float approach = Dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrtf(Max(0.f, envRadius * envRadius -
 		centerDistanceSquared + approach * approach));

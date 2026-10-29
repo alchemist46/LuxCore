@@ -134,6 +134,13 @@ Spectrum ConstantInfiniteLight::Illuminate(SceneConstRef scene, const BSDF &bsdf
 	const Point shadowRayOrig = bsdf.GetRayOrigin(shadowRayDir);
 	const Vector toCenter(worldCenter - shadowRayOrig);
 	const float centerDistanceSquared = Dot(toCenter, toCenter);
+	// A point outside the sphere of the environment (a vertex of a volume
+	// that reaches beyond the scene) sees no light from it: the distance below
+	// would be negative (a transmittance above 1), and a ray sampled from the
+	// point never reaches the sphere either (its segment in the volume is
+	// infinite)
+	if (centerDistanceSquared > envRadius * envRadius)
+		return Spectrum();
 	const float approach = Dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrtf(Max(0.f, envRadius * envRadius -
 		centerDistanceSquared + approach * approach));

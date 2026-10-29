@@ -17,7 +17,8 @@ Keep the two lists in sync when a material is added.
 ## Pitfalls (found in earlier runs)
 
 - Set all four `path.pathdepth.*` values. The glossy depth of 4 capped the old
-  rough glass furnace. `furnace.py` sets 48 for each.
+  rough glass furnace. `furnace.py` sets 128 for each: the white medium
+  behind the glass (`glass-vol-s4`) reads 0.957 at 48, 0.9995 at 128.
 - Glass materials need `interiorior` set explicitly. Without it the IOR is 1
   and the furnace passes trivially.
 - Cloth reads the UVs; `furnace.py`'s sphere has them.

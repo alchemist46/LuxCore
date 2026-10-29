@@ -38,13 +38,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: subsurface sphere, PATHOCL, `batch.haltspp = 64`.
 - Notes: the general halt bias (paths in flight) was fixed on 2026-10-18; this is the opposite effect of the subsurface walks.
 
-### Dense scattering media behind a delta glass read wrong in the furnace
-- Found: 2026-10-18 (the sigma_s 1 loss, fixed 2026-10-21); this part 2026-10-21
-- Area: material, engine (volumes)
-- Problem: white furnace, a unit sphere with a white homogeneous interior (`multiscattering = 1`) behind a delta `glass` (kr = kt = 1, ior 1.5): at sigma_s 4 PATHCPU reads 1.11-1.16 and PATHOCL 0.91 (1024 spp, relative std 1.6-2.9 per pixel: fireflies). At sigma_s 1 both read 0.996-0.999 and the `null` boundary is lossless at both densities. The rough OpenPBR glass read 0.894 at sigma_s 4 (0.910 with roughness 0) before the fix: not re-measured. BIDIRCPU read 1.059 at sigma_s 1 and 1.145 at sigma_s 4 (2026-10-22, 256 spp), 0.998 and 1.077 (relative std 0.59, fireflies) since the volume vertex fix of 2026-10-29 (1024 spp). The OpenPBR glass with a white scattering interior (`openpbr-glass-depth-s1`, roughness 0.3, sigma_s 1) reads 1.072 with PATHCPU (relative std 1.2, fireflies; the same in the build before 2026-10-29) and 1.003 with BIDIRCPU (1024 spp, 64x64).
-- Reproduce: `tests/furnace/furnace.py PATHCPU glass-vol-s4 spp=1024` (and PATHOCL).
-- Notes: the sigma_s 1 loss (0.630) was the correlation of the volume's scatter decision with the glass lobe choice (both read the same pass-through event), fixed by remapping the event for the surface. The CPU and GPU disagree at sigma_s 4 in opposite directions, so it is not a shared estimator bias; the fireflies come from long internal paths with the lobe probability clamped to [0.25, 0.75].
-
 ### Caustics seen through a specular surface are missing with light tracing
 - Found: 2026-10-16
 - Area: engine (light tracing)
@@ -230,12 +223,12 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py BIDIRCPU roughglass-a0.5 spp=1024 size=64 light.maxdepth=1`; `C:/Users/Ricardo/lc-work/passthru`: `SPP=64 bash run.sh venvtest BIDIRCPU x null:L` against PATHCPU (`EXTRA="--set path.maxdepth=8 --set light.maxdepth=8"`).
 - Notes: SmallVCM limits the total path length in every technique, so the weights of a path that fits sum to 1 over techniques that all exist. A fix here: skip a connection (and a light-traced vertex) whose total length exceeds `path.maxdepth`, and run the light path to `path.maxdepth` too; `light.maxdepth` would then only be able to lower it, which needs the weights to leave out the missing strategies. It changes the image of every BiDir scene with paths longer than the depth, so not done without a decision. Compare BiDir with PATH at depths that the paths of the scene don't reach (32 here).
 
-### BiDir reads 1.5% dark on a dense scattering medium
+### A few paths leave a dense medium with the medium still in their volume list
 - Found: 2026-10-29
-- Area: engine (BIDIRCPU), volumes
-- Problem: white furnace, a unit sphere with a `null` boundary and a white homogeneous interior (`multiscattering = 1`) at sigma_s 4: BIDIRCPU reads 0.982 (orthographic camera) and 0.985 (perspective) against PATHCPU 0.999 and 1.005 (1024 spp, 64x64). At sigma_s 1 both read 1.000 (since the volume vertex fix of 2026-10-29; 1.033 before), and with single scattering (`multiscattering = 0`) BiDir and PATH agree at sigma_s 4 (0.255 / 0.256). The same at depth 200, so not the depth limits.
-- Reproduce: `tests/furnace/furnace.py BIDIRCPU null-vol-s4 spp=1024 size=64` against PATHCPU.
-- Notes: the MIS weights leave the distance sampling pdfs of the medium out (the same for every strategy, so it should cost noise, not bias). Ruled out: the hit distance across the null boundary (accumulated), the sampler dimensions (no overlap), the camera type.
+- Area: volumes (the boundary crossing)
+- Problem: a path that leaves a `null` sphere with a white scattering interior sometimes keeps the interior as its current volume: it then scatters in the empty space around the sphere until the depth limit, and its light samples from there go through the medium too. Seen with a probe in the eye path: vertices at a radius of 4 to 10 around the unit sphere (sigma_s 4, PATHCPU, 64x64, 256 spp, depth 400), a handful per render. They cost less than 1e-4 of the furnace (BSDF sampling only, `env=boxnodls`, depth 400: 1.0000), but before the environment lights stopped lighting points outside their sphere (2026-10-29) each of them was a firefly of up to 1e18.
+- Reproduce: `tests/furnace/furnace.py PATHCPU null-vol-s4 spp=256 size=64` with every depth at 400 and a probe that logs the radius of the volume vertices beyond depth 100.
+- Notes: not investigated. Suspects: a vertex closer to the boundary than the epsilon of the next ray's start (the ray misses the crossing), or a crossing at a shared edge of the mesh.
 
 ### BiDir with an orthographic camera close to the object reads 0.04% dark
 - Found: 2026-10-29

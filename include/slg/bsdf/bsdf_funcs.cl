@@ -209,7 +209,8 @@ OPENCL_FORCE_INLINE void BSDF_InitVolume(
 
 	const float3 hitPointP = rayOrig + t * rayDir;
 	VSTORE3F(hitPointP, &bsdf->hitPoint.p.x);
-	const float3 geometryN = -rayDir;
+	// A unit vector, see BSDF::Init()
+	const float3 geometryN = -normalize(rayDir);
 	VSTORE3F(geometryN, &bsdf->hitPoint.fixedDir.x);
 
 	bsdf->sceneObjectIndex = NULL_INDEX;

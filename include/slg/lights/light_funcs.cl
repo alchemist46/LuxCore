@@ -108,6 +108,9 @@ OPENCL_FORCE_INLINE float3 ConstantInfiniteLight_Illuminate(__global const Light
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, shadowRayDir);
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
@@ -199,6 +202,9 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_Illuminate(__global const LightSource *
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, worldCenter - VLOAD3F(&bsdf->hitPoint.p.x));
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
@@ -335,6 +341,9 @@ OPENCL_FORCE_INLINE float3 Sky2Light_Illuminate(__global const LightSource *sky2
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, shadowRayDir);
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
@@ -413,6 +422,9 @@ OPENCL_FORCE_INLINE float3 SunLight_Illuminate(__global const LightSource *sunLi
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, worldCenter - VLOAD3F(&bsdf->hitPoint.p.x));
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
@@ -980,6 +992,9 @@ OPENCL_FORCE_INLINE float3 SharpDistantLight_Illuminate(__global const LightSour
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, worldCenter - VLOAD3F(&bsdf->hitPoint.p.x));
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
@@ -1016,6 +1031,9 @@ OPENCL_FORCE_INLINE float3 DistantLight_Illuminate(__global const LightSource *d
 	const float3 pSurface = BSDF_GetRayOrigin(bsdf, worldCenter - VLOAD3F(&bsdf->hitPoint.p.x));
 	const float3 toCenter = worldCenter - pSurface;
 	const float centerDistance = dot(toCenter, toCenter);
+	// Outside the sphere of the environment: see ConstantInfiniteLight::Illuminate()
+	if (centerDistance > envRadius * envRadius)
+		return BLACK;
 	const float approach = dot(toCenter, shadowRayDir);
 	const float shadowRayDistance = approach + sqrt(max(0.f, envRadius * envRadius -
 		centerDistance + approach * approach));
