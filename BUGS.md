@@ -230,13 +230,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py PATHCPU null-vol-s4 spp=256 size=64` with every depth at 400 and a probe in the eye path that logs the first volume vertex outside the sphere (radius above 1.02) with its ray.
 - Notes: `RTC_SCENE_FLAG_ROBUST` would make the test watertight; its cost on the CPU scenes is not measured. The HIPRT side is not checked.
 
-### BiDir with an orthographic camera close to the object reads 0.04% dark
-- Found: 2026-10-29
-- Area: engine (BIDIRCPU), camera
-- Problem: the white furnace matte sphere reads 0.9995 with the orthographic camera 0.5 in front of the sphere (`lookat.orig = 0 -1.5 0`), 0.9999 at 4 and at 49 (BIDIRCPU 4096 spp, 48x48, relative std 0.001; PATHCPU 0.9999 at all three).
-- Reproduce: a script that renders `tests/furnace/furnace.py`'s `matte` case with `scene.camera.lookat.orig` moved (`render_case()` with the property in the material string).
-- Notes: after the orthographic MIS fix of 2026-10-29 the weights no longer depend on the camera distance, so it is something else that does: the hither clip, the eye ray's start, or the light tracing's visibility ray near the camera plane. Small; not investigated.
-
 ### The AMD OpenCL compiler crashes on the path kernel (Windows)
 - Found: 2026-10-26
 - Area: build, device (OpenCL)

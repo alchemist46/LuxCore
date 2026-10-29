@@ -527,10 +527,17 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 
 						const float cosThetaToLight = eyeVertex.bsdf.IsVolume() ? 1.f : AbsDot(shadowRay.d, eyeVertex.bsdf.hitPoint.shadeN);
 						const float directLightSamplingPdfW = directPdfW * lightPickPdf;
+						// An environmental light emits from a disk normal to its
+						// direction (emissionPdfW is per area of that disk), so no
+						// cosine at the light, as TraceLightPath(): with the one at
+						// its sphere the light paths got too much weight, more so
+						// in a small scene (an orthographic camera close to the
+						// object read 0.05% dark)
+						const float usedCosLight = light->IsEnvironmental() ? 1.f : cosThetaAtLight;
 
 						// emissionPdfA / directPdfA = emissionPdfW / directPdfW
 						const float weightLight = MIS(bsdfPdfW / directLightSamplingPdfW);
-						const float weightCamera = MIS(emissionPdfW * cosThetaToLight / (directPdfW * cosThetaAtLight)) *
+						const float weightCamera = MIS(emissionPdfW * cosThetaToLight / (directPdfW * usedCosLight)) *
 								(misVmWeightFactor + eyeVertex.dVCM + eyeVertex.dVC * MIS(bsdfRevPdfW));
 						// Disable MIS if we have gone trough a shadow transparent object
 						const float misWeight = shadowBsdf.hitPoint.throughShadowTransparency ?
