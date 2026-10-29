@@ -69,13 +69,22 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 		engine->maxLightPathDepth * sampleLightStepSize + // For each light vertex
 		engine->maxEyePathDepth * sampleEyeStepSize; // For each eye vertex
 
+	// A Sobol sampler walks a bucket of pixels, one per sample, and the
+	// samplers of every thread take a sample each per pass, all at the same
+	// offset of their buckets: with buckets of 16 pixels a render shorter than
+	// 16 passes (a small film at a few spp) left most pixels of every bucket
+	// without a sample. With one pixel per bucket the samplers of a pass take
+	// consecutive pixels. (One copy of the configuration for all the samplers
+	// of the thread, not one per RenderConfig::AllocSampler() call.)
+	Properties samplerCfg;
+	samplerCfg << engine->renderConfig.GetConfig() << Property("sampler.sobol.bucketsize")(1u);
 	for (u_int i = 0; i < samplers.size(); ++i) {
-		auto sampler = engine->renderConfig.AllocSampler(
+		auto sampler = Sampler::FromProperties(
+			samplerCfg,
 			rndGen,
-			engine->GetFilm(),
+			FilmPtr(&engine->GetFilm()),
 			engine->GetSampleSplatter(),
-			engine->samplerSharedData,
-			Properties()
+			engine->samplerSharedData
 		);
 		sampler->SetThreadIndex(threadIndex);
 		sampler->RequestSamples(PIXEL_NORMALIZED_AND_SCREEN_NORMALIZED, sampleSize);
@@ -168,9 +177,11 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 			eyeSampleResult.filmX = sampler->GetSample(0);
 			eyeSampleResult.filmY = sampler->GetSample(1);
 			Ray eyeRay;
+			// The lens samples of BiDirCPURenderThread::RenderFunc() (9 is
+			// one of Emit()'s)
 			camera.GenerateRay(time,
 					eyeSampleResult.filmX, eyeSampleResult.filmY, &eyeRay,
-					&eyeVertex.volInfo, sampler->GetSample(9), sampler->GetSample(10));
+					&eyeVertex.volInfo, sampler->GetSample(10), sampler->GetSample(11));
 
 			eyeVertex.bsdf.hitPoint.fixedDir = -eyeRay.d;
 			eyeVertex.throughput = Spectrum(1.f);
@@ -179,8 +190,10 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 			float cameraPdfW;
 			scene.GetCamera().GetPDF(eyeRay, 0.f, eyeSampleResult.filmX, eyeSampleResult.filmY, &cameraPdfW, nullptr);
 			eyeVertex.dVCM = MIS(1.f / cameraPdfW);
-			eyeVertex.dVC = 1.f;
-			eyeVertex.dVM = 1.f;
+			// As SmallVCM: no strategy ends a path at the camera vertex but
+			// the light tracing, which dVCM weighs
+			eyeVertex.dVC = 0.f;
+			eyeVertex.dVM = 0.f;
 
 			eyeVertex.depth = 1;
 			// The BSDF Scene::Intersect() initializes at each hit, pass-through
@@ -201,7 +214,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				Spectrum connectionThroughput, connectEmission;
 				const bool hit = scene.Intersect(
 					IntersectionDevicePtr(&device),
-					EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : GENERIC_RAY),
+					EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&eyeVertex.volInfo,
 					sampler->GetSample(sampleOffset),
 					&eyeRay, &eyeRayHit, &hitBsdf,
@@ -234,9 +247,15 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 					eyeSampleResult.depth = eyeRayHit.t;
 				}
 
-				// Update MIS constants
+				// Update MIS constants, as BiDirCPURenderThread::RenderFunc(): the
+				// camera ray's distance starts at the hither plane, and the
+				// parallel rays of an orthographic camera have no 1 / t^2
+				const float t_MIS = eyeSampleResult.firstPathVertex ?
+					(eyeRayHit.t + camera.clipHither) : eyeRayHit.t;
+				const bool orthographicFirstVertex = eyeSampleResult.firstPathVertex &&
+						(camera.GetType() == Camera::ORTHOGRAPHIC);
 				const float factor = 1.f / MIS(AbsDot(eyeVertex.bsdf.hitPoint.shadeN, eyeVertex.bsdf.hitPoint.fixedDir));
-				eyeVertex.dVCM *= MIS(eyeRayHit.t * eyeRayHit.t) * factor;
+				eyeVertex.dVCM *= (orthographicFirstVertex ? 1.f : MIS(t_MIS * t_MIS)) * factor;
 				eyeVertex.dVC *= factor;
 				eyeVertex.dVM *= factor;
 

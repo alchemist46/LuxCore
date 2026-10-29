@@ -392,8 +392,14 @@ std::unique_ptr<Sampler> RenderConfig::AllocSampler(
 	const std::shared_ptr<SamplerSharedData> sharedData,
 	const Properties &additionalProps
 ) const {
-	auto& props = *cfg;
-	props << additionalProps;
+	if (additionalProps.GetSize() == 0)
+		return Sampler::FromProperties(*cfg, rndGen, film, flmSplatter, sharedData);
+
+	// The additional properties are for this sampler only: written into the
+	// configuration they would apply to every sampler allocated after it, and
+	// the render threads allocate their samplers at the same time
+	Properties props;
+	props << *cfg << additionalProps;
 
 	return Sampler::FromProperties(props, rndGen, film, flmSplatter, sharedData);
 }
@@ -405,10 +411,7 @@ std::unique_ptr<Sampler> RenderConfig::AllocSampler(
 	const std::shared_ptr<SamplerSharedData> sharedData,
 	const Properties &additionalProps
 ) const {
-	auto& props = *cfg;
-	props << additionalProps;
-
-	return Sampler::FromProperties(props, rndGen, FilmPtr(&film), flmSplatter, sharedData);
+	return AllocSampler(rndGen, FilmPtr(&film), flmSplatter, sharedData, additionalProps);
 }
 
 RenderEngineUPtr RenderConfig::AllocRenderEngine() {

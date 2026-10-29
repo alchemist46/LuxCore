@@ -230,13 +230,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `C:/Users/Ricardo/lc-work/gt`: from `pyunittests/`, `ENGINES=LIGHTCPU python C:/Users/Ricardo/lc-work/gt/gtimg.py 1024 1 C:/Users/Ricardo/lc-work/gt/gt-matte.cfg out.npz seeds=4 lightstrategy.type=UNIFORM` against PATHCPU at depth 2.
 - Notes: not investigated. The hybrid (`path.hybridbackforward.enable`) uses the same loop for its caustic connections: check whether its caustic paths can be one segment longer than the eye paths' limit. The floor's -0.9% may be the near-light problem of the entry above or the light tracing's own.
 
-### BIDIRVMCPU reads 0.2 in the white furnace
-- Found: 2026-10-29
-- Area: engine (BIDIRVMCPU)
-- Problem: the furnace's white matte sphere reads 0.175 with the build of c0f396c1c and 0.219 with the total depth limit of 2026-10-29 (`path.maxdepth = 8`, `light.maxdepth = 7`, 64 spp, 48x48), with a relative std of 1.5-1.8 over the disk (BIDIRCPU and PATHCPU 0.9999); `null-vol-s4` at `path.maxdepth = 8` 0.111 against 0.751 for PATHCPU. A run takes 9-110 s for 64 spp and the process holds about 3 GB.
-- Reproduce: `tests/furnace/furnace.py BIDIRVMCPU matte spp=64 size=48 path.maxdepth=8 light.maxdepth=7`.
-- Notes: not investigated. BIDIRVMCPU has its own eye loop (`bidirvmcputhread.cpp`) that missed the BIDIRCPU fixes of 2026-10: its first eye vertex takes the 1 / t^2 of a perspective camera with an orthographic one (the furnace's camera) and no hither term, and it starts with `dVC = dVM = 1` where BIDIRCPU and SmallVCM start with 0. Other suspects: the merges' normalization (`vmNormalization` over `lightPathsCount` paths, one sampler each), the halt by spp with one eye sample per sampler and pass.
-
 ### Embree misses a ray through a shared edge of a mesh (CPU)
 - Found: 2026-10-29
 - Area: build (Embree), volumes
