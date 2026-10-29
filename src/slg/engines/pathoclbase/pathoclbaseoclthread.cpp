@@ -190,6 +190,7 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	intersectionDevice.FreeBuffer(&uvsBuff);
 	intersectionDevice.FreeBuffer(&colsBuff);
 	intersectionDevice.FreeBuffer(&alphasBuff);
+	intersectionDevice.FreeBuffer(&vertexAOVBuff);
 	intersectionDevice.FreeBuffer(&triAOVBuff);
 	intersectionDevice.FreeBuffer(&trianglesBuff);
 	intersectionDevice.FreeBuffer(&interpolatedTransformsBuff);
