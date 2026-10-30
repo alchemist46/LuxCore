@@ -186,7 +186,10 @@ OPENCL_FORCE_INLINE bool PathVolumeInfo_ContinueToTrace(__global PathVolumeInfo 
 		// 1) I'm entering an object and the interior volume has a
 		// lower priority than the current one (or is the same volume).
 		//
-		// 2) I'm exiting an object and I'm not leaving the current volume.
+		// 2) I'm exiting an object, I'm not leaving the current volume and
+		// the surface is not a real boundary: the material is NULL or its
+		// interior volume is another one, of lower priority than the current
+		// one (so the ray entering it went on by #1 too).
 
 		const bool intoObject = bsdf->hitPoint.intoObject;
 		const uint bsdfInteriorVolIndex = BSDF_GetMaterialInteriorVolume(bsdf
@@ -201,9 +204,14 @@ OPENCL_FORCE_INLINE bool PathVolumeInfo_ContinueToTrace(__global PathVolumeInfo 
 		//
 		// I have to calculate the potentially new currentVolume in order
 		// to check if I'm leaving the current one
-		if ((!intoObject) && (pvi->currentVolumeIndex != NULL_INDEX) &&
+		const uint currentVolumeIndex = pvi->currentVolumeIndex;
+		if ((!intoObject) && (currentVolumeIndex != NULL_INDEX) &&
 				(PathVolumeInfo_SimulateRemoveVolume(pvi, bsdfInteriorVolIndex
-					MATERIALS_PARAM) == pvi->currentVolumeIndex))
+					MATERIALS_PARAM) == currentVolumeIndex) &&
+				((mats[bsdf->materialIndex].type == NULLMAT) ||
+					((bsdfInteriorVolIndex != NULL_INDEX) && (bsdfInteriorVolIndex != currentVolumeIndex) &&
+						PathVolumeInfo_CompareVolumePriorities(currentVolumeIndex, bsdfInteriorVolIndex
+							MATERIALS_PARAM))))
 			return true;
 	}
 

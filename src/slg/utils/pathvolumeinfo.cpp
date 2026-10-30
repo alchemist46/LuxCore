@@ -200,8 +200,10 @@ bool PathVolumeInfo::ContinueToTrace(const BSDF &bsdf) const {
 		// 1) I'm entering an object and the interior volume has a
 		// lower priority than the current one (or is the same volume).
 		//
-		// 2) I'm exiting an object, the material is NULL and I'm not leaving
-		// the current volume.
+		// 2) I'm exiting an object, I'm not leaving the current volume and
+		// the surface is not a real boundary: the material is NULL or its
+		// interior volume is another one, of lower priority than the current
+		// one (so the ray entering it went on by #1 too).
 
 		VolumeConstPtr bsdfInteriorVol = bsdf.GetMaterialInteriorVolume();
 
@@ -214,8 +216,10 @@ bool PathVolumeInfo::ContinueToTrace(const BSDF &bsdf) const {
 		// I have to calculate the potentially new currentVolume in order
 		// to check if I'm leaving the current one
 		if ((!bsdf.hitPoint.intoObject) &&
-				(bsdf.GetMaterialType() == NULLMAT) &&
-				currentVolume && (SimulateRemoveVolume(bsdfInteriorVol) == currentVolume))
+				currentVolume && (SimulateRemoveVolume(bsdfInteriorVol) == currentVolume) &&
+				((bsdf.GetMaterialType() == NULLMAT) ||
+					(bsdfInteriorVol && (bsdfInteriorVol != currentVolume) &&
+						CompareVolumePriorities(currentVolume, bsdfInteriorVol))))
 			return true;
 	}
 
