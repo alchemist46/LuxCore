@@ -97,6 +97,11 @@ private:
 
 	bool isGroundBlack;
 
+	// The mean luminance of the cells of the distribution (with the ground,
+	// black or not), for GetPower(): the light strategies ask for it several
+	// times at every scene edit that moves geometry
+	float meanRadianceY;
+
 	luxrays::Distribution2DUPtr skyDistribution, skyDistributionMIS;
 
 	EnvLightVisibilityCacheUPtr visibilityMapCache;

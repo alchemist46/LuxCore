@@ -146,7 +146,7 @@ SkyLight2::SkyLight2() : localSunDir(0.f, 0.f, 1.f), turbidity(2.2f),
 		groundAlbedo(0.f, 0.f, 0.f), groundColor(0.f, 0.f, 0.f),
 		hasGround(false), hasGroundAutoScale(true),
 		distributionWidth(512), distributionHeight(256),
-		skyDistribution(nullptr), visibilityMapCache(nullptr) {
+		meanRadianceY(0.f), skyDistribution(nullptr), visibilityMapCache(nullptr) {
 	misCompensation = false;
 }
 
@@ -206,18 +206,23 @@ void SkyLight2::Preprocess() {
 	isGroundBlack = (hasGround && groundColor.Black());
 	
 	vector<float> data(distributionWidth * distributionHeight);
+	float radianceYSum = 0.f;
 	for (u_int y = 0; y < distributionHeight; ++y) {
 		for (u_int x = 0; x < distributionWidth; ++x) {
 			const u_int index = x + y * distributionWidth;
 
+			const float radianceY = ComputeRadiance(UniformSampleSphere(
+					(y + .5f) / distributionHeight,
+					(x + .5f) / distributionWidth)).Y();
+			radianceYSum += radianceY;
+
 			if (isGroundBlack && (y > distributionHeight / 2))
 				data[index] = 0.f;
 			else
-				data[index] = ComputeRadiance(UniformSampleSphere(
-						(y + .5f) / distributionHeight,
-						(x + .5f) / distributionWidth)).Y();
+				data[index] = radianceY;
 		}
 	}
+	meanRadianceY = radianceYSum / (distributionWidth * distributionHeight);
 
 	skyDistribution = std::make_unique<Distribution2D>(data, distributionWidth, distributionHeight);
 
@@ -324,17 +329,8 @@ SkyLight2::GetPreprocessedData(float *absoluteSunDirData, float *absoluteUpDirDa
 
 float SkyLight2::GetPower(SceneConstRef scene) const {
 	const float envRadius = GetEnvRadius(scene);
-	
-	float power = 0.f;
-	for (u_int y = 0; y < distributionHeight; ++y) {
-		for (u_int x = 0; x < distributionWidth; ++x)
-			power += ComputeRadiance(UniformSampleSphere(
-					(y + .5f) / distributionHeight,
-					(x + .5f) / distributionWidth)).Y();
-	}
-	power /= distributionWidth * distributionHeight;
 
-	return power * (4.f * M_PI * envRadius * envRadius) * 2.f * M_PI;
+	return meanRadianceY * (4.f * M_PI * envRadius * envRadius) * 2.f * M_PI;
 }
 
 Spectrum SkyLight2::GetRadiance(SceneConstRef scene,

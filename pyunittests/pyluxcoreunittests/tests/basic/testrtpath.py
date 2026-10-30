@@ -34,7 +34,16 @@ import array as pyarray
 
 FILM_SIZE = 128
 
-def CreateSession(engine="RTPATHOCL"):
+# The whole definition: a light defined again from some of its properties
+# gets the defaults for the others (a sky2 light from its colour alone)
+DISTANT_LIGHT = """
+	scene.lights.distl.type = sharpdistant
+	scene.lights.distl.color = %f 1.0 1.0
+	scene.lights.distl.gain = 10.0 10.0 10.0
+	scene.lights.distl.direction = 1.0 1.0 -1.0
+	"""
+
+def CreateSession(engine="RTPATHOCL", light=None):
 	cfgProps = pyluxcore.Properties()
 	sampler = "TILEPATHSAMPLER" if engine == "RTPATHOCL" else "RTPATHCPUSAMPLER"
 	cfgProps.SetFromString("""
@@ -55,11 +64,7 @@ def CreateSession(engine="RTPATHOCL"):
 		scene.camera.lookat.target = 0.0 0.0 0.0
 		scene.materials.whitematte.type = matte
 		scene.materials.whitematte.kd = 0.75 0.75 0.75
-		scene.lights.distl.type = sharpdistant
-		scene.lights.distl.color = 1.0 1.0 1.0
-		scene.lights.distl.gain = 10.0 10.0 10.0
-		scene.lights.distl.direction = 1.0 1.0 -1.0
-		""")
+		""" + (light if light is not None else DISTANT_LIGHT % 1.0))
 	scnProps.Set(BuildPlane("plane1", "whitematte"))
 
 	scene = pyluxcore.Scene()
@@ -174,8 +179,7 @@ class RTPathOCL(unittest.TestCase):
 			def Edit(i):
 				start = time.time()
 				session.BeginSceneEdit()
-				scene.Parse(pyluxcore.Properties().SetFromString(
-					"scene.lights.distl.color = %f 1.0 1.0" % (0.5 + 0.05 * i)))
+				scene.Parse(pyluxcore.Properties().SetFromString(DISTANT_LIGHT % (0.5 + 0.05 * i)))
 				session.EndSceneEdit()
 				return time.time() - start
 
@@ -197,6 +201,32 @@ class RTPathOCL(unittest.TestCase):
 				session.Resume()
 
 			self.assertLess(statistics.median(paused), statistics.median(running) + 0.02)
+		finally:
+			session.Stop()
+
+	def test_RTPathOCL_ObjectMoveWithSky(self):
+		# An object move preprocesses the lights again: the sky2 light's
+		# power (the light strategies ask for it 5 times) is computed once
+		# in its Preprocess(), not over its 512x256 cells each time (an edit
+		# took ~105 ms instead of ~14 ms)
+		session = CreateSession(light="scene.lights.sky.type = sky2\n")
+		session.Start()
+		try:
+			WaitForSamples(session, lambda c: c > 0)
+			scene = session.GetRenderConfig().GetScene()
+
+			edits = []
+			for i in range(6):
+				start = time.time()
+				session.BeginSceneEdit()
+				scene.UpdateObjectTransformation("plane1",
+						[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.01 * i, 0, 0, 1])
+				session.EndSceneEdit()
+				edits.append(time.time() - start)
+				time.sleep(0.05)
+
+			# The first edit can compile the kernels again
+			self.assertLess(statistics.median(edits[1:]), 0.05)
 		finally:
 			session.Stop()
 
