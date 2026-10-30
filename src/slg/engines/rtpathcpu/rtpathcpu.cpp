@@ -46,6 +46,7 @@ void RTPathCPURenderEngine::StartLockLess() {
 	threadsPauseMode = false;
 	firstFrameDone = false;
 	firstFrameThreadDoneCount = 0;
+	firstFrameStop = false;
 
 	PathCPURenderEngine::StartLockLess();
 }
@@ -55,6 +56,14 @@ void RTPathCPURenderEngine::StopLockLess() {
 	// otherwise it will hang on a thread barrier.
 	if(pauseMode)
 		Resume();
+
+	// Wake up the WaitNewFrame() calls waiting for the first frame
+	{
+		std::unique_lock<std::mutex> lock(firstFrameMutex);
+		firstFrameStop = true;
+	}
+	firstFrameCondition.notify_all();
+
 	PathCPURenderEngine::StopLockLess();
 }
 
@@ -62,11 +71,32 @@ void RTPathCPURenderEngine::WaitNewFrame() {
 	if (!firstFrameDone && !pauseMode && !editMode) {
 		// Wait for the signal from all the rendering threads
 		std::unique_lock<std::mutex> lock(firstFrameMutex);
-		while (firstFrameThreadDoneCount < renderThreads.size())
+		while (!firstFrameStop && (firstFrameThreadDoneCount < renderThreads.size()))
 			firstFrameCondition.wait(lock);
 
 		firstFrameDone = true;
 	}
+}
+
+u_longlong RTPathCPURenderEngine::WaitNewFrame(const u_longlong generation, const u_int timeoutMs) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+
+	if (!firstFrameDone && !pauseMode && !editMode) {
+		// The image is complete once all the rendering threads finished
+		// their first (zoomed) frame
+		std::unique_lock<std::mutex> lock(firstFrameMutex);
+		if (!firstFrameCondition.wait_until(lock, deadline, [this] {
+				return firstFrameStop || (firstFrameThreadDoneCount >= renderThreads.size()); }))
+			return GetFilmGeneration();
+
+		firstFrameDone = true;
+	}
+
+	const auto now = std::chrono::steady_clock::now();
+	const u_int leftMs = (deadline > now) ?
+		(u_int)std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count() : 0u;
+
+	return RenderEngine::WaitNewFrame(generation, leftMs);
 }
 
 void RTPathCPURenderEngine::PauseThreads() {

@@ -208,6 +208,8 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
         slg::ocl::TilePathSamplerSharedData samplerData;
 
         while (!stop_token.stop_requested()) {
+                bool frameRendered = false;
+
                 //------------------------------------------------------------------
                 // Render the tile (there is only one tile for each device
                 // in RTPATHOCL)
@@ -245,6 +247,7 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 
                         // There is only one tile for each device in RTPATHOCL
                         tileWork.Reset();
+                        frameRendered = true;
 
                         //const double t1 = WallClockTime();
                         //SLG_LOG("[RTPathOCLRenderThread::" << threadIndex << "] Tile rendering time: " + ToString((u_int)((t1 - t0) * 1000.0)) + "ms");
@@ -256,6 +259,11 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                 //------------------------------------------------------------------
 
                 if (threadIndex == 0) {
+                        // Every thread merged its frame in the film (the
+                        // frame barrier above)
+                        if (frameRendered)
+                                engine->NotifyFilmUpdated();
+
                         //--------------------------------------------------------------
                         // Update frame time
                         //--------------------------------------------------------------

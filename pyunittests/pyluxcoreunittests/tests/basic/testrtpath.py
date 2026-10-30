@@ -17,9 +17,11 @@
 # limitations under the License.
 ################################################################################
 
-# RTPATHOCL pause, resume and camera edits (ROADMAP E6 (a))
+# RTPATHOCL pause, resume and camera edits (ROADMAP E6 (a)); the film
+# generation and WaitNewFrame(generation, timeoutMs) (E6 (c))
 
 import statistics
+import threading
 import time
 import unittest
 import pyluxcore
@@ -32,18 +34,19 @@ import array as pyarray
 
 FILM_SIZE = 128
 
-def CreateSession():
+def CreateSession(engine="RTPATHOCL"):
 	cfgProps = pyluxcore.Properties()
+	sampler = "TILEPATHSAMPLER" if engine == "RTPATHOCL" else "RTPATHCPUSAMPLER"
 	cfgProps.SetFromString("""
-		renderengine.type = RTPATHOCL
-		sampler.type = TILEPATHSAMPLER
+		renderengine.type = %s
+		sampler.type = %s
 		film.width = %d
 		film.height = %d
 		film.opencl.enable = 0
 		opencl.native.threads.count = 0
 		film.imagepipelines.0.0.type = TONEMAP_LINEAR
 		film.imagepipelines.0.0.scale = 1.0
-		""" % (FILM_SIZE, FILM_SIZE))
+		""" % (engine, sampler, FILM_SIZE, FILM_SIZE))
 	cfgProps.Set(LuxCoreTest.customConfigProps)
 
 	scnProps = pyluxcore.Properties()
@@ -76,6 +79,10 @@ def WaitForSamples(session, condition, timeout=10.0):
 			return count
 		time.sleep(0.001)
 	raise AssertionError("No new samples in %g s" % timeout)
+
+def FilmGeneration(session):
+	session.UpdateStats()
+	return session.GetStats().Get("stats.renderengine.film.generation").GetUnsignedLongLong()
 
 def ImageMean(session):
 	film = session.GetFilm()
@@ -192,3 +199,117 @@ class RTPathOCL(unittest.TestCase):
 			self.assertLess(statistics.median(paused), statistics.median(running) + 0.02)
 		finally:
 			session.Stop()
+
+def CheckFilmGeneration(test, session):
+	# The generation moves as the frames arrive, WaitNewFrame() returns as
+	# soon as it moved, and it stays still while paused
+	generation = session.WaitNewFrame(0, 10000)
+	test.assertGreater(generation, 0)
+	for i in range(5):
+		newGeneration = session.WaitNewFrame(generation, 5000)
+		test.assertGreater(newGeneration, generation)
+		generation = newGeneration
+	test.assertGreaterEqual(FilmGeneration(session), generation)
+
+	session.Pause()
+	# Let the frame in flight end
+	time.sleep(0.1)
+	generation = FilmGeneration(session)
+	start = time.time()
+	test.assertEqual(session.WaitNewFrame(generation, 100), generation)
+	test.assertGreaterEqual(time.time() - start, 0.09)
+	test.assertEqual(FilmGeneration(session), generation)
+
+	session.Resume()
+	start = time.time()
+	test.assertGreater(session.WaitNewFrame(generation, 5000), generation)
+	test.assertLess(time.time() - start, 1.0)
+
+	# Stop() ends a wait in another thread
+	session.Pause()
+	time.sleep(0.1)
+	generation = FilmGeneration(session)
+	waitTime = []
+	def Wait():
+		start = time.time()
+		session.WaitNewFrame(generation, 10000)
+		waitTime.append(time.time() - start)
+	waiter = threading.Thread(target=Wait)
+	waiter.start()
+	time.sleep(0.1)
+	session.Stop()
+	waiter.join(5.0)
+	test.assertFalse(waiter.is_alive())
+	test.assertLess(waitTime[0], 2.0)
+
+@unittest.skipUnless(LuxCoreHasOpenCL(), "no OpenCL/HIP/CUDA device")
+class RTPathOCLFilmGeneration(unittest.TestCase):
+	def test_RTPathOCL_FilmGeneration(self):
+		session = CreateSession()
+		session.Start()
+		try:
+			CheckFilmGeneration(self, session)
+		finally:
+			if session.IsStarted():
+				session.Stop()
+
+	def test_RTPathOCL_FilmGenerationPerFrame(self):
+		# One generation per frame merged in the film: a new generation
+		# has new samples
+		session = CreateSession()
+		session.Start()
+		try:
+			generation = session.WaitNewFrame(0, 10000)
+			count = SampleCount(session)
+			for i in range(5):
+				generation = session.WaitNewFrame(generation, 5000)
+				newCount = SampleCount(session)
+				self.assertNotEqual(newCount, count)
+				count = newCount
+		finally:
+			session.Stop()
+
+class RTPathCPUFilmGeneration(unittest.TestCase):
+	def test_RTPathCPU_FilmGeneration(self):
+		session = CreateSession("RTPATHCPU")
+		session.Start()
+		try:
+			CheckFilmGeneration(self, session)
+		finally:
+			if session.IsStarted():
+				session.Stop()
+
+	def test_RTPathCPU_StopEndsFirstFrameWait(self):
+		# WaitNewFrame() waits for every render thread's first frame: Stop()
+		# from another thread ends the wait (it waited forever before when
+		# the threads stopped before they all signalled)
+		cfgProps = pyluxcore.Properties()
+		cfgProps.SetFromString("""
+			renderengine.type = RTPATHCPU
+			sampler.type = RTPATHCPUSAMPLER
+			film.width = 4000
+			film.height = 4000
+			rtpathcpu.zoomphase.size = 1
+			""")
+		scnProps = pyluxcore.Properties()
+		scnProps.SetFromString("""
+			scene.camera.lookat.orig = 0.0 5.0 2.0
+			scene.camera.lookat.target = 0.0 0.0 0.0
+			scene.materials.whitematte.type = matte
+			scene.materials.whitematte.kd = 0.75 0.75 0.75
+			scene.lights.distl.type = sharpdistant
+			scene.lights.distl.direction = 1.0 1.0 -1.0
+			""")
+		scnProps.Set(BuildPlane("plane1", "whitematte"))
+		scene = pyluxcore.Scene()
+		scene.Parse(scnProps)
+
+		for i in range(3):
+			session = pyluxcore.RenderSession(pyluxcore.RenderConfig(cfgProps, scene))
+			session.Start()
+			waiter = threading.Thread(target=session.WaitNewFrame, daemon=True)
+			waiter.start()
+			time.sleep(0.05)
+			session.Stop()
+			waiter.join(5.0)
+			self.assertFalse(waiter.is_alive())

@@ -1610,6 +1610,25 @@ public:
 	virtual void WaitNewFrame() = 0;
 
 	/*!
+	 * \brief Waits for a film update: until the film generation (the
+	 * "stats.renderengine.film.generation" statistic) differs from
+	 * generation, the rendering stops or timeoutMs milliseconds passed.
+	 * The film generation changes every time the film gets new samples:
+	 * at each frame with RTPATHOCL, at each film update (UpdateStats()) with
+	 * PATHOCL, as the samples arrive with the CPU engines (RTPATHCPU waits
+	 * for the first frame after an edit too). It doesn't change while the
+	 * session is paused.
+	 *
+	 * \param generation is the film generation the caller has already seen.
+	 * \param timeoutMs is the longest wait in milliseconds.
+	 *
+	 * \return the current film generation, different from generation when
+	 * the film got new samples.
+	 */
+	virtual unsigned long long WaitNewFrame(const unsigned long long generation,
+			const unsigned int timeoutMs) = 0;
+
+	/*!
 	 * \brief Returns a reference to a Film with the output of the rendering.
 	 *
 	 * \return the reference to the Film.

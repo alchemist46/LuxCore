@@ -2788,7 +2788,9 @@ PYBIND11_MODULE(pyluxcore, m) {
     .def("GetFilm", &luxcore::detail::RenderSessionImpl::GetFilmPtr)
     .def("UpdateStats", &luxcore::detail::RenderSessionImpl::UpdateStats, ReleaseGIL())
     .def("GetStats", &luxcore::detail::RenderSessionImpl::GetStats)
-    .def("WaitNewFrame", &luxcore::detail::RenderSessionImpl::WaitNewFrame, ReleaseGIL())
+    .def("WaitNewFrame", py::overload_cast<>(&luxcore::detail::RenderSessionImpl::WaitNewFrame), ReleaseGIL())
+    .def("WaitNewFrame", py::overload_cast<const unsigned long long, const unsigned int>(
+        &luxcore::detail::RenderSessionImpl::WaitNewFrame), py::arg("generation"), py::arg("timeoutMs"), ReleaseGIL())
     .def("WaitForDone", &luxcore::detail::RenderSessionImpl::WaitForDone, ReleaseGIL())
     .def("HasDone", &luxcore::detail::RenderSessionImpl::HasDone)
     .def("Parse", &luxcore::detail::RenderSessionImpl::Parse, ReleaseGIL())

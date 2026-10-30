@@ -64,6 +64,7 @@ public:
 	virtual std::string GetTag() const { return GetObjectTag(); }
 
 	void WaitNewFrame();
+	virtual u_longlong WaitNewFrame(const u_longlong generation, const u_int timeoutMs);
 	virtual void Pause();
 	virtual void Resume();
 
@@ -115,6 +116,8 @@ protected:
     std::condition_variable firstFrameCondition;
 	u_int firstFrameThreadDoneCount;
 	bool firstFrameDone;
+	// Set by StopLockLess(): the threads may end before they all signal
+	bool firstFrameStop;
 
 	std::barrier<completion_t> *threadsSyncBarrier;
 	std::atomic<bool> threadsPauseMode;

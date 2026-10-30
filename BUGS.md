@@ -34,6 +34,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `pyunittests/pyluxcoreunittests/tests/basic/testrtpath.py` `CreateSession()` (RTPATHOCL 128x128, HIP), time the edit of `test_RTPathOCL_SceneEditWhilePaused`. From the LuxCore log clock: "Parsing lights" to "Preprocessing light source definitions" ~15 ms, from there to the light tree line ~51 ms (the tree, with 0 tree lights, "built in 0.0127 secs"), then ~13 ms to "Compile Lights" (which takes 0 ms). The device then uploads a 1028 KB env. light distributions buffer for the distant light.
 - Notes: not looked into. Suspects: fixed per-edit costs of the light preprocessing (the parallel passes of the 18M-light work, the light tree's learning grid, the distributions) that do not scale down to one light. Measured on the build with ROADMAP E6 (a); before it, the edit also waited for render thread 0's 100 ms pause sleep.
 
+### WaitNewFrame(generation, timeoutMs) sees the CPU engines' samples one Windows timer tick late
+- Found: 2026-10-30
+- Area: engine (film generation, ROADMAP E6 (c))
+- Problem: for the engines that don't notify their film updates (every engine but RTPATHOCL), a wait polls the film sample count every 5 ms, and on Windows a 5 ms `condition_variable::wait_until()` sleeps a whole 15.6 ms timer tick. A caller that waits with nothing else to do sees RTPATHCPU's new samples 14 ms apart (median, 31 ms at most) though they arrive continuously. A viewer that reads the film between two waits finds the count already changed and gets no delay.
+- Reproduce: RTPATHCPU at 1000x700 on a one-plane scene, a loop of `generation = session.WaitNewFrame(generation, 1000)` for 2 s: 140 generations, gaps of 14 ms.
+- Notes: a notification from the RTPATHCPU sampler where it adds its sample counts (`rtpathcpusampler.cpp`, every few lines in each thread) would take the generation mutex tens of thousands of times per second; a waiter count checked before notifying would avoid that. `timeBeginPeriod(1)` is process-wide and not ours to set.
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests

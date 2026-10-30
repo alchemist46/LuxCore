@@ -20,6 +20,9 @@
 #define	_SLG_RENDERENGINE_H
 
 #include <deque>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <boost/heap/priority_queue.hpp>
 #include <functional>
 
@@ -83,6 +86,14 @@ public:
 
 	void UpdateFilm();
 	virtual void WaitNewFrame() { }
+
+	// The film generation changes every time the film gets new samples: at
+	// each frame of the engines that notify it (RTPATHOCL), else when the
+	// film sample count changed since the last call
+	u_longlong GetFilmGeneration();
+	// Waits until the film generation differs from generation, the engine
+	// stops or timeoutMs passed; returns the film generation
+	virtual u_longlong WaitNewFrame(const u_longlong generation, const u_int timeoutMs);
 
 	virtual RenderEngineType GetType() const = 0;
 	virtual std::string GetTag() const = 0;
@@ -192,6 +203,11 @@ protected:
 	virtual void UpdateFilmLockLess() = 0;
 	virtual void UpdateCounters() = 0;
 
+	// True for the engines that call NotifyFilmUpdated() after each frame;
+	// the film generation of the others follows the film sample count
+	virtual bool NotifiesFilmUpdates() const { return false; }
+	void NotifyFilmUpdated();
+
 	std::recursive_mutex engineMutex;
 	luxrays::ContextUPtr ctx;
 	std::vector<std::reference_wrapper<luxrays::DeviceDescription>> selectedDeviceDescs;
@@ -222,9 +238,16 @@ protected:
 	void ResetSampleSplatter();
 
 private:
+	u_longlong GetFilmGenerationLockLess();
+
 	// Owned properties
 	FilterUPtr pixelFilter;
 	FilmSampleSplatterUPtr sampleSplatter;
+
+	std::mutex filmGenerationMutex;
+	std::condition_variable filmGenerationCondition;
+	u_longlong filmGeneration;
+	double filmGenerationSampleCount;
 };
 
 }

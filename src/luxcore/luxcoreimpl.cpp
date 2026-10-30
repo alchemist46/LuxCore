@@ -1956,6 +1956,17 @@ void RenderSessionImpl::WaitNewFrame() {
 	API_END();
 }
 
+unsigned long long RenderSessionImpl::WaitNewFrame(const unsigned long long generation,
+		const unsigned int timeoutMs) {
+	API_BEGIN("{}, {}", generation, timeoutMs);
+
+	const unsigned long long result = renderSession->renderEngine->WaitNewFrame(generation, timeoutMs);
+
+	API_RETURN("{}", result);
+
+	return result;
+}
+
 LuxFilmRef RenderSessionImpl::GetFilm() {
 	API_BEGIN_NOARGS();
 
@@ -2025,6 +2036,7 @@ void RenderSessionImpl::UpdateStats() {
 	stats->Set(Property("stats.renderengine.pass.light")(renderSession->renderEngine->GetLightPass()));
 	stats->Set(Property("stats.renderengine.time")(renderSession->renderEngine->GetRenderingTime()));
 	stats->Set(Property("stats.renderengine.convergence")(renderSession->film->GetConvergence()));
+	stats->Set(Property("stats.renderengine.film.generation")(renderSession->renderEngine->GetFilmGeneration()));
 
 	// Intersection devices statistics
 	const auto idevices = renderSession->renderEngine->GetIntersectionDevices();

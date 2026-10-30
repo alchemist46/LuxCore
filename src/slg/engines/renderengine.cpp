@@ -54,7 +54,9 @@ RenderEngine::RenderEngine(RenderConfigRef cfg) :
 	pixelFilter(nullptr),
 	started(false),
 	editMode(false),
-	pauseMode(false)
+	pauseMode(false),
+	filmGeneration(0),
+	filmGenerationSampleCount(0.0)
 {
 
 	if (renderConfig.GetConfig().IsDefined("renderengine.seed")) {
@@ -152,6 +154,12 @@ void RenderEngine::Stop() {
 		UpdateFilmLockLess();
 	}
 
+	// Wake up the WaitNewFrame() calls
+	{
+		std::lock_guard<std::mutex> lock(filmGenerationMutex);
+	}
+	filmGenerationCondition.notify_all();
+
 	pixelFilter.reset();
 }
 
@@ -224,6 +232,51 @@ void RenderEngine::UpdateFilm() {
 		UpdateCounters();
 
 		film->RunTests(filmMutex);
+	}
+}
+
+void RenderEngine::NotifyFilmUpdated() {
+	{
+		std::lock_guard<std::mutex> lock(filmGenerationMutex);
+		++filmGeneration;
+	}
+	filmGenerationCondition.notify_all();
+}
+
+u_longlong RenderEngine::GetFilmGenerationLockLess() {
+	if (!NotifiesFilmUpdates() && film) {
+		const double sampleCount = film->GetTotalSampleCount();
+		if (sampleCount != filmGenerationSampleCount) {
+			filmGenerationSampleCount = sampleCount;
+			++filmGeneration;
+		}
+	}
+
+	return filmGeneration;
+}
+
+u_longlong RenderEngine::GetFilmGeneration() {
+	std::lock_guard<std::mutex> lock(filmGenerationMutex);
+
+	return GetFilmGenerationLockLess();
+}
+
+u_longlong RenderEngine::WaitNewFrame(const u_longlong generation, const u_int timeoutMs) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+
+	std::unique_lock<std::mutex> lock(filmGenerationMutex);
+	for (;;) {
+		const u_longlong current = GetFilmGenerationLockLess();
+		if ((current != generation) || !started)
+			return current;
+
+		const auto now = std::chrono::steady_clock::now();
+		if (now >= deadline)
+			return current;
+
+		// The film sample count of the engines that don't notify is polled
+		filmGenerationCondition.wait_until(lock, NotifiesFilmUpdates() ?
+			deadline : (std::min)(deadline, now + std::chrono::milliseconds(5)));
 	}
 }
 

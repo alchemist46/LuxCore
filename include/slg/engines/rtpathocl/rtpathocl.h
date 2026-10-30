@@ -91,6 +91,7 @@ public:
 	virtual void EndFilmEdit(FilmRef film, std::mutex *flmMutex);
 
 	virtual void WaitNewFrame();
+	using RenderEngine::WaitNewFrame;
 
 	//--------------------------------------------------------------------------
 	// Static methods used by RenderEngineRegistry
@@ -117,6 +118,8 @@ protected:
 
 	virtual void InitGPUTaskConfiguration();
 	virtual bool IsRTMode() const { return true; }
+	// Render thread 0 notifies each frame merged in the film
+	virtual bool NotifiesFilmUpdates() const { return true; }
 
 	virtual PathOCLBaseOCLRenderThread *CreateOCLThread(const u_int index,
 			luxrays::HardwareIntersectionDeviceRef device);

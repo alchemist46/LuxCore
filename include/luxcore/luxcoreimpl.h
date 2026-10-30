@@ -636,6 +636,8 @@ public:
 	bool HasDone() const override;
 	void WaitForDone() const override;
 	void WaitNewFrame() override;
+	unsigned long long WaitNewFrame(const unsigned long long generation,
+			const unsigned int timeoutMs) override;
 
 	LuxFilmRef GetFilm() override;
 	FilmImplRPtr GetFilmPtr();

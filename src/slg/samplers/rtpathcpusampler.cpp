@@ -155,7 +155,7 @@ void RTPathCPUSampler::NextPixel() {
 
 				++(engine->firstFrameThreadDoneCount);
 
-				engine->firstFrameCondition.notify_one();
+				engine->firstFrameCondition.notify_all();
 				
 				firstFrameDone = true;
 			}
