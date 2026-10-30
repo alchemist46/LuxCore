@@ -1241,15 +1241,13 @@ void CompiledScene::CompileMaterials() {
 				mat->glossytranslucent.nubfTexIndex = scene.GetTextures().GetTextureIndex(nubfTex);
 				mat->glossytranslucent.nvbfTexIndex = scene.GetTextures().GetTextureIndex(nvbfTex);
 
-				auto depthTex = gtm.GetDepth();
 				mat->glossytranslucent.kaTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetKa());
-				mat->glossytranslucent.depthTexIndex = scene.GetTextures().GetTextureIndex(depthTex);
+				mat->glossytranslucent.depthTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetDepth());
 				mat->glossytranslucent.kabfTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetKa_bf());
-				mat->glossytranslucent.depthbfTexIndex = scene.GetTextures().GetTextureIndex(depthTex);
+				mat->glossytranslucent.depthbfTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetDepth_bf());
 
-				auto indexTex = gtm.GetIndex();
-				mat->glossytranslucent.indexTexIndex = scene.GetTextures().GetTextureIndex(indexTex);
-				mat->glossytranslucent.indexbfTexIndex = scene.GetTextures().GetTextureIndex(indexTex);
+				mat->glossytranslucent.indexTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetIndex());
+				mat->glossytranslucent.indexbfTexIndex = scene.GetTextures().GetTextureIndex(gtm.GetIndex_bf());
 
 				mat->glossytranslucent.multibounce = gtm.IsMultibounce() ? 1 : 0;
 				mat->glossytranslucent.multibouncebf = gtm.IsMultibounce_bf() ? 1 : 0;
