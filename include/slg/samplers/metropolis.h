@@ -144,6 +144,13 @@ private:
 	MetropolisSampleType lastSampleAcceptance;
 	float lastSampleWeight;
 
+	// The bootstrap of a chain of screen normalized samples: its first
+	// samples are uniform, splatted as plain samples, and the chain starts
+	// from one of them picked in proportion to its luminance (the current
+	// sample holds the pick meanwhile)
+	u_int bootstrapCount;
+	double bootstrapLuminanceSum;
+
 	u_int largeMutationCount;
 	
 	bool isLargeMutation;

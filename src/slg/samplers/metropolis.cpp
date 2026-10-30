@@ -80,6 +80,7 @@ MetropolisSampler::MetropolisSampler(
 		sharedData(dynamic_pointer_cast<MetropolisSamplerSharedData>(samplerSharedData)),
 		maxRejects(maxRej),	largeMutationProbability(pLarge), imageMutationRange(imgRange),
 		addOnlyCuastics(addOnlyCstcs),
+		bootstrapCount(0), bootstrapLuminanceSum(0.0),
 		largeMutationCount(0) {
 }
 
@@ -183,6 +184,16 @@ void MetropolisSampler::RequestSamples(const SampleType smplType, const u_int si
 	stamp = 1;
 	currentStamp = 1;
 	currentSampleResults.resize(0);
+
+	// The splats of the chain are weighted with the image luminance
+	// estimated so far, and a chain starts from a uniform sample: early in a
+	// run, or in a short one, both read dark where the bright paths are rare
+	// (the hybrid's caustics: -5% at 256 spp on a small film). Screen
+	// normalized samples are divided by their count, so plain samples can
+	// be mixed in: the bootstrap renders those, adds them to the luminance
+	// estimate and picks the start of the chain among them
+	bootstrapCount = (sampleType == SCREEN_NORMALIZED_ONLY) ? 4096 : 0;
+	bootstrapLuminanceSum = 0.0;
 }
 
 float MetropolisSampler::GetSample(const u_int index) {
@@ -300,90 +311,124 @@ void MetropolisSampler::NextSample(const vector<SampleResult> &sampleResults) {
 	// Define the probability of large mutations.
 	const float currentLargeMutationProbability = (sharedData->cooldown) ? .5 : largeMutationProbability;
 
-	// Calculate accept probability from old and new image sample
-	float accProb;
-	if ((currentLuminance > 0.f) && (consecRejects < maxRejects))
-		accProb = Min<float>(1.f, newLuminance / currentLuminance);
-	else
-		accProb = 1.f;
-	const float newWeight = accProb + (isLargeMutation ? 1.f : 0.f);
-	weight += 1.f - accProb;
-
-	const float rndVal = rndGen->floatValue();
-
-	/*if (!cooldown && (currentSampleResult.size() > 0) && (sampleResults.size() > 0))
-		printf("[%d] Current: (%f, %f, %f) [%f] Proposed: (%f, %f, %f) [%f] accProb: %f <%f>\n",
-				consecRejects,
-				currentSampleResult[0].radiance[0].c[0], currentSampleResult[0].radiance[0].c[1], currentSampleResult[0].radiance[0].c[2], weight,
-				sampleResults[0].radiance[0].c[0], sampleResults[0].radiance[0].c[1], sampleResults[0].radiance[0].c[2], newWeight,
-				accProb, rndVal);*/
-	
-	// Try or force accepting of the new sample
-	if ((accProb == 1.f) || (rndVal < accProb)) {
-		/*if (!cooldown)
-			printf("\t\tACCEPTED !\n");*/
-
-		// Add accumulated SampleResult of previous reference sample
-		const float norm = weight / (currentLuminance * invMeanIntensity + currentLargeMutationProbability);
-		if (norm > 0.f) {
-			/*if (!cooldown)
-				printf("\t\tContrib: (%f, %f, %f) [%f] consecutiveRejects: %d\n",
-						currentSampleResult[0].radiance[0].c[0],
-						currentSampleResult[0].radiance[0].c[1],
-						currentSampleResult[0].radiance[0].c[2],
-						norm, consecRejects);*/
-
-			if (film) {
-				for (auto const &sr : currentSampleResults) {
-					if (!addOnlyCuastics || (sr.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr.isCaustic))
-						AtomicAddSampleToFilm(sr, norm);
-				}
+	if (bootstrapCount > 0) {
+		// A plain sample of the bootstrap, splatted with weight 1
+		if (film) {
+			for (auto const &sr : sampleResults) {
+				if (!addOnlyCuastics || (sr.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr.isCaustic))
+					AtomicAddSampleToFilm(sr, 1.f);
 			}
 		}
 
 		lastSampleAcceptance = METRO_ACCEPTED;
-		lastSampleWeight = norm;
+		lastSampleWeight = 1.f;
 
-		// Save new contributions for reference
-		weight = newWeight;
-		currentStamp = stamp;
-		currentLuminance = newLuminance;
-		std::copy_n(samples.begin(), requestedSamples, currentSamples.begin());
-		std::copy_n(sampleStamps.begin(), requestedSamples, currentSampleStamps.begin());
-		currentSampleResults = sampleResults;
-
-		consecRejects = 0;
-	} else {
-		/*if (!cooldown)
-			printf("\t\tREJECTED !\n");*/
-		
-		// Add contribution of new sample before rejecting it
-		const float norm = newWeight / (newLuminance * invMeanIntensity + currentLargeMutationProbability);
-		if (norm > 0.f) {
-			/*if (!cooldown)
-				printf("\t\tContrib: (%f, %f, %f) [%f] consecutiveRejects: %d\n",
-						sampleResults[0].radiance[0].c[0],
-						sampleResults[0].radiance[0].c[1],
-						sampleResults[0].radiance[0].c[2],
-						norm, consecRejects);*/
-
-			if (film) {
-				for (auto const &sr : sampleResults) {
-					if (!addOnlyCuastics || (sr.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr.isCaustic))
-						AtomicAddSampleToFilm(sr, norm);
-				}
-			}
+		// The start of the chain, picked in proportion to the luminance
+		// (weighted reservoir sampling)
+		bootstrapLuminanceSum += newLuminance;
+		if ((newLuminance > 0.f) && (rndGen->floatValue() * bootstrapLuminanceSum < newLuminance)) {
+			currentStamp = stamp;
+			currentLuminance = newLuminance;
+			std::copy_n(samples.begin(), requestedSamples, currentSamples.begin());
+			std::copy_n(sampleStamps.begin(), requestedSamples, currentSampleStamps.begin());
+			currentSampleResults = sampleResults;
 		}
 
-		lastSampleAcceptance = METRO_REJECTED;
-		lastSampleWeight = norm;
+		if (--bootstrapCount == 0) {
+			// The chain starts from the pick, whose contribution is in the
+			// film already
+			weight = 0.f;
+			consecRejects = 0;
+			stamp = currentStamp;
+			std::copy_n(currentSamples.begin(), requestedSamples, samples.begin());
+			std::copy_n(currentSampleStamps.begin(), requestedSamples, sampleStamps.begin());
+		}
+	} else {
+		// Calculate accept probability from old and new image sample
+		float accProb;
+		if ((currentLuminance > 0.f) && (consecRejects < maxRejects))
+			accProb = Min<float>(1.f, newLuminance / currentLuminance);
+		else
+			accProb = 1.f;
+		const float newWeight = accProb + (isLargeMutation ? 1.f : 0.f);
+		weight += 1.f - accProb;
 
-		// Restart from previous reference
-		stamp = currentStamp;
-		std::copy_n(currentSamples.begin(), requestedSamples, samples.begin());
-		std::copy_n(currentSampleStamps.begin(), requestedSamples, sampleStamps.begin());
+		const float rndVal = rndGen->floatValue();
 
-		++consecRejects;
+		/*if (!cooldown && (currentSampleResult.size() > 0) && (sampleResults.size() > 0))
+			printf("[%d] Current: (%f, %f, %f) [%f] Proposed: (%f, %f, %f) [%f] accProb: %f <%f>\n",
+					consecRejects,
+					currentSampleResult[0].radiance[0].c[0], currentSampleResult[0].radiance[0].c[1], currentSampleResult[0].radiance[0].c[2], weight,
+					sampleResults[0].radiance[0].c[0], sampleResults[0].radiance[0].c[1], sampleResults[0].radiance[0].c[2], newWeight,
+					accProb, rndVal);*/
+	
+		// Try or force accepting of the new sample
+		if ((accProb == 1.f) || (rndVal < accProb)) {
+			/*if (!cooldown)
+				printf("\t\tACCEPTED !\n");*/
+
+			// Add accumulated SampleResult of previous reference sample
+			const float norm = weight / (currentLuminance * invMeanIntensity + currentLargeMutationProbability);
+			if (norm > 0.f) {
+				/*if (!cooldown)
+					printf("\t\tContrib: (%f, %f, %f) [%f] consecutiveRejects: %d\n",
+							currentSampleResult[0].radiance[0].c[0],
+							currentSampleResult[0].radiance[0].c[1],
+							currentSampleResult[0].radiance[0].c[2],
+							norm, consecRejects);*/
+
+				if (film) {
+					for (auto const &sr : currentSampleResults) {
+						if (!addOnlyCuastics || (sr.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr.isCaustic))
+							AtomicAddSampleToFilm(sr, norm);
+					}
+				}
+			}
+
+			lastSampleAcceptance = METRO_ACCEPTED;
+			lastSampleWeight = norm;
+
+			// Save new contributions for reference
+			weight = newWeight;
+			currentStamp = stamp;
+			currentLuminance = newLuminance;
+			std::copy_n(samples.begin(), requestedSamples, currentSamples.begin());
+			std::copy_n(sampleStamps.begin(), requestedSamples, currentSampleStamps.begin());
+			currentSampleResults = sampleResults;
+
+			consecRejects = 0;
+		} else {
+			/*if (!cooldown)
+				printf("\t\tREJECTED !\n");*/
+		
+			// Add contribution of new sample before rejecting it
+			const float norm = newWeight / (newLuminance * invMeanIntensity + currentLargeMutationProbability);
+			if (norm > 0.f) {
+				/*if (!cooldown)
+					printf("\t\tContrib: (%f, %f, %f) [%f] consecutiveRejects: %d\n",
+							sampleResults[0].radiance[0].c[0],
+							sampleResults[0].radiance[0].c[1],
+							sampleResults[0].radiance[0].c[2],
+							norm, consecRejects);*/
+
+				if (film) {
+					for (auto const &sr : sampleResults) {
+						if (!addOnlyCuastics || (sr.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) && sr.isCaustic))
+							AtomicAddSampleToFilm(sr, norm);
+					}
+				}
+			}
+
+			lastSampleAcceptance = METRO_REJECTED;
+			lastSampleWeight = norm;
+
+			// Restart from previous reference
+			stamp = currentStamp;
+			std::copy_n(currentSamples.begin(), requestedSamples, samples.begin());
+			std::copy_n(currentSampleStamps.begin(), requestedSamples, sampleStamps.begin());
+
+			++consecRejects;
+		}
 	}
 
 	// Cooldown is used in order to not have problems in the estimation of meanIntensity
@@ -435,7 +480,8 @@ void MetropolisSampler::NextSample(const vector<SampleResult> &sampleResults) {
 		}
 	}
 
-	isLargeMutation = (rndGen->floatValue() < currentLargeMutationProbability);
+	// The bootstrap's samples are all large mutations
+	isLargeMutation = (bootstrapCount > 0) || (rndGen->floatValue() < currentLargeMutationProbability);
 	if (isLargeMutation) {
 		stamp = 1;
 		std::fill_n(sampleStamps.begin(), requestedSamples, 0);
