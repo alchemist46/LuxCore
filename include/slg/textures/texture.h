@@ -136,29 +136,26 @@ inline bool operator==(std::reference_wrapper<slg::Texture> lhs, const slg::Text
 	return (&lhs.get() == rhs);
 }
 
-template <typename T>
-void updtex(T texture, TextureConstRef oldTex, TextureRef newTex) {}
-
-template<>
-inline void updtex<>(
-	TexturePtr texture,
-	const TextureConstRef oldTex,
-	TextureRef newTex
-) {
-	if (texture == std::addressof(oldTex)) {
+// Replace the reference to oldTex in texture (taken by reference, so the
+// caller's member is the one replaced)
+inline void updtex(TexturePtr &texture, TextureConstRef oldTex, TextureRef newTex) {
+	if (texture.get() == std::addressof(oldTex))
 		texture = std::addressof(newTex);
-	}
 }
 
-template<>
-inline void updtex<>(
-	std::reference_wrapper<Texture> texture,
-	const TextureConstRef oldTex,
-	TextureRef newTex
-) {
-	if (std::addressof(texture.get()) == std::addressof(oldTex)) {
-		texture = std::reference_wrapper(newTex);
-	}
+inline void updtex(TextureConstPtr &texture, TextureConstRef oldTex, TextureRef newTex) {
+	if (texture.get() == std::addressof(oldTex))
+		texture = std::addressof(newTex);
+}
+
+inline void updtex(std::reference_wrapper<Texture> &texture, TextureConstRef oldTex, TextureRef newTex) {
+	if (std::addressof(texture.get()) == std::addressof(oldTex))
+		texture = newTex;
+}
+
+inline void updtex(std::reference_wrapper<const Texture> &texture, TextureConstRef oldTex, TextureRef newTex) {
+	if (std::addressof(texture.get()) == std::addressof(oldTex))
+		texture = newTex;
 }
 
 }  // namespace slg

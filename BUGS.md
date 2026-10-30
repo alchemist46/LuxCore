@@ -149,13 +149,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `CARD=+ RRS=3,100 python rrmin.py 64 4 renderengine.type=BIDIRCPU` against `renderengine.type=PATHCPU`.
 - Notes: since 2026-10-30 every ray but the camera's reads the side of a surface seen from the light (`backTracing`), so a ray passes a one-sided surface the same way in both directions (before, BiDir read -2.9% / +1.2%). What is left is whether the surface becomes a vertex: the eye path decides it with its own ray, which reads the side away from it, the light path with the light's ray, which reads the side facing it, and for a reflection on the card these are different sides. BiDir's MIS assumes a vertex has the same probability from both directions. A consistent rule would need the side of the outgoing direction, which is not known when the ray stops. Not fixed: one-sided transparency on a card is rare, and PATH, the default, is consistent.
 
-### PATHOCL fails to start after a volume is redefined by a scene edit
-- Found: 2026-10-30
-- Area: scene editing, engine (PATHOCL)
-- Problem: redefining a volume with `Scene.Parse()` (all of its properties, a new `scattering`) after the scene is loaded makes the PATHOCL `RenderSession.Start()` throw "Reference to an undefined NamedObject pointer"; PATHCPU starts and renders. Redefining, in the same edit, the materials that use the volume as their interior avoids it.
-- Reproduce: `tests/benchmark/native_render.py --scene CannelleEtFromage --scale 0.25 --spp 16 --scene-set "scene.volumes.2187763275736Volume.scattering=0 0 0"` (the default HIP device).
-- Notes: not investigated. The materials keep a pointer to the old volume object (`Material::interiorVolume`), which the CPU engine apparently doesn't dereference in a way that fails, while the GPU compile of the materials looks the pointer up in the volume definitions (`CompiledScene::CompileMaterials()` or the volume index lookup). The addon's viewport edits a volume this way when its properties change.
-
 ### GPU: a shadow ray through a shadow transparency keeps its MIS weight
 - Found: 2026-10-29
 - Area: engine (PATHOCL, TILEPATHOCL, RTPATHOCL), lights

@@ -50,7 +50,7 @@ public:
 		GetKt().AddReferencedImageMaps(referencedImgMaps);
 	}
 
-	virtual void UpdateTextureReferences(TextureRef oldTex, TextureRef newTex) {
+	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
 		if (&GetKt() == &oldTex)
 			kt = newTex;
 

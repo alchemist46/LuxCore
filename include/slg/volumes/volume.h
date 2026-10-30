@@ -130,12 +130,13 @@ private:
 	std::reference_wrapper<const Texture> g;
 };
 
-// Some utilities
+// Some utilities: replace the reference to oldMat in volume (taken by
+// reference, so the caller's member is the one replaced)
 template <typename T>
-void updvol(T volume, const MaterialConstRef oldMat, MaterialRef newMat);
+void updvol(T &volume, const MaterialConstRef oldMat, MaterialRef newMat);
 
 template<>
-inline void updvol(VolumeConstPtr volume, MaterialConstRef oldMat, MaterialRef newMat) {
+inline void updvol(VolumeConstPtr &volume, MaterialConstRef oldMat, MaterialRef newMat) {
 
 	// Check
 	try {
@@ -152,7 +153,7 @@ inline void updvol(VolumeConstPtr volume, MaterialConstRef oldMat, MaterialRef n
 
 template<>
 inline void updvol(
-	std::reference_wrapper<const Volume> volume,
+	std::reference_wrapper<const Volume> &volume,
 	MaterialConstRef oldMat,
 	MaterialRef newMat
 ) {

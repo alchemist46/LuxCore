@@ -55,9 +55,9 @@ public:
 		GetValue().AddReferencedImageMaps(referencedImgMaps);
 	}
 
-	virtual void UpdateTextureReferences(TextureRef oldTex, TextureRef newTex) {
-		for (auto& t : std::array{tex, hue, sat, val})
-			updtex(t, oldTex, newTex);
+	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
+		for (auto *t : {&tex, &hue, &sat, &val})
+			updtex(*t, oldTex, newTex);
 	}
 
 	TextureConstRef GetTexture() const { return tex; }

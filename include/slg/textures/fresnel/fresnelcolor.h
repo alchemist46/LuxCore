@@ -50,8 +50,7 @@ public:
 	}
 
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
-		if (kr == &oldTex)
-			kr == newTex;
+		updtex(kr, oldTex, newTex);
 	}
 
 	TextureConstRef GetKr() const { return kr; };

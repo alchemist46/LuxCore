@@ -47,7 +47,7 @@ public:
 		GetTexture().AddReferencedImageMaps(referencedImgMaps);
 	}
 
-	virtual void UpdateTextureReferences(TextureRef oldTex, TextureRef newTex) {
+	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
 		updtex(tex, oldTex, newTex);
 	}
 
