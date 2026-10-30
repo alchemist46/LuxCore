@@ -558,12 +558,17 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			eyeRayHit.t = 0.f;
 		} else {
 			Spectrum connectionThroughput;
+			// The camera sees the side of a surface it faces (a backdrop
+			// card with transparency.front/back), a BSDF ray takes the side
+			// seen from the light, as the shadow ray of the direct light
+			// sampling: otherwise one technique would see a light the other
+			// can't reach, and their MIS weights would not sum to 1
 			hit = scene.Intersect(
 					IntersectionDevicePtr(&device),
 					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&pathInfo.volume, passThrough,
 					&eyeRay, &eyeRayHit, hitBsdf, &connectionThroughput,
-					&pathThroughput, &sampleResult);
+					&pathThroughput, &sampleResult, !sampleResult.firstPathVertex);
 			pathThroughput *= connectionThroughput;
 			// Note: pass-through check is done inside Scene::Intersect()
 		}
@@ -987,11 +992,12 @@ void PathTracer::ConnectToEye(IntersectionDeviceRef device,
 			PathVolumeInfo volInfo = pathInfo.volume;
 			if (!bsdf.IsVolume() && (event & TRANSMIT))
 				volInfo.Update(event, bsdf);
+			// The side of a surface seen from the camera, as the camera ray
 			if (!scene.Intersect(
 					luxrays::make_observer<IntersectionDevice>(device),
 					LIGHT_RAY | CAMERA_RAY,
 					&volInfo, u0, &traceRay, &traceRayHit, &bsdfConn,
-					&connectionThroughput)) {
+					&connectionThroughput, nullptr, nullptr, true)) {
 				// Nothing was hit, the light path vertex is visible
 
 				float fluxToRadianceFactor;

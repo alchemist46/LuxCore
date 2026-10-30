@@ -137,7 +137,8 @@ void BiDirCPURenderThread::AOVWarmUp(
 					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&volInfo, sampler.GetSample(sampleOffset),
 					&eyeRay, &eyeRayHit, &bsdf,
-					&connectionThroughput, &pathThroughput, &sampleResult);
+					&connectionThroughput, &pathThroughput, &sampleResult,
+					!sampleResult.firstPathVertex);
 			pathThroughput *= connectionThroughput;
 
 			if (!hit) {
@@ -328,11 +329,13 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 			// (PathVolumeInfo::ContinueToTrace()) instead of stopping it
 			if (!eyeVertex.bsdf.IsVolume() && (eyeEvent & TRANSMIT))
 				volInfo.Update(eyeEvent, eyeVertex.bsdf);
+			// The side of a surface seen from the light, as the light path's
+			// own rays (see PathTracer::RenderEyePath())
 			if (!scene.Intersect(
 					luxrays::make_observer(device),
 					LIGHT_RAY | INDIRECT_RAY | SHADOW_RAY,
 					&volInfo, u0, &p2pRay, &p2pRayHit, &bsdfConn,
-					&connectionThroughput)) {
+					&connectionThroughput, nullptr, nullptr, true)) {
 				// Nothing was hit, the light path vertex is visible
 
 				// The MIS weights leave the Russian roulette out: the probability of the
@@ -430,11 +433,12 @@ void BiDirCPURenderThread::ConnectToEye(const float time,
 			// interior volume, or from inside it
 			if (!lightVertex.bsdf.IsVolume() && (event & TRANSMIT))
 				volInfo.Update(event, lightVertex.bsdf);
+			// The side of a surface seen from the camera, as the camera ray
 			if (!scene.Intersect(
 					luxrays::make_observer(device),
 					LIGHT_RAY | CAMERA_RAY,
 					&volInfo, u0, &traceRay, &traceRayHit, &bsdfConn,
-					&connectionThroughput)) {
+					&connectionThroughput, nullptr, nullptr, true)) {
 				// Nothing was hit, the light path vertex is visible
 
 				// No Russian roulette in the MIS weights, see ConnectVertices()
@@ -514,11 +518,13 @@ void BiDirCPURenderThread::DirectLightSampling(const float time,
 					// its interior volume, or from inside it
 					if (!eyeVertex.bsdf.IsVolume() && (event & TRANSMIT))
 						volInfo.Update(event, eyeVertex.bsdf);
-					// Check if the light source is visible
+					// Check if the light source is visible (the side of a surface
+					// seen from the light, as PathTracer::DirectLightSampling())
 					if (!scene.Intersect(
 						luxrays::make_observer(device),
 						EYE_RAY | SHADOW_RAY, &volInfo, u4,
-						&shadowRay, &shadowRayHit, &shadowBsdf, &connectionThroughput)) {
+						&shadowRay, &shadowRayHit, &shadowBsdf, &connectionThroughput,
+						nullptr, nullptr, true)) {
 						// I'm ignoring volume emission because it is not sampled in
 						// direct light step.
 
@@ -1013,12 +1019,15 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				// not in any other place)
 				RayHit eyeRayHit;
 				Spectrum connectionThroughput;
+				// The camera sees the side of a surface it faces, a BSDF ray the
+				// side seen from the light (see PathTracer::RenderEyePath())
 				const bool hit = scene.Intersect(
 						luxrays::make_observer(device),
 						EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 						&eyeVertex.volInfo, sampler->GetSample(sampleOffset),
 						&eyeRay, &eyeRayHit, &hitBsdf,
-						&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult);
+						&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult,
+						!eyeSampleResult.firstPathVertex);
 
 				if (!hit) {
 					// Nothing was hit, look for infinitelight

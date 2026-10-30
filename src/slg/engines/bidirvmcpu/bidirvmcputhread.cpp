@@ -218,7 +218,10 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 					&eyeVertex.volInfo,
 					sampler->GetSample(sampleOffset),
 					&eyeRay, &eyeRayHit, &hitBsdf,
-					&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult
+					&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult,
+					// The camera sees the side of a surface it faces, a BSDF ray
+					// the side seen from the light (see PathTracer::RenderEyePath())
+					!eyeSampleResult.firstPathVertex
 				);
 
 				if (!hit) {

@@ -1041,7 +1041,9 @@ __kernel void AdvancePaths_MK_RT(
 					&rays[gid], &rayHits[gid], initBsdf,
 					&connectionThroughput, VLOAD3F(taskState->throughput.c),
 					sampleResult,
-					false, NULL
+					// The camera sees the side it faces, a BSDF ray the side
+					// seen from the light (as PathTracer::RenderEyePath())
+					pathInfo->depth.depth > 0, NULL
 					MATERIALS_PARAM
 					);
 			taskState->throughShadowTransparency = throughShadowTransparency;

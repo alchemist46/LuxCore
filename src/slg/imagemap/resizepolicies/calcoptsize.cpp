@@ -167,11 +167,12 @@ void ImageMapResizePolicy::RenderFunc(
 
 					RayHit eyeRayHit;
 					Spectrum connectionThroughput;
+					// The sides of a surface as PathTracer::RenderEyePath() sees them
 					const bool hit = scene.Intersect(NULL,
 							EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : GENERIC_RAY),
 							&volInfo, sampler.GetSample(sampleOffset),
 							&eyeRay, &eyeRayHit, &bsdf, &connectionThroughput,
-							&pathThroughput, &sampleResult);
+							&pathThroughput, &sampleResult, !sampleResult.firstPathVertex);
 					pathThroughput *= connectionThroughput;
 					// Note: pass-through check is done inside Scene::Intersect()
 

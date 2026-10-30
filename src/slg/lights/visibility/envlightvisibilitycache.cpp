@@ -377,8 +377,11 @@ void EnvLightVisibilityCache::BuildCacheEntry(
 		Spectrum connectionThroughput;
 
 		PathVolumeInfo volInfo = visibilityParticle.volInfoList[pointIndex];
+		// The side of a surface seen from the light, as the shadow rays of
+		// PathTracer::DirectLightSampling()
 		if (!scene.Intersect(nullptr, EYE_RAY | SHADOW_RAY, &volInfo, u4, &shadowRay,
-				&shadowRayHit, &shadowBsdf, &connectionThroughput)) {
+				&shadowRayHit, &shadowBsdf, &connectionThroughput,
+				nullptr, nullptr, true)) {
 			// Nothing was hit, the light source is visible
 
 			visibilityMap[pixelIndex] += connectionThroughput.Y();
