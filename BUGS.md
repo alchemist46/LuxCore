@@ -17,6 +17,16 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### COLOR_ABERRATION blends a shifted copy instead of shifting, elliptical on non-square images
+- Found: 2026-10-29
+- Area: film (image pipeline)
+- Problem: the effect is meant to shift the colour channels apart radially, as a lens' lateral chromatic aberration does. There are three problems:
+  - Each pixel becomes `(pixel + redblue * rbShifted + green * gShifted) / 2` (`coloraberration.cpp:229-234`, the same in `coloraberration_funcs.cl`). That averages every channel with its shifted copy: a double edge at half strength, not a shifted channel.
+  - The radius is measured in normalized x and y (`xOffset = x / width - 0.5`, `:182, :209-211`), so on a non-square image the effect is an ellipse: at equal distance in pixels it is stronger along the short axis.
+  - It samples at pixel corners (`x * invWidth`, no +0.5), which moves the shifted copies by up to half a pixel toward the image center.
+- Reproduce: a 1920x1080 render with a bright, sharp edge near a corner, `film.imagepipeline.N.type = COLOR_ABERRATION`, `.amount = 0.05`. The edge is doubled rather than coloured, and the fringe is wider on a vertical line than on a horizontal one at the same distance from the center.
+- Notes: found while reviewing the lens post effects. The cause is the code above. The fix is planned as ROADMAP F10 (a spectral mode as the default, with this code kept as `mode = LEGACY`).
+
 ### A light colour edit takes ~85 ms on a scene with one distant light
 - Found: 2026-10-30
 - Area: engine (scene edits, lights)
