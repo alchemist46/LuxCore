@@ -156,8 +156,12 @@ void EmbreeAccel::Init(
 	embreeScene = rtcNewScene(embreeDevice);
 	rtcSetSceneBuildQuality(embreeScene, RTC_BUILD_QUALITY_HIGH);
 	// The scene is updated (i.e. the instance transformations) by Update()
-	// both ways, a dynamic scene is faster to update and slower to trace
-	rtcSetSceneFlags(embreeScene, dynamicScene ? RTC_SCENE_FLAG_DYNAMIC : RTC_SCENE_FLAG_NONE);
+	// both ways, a dynamic scene is faster to update and slower to trace.
+	// The robust mode makes the triangle test watertight: without it a ray
+	// through the edge shared by two triangles can miss both, and a path
+	// crossing the boundary of a medium that way stays in the medium
+	rtcSetSceneFlags(embreeScene, (RTCSceneFlags)((dynamicScene ? RTC_SCENE_FLAG_DYNAMIC : RTC_SCENE_FLAG_NONE) |
+			RTC_SCENE_FLAG_ROBUST));
 
 	for(auto* ptr: meshes) {
 		auto& mesh = *ptr;
@@ -180,7 +184,7 @@ void EmbreeAccel::Init(
 					// Create a new RTCScene
 					instScene = rtcNewScene(embreeDevice);
 					rtcSetSceneBuildQuality(instScene, RTC_BUILD_QUALITY_HIGH);
-					rtcSetSceneFlags(instScene, RTC_SCENE_FLAG_NONE);
+					rtcSetSceneFlags(instScene, RTC_SCENE_FLAG_ROBUST);
 					ExportTriangleMesh(instScene, instancedMesh);
 					rtcCommitScene(instScene);
 
