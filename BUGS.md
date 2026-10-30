@@ -31,13 +31,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/subsurface_boundary.py PATHCPU colors=1` (the `d1` of the slab: `(d(1) - d(0)) / (1 - d(0))`), or the furnace `subsurface-rad0.01` case with `ior = 3`.
 - Notes: found while fixing the color of the walk under the boundary (SSS_BoundaryColor()). Raising the limit costs time on the GPU (see the TILEPATHOCL entry); a cheaper fix would be to finish a walk that is deep in a nearly white medium analytically (its escape probability from diffusion theory) instead of dropping it.
 
-### PATHOCL halt bias with the subsurface material
-- Found: 2026-10-18
-- Area: engine (PATHOCL)
-- Problem: a subsurface walk takes one iteration per step, so the long walks (the darker ones) are the paths in flight at the halt, and a subsurface sphere reads up to 1.8% too bright at 64 spp (0.2% at 512).
-- Reproduce: subsurface sphere, PATHOCL, `batch.haltspp = 64`.
-- Notes: the general halt bias (paths in flight) was fixed on 2026-10-18; this is the opposite effect of the subsurface walks.
-
 ### Hybrid back/forward: the light paths' Metropolis sampler reads dark on short runs
 - Found: 2026-10-30
 - Area: engine (PATHCPU, PATHOCL with native threads), sampler (Metropolis)
