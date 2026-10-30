@@ -663,6 +663,8 @@ def finish():
                         ticks=np.array(ticks))
     with open(os.path.join(args.out, "draws.json"), "w") as f:
         json.dump(draws, f)
+    with open(os.path.join(args.out, "reads.json"), "w") as f:
+        json.dump(reads, f)
     for key in ("first_frame", "move_running", "move_paused", "moves", "resizes", "steady"):
         if key in result:
             log(key, json.dumps(result[key], default=str))
