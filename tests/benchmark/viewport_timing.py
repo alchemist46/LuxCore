@@ -25,7 +25,9 @@ the 3D view from a timer and measures:
   one's, both while rendering and after the halt (paused: each move is
   labelled by the state of the render when it is made);
 - the resize latency (LuxCore only): from leaving the full-screen area to the
-  first draw of a film from the new session.
+  first draw of a film from the new session;
+- with --object-moves (LuxCore only): the view_update() that applies a move
+  of a mesh object, its scene edit and how many lights it exported again.
 
 The probe reads a band of the drawn region back in a POST_PIXEL handler, so it
 measures what is on screen and works for Cycles too (--engine CYCLES, the A/B
@@ -71,6 +73,9 @@ parser.add_argument("--move-angle", type=float, default=8.0,
 parser.add_argument("--cycles-samples", type=int, default=1024, help="Cycles viewport samples")
 parser.add_argument("--denoise", action="store_true", help="keep the viewport denoiser on")
 parser.add_argument("--no-resize", action="store_true", help="skip the resize test")
+parser.add_argument("--object-moves", type=int, default=0,
+                    help="moves of a mesh object (LuxCore): the view_update() time and its lights")
+parser.add_argument("--object", help="the object --object-moves moves (default: the first mesh)")
 parser.add_argument("--save-config", action="store_true",
                     help="save the session's render config with its scene at the end "
                     "(renderconfig.bcf, for viewport_film.py)")
@@ -119,6 +124,7 @@ ticks = []      # main-thread timer ticks
 events = []     # (t, name, details)
 calls = []      # (t, name, duration): session create/start, scene edits
 reads = []      # (t, duration): GetOutputFloat() calls outside the main thread
+updates = []    # view_update() calls (LuxCore): dict of timings
 state = {"current": None, "engine": None}
 
 
@@ -142,6 +148,18 @@ def timed(key, function):
                 record[key] = record.get(key, 0.0) + clock() - start
             elif not main:
                 reads.append((start - T0, clock() - start))
+    return wrapper
+
+
+def counted(key, function):
+    """A part of view_draw() or view_update() timed and counted"""
+    timed_function = timed(key, function)
+
+    def wrapper(*a, **k):
+        record = state["current"]
+        if record is not None and threading.current_thread() is threading.main_thread():
+            record[key + "_n"] = record.get(key + "_n", 0) + 1
+        return timed_function(*a, **k)
     return wrapper
 
 
@@ -184,6 +202,24 @@ def instrument_luxcore():
     # restart_session())
     if hasattr(exporter, "restart_session"):
         exporter.restart_session = timed_call("restart_session", exporter.restart_session)
+
+    light = g0_blc.submodule("export.light")
+    light.convert_light = counted("lights", light.convert_light)
+
+    view_update = viewport.view_update
+
+    def view_update_timed(engine, context, depsgraph, *a, **k):
+        record = {"t": now()}
+        state["current"] = record
+        start = clock()
+        try:
+            view_update(engine, context, depsgraph, *a, **k)
+        finally:
+            record["total"] = clock() - start
+            state["current"] = None
+            updates.append(record)
+
+    viewport.view_update = view_update_timed
 
     view_draw = viewport.view_draw
 
@@ -446,6 +482,16 @@ def plan():
         move()
     yield 1.5
 
+    if args.object_moves:
+        objects = [o for o in bpy.context.scene.objects if o.type == "MESH" and o.visible_get()]
+        obj = bpy.data.objects[args.object] if args.object else objects[0]
+        size = max(obj.dimensions) or 1.0
+        for i in range(args.object_moves):
+            obj.location.x += (0.01 if i % 2 == 0 else -0.01) * size
+            event("object_move", object=obj.name, kind="paused" if session_paused() else "running")
+            yield args.move_gap
+        yield 1.0
+
     if not args.no_resize:
         toggle_full_area()
         event("resize")
@@ -588,6 +634,22 @@ def analyze():
         resizes.append(entry)
     result["resizes"] = resizes
 
+    # Object moves: the view_update() that applies each one
+    object_moves = []
+    for t, details in by_name.get("object_move", []):
+        later = [u for u in updates if u["t"] >= t and "edit" in u]
+        if later:
+            u = later[0]
+            entry = {"kind": details.get("kind"), "delay_ms": round((u["t"] - t) * 1000, 1)}
+            for key in ("total", "edit", "begin_edit", "end_edit", "lights"):
+                entry[key + "_ms"] = round(u.get(key, 0.0) * 1000, 2)
+            entry["lights"] = u.get("lights_n", 0)
+            object_moves.append(entry)
+    result["object_moves"] = object_moves
+    if object_moves:
+        result["object_move"] = {key: ms(stats([m[key + "_ms"] / 1000 for m in object_moves]))
+                                 for key in ("total", "edit", "end_edit", "lights")}
+
     # Steady state while rendering (before the first halt) and while paused
     t_ref_a = by_name["ref"][0][0] if by_name.get("ref") else t_end
     t_first_film = film_draws[0]["t"] if film_draws else t_first
@@ -665,7 +727,8 @@ def finish():
         json.dump(draws, f)
     with open(os.path.join(args.out, "reads.json"), "w") as f:
         json.dump(reads, f)
-    for key in ("first_frame", "move_running", "move_paused", "moves", "resizes", "steady"):
+    for key in ("first_frame", "move_running", "move_paused", "moves", "resizes", "object_move",
+                "object_moves", "steady"):
         if key in result:
             log(key, json.dumps(result[key], default=str))
     restore_manifest()
