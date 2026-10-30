@@ -69,31 +69,35 @@ void FilterDistribution::SampleContinuous(const float u0, const float u1, float 
 //------------------------------------------------------------------------------
 
 FilterLUT::FilterLUT(const Filter &filter, const float offsetX, const float offsetY) {
-	const int x0 = luxrays::Floor2Int(offsetX - filter.xWidth * .5f + .5f);
-	const int x1 = luxrays::Floor2Int(offsetX + filter.xWidth * .5f + .5f);
-	const int y0 = luxrays::Floor2Int(offsetY - filter.yWidth * .5f + .5f);
-	const int y1 = luxrays::Floor2Int(offsetY + filter.yWidth * .5f + .5f);
-	lutWidth = x1 - x0 + 1;
-	lutHeight = y1 - y0 + 1;
+	// The pixels, relative to the one of the sample, whose center is within
+	// the filter's support ([-xWidth, xWidth] x [-yWidth, yWidth], as the eye
+	// samples' FilterDistribution), the sample's own pixel always
+	lutX0 = luxrays::Min(luxrays::Ceil2Int(offsetX - filter.xWidth), 0);
+	const int x1 = luxrays::Max(luxrays::Floor2Int(offsetX + filter.xWidth), 0);
+	lutY0 = luxrays::Min(luxrays::Ceil2Int(offsetY - filter.yWidth), 0);
+	const int y1 = luxrays::Max(luxrays::Floor2Int(offsetY + filter.yWidth), 0);
+	lutWidth = x1 - lutX0 + 1;
+	lutHeight = y1 - lutY0 + 1;
 	lut.resize(lutWidth * lutHeight);
 
 	float filterNorm = 0.f;
 	unsigned int index = 0;
-	for (int iy = y0; iy <= y1; ++iy) {
-		for (int ix = x0; ix <= x1; ++ix) {
+	for (int iy = lutY0; iy <= y1; ++iy) {
+		for (int ix = lutX0; ix <= x1; ++ix) {
 			const float filterVal = filter.Evaluate(fabsf(ix - offsetX), fabsf(iy - offsetY));
 			filterNorm += filterVal;
 			lut[index++] = filterVal;
 		}
 	}
 
-	// Normalize LUT
-	filterNorm = 1.f / filterNorm;
-	index = 0;
-	for (int iy = y0; iy <= y1; ++iy) {
-		for (int ix = x0; ix <= x1; ++ix)
-			lut[index++] *= filterNorm;
-	}
+	// Normalize LUT (all on the sample's own pixel if no pixel center is
+	// within a narrow filter)
+	if (filterNorm > 0.f) {
+		filterNorm = 1.f / filterNorm;
+		for (float &v : lut)
+			v *= filterNorm;
+	} else
+		lut[-lutX0 - lutY0 * lutWidth] = 1.f;
 }
 
 //------------------------------------------------------------------------------
@@ -102,7 +106,8 @@ FilterLUT::FilterLUT(const Filter &filter, const float offsetX, const float offs
 
 FilterLUTs::FilterLUTs(const Filter &filter, const size_t size) {
 	lutsSize = size + 1;
-	step = 1.f / float(size);
+	// The LUT of each interval of GetLUT() is built at the interval's center
+	step = 1.f / float(lutsSize);
 
 	luts.resize(lutsSize * lutsSize);
 

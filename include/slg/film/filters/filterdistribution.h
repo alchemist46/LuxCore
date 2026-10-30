@@ -54,6 +54,9 @@ public:
 
 	const unsigned int GetWidth() const { return lutWidth; }
 	const unsigned int GetHeight() const { return lutHeight; }
+	// The first pixel of the LUT, relative to the one of the sample
+	int GetX0() const { return lutX0; }
+	int GetY0() const { return lutY0; }
 
 	const std::span<const float> GetLUT() const {
 		return lut;
@@ -62,6 +65,7 @@ public:
 	friend std::ostream &operator<<(std::ostream &os, const FilterLUT &f);
 
 private:
+	int lutX0, lutY0;
 	unsigned int lutWidth, lutHeight;
 	std::vector<float> lut;
 };
@@ -87,6 +91,9 @@ inline std::ostream &operator<<(std::ostream &os, const FilterLUT &f) {
 class FilterLUTs {
 public:
 	FilterLUTs(const Filter &filter, const size_t size);
+
+	// The number of LUTs along each axis
+	size_t GetLUTsSize() const { return lutsSize; }
 
 	const FilterLUT *GetLUT(const float x, const float y) const {
 		const int ix = luxrays::Max<unsigned int>(0, luxrays::Min<unsigned int>(luxrays::Floor2Int(lutsSize * (x + 0.5f)), lutsSize - 1));

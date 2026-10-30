@@ -55,8 +55,17 @@ public:
 	FilmSampleSplatter(std::nullptr_t) = delete;
 
 private:
+	void InitBorderScales();
+	float GetBorderScale(const u_int *subRegion, const int x, const int y) const;
+
 	const FilterUPtr& filter;  // Nota: pixelFilter is provided by RenderEngine
 	FilterLUTs *filterLUTs;
+
+	// The scale of a splat on a pixel near the film's border, by the pixel's
+	// distances (up to borderSize) from the nearest x and y borders (see
+	// InitBorderScales())
+	int borderSize;
+	std::vector<float> borderScales;
 
 	// Null singleton instance
 };
