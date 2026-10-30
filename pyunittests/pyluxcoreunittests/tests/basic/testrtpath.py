@@ -279,10 +279,8 @@ class RTPathCPUFilmGeneration(unittest.TestCase):
 			if session.IsStarted():
 				session.Stop()
 
-	def test_RTPathCPU_StopEndsFirstFrameWait(self):
-		# WaitNewFrame() waits for every render thread's first frame: Stop()
-		# from another thread ends the wait (it waited forever before when
-		# the threads stopped before they all signalled)
+	def LongFirstFrameSession(self):
+		# A first frame of 16M samples (no zoom)
 		cfgProps = pyluxcore.Properties()
 		cfgProps.SetFromString("""
 			renderengine.type = RTPATHCPU
@@ -304,8 +302,39 @@ class RTPathCPUFilmGeneration(unittest.TestCase):
 		scene = pyluxcore.Scene()
 		scene.Parse(scnProps)
 
+		return pyluxcore.RenderSession(pyluxcore.RenderConfig(cfgProps, scene))
+
+	def test_RTPathCPU_NoGenerationBeforeFirstFrame(self):
+		# The film has samples of a part of the first frame only: no new
+		# generation for WaitNewFrame() until the frame is done (a viewer
+		# would show a partly black image)
+		session = self.LongFirstFrameSession()
+		session.Start()
+		try:
+			hidden = False
+			end = time.time() + 10.0
+			while time.time() < end:
+				# The samples counted before the call: a generation read from
+				# them would differ from 0
+				count = SampleCount(session)
+				generation = session.WaitNewFrame(0, 0)
+				if (count > 0) and (generation == 0):
+					hidden = True
+					break
+				if generation != 0:
+					break
+				time.sleep(0.005)
+			self.assertTrue(hidden)
+			self.assertGreater(session.WaitNewFrame(0, 30000), 0)
+		finally:
+			session.Stop()
+
+	def test_RTPathCPU_StopEndsFirstFrameWait(self):
+		# WaitNewFrame() waits for every render thread's first frame: Stop()
+		# from another thread ends the wait (it waited forever before when
+		# the threads stopped before they all signalled)
 		for i in range(3):
-			session = pyluxcore.RenderSession(pyluxcore.RenderConfig(cfgProps, scene))
+			session = self.LongFirstFrameSession()
 			session.Start()
 			waiter = threading.Thread(target=session.WaitNewFrame, daemon=True)
 			waiter.start()

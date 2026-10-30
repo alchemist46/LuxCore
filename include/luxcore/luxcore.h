@@ -1615,9 +1615,10 @@ public:
 	 * generation, the rendering stops or timeoutMs milliseconds passed.
 	 * The film generation changes every time the film gets new samples:
 	 * at each frame with RTPATHOCL, at each film update (UpdateStats()) with
-	 * PATHOCL, as the samples arrive with the CPU engines (RTPATHCPU waits
-	 * for the first frame after an edit too). It doesn't change while the
-	 * session is paused.
+	 * PATHOCL, as the samples arrive with the CPU engines. It doesn't change
+	 * while the session is paused. RTPATHCPU waits for the whole first frame
+	 * after a start, an edit or a resume: until it is done, the call returns
+	 * generation (the statistic moves with its partial samples).
 	 *
 	 * \param generation is the film generation the caller has already seen.
 	 * \param timeoutMs is the longest wait in milliseconds.

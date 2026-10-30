@@ -69,12 +69,15 @@ void RTPathCPURenderEngine::StopLockLess() {
 
 void RTPathCPURenderEngine::WaitNewFrame() {
 	if (!firstFrameDone && !pauseMode && !editMode) {
-		// Wait for the signal from all the rendering threads
-		std::unique_lock<std::mutex> lock(firstFrameMutex);
-		while (!firstFrameStop && (firstFrameThreadDoneCount < renderThreads.size()))
-			firstFrameCondition.wait(lock);
+		{
+			// Wait for the signal from all the rendering threads
+			std::unique_lock<std::mutex> lock(firstFrameMutex);
+			while (!firstFrameStop && (firstFrameThreadDoneCount < renderThreads.size()))
+				firstFrameCondition.wait(lock);
+		}
 
 		firstFrameDone = true;
+		NotifyFilmUpdated();
 	}
 }
 
@@ -83,13 +86,19 @@ u_longlong RTPathCPURenderEngine::WaitNewFrame(const u_longlong generation, cons
 
 	if (!firstFrameDone && !pauseMode && !editMode) {
 		// The image is complete once all the rendering threads finished
-		// their first (zoomed) frame
-		std::unique_lock<std::mutex> lock(firstFrameMutex);
-		if (!firstFrameCondition.wait_until(lock, deadline, [this] {
-				return firstFrameStop || (firstFrameThreadDoneCount >= renderThreads.size()); }))
-			return GetFilmGeneration();
+		// their first (zoomed) frame: until then, the samples in the film
+		// are a part of it only and the generation passed is returned
+		{
+			std::unique_lock<std::mutex> lock(firstFrameMutex);
+			if (!firstFrameCondition.wait_until(lock, deadline, [this] {
+					return firstFrameStop || (firstFrameThreadDoneCount >= renderThreads.size()); }))
+				return generation;
+		}
 
+		// A new generation even when the sample count is the one before the
+		// reset: the partial samples of the frame were not looked at
 		firstFrameDone = true;
+		NotifyFilmUpdated();
 	}
 
 	const auto now = std::chrono::steady_clock::now();

@@ -17,6 +17,15 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### Glass and coated Principled spheres render 3-10% darker than Cycles since the 2026-10-29 wheel
+- Found: 2026-10-30
+- Area: material (glass, coat), engine (PATHCPU)
+- Problem: two BlendLuxCore headless tests that compare LuxCore with Cycles fail with a pyluxcore built from today's main, and pass with the wheel built 2026-10-29 02:59 (after a3950c68f), with the same addon:
+  - `test_openpbr_principled`: the LuxCore/Cycles mean over the sphere is 0.901 for "smooth glass" (Roughness 0, Transmission 1), 0.97 for "glass" (Roughness 0.1) and 0.97-0.98 for "coat" (tolerance 0.03).
+  - `test_cycles_convert_disney`: `principled_coat_sheen` native/reader mean 0.94-0.98, pixel error 0.22 (tolerance 0.03, 0.15).
+- Reproduce: `BLENDER=<blender.exe> tests/run.sh <site-packages> test_openpbr_principled test_cycles_convert_disney` in BlendLuxCore, with the site-packages of a wheel built at ff14bf4ef (PATH on the CPU, a sphere before a gray backdrop under an area light, orthographic camera).
+- Notes: not bisected. The core commits in between that change light transport on the CPU: 07044a57f (one-sided transparency), 4c2929422 (shadow transparency MIS), 588d590bc (film splatting), 60c4c9fee (light tracing path length), 0f9d314ef (volume priorities), c0f396c1c (GlossyCoating). The darker glass points first at the shadow and transparency changes. A difference from Cycles is not a bug by itself: if the commit that moved it made the light transport right, the tests' references change instead. Found while testing BlendLuxCore 1.12 step 7, which does not touch materials.
+
 ### COLOR_ABERRATION blends a shifted copy instead of shifting, elliptical on non-square images
 - Found: 2026-10-29
 - Area: film (image pipeline)
