@@ -130,10 +130,10 @@ void ImagePipeline::AddPlugin(ImagePipelinePlugin *plugin) {
 	canUseHW |= plugin->CanUseHW();
 }
 
-void ImagePipeline::Apply(Film &film, const u_int index) {
+void ImagePipeline::Apply(Film &film, const u_int index, const bool imageInHWRam) {
 	//const double t1 = WallClockTime();
 
-	bool imageInCPURam = true;
+	bool imageInCPURam = !imageInHWRam;
 	for(ImagePipelinePlugin *plugin: pipeline) {
 		//const double p1 = WallClockTime();
 
@@ -175,7 +175,7 @@ void ImagePipeline::Apply(Film &film, const u_int index) {
 		//SLG_LOG("ImagePipeline plugin time: " << int((p2 - p1) * 1000.0) << "ms");
 	}
 
-	if (film.hwEnable && film.hardwareDevice && canUseHW) {
+	if (film.hwEnable && film.hardwareDevice && (canUseHW || imageInHWRam)) {
 		if (!imageInCPURam)
 			film.ReadHWBuffer_IMAGEPIPELINE(index);
 

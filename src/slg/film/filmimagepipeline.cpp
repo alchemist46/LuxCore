@@ -202,7 +202,7 @@ void Film::ExecuteImagePipelineImpl(const u_int index) {
 	if (hwEnable && hardwareDevice && imagePipelines[index]->CanUseHW())
 		WriteAllHWBuffers();
 
-	imagePipelines[index]->Apply(*this, index);
+	imagePipelines[index]->Apply(*this, index, hwEnable && hardwareDevice);
 
 	if (hwEnable && hardwareDevice)
 		hardwareDevice->PopThreadCurrentDevice();

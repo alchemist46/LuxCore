@@ -88,7 +88,9 @@ public:
 	ImagePipeline *Copy() const;
 
 	void AddPlugin(ImagePipelinePlugin *plugin);
-	void Apply(Film &film, const u_int index);
+	// imageInHWRam: the IMAGEPIPELINE channel is in the film's hardware
+	// buffer only (Film::MergeSampleBuffersHW() leaves it there)
+	void Apply(Film &film, const u_int index, const bool imageInHWRam = false);
 
 	friend class boost::serialization::access;
 

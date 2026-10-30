@@ -26,7 +26,7 @@ __kernel void Film_MergeBufferInitialize(
 		const uint filmWidth, const uint filmHeight,
 		__global float *channel_IMAGEPIPELINE) {
 	const size_t gid = get_global_id(0);
-	if (gid > filmWidth * filmHeight)
+	if (gid >= filmWidth * filmHeight)
 		return;
 
 	__global float *channelBufferPixel = &channel_IMAGEPIPELINE[gid * 3];
@@ -46,7 +46,7 @@ __kernel void Film_MergeRADIANCE_PER_PIXEL_NORMALIZED(
 		__global float *mergeBuffer,
 		const float scaleR, const float scaleG, const float scaleB) {
 	const size_t gid = get_global_id(0);
-	if (gid > filmWidth * filmHeight)
+	if (gid >= filmWidth * filmHeight)
 		return;
 
 	__global const float *mergeBufferPixel = &mergeBuffer[gid * 4];
@@ -87,7 +87,7 @@ __kernel void Film_MergeRADIANCE_PER_SCREEN_NORMALIZED(
 		__global float *mergeBuffer,
 		const float scaleR, const float scaleG, const float scaleB) {
 	const size_t gid = get_global_id(0);
-	if (gid > filmWidth * filmHeight)
+	if (gid >= filmWidth * filmHeight)
 		return;
 
 	__global const float *mergeBufferPixel = &mergeBuffer[gid * 3];
@@ -119,7 +119,7 @@ __kernel void Film_MergeBufferFinalize(
 		const uint filmWidth, const uint filmHeight,
 		__global float *channel_IMAGEPIPELINE) {
 	const size_t gid = get_global_id(0);
-	if (gid > filmWidth * filmHeight)
+	if (gid >= filmWidth * filmHeight)
 		return;
 
 	__global float *channelBufferPixel = &channel_IMAGEPIPELINE[gid * 3];

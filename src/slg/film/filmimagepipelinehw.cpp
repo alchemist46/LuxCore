@@ -383,12 +383,9 @@ void Film::MergeSampleBuffersHW(const u_int imagePipelineIndex) {
 	// hardwareDevice->Push/PopThreadCurrentDevice() is done by the caller
 
 	const ImagePipeline *ip = (imagePipelineIndex < imagePipelines.size()) ? imagePipelines[imagePipelineIndex] : nullptr;
-	// Transfer IMAGEPIPELINEs[index]
-	hardwareDevice->EnqueueWriteBuffer(hw_IMAGEPIPELINE, false,
-			channel_IMAGEPIPELINEs[imagePipelineIndex]->GetSize(),
-			channel_IMAGEPIPELINEs[imagePipelineIndex]->GetPixels());
 
-	// Initialize the framebuffer
+	// Initialize the framebuffer (every pixel of hw_IMAGEPIPELINE: nothing to
+	// upload before)
 	hardwareDevice->EnqueueKernel(mergeInitializeKernel,
 			HardwareDeviceRange(RoundUp(pixelCount, 256u)), HardwareDeviceRange(256));
 
@@ -439,11 +436,7 @@ void Film::MergeSampleBuffersHW(const u_int imagePipelineIndex) {
 	hardwareDevice->EnqueueKernel(mergeFinalizeKernel,
 			HardwareDeviceRange(RoundUp(pixelCount, 256u)), HardwareDeviceRange(256));
 
-	// Transfer back the results
-	hardwareDevice->EnqueueReadBuffer(hw_IMAGEPIPELINE, false,
-			channel_IMAGEPIPELINEs[imagePipelineIndex]->GetSize(),
-			channel_IMAGEPIPELINEs[imagePipelineIndex]->GetPixels());
-
-	hardwareDevice->FinishQueue();
+	// The result stays in hw_IMAGEPIPELINE: ImagePipeline::Apply() reads it
+	// back when a plugin runs on the CPU, or at the end
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

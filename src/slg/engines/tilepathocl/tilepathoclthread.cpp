@@ -85,18 +85,19 @@ void TilePathOCLRenderThread::RenderTileWork(const TileWork &tileWork,
 		const u_int filmIndex) {
 	TilePathOCLRenderEngine *engine = (TilePathOCLRenderEngine *)renderEngine;
 
-	threadFilms[filmIndex]->GetFilm().Reset();
+	// RTPATHOCL: RecvFilm() below overwrites every channel of the thread film
+	// (it has no RADIANCE_PER_SCREEN_NORMALIZED channels, and the denoiser is
+	// off in RT), so only the counters are reset: clearing the host channels
+	// cost a frame up to 100 MB of single-threaded writes at 1080p
+	assert ((engine->GetType() != RTPATHOCL) ||
+			(!threadFilms[filmIndex]->GetFilm().HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED) &&
+			!threadFilms[filmIndex]->GetFilm().GetDenoiser().IsEnabled()));
+	threadFilms[filmIndex]->GetFilm().Reset(engine->GetType() == RTPATHOCL);
 	if (threadFilms[filmIndex]->GetFilm().GetDenoiser().IsEnabled())
 		threadFilms[filmIndex]->GetFilm().GetDenoiser().CopyReferenceFilm(FilmPtr(&engine->GetFilm()));
 
 	// Clear the frame buffer
 	threadFilms[filmIndex]->ClearFilm(intersectionDevice, filmClearKernel, filmClearWorkGroupSize);
-
-	// Clear the frame buffer
-	const u_int filmPixelCount = threadFilms[filmIndex]->GetFilm().GetWidth() * threadFilms[filmIndex]->GetFilm().GetHeight();
-	intersectionDevice.EnqueueKernel(filmClearKernel,
-		HardwareDeviceRange(RoundUp<u_int>(filmPixelCount, filmClearWorkGroupSize)),
-		HardwareDeviceRange(filmClearWorkGroupSize));
 
 	// Update all kernel args
 	{
