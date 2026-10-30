@@ -1077,6 +1077,14 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 		// Trace the light path
 		//----------------------------------------------------------------------
 
+		// The connection of the vertex of depth d to the camera is a path of
+		// d + 2 segments, and RenderEyePath() renders up to path.maxdepth of
+		// them (2 at path.maxdepth = 1: the first vertex's direct light). The
+		// callback (the baking) connects to the hit point itself, a segment
+		// less
+		const u_int lastVertexDepth = ConnectToEyeCallBack ?
+			(maxPathDepth.depth - 1) : (Max(maxPathDepth.depth, 2u) - 2);
+
 		while (pathInfo.depth.depth < maxPathDepth.depth) {
 			const u_int sampleOffset = lightSampleBootSize +  pathInfo.depth.depth * lightSampleStepSize;
 
@@ -1131,7 +1139,7 @@ void PathTracer::RenderLightSample(IntersectionDeviceRef device,
 						*light, bsdf, lightPathFlux, pathInfo, sampleResults);
 			}
 
-			if (pathInfo.depth.depth == maxPathDepth.depth - 1)
+			if (pathInfo.depth.depth == lastVertexDepth)
 				break;
 
 			//--------------------------------------------------------------

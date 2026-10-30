@@ -232,13 +232,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Notes: before the Mix vertex-weight fix the difference was -2.0% (nest -5.4%), the double weight of the Mix's BSDF; the rest is the cache's.
 - Notes (2026-10-27): transparency alone does it too. White furnace (PATHCPU, 256 spp, `path.photongi.indirect.enabled=1 path.photongi.photon.maxcount=2000000`): a matte kd 1 with `transparency = 0.5` reads 0.985 with the hit-based area and 0.980 with the measured one (the probes stop on the transparent surface with its stop probability, as the photons); Mix(that, matte) 0.985 / 0.976; the furnace case `mix-transparent` 0.990 / 0.983 (1.000 without the cache). The plain matte, `mix` and `mix-null` read 1.000 with the cache. Cases in `C:/Users/Ricardo/lc-work/pgiarea/furnace_p.py` (`t-matte`, `t-mix-mattes`). Not investigated: a suspect is a per-material decision of the cache (where photons are stored or looked up, by event types or glossiness) that differs between a Mix with a null, whose event types include the null's specular transmission, and the leaf.
 
-### LIGHTCPU: its paths are one segment longer than path.maxdepth
-- Found: 2026-10-29
-- Area: engine (LIGHTCPU, the hybrid's light tracing)
-- Problem: `PathTracer::TraceLightPath()` connects the light path vertices of depth 0 to `path.maxdepth - 1` to the camera (`pathtracer.cpp:1074-1129`), so with `path.maxdepth = 2` it renders paths of 3 segments where PATHCPU and BIDIRCPU stop at 2: LIGHTCPU at depth 2 read +8.3% against PATHCPU at depth 2 on the matte `simple` scene below.
-- Reproduce: `C:/Users/Ricardo/lc-work/gt`: from `pyunittests/`, `ENGINES=LIGHTCPU python C:/Users/Ricardo/lc-work/gt/gtimg.py 1024 1 C:/Users/Ricardo/lc-work/gt/gt-matte.cfg out.npz seeds=4 lightstrategy.type=UNIFORM` against PATHCPU at depth 2.
-- Notes: the hybrid (`path.hybridbackforward.enable`) uses the same loop for its caustic connections: check whether its caustic paths can be one segment longer than the eye paths' limit. The dark part of the old entry (the floor -0.9% at depth 1) was the film splatting of the light samples, fixed on 2026-10-30.
-
 ### The AMD OpenCL compiler crashes on the path kernel (Windows)
 - Found: 2026-10-26
 - Area: build, device (OpenCL)
