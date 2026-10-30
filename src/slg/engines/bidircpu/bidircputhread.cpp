@@ -354,7 +354,10 @@ void BiDirCPURenderThread::ConnectVertices(const float time,
 				const float eyeWeight = MIS(lightBsdfPdfA) *
 					(misVmWeightFactor + eyeDVCM + eyeDVC * MIS(eyeBsdfRevPdfW));
 
-				const float misWeight = 1.f / (lightWeight + 1.f + eyeWeight);
+				// Only a connection goes through a shadow transparency: the
+				// eye and light paths stop there (as in DirectLightSampling())
+				const float misWeight = bsdfConn.hitPoint.throughShadowTransparency ?
+						1.f : (1.f / (lightWeight + 1.f + eyeWeight));
 
 				eyeSampleResult.radiance[lightVertex.lightID] += DispersionOnce(eyeVertex, eyeEvent, lightVertex, lightEvent,
 						(misWeight * geometryTerm) * eyeVertex.throughput * eyeBsdfEval *

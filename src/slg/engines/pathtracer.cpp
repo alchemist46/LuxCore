@@ -257,11 +257,17 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 
 							// MIS between direct light sampling and BSDF sampling
 							//
-							// Note: I have to avoid MIS on the last path vertex
+							// Note: I have to avoid MIS on the last path vertex. The
+							// path goes through a shadow transparency as the shadow
+							// ray does, unless it is nearly specular up to there (see
+							// RenderEyePath()): then only the light sampling reaches
+							// the light through it.
 							const bool misEnabled = !sampleResult->lastPathVertex &&
 								(light->IsEnvironmental() || light->IsIntersectable()) &&
 								CheckDirectHitVisibilityFlags(*light, directLightDepthInfo, event) &&
-								!shadowBsdf.hitPoint.throughShadowTransparency;
+								!(shadowBsdf.hitPoint.throughShadowTransparency &&
+									pathInfo.IsSpecularPathAfter(event, bsdf.GetUnregularizedGlossiness(),
+										hybridBackForwardGlossinessThreshold));
 
 							const float weight = misEnabled ? PowerHeuristic(directLightSamplingPdfW, bsdfPdfW) : 1.f;
 							const Spectrum incomingRadiance = bsdfEval * (weight * factor) * connectionThroughput * lightRadiance;
@@ -319,17 +325,13 @@ bool PathTracer::CheckDirectHitVisibilityFlags(LightSourceConstRef lightSource, 
 
 void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 		const EyePathInfo &pathInfo,
-		const Spectrum &pathThroughput, const Ray &ray,
-		const float distance, const BSDF &bsdf,
+		const Spectrum &pathThroughput, const BSDF &bsdf,
 		SampleResult *sampleResult) const {
 
 	auto lightSource = bsdf.GetLightSource();
 
 	// Check if the light source is visible according the settings
-	if (!CheckDirectHitVisibilityFlags(*lightSource, pathInfo.depth, pathInfo.lastBSDFEvent) ||
-			// If the material is shadow transparent, Direct Light sampling
-			// will take care of transporting all emitted light
-			bsdf.hitPoint.throughShadowTransparency)
+	if (!CheckDirectHitVisibilityFlags(*lightSource, pathInfo.depth, pathInfo.lastBSDFEvent))
 		return;
 
 	float directPdfA;
@@ -339,17 +341,18 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 		float weight;
 		if (!(pathInfo.lastBSDFEvent & SPECULAR)) {
 			auto& lightStrategy = scene.GetLightSources().GetIlluminateLightStrategy();
-			// The strategies pick a quad of two triangle lights as its first
-			// triangle
+			// The pick and the pdf of the light sampling of the last
+			// scattering vertex: not the origin of the ray after a shadow
+			// transparency the path went through (see RenderEyePath()). The
+			// strategies pick a quad of two triangle lights as its first
+			// triangle.
 			const float lightPickProb = lightStrategy.SampleLightPdf(
 				GetIlluminatePickLight(*lightSource),
-				ray.o, pathInfo.lastShadeN, pathInfo.lastFromVolume);
+				pathInfo.lastP, pathInfo.lastShadeN, pathInfo.lastFromVolume);
 
-			// The pdf of the light sampling from the origin of the ray: the
-			// last scattering vertex (Scene::Intersect() moves mint, not the
-			// origin, past the pass-through surfaces)
 			const float directPdfW = bsdf.GetTriangleLightSource()->GetDirectPdfW(bsdf.hitPoint,
-					ray.o, distance, AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
+					pathInfo.lastP, Distance(pathInfo.lastP, bsdf.hitPoint.p),
+					AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
 
 			// MIS between BSDF sampling and direct light sampling
 			weight = PowerHeuristic(pathInfo.lastBSDFPdfW * lightSource->GetAvgPassThroughTransparency(), directPdfW * lightPickProb);
@@ -363,11 +366,6 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 void PathTracer::DirectHitInfiniteLight(SceneConstRef scene,
 		const EyePathInfo &pathInfo, const Spectrum &pathThroughput,
 		const Ray &ray, const BSDF *bsdf, SampleResult *sampleResult) const {
-	// If the material is shadow transparent, Direct Light sampling
-	// will take care of transporting all emitted light
-	if (bsdf && bsdf->hitPoint.throughShadowTransparency)
-		return;
-
 	for(EnvLightSource& envLight: scene.GetLightSources().GetEnvLightSources()) {
 		// Check if the light source is visible according the settings
 		if (!CheckDirectHitVisibilityFlags(envLight, pathInfo.depth, pathInfo.lastBSDFEvent))
@@ -379,7 +377,7 @@ void PathTracer::DirectHitInfiniteLight(SceneConstRef scene,
 			float weight;
 			if (!(pathInfo.lastBSDFEvent & SPECULAR)) {
 				const float lightPickProb = scene.GetLightSources().GetIlluminateLightStrategy().
-						SampleLightPdf(envLight, ray.o, pathInfo.lastShadeN, pathInfo.lastFromVolume);
+						SampleLightPdf(envLight, pathInfo.lastP, pathInfo.lastShadeN, pathInfo.lastFromVolume);
 
 				// MIS between BSDF sampling and direct light sampling
 				weight = PowerHeuristic(pathInfo.lastBSDFPdfW, directPdfW * lightPickProb);
@@ -520,6 +518,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 	// This is used by light strategy
 	pathInfo.lastShadeN = Normal(eyeRay.d);
+	pathInfo.lastP = eyeRay.o;
 
 	// One wavelength for the dispersion of the whole path
 	pathInfo.wavelength = PathInfo::Wavelength(sampler.GetSample(IDX_WAVELENGTH(eyeSampleSize)));
@@ -672,7 +671,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 
 		if (!subsurfaceExit && bsdf.IsLightSource() && checkDirectLightHit) {
 			DirectHitFiniteLight(scene, pathInfo, pathThroughput,
-					eyeRay, eyeRayHit.t, bsdf, &sampleResult);
+					bsdf, &sampleResult);
 		}
 
 		//----------------------------------------------------------------------
@@ -786,6 +785,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		Spectrum bsdfSample;
 		float bsdfPdfW;
 		BSDFEvent bsdfEvent;
+		bool shadowTransparencyPass = false;
 		if (bsdf.IsShadowCatcher() && (directLightResult != SHADOWED)) {
 			bsdfSample = bsdf.ShadowCatcherSample(&sampledDir, &bsdfPdfW, &cosSampledDir, &bsdfEvent);
 
@@ -796,6 +796,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		} else {
 			const Spectrum &shadowTransparency = bsdf.GetPassThroughShadowTransparency();
 			if (!sampleResult.firstPathVertex && !shadowTransparency.Black() && !pathInfo.IsSpecularPath()) {
+				// The path goes on through the surface, as the shadow ray of
+				// the light sampling of the vertex before it: a light hit
+				// behind it takes the MIS weight of that vertex (its BSDF pdf,
+				// point and normal, and no Russian roulette here)
+				shadowTransparencyPass = true;
 				sampledDir = -bsdf.hitPoint.fixedDir;
 				bsdfSample = shadowTransparency;
 				bsdfPdfW = pathInfo.lastBSDFPdfW;
@@ -817,15 +822,19 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		if (sampleResult.firstPathVertex)
 			sampleResult.firstPathVertexEvent = bsdfEvent;
 
-		pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold,
-				rrType != slg::ocl::RR_BOUNCE, regularizationRoughness);
-		if (photonGICache)
-			causticChain = photonGICache->NextCausticChain(causticChain, causticLookup,
-					bsdfEvent, bsdf.GetUnregularizedGlossiness());
+		if (shadowTransparencyPass)
+			pathInfo.PassShadowTransparency(bsdf);
+		else {
+			pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold,
+					rrType != slg::ocl::RR_BOUNCE, regularizationRoughness);
+			if (photonGICache)
+				causticChain = photonGICache->NextCausticChain(causticChain, causticLookup,
+						bsdfEvent, bsdf.GetUnregularizedGlossiness());
+		}
 
 		// Russian Roulette
 		float rrProb = 1.f;
-		if (pathInfo.UseRR(rrDepth)) {
+		if (!shadowTransparencyPass && pathInfo.UseRR(rrDepth)) {
 			rrProb = RussianRouletteProb(bsdfSample, pathThroughput, pathInfo.etaScale);
 			if (rrProb < sampler.GetSample(sampleOffset + IDX_RR))
 				break;
@@ -866,6 +875,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			continue;
 		}
 		subsurfaceExit = false;
+
+		// After a shadow transparency, the environment lights on a miss
+		// take the pdf of the MIS weight at the vertex before it too
+		if (shadowTransparencyPass)
+			std::swap(vertexBsdf, hitBsdf);
 
 		eyeRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
 		// A ray from a point in a volume starts at the point, see BSDF::GetRayOrigin()

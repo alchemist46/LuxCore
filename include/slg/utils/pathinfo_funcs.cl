@@ -126,6 +126,7 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	pathInfo->lastBSDFPdfW = pdfW;
 	const float3 shadeN = VLOAD3F(&bsdf->hitPoint.shadeN.x);
 	VSTORE3F(bsdf->hitPoint.intoObject ? shadeN : -shadeN, &pathInfo->lastShadeN.x);
+	pathInfo->lastP = bsdf->hitPoint.p;
 	pathInfo->lastFromVolume =  bsdf->isVolume;
 	pathInfo->lastGlossiness = glossiness;
 	
@@ -138,6 +139,23 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 	// A rough bounce only (see EyePathInfo::AddVertex())
 	pathInfo->anyNonSpecularBounce = pathInfo->anyNonSpecularBounce || (event & DIFFUSE) ||
 			((event & GLOSSY) && (BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM) >= regularizationRoughness));
+}
+
+// See EyePathInfo::PassShadowTransparency()
+OPENCL_FORCE_INLINE void EyePathInfo_PassShadowTransparency(__global EyePathInfo *pathInfo,
+		__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	PathDepthInfo_IncDepths(&pathInfo->depth, PathDepthInfo_GetDepthEvent(bsdf, pathInfo->lastBSDFEvent MATERIALS_PARAM));
+
+	// The path crosses the surface, as a shadow ray does (see Scene_Intersect())
+	PathVolumeInfo_Update(&pathInfo->volume, BSDF_GetEventTypes(bsdf MATERIALS_PARAM), bsdf MATERIALS_PARAM);
+}
+
+// See EyePathInfo::IsSpecularPathAfter()
+OPENCL_FORCE_INLINE bool EyePathInfo_IsSpecularPathAfter(__global EyePathInfo *pathInfo,
+		const BSDFEvent event, const float glossiness, const float glossinessThreshold) {
+	return ((pathInfo->depth.depth == 0) || pathInfo->isNearlyS) &&
+			EyePathInfo_IsNearlySpecular(pathInfo, event, glossiness, glossinessThreshold);
 }
 
 OPENCL_FORCE_INLINE bool EyePathInfo_IsCausticPath(__global EyePathInfo *pathInfo) {

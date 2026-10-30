@@ -75,14 +75,21 @@ OPENCL_FORCE_INLINE __global const ELVCacheEntry* restrict EnvLightVisibilityCac
 	return nearestEntry;
 }
 
-OPENCL_FORCE_INLINE __global const float* restrict EnvLightVisibilityCache_GetVisibilityMap(__global const BSDF *bsdf
+// The map of a point with its landing shading normal
+OPENCL_FORCE_INLINE __global const float* restrict EnvLightVisibilityCache_GetVisibilityMapAt(
+		const float3 p, const float3 n, const bool isVolume
 		LIGHTS_PARAM_DECL) {
 	__global const ELVCacheEntry* restrict cacheEntry = EnvLightVisibilityCache_GetNearestEntry(
 			elvcAllEntries, elvcDistributions, elvcBVHNodes, elvcRadius2, elvcNormalCosAngle,
-			VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf), bsdf->isVolume
-			);
+			p, n, isVolume);
 
 	return (cacheEntry && (cacheEntry->distributionOffset != NULL_INDEX)) ? &elvcDistributions[cacheEntry->distributionOffset] : NULL;
+}
+
+OPENCL_FORCE_INLINE __global const float* restrict EnvLightVisibilityCache_GetVisibilityMap(__global const BSDF *bsdf
+		LIGHTS_PARAM_DECL) {
+	return EnvLightVisibilityCache_GetVisibilityMapAt(VLOAD3F(&bsdf->hitPoint.p.x),
+			BSDF_GetLandingShadeN(bsdf), bsdf->isVolume LIGHTS_PARAM);
 }
 
 //------------------------------------------------------------------------------
@@ -135,10 +142,13 @@ OPENCL_FORCE_INLINE bool EnvLightVisibilityCache_Sample(__global const BSDF *bsd
 // Pdf
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE bool EnvLightVisibilityCache_Pdf(__global const BSDF *bsdf,
+// The pdf of the sampling at a point with its landing shading normal (the
+// last scattering vertex of a path, see EnvLight_GetRadiance())
+OPENCL_FORCE_INLINE bool EnvLightVisibilityCache_Pdf(
+		const float3 p, const float3 n, const bool isVolume,
 		const float u, const float v, float *pdf
 		LIGHTS_PARAM_DECL) {
-	__global const float* restrict cacheDist = EnvLightVisibilityCache_GetVisibilityMap(bsdf LIGHTS_PARAM);
+	__global const float* restrict cacheDist = EnvLightVisibilityCache_GetVisibilityMapAt(p, n, isVolume LIGHTS_PARAM);
 	if (!cacheDist)
 		return false;
 

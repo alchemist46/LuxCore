@@ -220,6 +220,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 	float cosSampledDir;
 	float bsdfPdfW;
 	BSDFEvent bsdfEvent;
+	bool shadowTransparencyPass = false;
 
 	if (BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM) && (directLightResult != SHADOWED)) {
 		bsdfSample = BSDF_ShadowCatcherSample(bsdf,
@@ -234,6 +235,10 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		const float3 shadowTransparency = BSDF_GetPassThroughShadowTransparency(bsdf
 				MATERIALS_PARAM);
 		if (!sampleResult->firstPathVertex && !Spectrum_IsBlack(shadowTransparency) && !pathInfo->isNearlyS) {
+			// The path goes on through the surface: a light hit behind it
+			// takes the MIS weight of the vertex before it (see
+			// PathTracer::RenderEyePath())
+			shadowTransparencyPass = true;
 			sampledDir = -VLOAD3F(&bsdf->hitPoint.fixedDir.x);
 			bsdfSample = shadowTransparency;
 			bsdfPdfW = pathInfo->lastBSDFPdfW;
@@ -253,20 +258,24 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 	if (sampleResult->firstPathVertex)
 		sampleResult->firstPathVertexEvent = bsdfEvent;
 
-	EyePathInfo_AddVertex(pathInfo, bsdf, bsdfEvent, bsdfPdfW,
-			taskConfig->pathTracer.hybridBackForward.glossinessThreshold,
-			taskConfig->pathTracer.rrType != RR_BOUNCE,
-			taskConfig->pathTracer.regularization
-			MATERIALS_PARAM);
-	if (taskConfig->pathTracer.pgic.causticEnabled) {
-		taskState->photonGICausticChain = PhotonGICache_NextCausticChain(taskConfig,
-				taskState->photonGICausticChain, taskState->photonGICausticLookup,
-				bsdfEvent, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM));
-		taskState->photonGICausticLookup = false;
+	if (shadowTransparencyPass)
+		EyePathInfo_PassShadowTransparency(pathInfo, bsdf MATERIALS_PARAM);
+	else {
+		EyePathInfo_AddVertex(pathInfo, bsdf, bsdfEvent, bsdfPdfW,
+				taskConfig->pathTracer.hybridBackForward.glossinessThreshold,
+				taskConfig->pathTracer.rrType != RR_BOUNCE,
+				taskConfig->pathTracer.regularization
+				MATERIALS_PARAM);
+		if (taskConfig->pathTracer.pgic.causticEnabled)
+			taskState->photonGICausticChain = PhotonGICache_NextCausticChain(taskConfig,
+					taskState->photonGICausticChain, taskState->photonGICausticLookup,
+					bsdfEvent, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM));
 	}
+	// The lookup of this vertex is done (a vertex of the next ray has its own)
+	taskState->photonGICausticLookup = false;
 
 	// Russian Roulette (the throughput is still the one before the bounce)
-	const bool rrEnabled = EyePathInfo_UseRR(pathInfo, taskConfig->pathTracer.rrDepth);
+	const bool rrEnabled = !shadowTransparencyPass && EyePathInfo_UseRR(pathInfo, taskConfig->pathTracer.rrDepth);
 	const float rrProb = rrEnabled ?
 		PathTracer_RussianRouletteProb(taskConfig->pathTracer.rrType,
 			taskConfig->pathTracer.rrImportanceCap, bsdfSample,
@@ -387,7 +396,11 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			MATERIALS_PARAM
 			);
 	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
-	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c), taskDirectLight->illumInfo.lightRadiance.c);
+	// The MIS weight of the light sampling, taken out where only it goes
+	// through a shadow transparency (see DirectLight_BSDFSampling())
+	const float shadowTransparencyScale = (!continueToTrace && throughShadowTransparency) ?
+		taskDirectLight->illumInfo.shadowTransparencyScale : 1.f;
+	VSTORE3F((shadowTransparencyScale * connectionThroughput) * VLOAD3F(taskDirectLight->illumInfo.lightRadiance.c), taskDirectLight->illumInfo.lightRadiance.c);
 	VSTORE3F(connectionThroughput * VLOAD3F(taskDirectLight->illumInfo.lightIrradiance.c), taskDirectLight->illumInfo.lightIrradiance.c);
 
 	const bool rayMiss = (rayHit->meshIndex == NULL_INDEX);
@@ -589,8 +602,6 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				&taskConfig->film,
 				pathInfo,
 				&taskState->throughput,
-				ray,
-				rayHit->t,
 				bsdf,
 				sampleResult
 				LIGHTS_PARAM);

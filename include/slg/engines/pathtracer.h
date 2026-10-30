@@ -236,8 +236,7 @@ private:
 			BSDF &bsdf, luxrays::Spectrum &pathThroughput) const;
 
 	void DirectHitFiniteLight(SceneConstRef scene, const EyePathInfo &pathInfo,
-			const luxrays::Spectrum &pathThrouput, const luxrays::Ray &ray,
-			const float distance, const BSDF &bsdf,
+			const luxrays::Spectrum &pathThrouput, const BSDF &bsdf,
 			SampleResult *sampleResult) const;
 	void DirectHitInfiniteLight(SceneConstRef scene, const EyePathInfo &pathInfo,
 			const luxrays::Spectrum &pathThrouput, const luxrays::Ray &ray,

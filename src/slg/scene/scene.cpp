@@ -920,6 +920,9 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 				if (!shadowTransparency.Black()) {
 					*connectionThroughput *= shadowTransparency;
 					throughShadowTransparency = true;
+					// The callers read it after a miss too (the BSDF is then
+					// the one of the last surface the ray went through)
+					bsdf->hitPoint.throughShadowTransparency = true;
 					continueToTrace = true;
 				}
 			}

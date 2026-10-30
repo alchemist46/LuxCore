@@ -102,6 +102,10 @@ typedef struct {
 	// This is used only if Film channel IRRADIANCE is enabled and
 	// only for the first path vertex
 	Spectrum lightIrradiance;
+	// The factor of lightRadiance if the shadow ray goes through a shadow
+	// transparency: it takes the MIS weight out where the path doesn't go
+	// through it (see DirectLight_BSDFSampling())
+	float shadowTransparencyScale;
 
 	unsigned int lightID;
 } DirectLightIlluminateInfo;

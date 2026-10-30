@@ -108,6 +108,7 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 	// Update last path vertex information
 	lastBSDFPdfW = pdfW;
 	lastShadeN = bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
+	lastP = bsdf.hitPoint.p;
 	lastFromVolume =  bsdf.IsVolume();
 	lastGlossiness = glossiness;
 
@@ -122,6 +123,14 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 	// paths after a rough bounce
 	anyNonSpecularBounce = anyNonSpecularBounce || (event & DIFFUSE) ||
 			((event & GLOSSY) && (bsdf.GetUnregularizedGlossiness() >= regularizationRoughness));
+}
+
+void EyePathInfo::PassShadowTransparency(const BSDF &bsdf) {
+	depth.IncDepths(PathDepthInfo::GetDepthEvent(bsdf, lastBSDFEvent));
+
+	// The path crosses the surface, as a shadow ray does (see
+	// Scene::Intersect())
+	volume.Update(bsdf.GetEventTypes(), bsdf);
 }
 
 bool EyePathInfo::IsCausticPath(const BSDFEvent event,

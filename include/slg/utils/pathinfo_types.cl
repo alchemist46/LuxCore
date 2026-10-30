@@ -29,6 +29,9 @@ typedef struct {
 	float lastBSDFPdfW;
 	float lastGlossiness;
 	Normal lastShadeN;
+	// The point of the last scattering vertex, where its light sampling
+	// starts
+	Point lastP;
 	bool lastFromVolume, isTransmittedPath;
 	// The product of the eta^2 of the refractions of the path, for the
 	// Russian roulette on the path throughput (see

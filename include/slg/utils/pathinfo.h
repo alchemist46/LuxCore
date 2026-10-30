@@ -98,6 +98,17 @@ public:
 	void AddVertex(const BSDF &bsdf, const BSDFEvent event, const float pdfW,
 			const float glossinessThreshold, const bool trackEtaScale = false,
 			const float regularizationRoughness = 0.f);
+	// The path goes on through a surface with a shadow transparency, as the
+	// shadow rays do (see PathTracer::RenderEyePath()): a vertex for the
+	// depth, but the last vertex information stays the one of the scattering
+	// vertex before it, for the MIS weight of a light hit behind the surface
+	void PassShadowTransparency(const BSDF &bsdf);
+	// The path is nearly specular after a vertex with this event (see
+	// AddVertex())
+	bool IsSpecularPathAfter(const BSDFEvent event, const float glossiness,
+			const float glossinessThreshold) const {
+		return ((depth.depth == 0) || isNearlyS) && IsNearlySpecular(event, glossiness, glossinessThreshold);
+	}
 	
 	bool IsCausticPath() const { return isNearlyCaustic && (depth.depth > 1); }
 	bool IsCausticPath(const BSDFEvent event, const float glossiness, const float glossinessThreshold) const;
@@ -108,6 +119,9 @@ public:
 	float lastBSDFPdfW;
 	float lastGlossiness;
 	luxrays::Normal lastShadeN;
+	// The point of the last scattering vertex, where its light sampling
+	// starts
+	luxrays::Point lastP;
 	bool lastFromVolume, isTransmittedPath;
 	// The product of the eta^2 of the refractions of the path, for the
 	// Russian roulette on the path throughput (see

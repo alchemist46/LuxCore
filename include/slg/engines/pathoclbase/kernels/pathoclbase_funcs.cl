@@ -186,11 +186,6 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 		__global EyePathInfo *pathInfo, __global const Spectrum* restrict pathThroughput,
 		const __global Ray *ray, __global const BSDF *bsdf, __global SampleResult *sampleResult
 		LIGHTS_PARAM_DECL) {
-	// If the material is shadow transparent, Direct Light sampling
-	// will take care of transporting all emitted light
-	if (bsdf && bsdf->hitPoint.throughShadowTransparency)
-		return;
-
 	const float3 throughput = VLOAD3F(pathThroughput->c);
 
 	for (uint i = 0; i < envLightCount; ++i) {
@@ -201,7 +196,11 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 			continue;
 
 		float directPdfW;
-		const float3 envRadiance = EnvLight_GetRadiance(light, bsdf,
+		// The pdf of the light sampling of the last scattering vertex, not
+		// of a shadow transparency the path went through after it (see
+		// PathTracer::RenderEyePath())
+		const float3 envRadiance = EnvLight_GetRadiance(light, bsdf != NULL,
+				VLOAD3F(&pathInfo->lastP.x), VLOAD3F(&pathInfo->lastShadeN.x), pathInfo->lastFromVolume,
 				-VLOAD3F(&ray->d.x), &directPdfW
 				LIGHTS_PARAM);
 
@@ -212,7 +211,7 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 						lightTreeNodes, lightTreeDistantLights,
 						lightTreeDistantLightCount, lightTreeLightIndex,
 						lightTreeLearn, lightTreeLearnCells,
-						VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
+						VLOAD3F(&pathInfo->lastP.x), VLOAD3F(&pathInfo->lastShadeN.x),
 						pathInfo->lastFromVolume,
 						light->lightSceneIndex);
 
@@ -228,17 +227,14 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 
 OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict film,
 		__global EyePathInfo *pathInfo,
-		__global const Spectrum* restrict pathThroughput, const __global Ray *ray,
-		const float distance, __global const BSDF *bsdf,
+		__global const Spectrum* restrict pathThroughput,
+		__global const BSDF *bsdf,
 		__global SampleResult *sampleResult
 		LIGHTS_PARAM_DECL) {
 	__global const LightSource* restrict light = &lights[bsdf->triangleLightSourceIndex];
 
 	// Check if the light source is visible according the settings
-	if (!CheckDirectHitVisibilityFlags(light, &pathInfo->depth, pathInfo->lastBSDFEvent) ||
-			// If the material is shadow transparent, Direct Light sampling
-			// will take care of transporting all emitted light
-			bsdf->hitPoint.throughShadowTransparency)
+	if (!CheckDirectHitVisibilityFlags(light, &pathInfo->depth, pathInfo->lastBSDFEvent))
 		return;
 	
 	float directPdfA;
@@ -249,11 +245,14 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 		// Add emitted radiance
 		float weight = 1.f;
 		if (!(pathInfo->lastBSDFEvent & SPECULAR)) {
+			// The pick and the pdf of the light sampling of the last
+			// scattering vertex (see PathTracer::DirectHitFiniteLight())
+			const float3 lastP = VLOAD3F(&pathInfo->lastP.x);
 			const float lightPickProb = LightStrategy_SampleLightPdf(lightsDistribution,
 					lightTreeNodes, lightTreeDistantLights,
 					lightTreeDistantLightCount, lightTreeLightIndex,
 						lightTreeLearn, lightTreeLearnCells,
-					VLOAD3F(&ray->o.x), VLOAD3F(&pathInfo->lastShadeN.x),
+					lastP, VLOAD3F(&pathInfo->lastShadeN.x),
 					pathInfo->lastFromVolume,
 					// The strategies pick a quad of two triangle lights as
 					// its first triangle
@@ -261,7 +260,7 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 						light->triangle.quadLightIndex : light->lightSceneIndex);
 
 			const float directPdfW = TriangleLight_GetDirectPdfW(light, &bsdf->hitPoint,
-					VLOAD3F(&ray->o.x), distance,
+					lastP, length(VLOAD3F(&bsdf->hitPoint.p.x) - lastP),
 					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x)))
 					MATERIALS_PARAM);
 
@@ -405,10 +404,20 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 
 	const bool misEnabled = !lastPathVertex &&
 			Light_IsEnvOrIntersectable(light) &&
-			CheckDirectHitVisibilityFlags(light, tmpDepthInfo, event) &&
-			!bsdf->hitPoint.throughShadowTransparency;
+			CheckDirectHitVisibilityFlags(light, tmpDepthInfo, event);
 
 	const float weight = misEnabled ? PowerHeuristic(directLightSamplingPdfW, bsdfPdfW) : 1.f;
+
+	// The path goes through a shadow transparency as the shadow ray does,
+	// unless it is nearly specular up to there (see
+	// PathTracer::DirectLightSampling()): then only the light sampling
+	// reaches the light through it, without MIS. The shadow ray is traced
+	// later (see AdvancePaths_ShadowRayHit()).
+	info->shadowTransparencyScale = (misEnabled && (weight > 0.f) &&
+			EyePathInfo_IsSpecularPathAfter(pathInfo, event,
+				BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM),
+				taskConfig->pathTracer.hybridBackForward.glossinessThreshold)) ?
+		(1.f / weight) : 1.f;
 
 	const float3 lightRadiance = VLOAD3F(info->lightRadiance.c);
 	VSTORE3F(bsdfEval * (weight * factor) * lightRadiance, info->lightRadiance.c);

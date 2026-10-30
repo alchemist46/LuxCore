@@ -54,18 +54,19 @@ OPENCL_FORCE_INLINE void EnvLightSource_FromLatLongMapping(const float s, const 
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float3 ConstantInfiniteLight_GetRadiance(__global const LightSource *constantInfiniteLight,
-		__global const BSDF *bsdf, const float3 dir, float *directPdfA
+		const bool hasPdf, const float3 pdfP, const float3 pdfN, const bool pdfIsVolume,
+		const float3 dir, float *directPdfA
 		LIGHTS_PARAM_DECL) {
 	const bool useVisibilityMapCache = constantInfiniteLight->notIntersectable.constantInfinite.useVisibilityMapCache;
 
-	*directPdfA = bsdf ? UniformSpherePdf() : 0.f;
+	*directPdfA = hasPdf ? UniformSpherePdf() : 0.f;
 
-	if (bsdf && useVisibilityMapCache && EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM)) {
+	if (hasPdf && useVisibilityMapCache) {
 		// The world lat-long mapping, the one ConstantInfiniteLight_Illuminate()
 		// samples
 		float u, v, latLongMappingPdf, cachePdf;
 		EnvLightSource_ToLatLongMapping(-dir, &u, &v, &latLongMappingPdf);
-		if (EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM))
+		if (EnvLightVisibilityCache_Pdf(pdfP, pdfN, pdfIsVolume, u, v, &cachePdf LIGHTS_PARAM))
 			*directPdfA = cachePdf * latLongMappingPdf;
 	}
 
@@ -136,7 +137,8 @@ OPENCL_FORCE_INLINE float3 ConstantInfiniteLight_Illuminate(__global const Light
 //------------------------------------------------------------------------------
 
 OPENCL_FORCE_INLINE float3 InfiniteLight_GetRadiance(__global const LightSource *infiniteLight,
-		__global const BSDF *bsdf, const float3 dir, float *directPdfA
+		const bool hasPdf, const float3 pdfP, const float3 pdfN, const bool pdfIsVolume,
+		const float3 dir, float *directPdfA
 		LIGHTS_PARAM_DECL) {
 	const float3 localDir = normalize(Transform_InvApplyVector(&infiniteLight->notIntersectable.light2World, -dir));
 
@@ -146,11 +148,10 @@ OPENCL_FORCE_INLINE float3 InfiniteLight_GetRadiance(__global const LightSource 
 		return BLACK;
 
 	float cachePdf;
-	if (!bsdf)
+	if (!hasPdf)
 		*directPdfA = 0.f;
 	else if (infiniteLight->notIntersectable.infinite.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) &&
-			EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM)) {
+			EnvLightVisibilityCache_Pdf(pdfP, pdfN, pdfIsVolume, u, v, &cachePdf LIGHTS_PARAM)) {
 		*directPdfA = cachePdf * latLongMappingPdf;
 	} else {
 		// The pdf of the light sampling technique (MIS compensated)
@@ -285,7 +286,8 @@ OPENCL_FORCE_INLINE float3 Sky2Light_ComputeRadiance(__global const LightSource 
 }
 
 OPENCL_FORCE_INLINE float3 Sky2Light_GetRadiance(__global const LightSource *sky2Light,
-		__global const BSDF *bsdf, const float3 dir, float *directPdfA
+		const bool hasPdf, const float3 pdfP, const float3 pdfN, const bool pdfIsVolume,
+		const float3 dir, float *directPdfA
 		LIGHTS_PARAM_DECL) {
 	const float3 w = -dir;
 	float u, v, latLongMappingPdf;
@@ -294,11 +296,10 @@ OPENCL_FORCE_INLINE float3 Sky2Light_GetRadiance(__global const LightSource *sky
 		return BLACK;
 
 	float cachePdf;
-	if (!bsdf)
+	if (!hasPdf)
 		*directPdfA = 0.f;
 	else if (sky2Light->notIntersectable.sky2.useVisibilityMapCache &&
-			EnvLightVisibilityCache_IsCacheEnabled(bsdf MATERIALS_PARAM) &&
-			EnvLightVisibilityCache_Pdf(bsdf, u, v, &cachePdf LIGHTS_PARAM)) {
+			EnvLightVisibilityCache_Pdf(pdfP, pdfN, pdfIsVolume, u, v, &cachePdf LIGHTS_PARAM)) {
 		*directPdfA = cachePdf * latLongMappingPdf;
 	} else {
 		__global const float *skyLightDist = &envLightDistribution[sky2Light->notIntersectable.sky2.misDistributionOffset];
@@ -377,7 +378,7 @@ OPENCL_FORCE_INLINE float SunLight_ConeOneMinusCos(__global const LightSource *s
 }
 
 OPENCL_FORCE_INLINE float3 SunLight_GetRadiance(__global const LightSource *sunLight,
-		__global const BSDF *bsdf, const float3 dir, float *directPdfA) {
+		const float3 dir, float *directPdfA) {
 	const float cosThetaMax = sunLight->notIntersectable.sun.cosThetaMax;
 	const float sin2ThetaMax = sunLight->notIntersectable.sun.sin2ThetaMax;
 	const float3 x = VLOAD3F(&sunLight->notIntersectable.sun.x.x);
@@ -1102,28 +1103,32 @@ OPENCL_FORCE_INLINE float3 LaserLight_Illuminate(__global const LightSource *las
 // Generic light functions
 //------------------------------------------------------------------------------
 
+// The pdf of the light sampling (for the MIS weight) is the one at pdfP, the
+// last scattering vertex of the path, with its landing shading normal pdfN:
+// none without hasPdf (a camera ray). The visibility map cache answers for a
+// delta vertex too, whose MIS weight doesn't use the pdf.
 OPENCL_HOT_FUNCTION float3 EnvLight_GetRadiance(__global const LightSource *light,
-		__global const BSDF *bsdf, const float3 dir, float *directPdfA
+		const bool hasPdf, const float3 pdfP, const float3 pdfN, const bool pdfIsVolume,
+		const float3 dir, float *directPdfA
 		LIGHTS_PARAM_DECL) {
 	switch (light->type) {
 		case TYPE_IL_CONSTANT:
 			return ConstantInfiniteLight_GetRadiance(light,
-					bsdf,
+					hasPdf, pdfP, pdfN, pdfIsVolume,
 					dir, directPdfA
 					LIGHTS_PARAM);
 		case TYPE_IL:
 			return InfiniteLight_GetRadiance(light,
-					bsdf,
+					hasPdf, pdfP, pdfN, pdfIsVolume,
 					dir, directPdfA
 					LIGHTS_PARAM);
 		case TYPE_IL_SKY2:
 			return Sky2Light_GetRadiance(light,
-					bsdf,
+					hasPdf, pdfP, pdfN, pdfIsVolume,
 					dir, directPdfA
 					LIGHTS_PARAM);
 		case TYPE_SUN:
 			return SunLight_GetRadiance(light,
-					bsdf,
 					dir, directPdfA);
 		case TYPE_SHARPDISTANT:
 			// Just return Black
