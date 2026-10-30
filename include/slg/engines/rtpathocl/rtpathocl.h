@@ -21,6 +21,9 @@
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
+#include <condition_variable>
+#include <mutex>
+
 #include "slg/engines/tilepathocl/tilepathocl.h"
 
 namespace slg {
@@ -82,6 +85,8 @@ public:
 
 	virtual void EndSceneEdit(const EditActionList &editActions);
 
+	virtual void Resume();
+
 	virtual void BeginFilmEdit();
 	virtual void EndFilmEdit(FilmRef film, std::mutex *flmMutex);
 
@@ -118,14 +123,28 @@ protected:
 
 	virtual void StartLockLess();
 	virtual void StopLockLess();
+	virtual void EndSceneEditLockLess(const EditActionList &editActions);
 	virtual void UpdateFilmLockLess();
 
-	void PauseThreads();
-	void ResumeThreads();
 	void ReleaseStartedRenderThreads();
 
+	// Sets syncType and wakes render thread 0 up if it waits in pause mode
+	void RequestSync(const RTPathOCLSyncType type);
+	void WakeUpPausedRenderThread();
+
 	EditActionList updateActions;
-	bool useFastCameraEditPath, cameraIsUsingCustomBokeh;
+	// Set by a camera only edit, taken by render thread 0 at the end of a frame
+	std::atomic<bool> useFastCameraEditPath;
+	bool cameraIsUsingCustomBokeh;
+	// The compiled camera is written by EndSceneEditLockLess() while the render
+	// threads run (the fast camera edit path) and read by render thread 0
+	std::mutex cameraEditMutex;
+	// The copy the camera buffers are uploaded from (asynchronously)
+	slg::ocl::Camera cameraUpload;
+
+	// Render thread 0 waits on pauseCondition in pause mode
+	std::mutex pauseMutex;
+	std::condition_variable pauseCondition;
 
 	// Used by RTPathOCLRenderEngine code to sync. with render thread 0
 	std::barrier<completion_t> *syncBarrier;

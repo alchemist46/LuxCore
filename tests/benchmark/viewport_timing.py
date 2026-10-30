@@ -59,6 +59,8 @@ parser.add_argument("--device", default="OCL", choices=("OCL", "CPU"),
                     help="viewport device: OCL is RTPATHOCL on the HIP GPU, CPU is RTPATHCPU")
 parser.add_argument("--pixel-size", default="1", choices=("1", "2", "4", "8"))
 parser.add_argument("--halt", type=int, default=6, help="viewport halt time (s)")
+parser.add_argument("--first-pause-timeout", type=float, default=120.0,
+                    help="seconds past the halt to wait for the first pause (a cold HIP kernel compile takes ~6 min)")
 parser.add_argument("--moves", type=int, default=4, help="camera moves while rendering")
 parser.add_argument("--paused-moves", type=int, default=3,
                     help="camera moves after the halt (at least 2: the first two set the references)")
@@ -420,7 +422,7 @@ def plan():
     event("rendered", view="A")
     space.shading.type = "RENDERED"
     yield 1.0
-    yield from wait_paused(args.halt + 120)
+    yield from wait_paused(args.halt + args.first_pause_timeout)
     yield 0.5
     event("ref", view="A")
     yield 0.3

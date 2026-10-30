@@ -46,6 +46,7 @@ RTPathOCLRenderEngine::RTPathOCLRenderEngine(RenderConfigRef rcfg) :
 		frameBarrier = nullptr;
 
 	frameTime = 0.f;
+	useFastCameraEditPath = false;
 }
 
 RTPathOCLRenderEngine::~RTPathOCLRenderEngine() {
@@ -116,6 +117,27 @@ void RTPathOCLRenderEngine::StartLockLess() {
 	renderThreadsSynced = true;
 }
 
+void RTPathOCLRenderEngine::WakeUpPausedRenderThread() {
+	// Render thread 0 checks its wait condition under pauseMutex: taking it
+	// here once the state has changed means the notification can not fall
+	// between its check and its wait
+	{
+		std::lock_guard<std::mutex> lock(pauseMutex);
+	}
+	pauseCondition.notify_all();
+}
+
+void RTPathOCLRenderEngine::RequestSync(const RTPathOCLSyncType type) {
+	syncType = type;
+	WakeUpPausedRenderThread();
+}
+
+void RTPathOCLRenderEngine::Resume() {
+	TilePathOCLRenderEngine::Resume();
+
+	WakeUpPausedRenderThread();
+}
+
 void RTPathOCLRenderEngine::ReleaseStartedRenderThreads() {
 	// A device failed after the render threads of the devices before it had
 	// started (they start in order, so those are a prefix with thread 0).
@@ -160,7 +182,7 @@ void RTPathOCLRenderEngine::StopLockLess() {
 		return;
 	}
 
-	syncType = SYNCTYPE_STOP;
+	RequestSync(SYNCTYPE_STOP);
 	syncBarrier->arrive_and_wait();
 
 	// All render threads are now suspended and I can set the interrupt signal
@@ -187,7 +209,7 @@ void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
 		TilePathOCLRenderEngine::EndSceneEdit(editActions);
 		useFastCameraEditPath = true;
 	} else {
-		syncType = SYNCTYPE_ENDSCENEEDIT;
+		RequestSync(SYNCTYPE_ENDSCENEEDIT);
 		updateActions.AddActions(editActions.GetActions());
 		syncBarrier->arrive_and_wait();
 
@@ -203,9 +225,17 @@ void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
 	}
 }
 
+void RTPathOCLRenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
+	// With the fast camera edit path, the render threads are running and
+	// render thread 0 can be copying the compiled camera
+	std::lock_guard<std::mutex> lock(cameraEditMutex);
+
+	TilePathOCLRenderEngine::EndSceneEditLockLess(editActions);
+}
+
 // A fast path for film resize
 void RTPathOCLRenderEngine::BeginFilmEdit() {
-	syncType = SYNCTYPE_BEGINFILMEDIT;
+	RequestSync(SYNCTYPE_BEGINFILMEDIT);
 	syncBarrier->arrive_and_wait();
 
 	// All render threads are now suspended and I can set the interrupt signal

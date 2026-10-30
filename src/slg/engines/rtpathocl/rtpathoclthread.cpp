@@ -147,11 +147,19 @@ void RTPathOCLRenderThread::UpdateCameraOCLBuffer() {
 	RTPathOCLRenderEngine *engine = (RTPathOCLRenderEngine *)renderEngine;
 
 	intersectionDevice.EnqueueWriteBuffer(cameraBuff, false, sizeof(slg::ocl::Camera),
-			&engine->compiledScene->camera);
+			&engine->cameraUpload);
 }
 
 void RTPathOCLRenderThread::UpdateAllCameraThreadsOCLBuffers() {
 	RTPathOCLRenderEngine *engine = (RTPathOCLRenderEngine *)renderEngine;
+
+	// The main thread can be compiling the camera of the next edit. The
+	// asynchronous writes read the copy, which changes only at the next
+	// camera edit, a frame later.
+	{
+		std::lock_guard<std::mutex> lock(engine->cameraEditMutex);
+		engine->cameraUpload = engine->compiledScene->camera;
+	}
 
 	// Update all threads
 	for (u_int i = 0; i < engine->renderOCLThreads.size(); ++i) {
@@ -255,21 +263,6 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
                         const double now = WallClockTime();
                         engine->frameTime = now - frameStartTime;
                         frameStartTime = now;
-                        
-                        //--------------------------------------------------------------
-                        // This is a special optimized path for CAMERA_EDIT action only
-                        // (when custom camera bokeh is not used)
-                        //--------------------------------------------------------------
-
-                        if (engine->useFastCameraEditPath) {
-                                engine->useFastCameraEditPath = false;
-
-                                // Update OpenCL camera buffer if there is only a CAMERA_EDIT. It
-                                // is done by thread #0 for all threads.
-                                UpdateAllCameraThreadsOCLBuffers();
-                                frameCounter = 0;
-                                engine->GetFilm().Reset(true);
-                        }
 
                         //--------------------------------------------------------------
                         // Check if there is a sync. request from the main thread
@@ -311,10 +304,30 @@ void RTPathOCLRenderThread::RenderThreadImpl(std::stop_token stop_token) {
 									if (requestedStop)
 											break;
 
-									std::this_thread::sleep_for(100ms);
+									// Woken up by Resume() and by the sync. requests;
+									// the timeout is only a safety net
+									std::unique_lock<std::mutex> lock(engine->pauseMutex);
+									engine->pauseCondition.wait_for(lock, 100ms, [engine] {
+										return !engine->pauseMode || (engine->syncType != SYNCTYPE_NONE);
+									});
                                 } else {
 									break;
 								}
+                        }
+
+                        //--------------------------------------------------------------
+                        // This is a special optimized path for CAMERA_EDIT action only
+                        // (when custom camera bokeh is not used). After the pause:
+                        // a camera edit while paused is in the first frame after
+                        // Resume().
+                        //--------------------------------------------------------------
+
+                        if (!stop_token.stop_requested() && engine->useFastCameraEditPath.exchange(false)) {
+                                // Update OpenCL camera buffer if there is only a CAMERA_EDIT. It
+                                // is done by thread #0 for all threads.
+                                UpdateAllCameraThreadsOCLBuffers();
+                                frameCounter = 0;
+                                engine->GetFilm().Reset(true);
                         }
 
                         // Re-initialize the tile queue for the next frame

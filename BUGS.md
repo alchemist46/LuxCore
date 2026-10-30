@@ -17,6 +17,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### A light colour edit takes ~85 ms on a scene with one distant light
+- Found: 2026-10-30
+- Area: engine (scene edits, lights)
+- Problem: `BeginSceneEdit()`, a `scene.lights.<n>.color` change and `EndSceneEdit()` on RTPATHOCL take 84-90 ms on a scene with one plane and one sharp distant light, while rendering or paused. A viewport light tweak pays this on every change, whatever the scene size.
+- Reproduce: `pyunittests/pyluxcoreunittests/tests/basic/testrtpath.py` `CreateSession()` (RTPATHOCL 128x128, HIP), time the edit of `test_RTPathOCL_SceneEditWhilePaused`. From the LuxCore log clock: "Parsing lights" to "Preprocessing light source definitions" ~15 ms, from there to the light tree line ~51 ms (the tree, with 0 tree lights, "built in 0.0127 secs"), then ~13 ms to "Compile Lights" (which takes 0 ms). The device then uploads a 1028 KB env. light distributions buffer for the distant light.
+- Notes: not looked into. Suspects: fixed per-edit costs of the light preprocessing (the parallel passes of the 18M-light work, the light tree's learning grid, the distributions) that do not scale down to one light. Measured on the build with ROADMAP E6 (a); before it, the edit also waited for render thread 0's 100 ms pause sleep.
+
 ### Render-thread segfaults when many tests run in one process
 - Found: 2026-10-13
 - Area: engine, tests
