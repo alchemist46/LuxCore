@@ -50,7 +50,6 @@ namespace slg {
 
 // Forward declarations
 class PathVolumeInfo;
-class VolumeSegmentLight;
 class BSDF;
 class OpenPBRMaterial;
 class ImageMapConfig;
@@ -115,8 +114,7 @@ public:
 	bool Intersect(luxrays::IntersectionDevicePtr device, const SceneRayType rayType, PathVolumeInfo *volInfo,
 		const float passThrough, luxrays::Ray *ray, luxrays::RayHit *rayHit, BSDF *bsdf,
 		luxrays::Spectrum *connectionThroughput, const luxrays::Spectrum *pathThroughput = nullptr,
-		SampleResult *sampleResult = nullptr, const bool backTracing = false,
-		VolumeSegmentLight *volumeSegmentLight = nullptr) const;
+		SampleResult *sampleResult = nullptr, const bool backTracing = false) const;
 
 	void PreprocessCamera(const u_int filmWidth, const u_int filmHeight, const u_int *filmSubRegion);
 	void Preprocess(luxrays::Context & ctx,

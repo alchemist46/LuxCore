@@ -52,7 +52,6 @@
 #include "slg/utils/pathinfo.h"
 #include "slg/cameras/camera.h"
 #include "slg/materials/openpbr.h"
-#include "slg/volumes/homogenous.h"
 
 using namespace std;
 using namespace luxrays;
@@ -744,8 +743,7 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 		const SceneRayType rayType, PathVolumeInfo *volInfo,
 		const float initialPassThrough, Ray *ray, RayHit *rayHit, BSDF *bsdf,
 		Spectrum *connectionThroughput, const Spectrum *pathThroughput,
-		SampleResult *sampleResult, const bool backTracing,
-		VolumeSegmentLight *volumeSegmentLight) const {
+		SampleResult *sampleResult, const bool backTracing) const {
 	*connectionThroughput = Spectrum(1.f);
 
 	// The first pass-through event is the sample itself (stratified: it also
@@ -844,18 +842,6 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 			// no roulette and 12% faster, 0.5 five times as noisy).
 			const bool transmittanceOnly = shadowRay || (fromLight && cameraRay);
 			Spectrum segmentTransmittance(1.f);
-
-			// The direct light scattered along the segment (V5), where the
-			// distance sampling can scatter
-			const bool segmentLight = volumeSegmentLight && !transmittanceOnly &&
-					(rayVolume->GetType() == HOMOGENEOUS_VOL) &&
-					(!volInfo->IsScatteredStart() ||
-						static_cast<const HomogeneousVolume *>(rayVolume.get())->IsMultiScattering());
-			if (segmentLight)
-				volumeSegmentLight->Segment(*ray, *static_cast<const HomogeneousVolume *>(rayVolume.get()),
-						(pathThroughput ? *pathThroughput : Spectrum(1.f)) * (*connectionThroughput),
-						passThrough);
-
 			const float t = rayVolume->Scatter(*ray, passThrough, volInfo->IsScatteredStart(),
 					transmittanceOnly, pathThroughput ? *pathThroughput : Spectrum(1.f),
 					transmittanceOnly ? &segmentTransmittance : connectionThroughput, &emis,
@@ -879,8 +865,6 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 
 			if (t > 0.f) {
 				// There was a volume scatter event
-				if (segmentLight)
-					volumeSegmentLight->Scattered(t);
 
 				// I have to set RayHit fields even if there wasn't a real
 				// ray hit

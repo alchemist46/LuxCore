@@ -27,7 +27,6 @@
 #include "slg/scene/scene.h"
 #include "slg/lights/trianglelight.h"
 #include "slg/lights/strategies/logpower.h"
-#include "slg/lights/strategies/lighttree.h"
 #include "slg/usings.h"
 
 using namespace std;
@@ -39,8 +38,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 LightSourceDefinitions::LightSourceDefinitions() :
-	lightTypeCount(LIGHT_SOURCE_TYPE_COUNT, 0),
-	finiteLightsBoundsValid(false)
+	lightTypeCount(LIGHT_SOURCE_TYPE_COUNT, 0)
 {
 	emitLightStrategy = std::make_unique<LightStrategyLogPower>();
 	illuminateLightStrategy = std::make_unique<LightStrategyLogPower>();
@@ -385,8 +383,6 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 	}
 
 	PairQuadLights(scene);
-
-	finiteLightsBoundsValid = ::slg::GetFiniteLightsBounds(scene, finiteLightsBounds);
 
 //	const double end1 = WallClockTime();
 //	SLG_LOG("Light step #1 preprocessing time: " << (end1 - start) << "secs");

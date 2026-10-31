@@ -60,12 +60,6 @@ typedef enum {
 	// the ray goes from a point in the object to the next scattering point,
 	// or to the exit point, the next path vertex
 	MK_RT_SSS_WALK = 3,
-	// The shadow ray of the light sample of a volume segment of the vertex
-	// ray (GPUTaskVolumeSegment) when it is traced alone: after a vertex
-	// without light sampling, or where it needs more traces than the
-	// vertex's shadow ray it was traced with. Then
-	// GPUTaskVolumeSegment::nextState.
-	MK_RT_SEGMENT_DL = 4,
 	// The shadow ray, then the next vertex ray is sampled (shadow catchers,
 	// and the scenes where the shadow rays can cross a surface)
 	MK_RT_DL = 5,
@@ -176,40 +170,6 @@ typedef struct {
 	// The task seed
 	Seed seed;
 } GPUTask;
-
-// The direct light along the first segment of the vertex ray in a homogeneous
-// volume that can scatter (path.volume.equiangular.enable, see
-// EyeVolumeSegmentLight in pathtracer.cpp): the light sample of a point drawn
-// by equiangular sampling, set up when the vertex ray has crossed the
-// segment (AdvancePaths_VolumeSegmentLight()) and traced after the light
-// sampling of the vertex (MK_RT_SEGMENT_DL). One element when the scene
-// doesn't use it.
-typedef struct {
-	// The light sample: its shadow ray, its light and the radiance it adds
-	// (the shadow ray's transmittance aside) for the throughput below
-	DirectLightIlluminateInfo illumInfo;
-	Ray shadowRay;
-	Spectrum throughput;
-	// The volumes along the segment, for the shadow ray
-	PathVolumeInfo volInfo;
-	// The point of the sample and its landing normal (the light tree learning)
-	Point p;
-	Normal landingN;
-	// As GPUTaskDirectLight, for the shadow ray
-	Seed seedPassThroughEvent;
-	float firstPassThroughEvent;
-	int throughShadowTransparency;
-	// The MIS weight of the light sample of the vertex the distance sampling
-	// scattered at in the segment (1 elsewhere)
-	float scatterWeight;
-	// 0 the vertex ray has crossed no such segment yet, 1 it has, 2 and the
-	// shadow ray is to trace, 3 the shadow ray is traced in the second slot
-	// of the ray buffer, with the shadow ray of the vertex (MK_RT_DL)
-	int state;
-	// The state of the path after the shadow ray, when it is traced alone
-	// (MK_RT_SEGMENT_DL)
-	PathState nextState;
-} GPUTaskVolumeSegment;
 
 // Space for temporary storage, used only within one run of AdvancePaths_MK_RT.
 // On CUDA and HIP it is a private variable of the kernel (scratch memory, laid

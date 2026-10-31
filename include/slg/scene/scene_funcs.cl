@@ -32,12 +32,6 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		__global SampleResult *sampleResult,
 		const bool backTracing,
 		__global Seed *seedPassThroughEvent
-#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
-		// When not NULL: the volume of the segment (NULL_INDEX if none) and,
-		// for a homogeneous volume, the volumes along the segment (before the
-		// ray goes through the surface at its end)
-		, uint *segmentVolumeIndex, __global PathVolumeInfo *segmentVolInfo
-#endif
 		MATERIALS_PARAM_DECL
 		) {
 	*connectionThroughput = WHITE;
@@ -64,14 +58,6 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		// No volume information, I use the default volume
 		rayVolumeIndex = scene->defaultVolumeIndex;
 	}
-
-#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
-	if (segmentVolumeIndex) {
-		*segmentVolumeIndex = rayVolumeIndex;
-		if ((rayVolumeIndex != NULL_INDEX) && (mats[rayVolumeIndex].type == HOMOGENEOUS_VOL))
-			*segmentVolInfo = *volInfo;
-	}
-#endif
 
 	// Check if there is volume scatter event
 	if (rayVolumeIndex != NULL_INDEX) {

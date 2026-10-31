@@ -539,31 +539,6 @@ u_int BuildNode(BuildLights &lights, const u_int start, const u_int end,
 
 } }
 
-bool slg::GetFiniteLightsBounds(SceneConstRef scene, BBox &bbox) {
-	bbox = BBox();
-	const u_int lightCount = scene.GetLightSources().GetSize();
-	for (u_int i = 0; i < lightCount; ++i) {
-		auto& l = scene.GetLightSources().GetLightSource(i);
-		if (l.IsInfinite())
-			continue;
-
-		LightBounds bounds;
-		ocl::LightTreeDistantLight distant;
-		switch (GetLightBounds(scene, l, &bounds, &distant)) {
-			case LIGHT_IN_TREE:
-				bbox = Union(bbox, bounds.bbox);
-				break;
-			case LIGHT_DISTANT:
-				// A laser
-				return false;
-			default:
-				break;
-		}
-	}
-
-	return true;
-}
-
 //------------------------------------------------------------------------------
 // LightStrategyLightTree
 //------------------------------------------------------------------------------

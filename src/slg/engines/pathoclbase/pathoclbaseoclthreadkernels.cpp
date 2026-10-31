@@ -150,15 +150,6 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 	slg::ocl::AddPathKernelVariantParameters(kernelsParameters, privateEvalStack,
 			cscene->hasSubsurface);
 
-	// The direct light along the volume segments (see GPUTaskVolumeSegment):
-	// compiled only where it is used, on CUDA and HIP (the OpenCL device
-	// keeps in tasksTmp[].tmpBsdf the vertex BSDF it uses). It costs the other
-	// scenes 10-17% (2026-10-31, the shape of the big kernel).
-	volumeSegmentLightKernel = cscene->compiledPathTracer.volumeSegmentLight &&
-			(intersectionDevice.GetDeviceDesc().GetType() & (DEVICE_TYPE_HIP_ALL | DEVICE_TYPE_CUDA_ALL));
-	if (volumeSegmentLightKernel)
-		kernelsParameters.push_back("-D PARAM_ENABLE_VOLUME_SEGMENT_LIGHT");
-
 	// The working colour space matrix (no parameter in Rec.709)
 	if (!useKernelConstants)
 		renderEngine->renderConfig.GetScene().GetWorkingColorSpace().AddKernelParameters(kernelsParameters);
@@ -396,8 +387,6 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksDirectLightBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksDirectLightVertexBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksSSSWalkBuff);
-	if (volumeSegmentLightKernel)
-		intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksVolumeSegmentBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksStateBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, tasksBSDFBuff);
 	intersectionDevice.SetKernelArg(advancePathsKernel, argIndex++, pathStatesBuff);
@@ -522,11 +511,8 @@ void PathOCLBaseOCLRenderThread::EnqueueTraceRays() {
 	// shadow rays are final after one trace and a path can have a next
 	// vertex, see AdvancePaths_MK_RT)
 	const slg::ocl::pathoclbase::GPUTaskConfiguration &taskConfig = renderEngine->taskConfig;
-	const bool shadowRaysWithVertexRays = (taskConfig.scene.shadowRayAnyHit &&
-			(taskConfig.pathTracer.maxPathDepth.depth > 1)) ||
-			// The shadow ray of a volume segment's light sample is traced
-			// with the vertex's one (see GPUTaskVolumeSegment)
-			volumeSegmentLightKernel;
+	const bool shadowRaysWithVertexRays = taskConfig.scene.shadowRayAnyHit &&
+			(taskConfig.pathTracer.maxPathDepth.depth > 1);
 	intersectionDevice.EnqueueTraceRayBuffer(raysBuff, hitsBuff,
 			shadowRaysWithVertexRays ? (2 * taskCount) : taskCount);
 }

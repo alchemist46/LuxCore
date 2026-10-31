@@ -40,15 +40,6 @@ typedef struct {
 
 	int forceBlackBackground;
 
-	// The direct light along the volume segments of the vertex rays
-	// (path.volume.equiangular.enable, see GPUTaskVolumeSegment), when the
-	// scene can use it
-	int volumeSegmentLight;
-	// The bounds of the lights that are not infinite (valid if
-	// volumeSegmentLightBounds is true)
-	float volumeSegmentLightBoundsMin[3], volumeSegmentLightBoundsMax[3];
-	int volumeSegmentLightBounds;
-
 	// Hybrid backward/forward path tracing settings
 	struct {
 		int enabled;

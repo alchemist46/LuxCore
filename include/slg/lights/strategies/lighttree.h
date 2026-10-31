@@ -43,11 +43,6 @@ namespace ocl {
 // see the infinite lights have no shading point to use: they pick by log power.
 //------------------------------------------------------------------------------
 
-// The bounds of the lights that are not infinite (the points the volume
-// segment light aims at, see EyeVolumeSegmentLight in pathtracer.cpp): false
-// when one of them has no bounds (a laser)
-bool GetFiniteLightsBounds(SceneConstRef scene, luxrays::BBox &bbox);
-
 class LightStrategyLightTree : public LightStrategy {
 public:
 	LightStrategyLightTree(const bool learnEnable, const u_int learnDepth,

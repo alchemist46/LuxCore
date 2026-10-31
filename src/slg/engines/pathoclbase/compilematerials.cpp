@@ -1451,14 +1451,6 @@ void CompiledScene::CompileMaterials() {
 		}
 	}
 
-	hasHomogeneousVolumes = false;
-	for (const slg::ocl::Material &mat : mats) {
-		if (mat.type == slg::ocl::HOMOGENEOUS_VOL) {
-			hasHomogeneousVolumes = true;
-			break;
-		}
-	}
-
 	const double tEnd = WallClockTime();
 	SLG_LOG("Material compilation time: " << int((tEnd - tStart) * 1000.0) << "ms");
 }

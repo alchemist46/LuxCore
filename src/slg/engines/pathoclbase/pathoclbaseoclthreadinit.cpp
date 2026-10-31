@@ -172,13 +172,6 @@ void PathOCLBaseOCLRenderThread::InitMaterials() {
 	intersectionDevice.AllocBufferRW(&tasksSSSWalkBuff, nullptr,
 			GPUTASK_SSSWALK_SIZE * (renderEngine->compiledScene->hasSubsurface ? taskCount : 1),
 			"GPUTaskSSSWalk");
-
-	// The light samples along the volume segments (one element when they
-	// are off, only to keep the same kernel arguments)
-	intersectionDevice.AllocBufferRW(&tasksVolumeSegmentBuff, nullptr,
-			sizeof(slg::ocl::pathoclbase::GPUTaskVolumeSegment) *
-			(renderEngine->compiledScene->HasVolumeSegmentLightBuffer() ? taskCount : 1),
-			"GPUTaskVolumeSegment");
 }
 
 void PathOCLBaseOCLRenderThread::InitSceneObjects() {

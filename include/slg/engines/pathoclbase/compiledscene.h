@@ -148,12 +148,6 @@ public:
 	// True if a material is a random-walk subsurface one (PathOCL then needs
 	// the buffer of the walks)
 	bool hasSubsurface;
-	// A homogeneous volume (the direct light along the volume segments, see
-	// GPUTaskVolumeSegment)
-	bool hasHomogeneousVolumes;
-	// The buffer of the light samples along the volume segments (see
-	// CompilePathTracer())
-	bool HasVolumeSegmentLightBuffer() const;
 
 	// Compiled Textures
 	std::vector<slg::ocl::Texture> texs;
