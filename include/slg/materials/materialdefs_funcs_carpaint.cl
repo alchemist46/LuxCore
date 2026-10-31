@@ -223,6 +223,54 @@ OPENCL_FORCE_INLINE void CarPaintMaterial_Sample(__global const Material* restri
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The diffuse layer (Material::EvaluateDiffuse())
+OPENCL_FORCE_INLINE void CarPaintMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	if (lightDir.z * eyeDir.z <= 0.f) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	// Absorption
+	const float cosi = fabs(lightDir.z);
+	const float coso = fabs(eyeDir.z);
+	const float3 kaVal = Texture_GetSpectrumValue(material->carpaint.KaTexIndex, hitPoint TEXTURES_PARAM);
+	const float3 alpha = Spectrum_Clamp(kaVal);
+	const float d = Texture_GetFloatValue(material->carpaint.depthTexIndex, hitPoint TEXTURES_PARAM);
+	const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+	const float3 kdVal = Texture_GetSpectrumValue(material->carpaint.KdTexIndex, hitPoint TEXTURES_PARAM);
+	const float3 result = absorption * Spectrum_Clamp(kdVal) * M_1_PI_F * cosi;
+
+	// One layer of the mixture of CarPaintMaterial_EvaluateMixture()
+	uint n = 1;
+	if ((lightDir.z > 0.f) && (eyeDir.z > 0.f)) {
+		const float3 ks1 = Spectrum_Clamp(Texture_GetSpectrumValue(material->carpaint.Ks1TexIndex, hitPoint TEXTURES_PARAM));
+		const float m1 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M1TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
+		if ((Spectrum_Filter(ks1) > 0.f) && (m1 > 0.f))
+			++n;
+		const float3 ks2 = Spectrum_Clamp(Texture_GetSpectrumValue(material->carpaint.Ks2TexIndex, hitPoint TEXTURES_PARAM));
+		const float m2 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M2TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
+		if ((Spectrum_Filter(ks2) > 0.f) && (m2 > 0.f))
+			++n;
+		const float3 ks3 = Spectrum_Clamp(Texture_GetSpectrumValue(material->carpaint.Ks3TexIndex, hitPoint TEXTURES_PARAM));
+		const float m3 = Microfacet_Regularize(Texture_GetFloatValue(material->carpaint.M3TexIndex, hitPoint TEXTURES_PARAM), hitPoint->regularization);
+		if ((Spectrum_Filter(ks3) > 0.f) && (m3 > 0.f))
+			++n;
+	}
+	const float directPdfW = (cosi * M_1_PI_F) / n;
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

@@ -683,6 +683,88 @@ OPENCL_FORCE_INLINE void GlossyCoatingMaterial_SampleMatBaseEvaluate(__global co
 		MATERIALS_PARAM);
 }
 
+// The diffuse reflection of the base under the coating (Material::EvaluateDiffuse(),
+// after the base's EVAL_EVALUATE_DIFFUSE ops, see GlossyCoatingMaterial_Evaluate())
+OPENCL_FORCE_INLINE void GlossyCoatingMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	// Pop the albedo of the base for the darkening, on top of the stack
+	float3 baseAlbedo = WHITE;
+	if (material->glossycoating.darkening) {
+		EvalStack_PopFloat3(baseAlbedo);
+	}
+
+	// Pop the result of the base material evaluation
+	float directPdfWMatBase;
+	BSDFEvent eventMatBase;
+	float3 resultMatBase;
+	EvalStack_PopFloat(directPdfWMatBase);
+	EvalStack_PopBSDFEvent(eventMatBase);
+	EvalStack_PopFloat3(resultMatBase);
+
+	// Pop the parameters
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	// Pop saved original shading normal/dpdu/dpdv
+	float3 originalShadeN, originalDpdu, originalDpdv;
+	EvalStack_PopFloat3(originalDpdv);
+	EvalStack_PopFloat3(originalDpdu);
+	EvalStack_PopFloat3(originalShadeN);
+	// Restore original hitPoint
+	__global HitPoint *hitPointTmp = (__global HitPoint *)hitPoint;
+	VSTORE3F(originalShadeN, &hitPointTmp->shadeN.x);
+	VSTORE3F(originalDpdu, &hitPointTmp->dpdu.x);
+	VSTORE3F(originalDpdv, &hitPointTmp->dpdv.x);
+
+	if (!(CosTheta(lightDir) * CosTheta(eyeDir) > DEFAULT_COS_EPSILON_STATIC) ||
+			Spectrum_IsBlack(resultMatBase)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	if (eyeDir.z <= 0.f) {
+		// Back face: no coating
+		EvalStack_PushFloat3(resultMatBase);
+		EvalStack_PushBSDFEvent(event);
+		EvalStack_PushFloat(directPdfWMatBase);
+
+		return;
+	}
+
+	float3 ks = Texture_GetSpectrumValue(material->glossycoating.ksTexIndex, hitPoint TEXTURES_PARAM);
+	const float i = Texture_GetFloatValue(material->glossycoating.indexTexIndex, hitPoint TEXTURES_PARAM);
+	if (i > 0.f) {
+		const float ti = (i - 1.f) / (i + 1.f);
+		ks *= ti * ti;
+	}
+	ks = Spectrum_Clamp(ks);
+
+	const float nuVal = Texture_GetFloatValue(material->glossycoating.nuTexIndex, hitPoint TEXTURES_PARAM);
+	const float nvVal = Texture_GetFloatValue(material->glossycoating.nvTexIndex, hitPoint TEXTURES_PARAM);
+	const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+	const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+
+	const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(eyeDir.z), ks);
+	const float directPdfW = (1.f - GlossyCoatingMaterial_CoatProbability(ks, EcEye)) * directPdfWMatBase;
+
+	// Absorption
+	const float cosi = fabs(lightDir.z);
+	const float coso = fabs(eyeDir.z);
+	const float3 alpha = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossycoating.kaTexIndex, hitPoint TEXTURES_PARAM));
+	const float d = Texture_GetFloatValue(material->glossycoating.depthTexIndex, hitPoint TEXTURES_PARAM);
+	const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+	const float3 result = absorption * (WHITE - EcEye) *
+			GlossyCoatingMaterial_Darkening(material, hitPoint, ks, baseAlbedo TEXTURES_PARAM) * resultMatBase;
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

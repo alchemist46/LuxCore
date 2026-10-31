@@ -290,4 +290,38 @@ PropertiesUPtr SubsurfaceMaterial::ToProperties(const ImageMapCache &imgMapCache
 
 	return props;
 }
+
+// The Lambertian base under the coating, where it is a plain surface
+// (HITPOINT_SSS_SURFACE: the PhotonGI cache stands for the random walk with it)
+Spectrum SubsurfaceMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if ((hitPoint.subsurface != HITPOINT_SSS_SURFACE) || (localLightDir.z * localEyeDir.z <= 0.f))
+		return Spectrum();
+
+	const Spectrum kd = color->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum baseF = kd * INV_PI * fabsf(localLightDir.z);
+
+	float alpha, F0;
+	GetReflection(hitPoint, &alpha, &F0);
+
+	if ((localEyeDir.z < 0.f) || (F0 < 0.f)) {
+		// The back face, or no coating: the Lambertian base
+		*pdfW = fabsf(localLightDir.z * INV_PI);
+		return baseF;
+	}
+
+	const Spectrum ks(F0);
+	const Spectrum EcFixed = GGXEnergy_CoatE(alpha, alpha, fabsf(localEyeDir.z), ks);
+	const Spectrum EcSampled = GGXEnergy_CoatE(alpha, alpha, fabsf(localLightDir.z), ks);
+	const float wCoating = Subsurface_CoatProbability(EcFixed, kd);
+	*pdfW = (1.f - wCoating) * fabsf(localLightDir.z * INV_PI);
+
+	const Spectrum EcAvg = GGXEnergy_CoatEavg(alpha, alpha, ks);
+	Spectrum layerScale;
+	for (u_int c = 0; c < 3; ++c)
+		layerScale.c[c] = (1.f - EcSampled.c[c]) * (1.f - EcFixed.c[c]) / Max(1.f - EcAvg.c[c], 1e-4f);
+
+	return layerScale * baseF;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

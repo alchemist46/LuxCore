@@ -572,4 +572,47 @@ PropertiesUPtr MixMaterial::ToProperties(const ImageMapCache &imgMapCache, const
 
 	return props;
 }
+
+// The diffuse lobes of the two materials with their weights at a vertex
+Spectrum MixMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
+
+	const Frame frame(hitPoint.GetFrame());
+	const float weight2 = GetVertexWeight2(hitPoint, Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f));
+	const float weight1 = 1.f - weight2;
+
+	Spectrum result;
+	if ((weight1 > 0.f) && matA->HasDiffuseLobe()) {
+		HitPoint hitPointA(hitPoint);
+		matA->Bump(&hitPointA);
+		const Frame frameA(hitPointA.GetFrame());
+
+		float pdfWA;
+		const Spectrum fA = matA->EvaluateDiffuse(hitPointA, frameA.ToLocal(frame.ToWorld(localLightDir)),
+				frameA.ToLocal(frame.ToWorld(localEyeDir)), &pdfWA);
+		if (!fA.Black()) {
+			result += weight1 * fA;
+			*pdfW += weight1 * pdfWA;
+		}
+	}
+
+	if ((weight2 > 0.f) && matB->HasDiffuseLobe()) {
+		HitPoint hitPointB(hitPoint);
+		matB->Bump(&hitPointB);
+		const Frame frameB(hitPointB.GetFrame());
+
+		float pdfWB;
+		const Spectrum fB = matB->EvaluateDiffuse(hitPointB, frameB.ToLocal(frame.ToWorld(localLightDir)),
+				frameB.ToLocal(frame.ToWorld(localEyeDir)), &pdfWB);
+		if (!fB.Black()) {
+			result += weight2 * fB;
+			*pdfW += weight2 * pdfWB;
+		}
+	}
+
+	return result;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

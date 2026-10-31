@@ -255,4 +255,12 @@ PropertiesUPtr TwoSidedMaterial::ToProperties(const ImageMapCache &imgMapCache, 
 
 	return props;
 }
+
+Spectrum TwoSidedMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	if (hitPoint.intoObject)
+		return frontMat->EvaluateDiffuse(hitPoint, localLightDir, localEyeDir, pdfW);
+	else
+		return backMat->EvaluateDiffuse(hitPoint, localLightDir, localEyeDir, pdfW);
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

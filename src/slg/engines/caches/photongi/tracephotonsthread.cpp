@@ -154,6 +154,14 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 				time, samples[2], samples[3], samples[4], samples[5], samples[6],
 				nextEventRay, lightEmitPdfW);
 
+		// The indirect cache holds the light of the bounces after the first
+		// hit: an eye path vertex that uses it samples the lights for the
+		// direct light (PathTracer::RenderEyePath()). The direct light of the
+		// lights the direct light sampling doesn't reach is in the cache, and
+		// all of it without path.photongi.indirect.lightsampling.
+		const bool storeDirectIndirect = !pgic.params.indirect.lightSampling ||
+				!light->IsDirectLightSamplingEnabled();
+
 		if (!lightPathFlux.Black()) {
 			lightPathFlux /= lightEmitPdfW * lightPickPdf;
 			assert (lightPathFlux.IsValid());
@@ -182,7 +190,12 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					// Deposit photons only on diffuse surfaces
 					//----------------------------------------------------------
 
-					if (pgic.IsPhotonDepositEnabled(bsdf) &&
+					const bool causticDeposit = !causticDone && (pathInfo.depth.depth > 0) &&
+							pathInfo.IsSpecularPath() && pgic.IsPhotonDepositEnabled(bsdf);
+					const bool indirectDeposit = !indirectDone &&
+							((pathInfo.depth.depth > 0) || storeDirectIndirect) &&
+							pgic.IsIndirectDepositEnabled(bsdf);
+					if ((causticDeposit || indirectDeposit) &&
 							// This is an anti-NaNs/Infs safety net to avoid poisoning
 							// the caches
 							lightPathFlux.IsValid()) {
@@ -199,7 +212,7 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 								pgic.params.visibility.lookUpNormalCosAngle);
 
 						if (allNearEntryIndices.size() > 0) {
-							if ((pathInfo.depth.depth > 0) && pathInfo.IsSpecularPath() && !causticDone) {
+							if (causticDeposit) {
 								// It is a caustic photon. At a volume scattering
 								// vertex the flux carries sigma_t (the weight
 								// of Volume::Scatter()), so the photons summed
@@ -219,15 +232,19 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 								usefulPath = true;
 							}
 							
-							if (!indirectDone) {
+							if (indirectDeposit) {
 								// It is an indirect photon
 
-								// Add outgoingRadiance to each near visible entry 
-								for (auto const &vpIndex : allNearEntryIndices)
-									newIndirectPhotons.push_back(RadiancePhotonEntry(vpIndex,
-											light->GetID(), lightPathFlux));
+								// Add outgoingRadiance to each near entry that
+								// sees the point (no gather across an occluder)
+								for (auto const &vpIndex : allNearEntryIndices) {
+									if (pgic.IsVisibleFromParticle(vpIndex, bsdf.hitPoint.p)) {
+										newIndirectPhotons.push_back(RadiancePhotonEntry(vpIndex,
+												light->GetID(), lightPathFlux));
 
-								usefulPath = true;
+										usefulPath = true;
+									}
+								}
 							}
 						}
 					}

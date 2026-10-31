@@ -199,6 +199,69 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_SubsurfaceWalkStep(__global GPUTaskSS
 }
 #endif
 
+// The PhotonGI indirect cache (see PathTracer::RenderEyePath()): at a vertex
+// reached by a bounce that is not nearly specular, from far enough for the
+// blur of the cache not to show, the cache stands for the indirect light of
+// the diffuse lobe of the material. The vertex samples the lights (the
+// diffuse lobe with the weight 1, see DirectLight_BSDFSampling()), then its
+// BSDF sample reflects the cached irradiance through the diffuse lobe and ends
+// the path there, the other lobes go on (AdvancePaths_GenerateNextVertexRay()).
+// A volume vertex adds the radiance the cache holds for it and ends the path
+// after the light sampling. Sets
+// taskState->photonGIIndirect, and returns true at such a vertex.
+OPENCL_FORCE_INLINE bool AdvancePaths_PhotonGIIndirect(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
+		__global EyePathInfo *pathInfo,
+		__global const RayHit *rayHit,
+		__global SampleResult *sampleResult,
+		__global const RadiancePhoton* restrict pgicRadiancePhotons,
+		const uint pgicLightGroupCounts,
+		__global const Spectrum* restrict pgicRadiancePhotonsValues,
+		__global const IndexBVHArrayNode* restrict pgicRadiancePhotonsBVHNodes
+		MATERIALS_PARAM_DECL) {
+	taskState->photonGIIndirect = NULL_INDEX;
+	// Note: the material test first, the other order makes the HIP compiler
+	// change the arithmetic of the paths that never use the cache (the
+	// images of a scene without a diffuse lobe were no longer the ones of
+	// the cache off)
+	if (!PhotonGICache_IsIndirectEnabled(bsdf MATERIALS_PARAM) ||
+			!taskState->photonGICacheEnabledOnLastHit ||
+			(taskConfig->pathTracer.pgic.debugType != PGIC_DEBUG_NONE) ||
+			BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM) ||
+			!Spectrum_IsBlack(BSDF_GetPassThroughShadowTransparency(bsdf MATERIALS_PARAM)))
+		return false;
+
+	// I hope to not introduce strange sample correlations by using
+	// passThrough here
+	Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
+	const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
+	if (!(rayHit->t > PhotonGICache_GetIndirectUsageThreshold(pathInfo->lastBSDFEvent,
+			passThroughEvent,
+			taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
+			taskConfig->pathTracer.pgic.indirectLookUpRadius)))
+		return false;
+
+	const uint index = PhotonGICache_GetIndirectRadianceIndex(bsdf,
+			pgicRadiancePhotons, pgicRadiancePhotonsBVHNodes,
+			taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
+			taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
+	// No cache entry here (the visibility pass placed none): the path goes on
+	// as if the cache was off
+	if (index == NULL_INDEX)
+		return false;
+
+	if (bsdf->isVolume) {
+		const float3 throughput = VLOAD3F(taskState->throughput.c);
+		for (uint i = 0; i < pgicLightGroupCounts; ++i)
+			VADD3F(sampleResult->radiancePerPixelNormalized[i].c, throughput * VLOAD3F(pgicRadiancePhotonsValues[index + i].c));
+	}
+	taskState->photonGIIndirect = 2 * index;
+
+	return true;
+}
+
 // The next vertex ray: sample the BSDF, Russian roulette (the next state is
 // MK_RT_NEXT_VERTEX, MK_RT_SSS_WALK or MK_SPLAT_SAMPLE)
 OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
@@ -209,10 +272,21 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		__global Ray *ray,
 		__global SampleResult *sampleResult,
 		const DirectLightResult directLightResult,
-		__global GPUTaskSSSWalk *taskSSSWalk
+		__global GPUTaskSSSWalk *taskSSSWalk,
+		const uint pgicLightGroupCounts,
+		__global const Spectrum* restrict pgicRadiancePhotonsValues
 		SAMPLER_PARAM_DECL
 		MATERIALS_PARAM_DECL) {
 	const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize + pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
+
+	// A vertex that uses the PhotonGI indirect cache (see
+	// AdvancePaths_PhotonGIIndirect()): a volume one is over
+	const uint photonGIIndirect = taskState->photonGIIndirect;
+	if (photonGIIndirect != NULL_INDEX) {
+		taskState->photonGIIndirect = NULL_INDEX;
+		if (bsdf->isVolume)
+			return MK_SPLAT_SAMPLE;
+	}
 
 	// Sample the BSDF
 	float3 sampledDir;
@@ -255,6 +329,29 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 		}
 	}
 
+	// The PhotonGI indirect cache: the diffuse lobe's part of the sample
+	// reflects the cached irradiance and ends there, the other lobes go on
+	// with the probability of their share of the pdf
+	float photonGIContinueProb = 1.f;
+	if (photonGIIndirect != NULL_INDEX) {
+		float diffusePdfShare = 0.f;
+		const float3 diffuseSample = Spectrum_IsBlack(bsdfSample) ? BLACK :
+			BSDF_GetDiffuseSample(bsdf, sampledDir, bsdfEvent, bsdfPdfW, &diffusePdfShare
+				MATERIALS_PARAM);
+		if (!Spectrum_IsBlack(diffuseSample)) {
+			const float3 scale = VLOAD3F(taskState->throughput.c) * diffuseSample * M_1_PI_F;
+			const uint index = photonGIIndirect >> 1;
+			for (uint i = 0; i < pgicLightGroupCounts; ++i)
+				VADD3F(sampleResult->radiancePerPixelNormalized[i].c, scale * VLOAD3F(pgicRadiancePhotonsValues[index + i].c));
+		}
+
+		if ((photonGIIndirect & 1) || (diffusePdfShare > PGIC_DIFFUSE_SHARE_END))
+			return MK_SPLAT_SAMPLE;
+
+		photonGIContinueProb = 1.f - diffusePdfShare;
+		bsdfSample = fmax(bsdfSample - diffuseSample, BLACK) / photonGIContinueProb;
+	}
+
 	if (sampleResult->firstPathVertex)
 		sampleResult->firstPathVertexEvent = bsdfEvent;
 
@@ -273,16 +370,30 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 	}
 	// The lookup of this vertex is done (a vertex of the next ray has its own)
 	taskState->photonGICausticLookup = false;
+	if (taskConfig->pathTracer.pgic.indirectEnabled && !shadowTransparencyPass) {
+		// The indirect cache can stand for the next vertex after a bounce
+		// that isn't nearly specular
+		taskState->photonGICacheEnabledOnLastHit = !PhotonGICache_IsNearlySpecular(taskConfig,
+				bsdfEvent, BSDF_GetUnregularizedGlossiness(bsdf MATERIALS_PARAM));
 
-	// Russian Roulette (the throughput is still the one before the bounce)
+		// The BSDF sampling of a vertex that uses the indirect cache reaches
+		// the lights through the other lobes only: the pdf of its MIS weight
+		// is the one of their continuation (see DirectLight_BSDFSampling())
+		if (photonGIIndirect != NULL_INDEX)
+			pathInfo->lastBSDFPdfW *= photonGIContinueProb;
+	}
+
+	// Russian Roulette (the throughput is still the one before the bounce),
+	// with the continuation of the other lobes of a vertex that uses the
+	// PhotonGI indirect cache
 	const bool rrEnabled = !shadowTransparencyPass && EyePathInfo_UseRR(pathInfo, taskConfig->pathTracer.rrDepth);
 	const float rrProb = rrEnabled ?
 		PathTracer_RussianRouletteProb(taskConfig->pathTracer.rrType,
 			taskConfig->pathTracer.rrImportanceCap, bsdfSample,
 			VLOAD3F(taskState->throughput.c), pathInfo->etaScale) :
 		1.f;
-	const bool rrContinuePath = !rrEnabled ||
-		!(rrProb < Sampler_GetSample(taskConfig, sampleOffset + IDX_RR SAMPLER_PARAM));
+	const bool rrContinuePath = !(rrEnabled || (photonGIIndirect != NULL_INDEX)) ||
+		!(rrProb * photonGIContinueProb < Sampler_GetSample(taskConfig, sampleOffset + IDX_RR SAMPLER_PARAM));
 
 	// Max. path depth
 	const bool maxPathDepth = (pathInfo->depth.depth >= taskConfig->pathTracer.maxPathDepth.depth);
@@ -628,14 +739,16 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 
 		switch (taskConfig->pathTracer.pgic.debugType) {
 			case PGIC_DEBUG_SHOWINDIRECT: {
-				if (isPhotonGIEnabled) {
+				// The irradiance of the indirect cache reflected by the albedo
+				if (PhotonGICache_IsIndirectEnabled(bsdf MATERIALS_PARAM)) {
 					__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
 							pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
 							taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
 							taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
 					if (radiance) {
+						const float3 scale = bsdf->isVolume ? WHITE : (M_1_PI_F * BSDF_Albedo(bsdf MATERIALS_PARAM));
 						for (uint i = 0; i < pgicLightGroupCounts; ++i)
-							VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(radiance[i].c));
+							VADD3F(sampleResult->radiancePerPixelNormalized[i].c, scale * VLOAD3F(radiance[i].c));
 					}
 				}
 				return MK_SPLAT_SAMPLE;
@@ -654,68 +767,33 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 				return MK_SPLAT_SAMPLE;
 			}
 			case PGIC_DEBUG_SHOWINDIRECTPATHMIX: {
-				if (isPhotonGIEnabled) {
+				// Where the indirect cache would be used
+				if (taskState->photonGICacheEnabledOnLastHit && PhotonGICache_IsIndirectEnabled(bsdf MATERIALS_PARAM)) {
 					Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
 					const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
 
-					if (taskState->photonGICacheEnabledOnLastHit &&
-							(rayHit->t > PhotonGICache_GetIndirectUsageThreshold(
+					if (rayHit->t > PhotonGICache_GetIndirectUsageThreshold(
 								pathInfo->lastBSDFEvent,
-								pathInfo->lastGlossiness,
 								// I hope to not introduce strange sample correlations
 								// by using passThrough here
 								passThroughEvent,
-								taskConfig->pathTracer.pgic.glossinessUsageThreshold,
 								taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
-								taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
+								taskConfig->pathTracer.pgic.indirectLookUpRadius)) {
 						VSTORE3F(MAKE_FLOAT3(0.f, 0.f, 1.f), sampleResult->radiancePerPixelNormalized[0].c);
 						taskState->photonGIShowIndirectPathMixUsed = true;
 
 						return MK_SPLAT_SAMPLE;
 					}
-
-					taskState->photonGICacheEnabledOnLastHit = true;
-				} else
-					taskState->photonGICacheEnabledOnLastHit = false;
+				}
 
 				break;
 			}
 			case PGIC_DEBUG_NONE:
 			default: {
-				if (isPhotonGIEnabled) {
-					// The indirect cache first: its radiance has all the
-					// photons, the caustic ones too
-					if (taskConfig->pathTracer.pgic.indirectEnabled) {
-						Seed seedPassThroughEvent = taskState->seedPassThroughEvent;
-						const float passThroughEvent = Rnd_FloatValue(&seedPassThroughEvent);
-
-						if (taskState->photonGICacheEnabledOnLastHit &&
-								(rayHit->t > PhotonGICache_GetIndirectUsageThreshold(
-									pathInfo->lastBSDFEvent,
-									pathInfo->lastGlossiness,
-									// I hope to not introduce strange sample correlations
-									// by using passThrough here
-									passThroughEvent,
-									taskConfig->pathTracer.pgic.glossinessUsageThreshold,
-									taskConfig->pathTracer.pgic.indirectUsageThresholdScale,
-									taskConfig->pathTracer.pgic.indirectLookUpRadius))) {
-							__global const Spectrum* restrict radiance = PhotonGICache_GetIndirectRadiance(bsdf,
-								pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes,
-								taskConfig->pathTracer.pgic.indirectLookUpRadius * taskConfig->pathTracer.pgic.indirectLookUpRadius,
-								taskConfig->pathTracer.pgic.indirectLookUpNormalCosAngle);
-
-							if (radiance) {
-								for (uint i = 0; i < pgicLightGroupCounts; ++i)
-									VADD3F(sampleResult->radiancePerPixelNormalized[i].c, VLOAD3F(taskState->throughput.c) * VLOAD3F(radiance[i].c));
-
-								// I can terminate the path, all done
-								return MK_SPLAT_SAMPLE;
-							}
-							// No cache entry here (the visibility pass placed
-							// none): the path goes on as if the cache was off
-						}
-					}
-
+				// The caustic cache where the indirect cache isn't used (its
+				// irradiance has all the photons, the caustic ones too, see
+				// AdvancePaths_PhotonGIIndirect())
+				if (isPhotonGIEnabled && (taskState->photonGIIndirect == NULL_INDEX)) {
 					if (taskConfig->pathTracer.pgic.causticEnabled &&
 							(!taskConfig->pathTracer.hybridBackForward.enabled || (pathInfo->depth.depth != 0))) {
 						const bool isEmpty = PhotonGICache_ConnectWithCausticPaths(bsdf,
@@ -730,10 +808,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 						if (!isEmpty)
 							taskState->photonGICausticLookup = true;
 					}
-
-					taskState->photonGICacheEnabledOnLastHit = true;
-				} else
-					taskState->photonGICacheEnabledOnLastHit = false;
+				}
 
 				break;
 			}
@@ -783,13 +858,18 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 			DirectLight_BSDFSampling(
 				taskConfig,
 				&taskDirectLight->illumInfo,
-				ray->time, sampleResult->lastPathVertex,
+				ray->time,
+				// No MIS where a vertex that uses the PhotonGI indirect cache
+				// ends the path (see AdvancePaths_MK_RT())
+				sampleResult->lastPathVertex ||
+					((taskState->photonGIIndirect != NULL_INDEX) && (taskState->photonGIIndirect & 1)),
 				pathInfo,
 				&taskTmp->tmpPathDepthInfo,
 				bsdf,
 				VLOAD3F(taskState->throughput.c),
 				VLOAD3F(&shadowRay->d.x),
-				taskState->photonGICausticChain
+				taskState->photonGICausticChain,
+				taskState->photonGIIndirect != NULL_INDEX
 				LIGHTS_PARAM)) {
 		// Initialize the pass-through event for the shadow ray
 		const float passThroughEvent = Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM);
@@ -1085,6 +1165,13 @@ __kernel void AdvancePaths_MK_RT(
 				bsdf->hitPoint.dispersionTinted = pathInfo->dispersionTinted;
 				bsdf->hitPoint.regularization = ((taskConfig->pathTracer.regularization > 0.f) && pathInfo->anyNonSpecularBounce) ?
 					taskConfig->pathTracer.regularization : 0.f;
+
+				// The PhotonGI indirect cache
+				const bool photonGIIndirect = taskConfig->pathTracer.pgic.indirectEnabled && !subsurfaceExit &&
+						AdvancePaths_PhotonGIIndirect(taskConfig, taskState, bsdf, pathInfo, &rayHits[gid], sampleResult,
+							pgicRadiancePhotons, pgicLightGroupCounts, pgicRadiancePhotonsValues, pgicRadiancePhotonsBVHNodes
+							MATERIALS_PARAM);
+
 				BSDFEvent eventTypes = BSDF_GetEventTypes(bsdf
 						MATERIALS_PARAM);
 #if defined(PARAM_ENABLE_SUBSURFACE)
@@ -1105,6 +1192,15 @@ __kernel void AdvancePaths_MK_RT(
 				if (walkEntry && !sampleResult->lastPathVertex)
 					bsdf->hitPoint.subsurface = HITPOINT_SSS_ENTRY;
 #endif
+				// A vertex that uses the PhotonGI indirect cache samples the
+				// lights, the last one too, and goes to
+				// AdvancePaths_GenerateNextVertexRay() for the cache term (a
+				// volume one ends there)
+				if (photonGIIndirect) {
+					if (sampleResult->lastPathVertex || bsdf->isVolume)
+						taskState->photonGIIndirect |= 1;
+					sampleResult->lastPathVertex = false;
+				}
 
 				// The next vertex ray can be sampled without waiting for the
 				// shadow ray if the shadow ray is final after one trace and
@@ -1165,7 +1261,7 @@ __kernel void AdvancePaths_MK_RT(
 	if (pathState == MK_GENERATE_NEXT_VERTEX_RAY) {
 		pathState = AdvancePaths_GenerateNextVertexRay(taskConfig, taskState, bsdf, pathInfo,
 				&rays[gid], sampleResult, tasksDirectLight[gid].directLightResult,
-				&tasksSSSWalk[gid]
+				&tasksSSSWalk[gid], pgicLightGroupCounts, pgicRadiancePhotonsValues
 				SAMPLER_PARAM
 				MATERIALS_PARAM);
 	}

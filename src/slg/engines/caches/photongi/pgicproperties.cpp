@@ -49,6 +49,7 @@ PropertiesUPtr PhotonGICache::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.lookup.normalangle")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.usagethresholdscale")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.filter.radiusscale")) <<
+			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.lightsampling")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.enabled")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.maxsize")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.updatespp")) <<
@@ -84,6 +85,7 @@ PropertiesUPtr PhotonGICache::GetDefaultProps() {
 			Property("path.photongi.indirect.lookup.normalangle")(10.f) <<
 			Property("path.photongi.indirect.usagethresholdscale")(8.f) <<
 			Property("path.photongi.indirect.filter.radiusscale")(3.f) <<
+			Property("path.photongi.indirect.lightsampling")(true) <<
 			Property("path.photongi.caustic.enabled")(false) <<
 			Property("path.photongi.caustic.maxsize")(100000) <<
 			Property("path.photongi.caustic.updatespp")(8) <<
@@ -129,6 +131,8 @@ PhotonGICache *PhotonGICache::FromProperties(SceneConstRef scn, const Properties
 			params.indirect.usageThresholdScale = Max(0.0, cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.usagethresholdscale")).Get<double>());
 
 			params.indirect.filterRadiusScale = Max(1.0, cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.filter.radiusscale")).Get<double>());
+
+			params.indirect.lightSampling = cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.lightsampling")).Get<bool>();
 		}
 
 		if (params.caustic.enabled) {

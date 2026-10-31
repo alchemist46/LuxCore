@@ -259,4 +259,48 @@ PropertiesUPtr Glossy2Material::ToProperties(const ImageMapCache &imgMapCache, c
 
 	return props;
 }
+
+// The Lambertian base under the coating (Evaluate() without the coating)
+Spectrum Glossy2Material::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
+
+	const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum baseF = kd * INV_PI * fabsf(localLightDir.z);
+
+	if ((!doublesided) && (localEyeDir.z <= 0.f)) {
+		// Back face: no coating
+		*pdfW = fabsf(localLightDir.z * INV_PI);
+		return baseF;
+	}
+
+	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
+	const float i = index->GetFloatValue(hitPoint);
+	if (i > 0.f) {
+		const float ti = (i - 1.f) / (i + 1.f);
+		ks *= ti * ti;
+	}
+	ks = ks.Clamp(0.f, 1.f);
+
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+
+	const Spectrum EcEye = GGXEnergy_CoatE(u, v, fabsf(localEyeDir.z), ks);
+	const Spectrum EcLight = GGXEnergy_CoatE(u, v, fabsf(localLightDir.z), ks);
+	const Spectrum EcAvg = GGXEnergy_CoatEavg(u, v, ks);
+
+	const float wCoating = Glossy2_CoatProbability(EcEye, kd);
+	*pdfW = (1.f - wCoating) * fabsf(localLightDir.z * INV_PI);
+
+	// Absorption
+	const float cosi = fabsf(localLightDir.z);
+	const float coso = fabsf(localEyeDir.z);
+	const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float d = depth->GetFloatValue(hitPoint);
+	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+	return absorption * Glossy2_LayerScale(EcLight, EcEye, EcAvg) * baseF;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

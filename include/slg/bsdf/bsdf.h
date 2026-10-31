@@ -195,6 +195,19 @@ public:
 		const float u0, const float u1,
 		float *pdfW, float *absCosSampledDir,
 		BSDFEvent *event) const;
+	// The part of a sample of Sample() of an eye path that comes from the
+	// diffuse reflection lobe of the material (Material::EvaluateDiffuse()),
+	// with the factors of Sample(): the lobe's value over the pdf of the
+	// sample, and in *diffusePdfShare the lobe's share of that pdf (black and
+	// 0 for a delta sample, a volume or a material without such a lobe)
+	luxrays::Spectrum GetDiffuseSample(const luxrays::Vector &sampledDir,
+		const BSDFEvent event, const float pdfW, float *diffusePdfShare) const;
+	// The part of Evaluate() of an eye path that comes from the diffuse
+	// reflection lobe of the material (Material::EvaluateDiffuse()), and in
+	// *pdfW the lobe's share of the pdf of Sample() (black and 0 for a volume
+	// or a material without such a lobe)
+	luxrays::Spectrum EvaluateDiffuse(const luxrays::Vector &lightDir, float *pdfW) const;
+	bool HasDiffuseLobe() const { return material->HasDiffuseLobe(); }
 	luxrays::Spectrum ShadowCatcherSample(Vector *sampledDir,
 		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
 	void Pdf(const luxrays::Vector &sampledDir, float *directPdfW, float *reversePdfW) const;

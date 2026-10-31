@@ -59,6 +59,9 @@ typedef struct {
 		unsigned int photonMaxPathDepth;
 
 		int indirectEnabled, causticEnabled;
+		// path.photongi.indirect.lightsampling (see
+		// PhotonGICacheParams::indirect.lightSampling)
+		int indirectLightSampling;
 
 		PhotonGIDebugType debugType;
 	} pgic;

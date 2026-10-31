@@ -50,7 +50,11 @@ typedef enum {
 	EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE,
 	EVAL_SAMPLE_GLOSSYCOATING_CLOSE_EVALUATE_BASE,
 	// For the very special case of TwoSided material
-	EVAL_TWOSIDED_SETUP
+	EVAL_TWOSIDED_SETUP,
+	// The diffuse reflection lobe (Material::EvaluateDiffuse()): the
+	// parameters and the results of EVAL_EVALUATE. The Mix, GlossyCoating
+	// and TwoSided materials use their EVAL_EVALUATE set up ops.
+	EVAL_EVALUATE_DIFFUSE
 } MaterialEvalOpType;
 
 // The bump cache keeps, for the vertex being shaded, the shading normal of
@@ -417,6 +421,9 @@ typedef struct {
 	BSDFEvent visibility;
 	unsigned int interiorVolumeIndex, exteriorVolumeIndex;
 	float glossiness, avgPassThroughTransparency;
+	// isPhotonGIEnabled: Material::IsPhotonGIEnabled() (1, the caustic
+	// cache), plus 2 if the material has a diffuse lobe for the indirect cache
+	// too (Material::HasDiffuseLobe())
 	int isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled,
 			isHoldout;
 
@@ -485,6 +492,9 @@ typedef struct {
 		OpenPBRParam openpbr;
 		VolumeParam volume;
 	};
+
+	// The EVAL_EVALUATE_DIFFUSE ops (the PhotonGI indirect cache)
+	unsigned int evalEvaluateDiffuseOpStartIndex, evalEvaluateDiffuseOpLength;
 } Material;
 
 //------------------------------------------------------------------------------

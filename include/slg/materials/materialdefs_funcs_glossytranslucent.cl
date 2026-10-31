@@ -241,6 +241,50 @@ OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_Sample(__global const Materia
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The diffuse reflection of the base under the coating of its side
+// (Material::EvaluateDiffuse())
+OPENCL_FORCE_INLINE void GlossyTranslucentMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	const float cosLight = fabs(lightDir.z);
+	const float cosEye = fabs(eyeDir.z);
+	if ((cosLight < DEFAULT_COS_EPSILON_STATIC) || (cosEye < DEFAULT_COS_EPSILON_STATIC) ||
+			(lightDir.z * eyeDir.z <= 0.f)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	const float3 kd = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossytranslucent.kdTexIndex, hitPoint TEXTURES_PARAM));
+	const float3 t = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossytranslucent.ktTexIndex, hitPoint TEXTURES_PARAM)) *
+			(WHITE - kd);
+
+	float3 ksL, alphaL, ksE, alphaE;
+	float uL, vL, dL, uE, vE, dE;
+	GlossyTranslucentMaterial_GetSide(material, hitPoint, lightDir.z > 0.f, &ksL, &alphaL, &uL, &vL, &dL TEXTURES_PARAM);
+	GlossyTranslucentMaterial_GetSide(material, hitPoint, eyeDir.z > 0.f, &ksE, &alphaE, &uE, &vE, &dE TEXTURES_PARAM);
+
+	const float3 EcLight = GGXEnergy_CoatE3(uL, vL, cosLight, ksL);
+	const float3 EcEye = GGXEnergy_CoatE3(uE, vE, cosEye, ksE);
+	const float3 EcLightAvg = GGXEnergy_CoatEavg3(uL, vL, ksL);
+
+	float pCoat, pReflect, pTransmit;
+	GlossyTranslucentMaterial_LobeProbabilities(EcEye, kd, t, &pCoat, &pReflect, &pTransmit);
+
+	const float3 layer = Coating_LayerScale(EcLight, EcEye, EcLightAvg);
+	const float directPdfW = pReflect * cosLight * M_1_PI_F;
+	const float3 absorption = CoatingAbsorption(cosLight, cosEye, alphaE, dE);
+	const float3 result = absorption * layer * kd * (M_1_PI_F * cosLight);
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

@@ -450,6 +450,45 @@ Spectrum BSDF::Evaluate(const Vector &generatedDir,
 	return result;
 }
 
+Spectrum BSDF::EvaluateDiffuse(const Vector &lightDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if (hitPoint.fromLight || IsVolume())
+		return Spectrum();
+
+	const Vector localLightDir = frame.ToLocal(lightDir);
+	const Vector localEyeDir = frame.ToLocal(hitPoint.fixedDir);
+	float diffusePdfW;
+	Spectrum result = material->EvaluateDiffuse(hitPoint, localLightDir, localEyeDir, &diffusePdfW);
+	if (result.Black() || !(diffusePdfW > 0.f))
+		return Spectrum();
+
+	// Shadow terminator artefact avoidance, as Evaluate() and Sample() of a
+	// diffuse reflection
+	if (hitPoint.shadeN != hitPoint.interpolatedN)
+		result *= ShadowTerminatorAvoidanceFactor(hitPoint.GetLandingInterpolatedN(),
+				hitPoint.GetLandingShadeN(), lightDir);
+
+	*pdfW = diffusePdfW;
+
+	return result;
+}
+
+Spectrum BSDF::GetDiffuseSample(const Vector &sampledDir, const BSDFEvent event,
+		const float pdfW, float *diffusePdfShare) const {
+	*diffusePdfShare = 0.f;
+	if ((event & SPECULAR) || !(pdfW > 0.f))
+		return Spectrum();
+
+	float diffusePdfW;
+	const Spectrum result = EvaluateDiffuse(sampledDir, &diffusePdfW);
+	if (result.Black())
+		return Spectrum();
+
+	*diffusePdfShare = luxrays::Min(diffusePdfW / pdfW, 1.f);
+
+	return result / pdfW;
+}
+
 Spectrum BSDF::ShadowCatcherSample(Vector *sampledDir,
 		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
 	// Just continue to trace the ray

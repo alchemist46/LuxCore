@@ -35,7 +35,7 @@ public:
 	virtual ~PGICFilm2SceneRadiusValidator() { }
 	
 	virtual bool IsValid(const BSDF &bsdf) const {
-		return pgic.IsPhotonGIEnabled(bsdf);
+		return pgic.IsVisibilityParticleEnabled(bsdf);
 	}
 
 private:

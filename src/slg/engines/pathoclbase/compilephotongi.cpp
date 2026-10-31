@@ -51,6 +51,7 @@ void CompiledScene::CompilePhotonGI() {
 
 	compiledPathTracer.pgic.indirectEnabled = false;
 	compiledPathTracer.pgic.causticEnabled = false;
+	compiledPathTracer.pgic.indirectLightSampling = true;
 
 	const PhotonGICache *photonGICache = pathTracer->GetPhotonGICache();
 	if (!photonGICache)
@@ -129,6 +130,7 @@ void CompiledScene::CompilePhotonGI() {
 			compiledPathTracer.pgic.indirectLookUpRadius = radiancePhotonsBVH->GetEntryRadius();
 			compiledPathTracer.pgic.indirectLookUpNormalCosAngle = radiancePhotonsBVH->GetEntryNormalCosAngle();
 			compiledPathTracer.pgic.indirectUsageThresholdScale = photonGICache->GetParams().indirect.usageThresholdScale;
+			compiledPathTracer.pgic.indirectLightSampling = photonGICache->GetParams().indirect.lightSampling;
 		}
 	}
 

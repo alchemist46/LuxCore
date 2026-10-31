@@ -255,6 +255,7 @@ void OpenPBRMaterial::Update() {
 	const bool opaque = !(GetConstant(slg::ocl::OPENPBR_BASE_METALNESS, &value) && (value >= 1.f)) &&
 			!(GetConstant(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, &value) && (value >= 1.f));
 	const bool diffuse = opaque || !IsZero(slg::ocl::OPENPBR_FUZZ_WEIGHT);
+	hasDiffuseLobe = opaque;
 	isDelta = !diffuse && specAlwaysDelta && coatAlwaysDelta;
 
 	// Path regularization roughens every lobe
@@ -403,6 +404,16 @@ PropertiesUPtr OpenPBRMaterial::ToProperties(const ImageMapCache &imgMapCache, c
 		props->Delete("scene.materials." + name + ".volume.interior");
 
 	return props;
+}
+
+Spectrum OpenPBRMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	slg::ocl::OpenPBRBSDF b;
+	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
+
+	BSDFEvent event = NONE;
+	return ToSpectrum(slg::ocl::OpenPBR_Disperse(&b, slg::ocl::OpenPBR_EvaluateDiffuse(&b,
+			slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir), pdfW), &event));
 }
 
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

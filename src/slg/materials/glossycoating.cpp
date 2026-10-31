@@ -567,4 +567,54 @@ PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCa
 
 	return props;
 }
+
+// The diffuse reflection of the base under the coating
+Spectrum GlossyCoatingMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+
+	const Frame frame(hitPoint.GetFrame());
+	const float sideTest = Dot(frame.ToWorld(localEyeDir), hitPoint.geometryN) * Dot(frame.ToWorld(localLightDir), hitPoint.geometryN);
+	if (!(sideTest > DEFAULT_COS_EPSILON_STATIC))
+		return Spectrum();
+
+	HitPoint hitPointBase(hitPoint);
+	matBase->Bump(&hitPointBase);
+	const Frame frameBase(hitPointBase.GetFrame());
+	const Vector lightDirBase = frameBase.ToLocal(frame.ToWorld(localLightDir));
+	const Vector eyeDirBase = frameBase.ToLocal(frame.ToWorld(localEyeDir));
+
+	float basePdfW;
+	const Spectrum baseF = matBase->EvaluateDiffuse(hitPointBase, lightDirBase, eyeDirBase, &basePdfW);
+	if (baseF.Black())
+		return Spectrum();
+	if (!(localLightDir.z > 0.f)) {
+		// Back face: no coating
+		*pdfW = basePdfW;
+		return baseF;
+	}
+
+	Spectrum ks = Ks->GetSpectrumValue(hitPoint);
+	const float i = index->GetFloatValue(hitPoint);
+	if (i > 0.f) {
+		const float ti = (i - 1.f) / (i + 1.f);
+		ks *= ti * ti;
+	}
+	ks = ks.Clamp(0.f, 1.f);
+
+	const float u = Microfacet_Regularize(Clamp(nu->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+	const float v = Microfacet_Regularize(Clamp(nv->GetFloatValue(hitPoint), MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint.regularization);
+
+	const Spectrum EcEye = GGXEnergy_CoatE(u, v, fabsf(localEyeDir.z), ks);
+	*pdfW = (1.f - GlossyCoating_CoatProbability(ks, EcEye)) * basePdfW;
+
+	// Absorption
+	const float cosi = fabsf(localLightDir.z);
+	const float coso = fabsf(localEyeDir.z);
+	const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float d = depth->GetFloatValue(hitPoint);
+	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+	return absorption * (Spectrum(1.f) - EcEye) * DarkeningFactor(hitPoint, ks) * baseF;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

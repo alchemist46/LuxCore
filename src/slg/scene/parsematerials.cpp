@@ -916,6 +916,10 @@ VolumeConstPtr Scene::DefineOpenPBRInterior(const OpenPBRMaterial &mat) {
 	auto vol = std::make_unique<HomogeneousVolume>(input(slg::ocl::OPENPBR_SPECULAR_IOR), nullptr,
 			absorption, scattering, input(slg::ocl::OPENPBR_TRANSMISSION_SCATTERANISOTROPY), true);
 	vol->SetName(volName);
+	// As the volumes of the scene (photongi.enable is false by default): the
+	// PhotonGI indirect cache in a volume uses the surface estimate (BUGS.md),
+	// the white furnace of a scattering glass read 0.53 with it
+	vol->SetPhotonGIEnabled(false);
 	const u_int index = defaultMaterialIDIndex++;
 	vol->SetID(((u_int)(RadicalInverse(index + 1, 2) * 255.f + .5f)) |
 			(((u_int)(RadicalInverse(index + 1, 3) * 255.f + .5f)) << 8) |

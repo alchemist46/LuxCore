@@ -23,6 +23,36 @@
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// EVAL_EVALUATE_DIFFUSE (Material::EvaluateDiffuse()) of a material without a
+// diffuse lobe, and the reflection only of an EVAL_EVALUATE result
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE void DefaultMaterial_EvaluateNoDiffuse(__global float *evalStack, uint *evalStackOffset) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	MATERIAL_EVALUATE_RETURN_BLACK;
+}
+
+OPENCL_FORCE_INLINE void DefaultMaterial_KeepDiffuseReflection(__global float *evalStack, uint *evalStackOffset) {
+	float directPdfW;
+	BSDFEvent event;
+	float3 result;
+	EvalStack_PopFloat(directPdfW);
+	EvalStack_PopBSDFEvent(event);
+	EvalStack_PopFloat3(result);
+
+	if (event & TRANSMIT) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
+//------------------------------------------------------------------------------
 // DefaultMaterial_GetInteriorVolume
 //------------------------------------------------------------------------------
 

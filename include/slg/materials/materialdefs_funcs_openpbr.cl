@@ -226,6 +226,27 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Sample(__global const Material* restric
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The diffuse reflection lobe (Material::EvaluateDiffuse())
+OPENCL_FORCE_INLINE void OpenPBRMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	OpenPBRBSDF b;
+	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+	BSDFEvent event = DIFFUSE | REFLECT;
+	float directPdfW;
+	const float3 result = OpenPBR_Disperse(&b, OpenPBR_EvaluateDiffuse(&b, lightDir, eyeDir, &directPdfW), &event);
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

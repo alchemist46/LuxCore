@@ -132,6 +132,48 @@ OPENCL_HOT_FUNCTION float3 Material_Evaluate(const uint matIndex,
 }
 
 //------------------------------------------------------------------------------
+// Material_EvaluateDiffuse: the diffuse lobe of Material_Evaluate() (see
+// Material::EvaluateDiffuse(), for the PhotonGI indirect cache)
+//------------------------------------------------------------------------------
+
+OPENCL_HOT_FUNCTION float3 Material_EvaluateDiffuse(const uint matIndex,
+		__global const HitPoint *hitPoint, const float3 lightDir, const float3 eyeDir,
+		float *directPdfW
+		MATERIALS_PARAM_DECL) {
+	__global const Material* restrict startMat = &mats[matIndex];
+	EvalStack_Declare(matEvalStacks, maxMaterialEvalStackSize, PARAM_MATERIAL_EVALSTACK_SIZE);
+
+	const uint evalOpStartIndex = startMat->evalEvaluateDiffuseOpStartIndex;
+	const uint evalOpLength = startMat->evalEvaluateDiffuseOpLength;
+
+	uint evalStackOffsetVal = 0;
+	uint *evalStackOffset = &evalStackOffsetVal; // Used by macros
+	// Evaluation parameters
+	EvalStack_PushFloat3(lightDir);
+	EvalStack_PushFloat3(eyeDir);
+
+	for (uint i = 0; i < evalOpLength; ++i) {
+		__global const MaterialEvalOp* restrict evalOp = &matEvalOps[evalOpStartIndex + i];
+
+		if (evalOp->evalType == EVAL_EVALUATE_DIFFUSE)
+			MaterialDiffuse_EvalOp(evalOp, evalStack, &evalStackOffsetVal, hitPoint MATERIALS_PARAM);
+		else
+			i += Material_EvalOp(evalOp, evalStack, &evalStackOffsetVal, hitPoint MATERIALS_PARAM);
+	}
+
+	float pdfResult;
+	EvalStack_PopFloat(pdfResult);
+	BSDFEvent eventResult;
+	EvalStack_PopBSDFEvent(eventResult);
+	float3 result;
+	EvalStack_PopFloat3(result);
+
+	*directPdfW = pdfResult;
+
+	return result;
+}
+
+//------------------------------------------------------------------------------
 // Material_Sample
 //------------------------------------------------------------------------------
 

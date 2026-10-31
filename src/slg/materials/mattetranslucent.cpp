@@ -212,4 +212,20 @@ PropertiesUPtr MatteTranslucentMaterial::ToProperties(const ImageMapCache &imgMa
 
 	return propsPtr;
 }
+
+// The diffuse reflection (the diffuse transmission goes on as the other lobes)
+Spectrum MatteTranslucentMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	if (localLightDir.z * localEyeDir.z <= 0.f) {
+		*pdfW = 0.f;
+		return Spectrum();
+	}
+
+	BSDFEvent event;
+	const Spectrum result = Evaluate(hitPoint, localLightDir, localEyeDir, &event, pdfW, nullptr);
+	if (result.Black())
+		*pdfW = 0.f;
+
+	return result;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

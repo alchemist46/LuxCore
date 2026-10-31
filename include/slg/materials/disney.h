@@ -57,6 +57,10 @@ public:
 	virtual luxrays::Spectrum Albedo(
 		const HitPoint &hitPoint
 	) const;
+	virtual luxrays::Spectrum EvaluateDiffuse(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+		float *pdfW) const;
+	virtual bool HasDiffuseLobe() const { return true; }
 
 	virtual luxrays::Spectrum Evaluate(
 		const HitPoint &hitPoint,
@@ -136,8 +140,11 @@ private:
 
 	// The lobe stack (see disney.cpp)
 	void GetParams(const HitPoint &hitPoint, Params &p) const;
+	// diffusePart: if not nullptr, the part of the result that is the diffuse
+	// lobe under the layers above it
 	luxrays::Spectrum EvaluateLayers(const Params &p, const bool fromLight,
-			const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir) const;
+			const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+			luxrays::Spectrum *diffusePart = nullptr) const;
 	float PdfLobes(const Params &p, const bool fromLight,
 			const luxrays::Vector &localFixedDir, const luxrays::Vector &localSampledDir) const;
 

@@ -223,7 +223,9 @@ Spectrum Disney_Subsurface(const Spectrum &color, const float roughness,
 }
 
 Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
-		const Vector &localLightDir, const Vector &localEyeDir) const {
+		const Vector &localLightDir, const Vector &localEyeDir, Spectrum *diffusePart) const {
+	if (diffusePart)
+		*diffusePart = Spectrum();
 	if (localLightDir.z * localEyeDir.z <= 0.f)
 		return Spectrum();
 
@@ -285,6 +287,8 @@ Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
 
 	const Spectrum dielectric = sheenF + sheenScale * (specD + layerD * diffuse);
 	const Spectrum base = p.metallic * specM + (1.f - p.metallic) * dielectric;
+	if (diffusePart)
+		*diffusePart = ((1.f - p.metallic) * sheenScale) * layerD * diffuse;
 
 	// The clearcoat above everything
 	if (p.clearcoat > 0.f) {
@@ -293,6 +297,8 @@ Spectrum DisneyMaterial::EvaluateLayers(const Params &p, const bool fromLight,
 		// Albedo scaling by the eye direction, exact for any base (see
 		// glossycoating.cpp): the base is not Lambertian here
 		const float EccEye = p.clearcoat * GGXEnergy_CoatE(p.alphaCC, p.alphaCC, muE, F0cc).c[0];
+		if (diffusePart)
+			*diffusePart *= 1.f - EccEye;
 
 		return ccF + (1.f - EccEye) * base;
 	}
@@ -490,5 +496,27 @@ void DisneyMaterial::AddReferencedTextures(std::unordered_set<const Texture *>  
 		filmThickness->AddReferencedTextures(referencedTexs);
 	if (filmIor)
 		filmIor->AddReferencedTextures(referencedTexs);
+}
+// The diffuse lobe (EON, or the flattened subsurface) under the layers above it
+Spectrum DisneyMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
+
+	Params p;
+	GetParams(hitPoint, p);
+
+	Spectrum diffuse;
+	EvaluateLayers(p, false, localLightDir, localEyeDir, &diffuse);
+	if (diffuse.Black())
+		return Spectrum();
+
+	// The diffuse share of PdfLobes()
+	float wCC, wSpec, wSheen, wDiff, sheenA, sheenB;
+	Disney_LobeWeights(p, fabsf(localEyeDir.z), &wCC, &wSpec, &wSheen, &wDiff, &sheenA, &sheenB);
+	*pdfW = wDiff * fabsf(localLightDir.z) * INV_PI;
+
+	return diffuse;
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

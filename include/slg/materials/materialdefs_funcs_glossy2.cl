@@ -201,6 +201,53 @@ OPENCL_FORCE_INLINE void Glossy2Material_Sample(__global const Material* restric
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The Lambertian base under the coating (Material::EvaluateDiffuse())
+OPENCL_FORCE_INLINE void Glossy2Material_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	if (lightDir.z * eyeDir.z <= 0.f) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	const float3 kd = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossy2.kdTexIndex, hitPoint TEXTURES_PARAM));
+	float3 result = kd * M_1_PI_F * fabs(lightDir.z);
+	float directPdfW = fabs(lightDir.z * M_1_PI_F);
+
+	if (material->glossy2.doublesided || (eyeDir.z > 0.f)) {
+		// Front face: under the coating
+		const float3 ks = Glossy2Material_GetKs(material, hitPoint TEXTURES_PARAM);
+		const float nuVal = Texture_GetFloatValue(material->glossy2.nuTexIndex, hitPoint TEXTURES_PARAM);
+		const float nvVal = Texture_GetFloatValue(material->glossy2.nvTexIndex, hitPoint TEXTURES_PARAM);
+		const float u = Microfacet_Regularize(clamp(nuVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+		const float v = Microfacet_Regularize(clamp(nvVal, MICROFACET_MIN_ROUGHNESS, 1.f), hitPoint->regularization);
+
+		const float3 EcEye = GGXEnergy_CoatE3(u, v, fabs(eyeDir.z), ks);
+		const float3 EcLight = GGXEnergy_CoatE3(u, v, fabs(lightDir.z), ks);
+		const float3 EcAvg = GGXEnergy_CoatEavg3(u, v, ks);
+
+		directPdfW *= 1.f - Coating_Probability(EcEye, kd);
+
+		// Absorption
+		const float cosi = fabs(lightDir.z);
+		const float coso = fabs(eyeDir.z);
+		const float3 alpha = Spectrum_Clamp(Texture_GetSpectrumValue(material->glossy2.kaTexIndex, hitPoint TEXTURES_PARAM));
+		const float d = Texture_GetFloatValue(material->glossy2.depthTexIndex, hitPoint TEXTURES_PARAM);
+		const float3 absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+		result = absorption * Coating_LayerScale(EcLight, EcEye, EcAvg) * result;
+	}
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

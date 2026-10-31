@@ -102,11 +102,16 @@ string PhotonGICache::ComputeSignature() const {
 			" " << params.visibility.targetHitRate << " " << params.visibility.maxSampleCount <<
 			" glossiness " << params.glossinessUsageThreshold;
 	// "area 1": the measured gather area of the visibility particles (the
-	// files before it hold the radiance of the area estimated from the hits)
+	// files before it hold the radiance of the area estimated from the hits);
+	// "area 2": the gather limited to what the particles see. "irradiance 1":
+	// a surface entry holds the indirect irradiance of the diffuse lobes (the
+	// files before it hold the outgoing radiance of the whole material, the
+	// direct light included)
 	if (params.indirect.enabled)
-		ss << " indirect area 1 " << params.indirect.maxSize << " " << params.indirect.haltThreshold <<
+		ss << " indirect area 2 irradiance 1 " << params.indirect.maxSize << " " << params.indirect.haltThreshold <<
 				" " << params.indirect.lookUpRadius << " " << params.indirect.lookUpNormalAngle <<
-				" " << params.indirect.usageThresholdScale << " " << params.indirect.filterRadiusScale;
+				" " << params.indirect.usageThresholdScale << " " << params.indirect.filterRadiusScale <<
+				" lightsampling " << params.indirect.lightSampling;
 	if (params.caustic.enabled)
 		ss << " caustic " << params.caustic.maxSize << " " << params.caustic.updateSpp <<
 				" " << params.caustic.lookUpRadius << " " << params.caustic.lookUpNormalAngle <<

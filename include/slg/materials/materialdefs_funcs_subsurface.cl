@@ -238,6 +238,43 @@ OPENCL_FORCE_INLINE void SubsurfaceMaterial_Sample(__global const Material* rest
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The Lambertian base under the coating where the material is a plain surface
+// (Material::EvaluateDiffuse())
+OPENCL_FORCE_INLINE void SubsurfaceMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	if ((hitPoint->subsurface != HITPOINT_SSS_SURFACE) || (lightDir.z * eyeDir.z <= 0.f)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	const float3 kd = Spectrum_Clamp(Texture_GetSpectrumValue(material->subsurface.colorTexIndex, hitPoint TEXTURES_PARAM));
+	float3 result = kd * M_1_PI_F * fabs(lightDir.z);
+	float directPdfW = fabs(lightDir.z * M_1_PI_F);
+
+	float alpha, F0;
+	SubsurfaceMaterial_GetReflection(material, hitPoint, &alpha, &F0 TEXTURES_PARAM);
+	if ((eyeDir.z >= 0.f) && (F0 >= 0.f)) {
+		// Under the coating
+		const float3 ks = TO_FLOAT3(F0);
+		const float3 EcEye = GGXEnergy_CoatE3(alpha, alpha, fabs(eyeDir.z), ks);
+		const float3 EcLight = GGXEnergy_CoatE3(alpha, alpha, fabs(lightDir.z), ks);
+		const float3 EcAvg = GGXEnergy_CoatEavg3(alpha, alpha, ks);
+
+		directPdfW *= 1.f - Coating_Probability(EcEye, kd);
+		result = Coating_LayerScale(EcLight, EcEye, EcAvg) * result;
+	}
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

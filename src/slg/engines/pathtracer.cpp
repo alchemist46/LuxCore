@@ -158,7 +158,8 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 		const float u3, const float u4,
 		const EyePathInfo &pathInfo, const Spectrum &pathThroughput,
 		const BSDF &bsdf, SampleResult *sampleResult,
-		const bool useBSDFEVal, const u_int causticChain) const {
+		const bool useBSDFEVal, const u_int causticChain, const bool photonGIIndirect,
+		const bool photonGIIndirectEnd) const {
 	if (!bsdf.IsDelta()) {
 		// Select the light strategy to use
 		auto& lightStrategy =
@@ -241,6 +242,22 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							const float directLightSamplingPdfW = directPdfW * lightPickPdf;
 							const float factor = 1.f / directLightSamplingPdfW;
 
+							// A vertex that uses the PhotonGI indirect cache: the
+							// diffuse lobe has the light sample only, the BSDF
+							// sampling of the other lobes goes on with the pdf
+							// left (see RenderEyePath())
+							Spectrum diffuseEval;
+							if (photonGIIndirect) {
+								float diffusePdfW;
+								diffuseEval = bsdf.EvaluateDiffuse(shadowRay.d, &diffusePdfW);
+								bsdfEval = (bsdfEval - diffuseEval).Clamp(0.f, INFINITY);
+								bsdfPdfW = Max(bsdfPdfW - diffusePdfW, 0.f);
+								// The cache has the direct light of the diffuse lobe
+								// without path.photongi.indirect.lightsampling
+								if (!photonGICache->IsIndirectLightSampling())
+									diffuseEval = Spectrum();
+							}
+
 							if ((directLightDepthInfo.GetRRDepth() >= rrDepth) && (bsdfPdfW > 0.f)) {
 								// Russian Roulette: the BSDF technique continues the path
 								// with the probability RenderEyePath() computes from the
@@ -262,7 +279,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							// ray does, unless it is nearly specular up to there (see
 							// RenderEyePath()): then only the light sampling reaches
 							// the light through it.
-							const bool misEnabled = !sampleResult->lastPathVertex &&
+							const bool misEnabled = !sampleResult->lastPathVertex && !photonGIIndirectEnd &&
 								(light->IsEnvironmental() || light->IsIntersectable()) &&
 								CheckDirectHitVisibilityFlags(*light, directLightDepthInfo, event) &&
 								!(shadowBsdf.hitPoint.throughShadowTransparency &&
@@ -270,7 +287,9 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 										hybridBackForwardGlossinessThreshold));
 
 							const float weight = misEnabled ? PowerHeuristic(directLightSamplingPdfW, bsdfPdfW) : 1.f;
-							const Spectrum incomingRadiance = bsdfEval * (weight * factor) * connectionThroughput * lightRadiance;
+							const Spectrum incomingRadiance = photonGIIndirect ?
+								((diffuseEval + bsdfEval * weight) * factor * connectionThroughput * lightRadiance) :
+								(bsdfEval * (weight * factor) * connectionThroughput * lightRadiance);
 
 							sampleResult->AddDirectLight(light->GetID(), event, pathThroughput, incomingRadiance, 1.f);
 							learnContribution = RGBColor(incomingRadiance.c[0], incomingRadiance.c[1], incomingRadiance.c[2]).Y();
@@ -354,8 +373,14 @@ void PathTracer::DirectHitFiniteLight(SceneConstRef scene,
 					pathInfo.lastP, Distance(pathInfo.lastP, bsdf.hitPoint.p),
 					AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
 
-			// MIS between BSDF sampling and direct light sampling
-			weight = PowerHeuristic(pathInfo.lastBSDFPdfW * lightSource->GetAvgPassThroughTransparency(), directPdfW * lightPickProb);
+			// MIS between BSDF sampling and direct light sampling. The light
+			// sampling has the whole light where the BSDF sampling can't reach
+			// it (lastBSDFPdfW is 0 after a vertex that uses the PhotonGI
+			// indirect cache with a diffuse lobe only), and a pdf of 0 for
+			// both would make the weight NaN.
+			const float lightPdfW = directPdfW * lightPickProb;
+			weight = (lightPdfW > 0.f) ?
+				PowerHeuristic(pathInfo.lastBSDFPdfW * lightSource->GetAvgPassThroughTransparency(), lightPdfW) : 1.f;
 		} else
 			weight = 1.f;
 
@@ -379,8 +404,10 @@ void PathTracer::DirectHitInfiniteLight(SceneConstRef scene,
 				const float lightPickProb = scene.GetLightSources().GetIlluminateLightStrategy().
 						SampleLightPdf(envLight, pathInfo.lastP, pathInfo.lastShadeN, pathInfo.lastFromVolume);
 
-				// MIS between BSDF sampling and direct light sampling
-				weight = PowerHeuristic(pathInfo.lastBSDFPdfW, directPdfW * lightPickProb);
+				// MIS between BSDF sampling and direct light sampling (see
+				// DirectHitFiniteLight())
+				const float lightPdfW = directPdfW * lightPickProb;
+				weight = (lightPdfW > 0.f) ? PowerHeuristic(pathInfo.lastBSDFPdfW, lightPdfW) : 1.f;
 			} else
 				weight = 1.f;
 
@@ -637,11 +664,45 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// rough (see HitPoint::regularization)
 		bsdf.hitPoint.regularization = (regularizationEnable && pathInfo.anyNonSpecularBounce) ?
 			regularizationRoughness : 0.f;
+
+		//----------------------------------------------------------------------
+		// The PhotonGI indirect cache
+		//
+		// At a vertex reached by a bounce that is not nearly specular, from far
+		// enough for the blur of the cache not to show, the cache stands for
+		// the indirect light of the diffuse lobe of the material
+		// (Material::EvaluateDiffuse()). Its BSDF sample reflects the cached
+		// irradiance through the diffuse lobe and ends the path there, the
+		// other lobes go on with the probability of their share of the pdf.
+		// The vertex samples the lights: the diffuse lobe's direct light with
+		// the weight 1 (its BSDF sampling never reaches a light), the other
+		// lobes' with the MIS weight against the pdf of their continuation
+		// (DirectLightSampling()); TracePhotonsThread stores the photons of
+		// the bounces after the first hit. Without
+		// path.photongi.indirect.lightsampling the cache holds the direct light
+		// of the diffuse lobe too. A volume vertex adds the radiance the cache
+		// holds for it and ends the path (after the light sampling, with it).
+		//----------------------------------------------------------------------
+
+		const SpectrumGroup *photonGIIndirect = nullptr;
+		if (photonGICache && photonGICache->IsIndirectEnabled() && photonGICacheEnabledOnLastHit &&
+				!subsurfaceExit &&
+				(photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_NONE) &&
+				photonGICache->IsIndirectEnabled(bsdf) &&
+				!bsdf.IsShadowCatcher() && bsdf.GetPassThroughShadowTransparency().Black() &&
+				// I hope to not introduce strange sample correlations by using
+				// passThrough here
+				(eyeRayHit.t > photonGICache->GetIndirectUsageThreshold(pathInfo.lastBSDFEvent, passThrough)))
+			photonGIIndirect = photonGICache->GetIndirectRadiance(bsdf);
+
 		// The base lobe of a subsurface material enters the object for the
 		// walk while the subsurface depth lasts. The walk is then the base's
 		// diffuse lobe (unless it has another one), out of the diffuse depth.
 		// Beyond the subsurface depth, and on the last vertex (no next vertex
-		// for the walk), the base is the Lambertian stand-in.
+		// for the walk), the base is the Lambertian stand-in. Where the
+		// PhotonGI cache is used, the walk is one of the other lobes (the
+		// cache stands for the diffuse lobe beside it, see
+		// Material::EvaluateDiffuse()).
 		const bool walkEntry = !subsurfaceExit && bsdf.HasSubsurfaceWalk() &&
 				pathInfo.depth.CanStartSubsurfaceWalk(maxPathDepth);
 		BSDFEvent eventTypes = bsdf.GetEventTypes();
@@ -679,16 +740,22 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		//----------------------------------------------------------------------
 
 		if (photonGICache && !subsurfaceExit) {
-			// The cache doesn't have the random walk of the subsurface materials
+			// The caustic cache doesn't have the random walk of the subsurface
+			// materials
 			const bool isPhotonGIEnabled = photonGICache->IsPhotonGIEnabled(bsdf) &&
 					(bsdf.hitPoint.subsurface != HITPOINT_SSS_ENTRY);
 
 			// Check if one of the debug modes is enabled
 			if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWINDIRECT) {
-				if (isPhotonGIEnabled) {
+				// The irradiance of the indirect cache reflected by the albedo
+				if (photonGICache->IsIndirectEnabled(bsdf)) {
 					const SpectrumGroup *group = photonGICache->GetIndirectRadiance(bsdf);
-					if (group)
-						sampleResult.radiance += *group;
+					if (group) {
+						if (bsdf.IsVolume())
+							sampleResult.radiance += *group;
+						else
+							sampleResult.radiance.AddWeighted(bsdf.Albedo() * INV_PI, *group);
+					}
 				}
 				break;
 			} else if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWCAUSTIC) {
@@ -696,55 +763,29 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 					sampleResult.radiance += photonGICache->ConnectWithCausticPaths(bsdf);
 				break;
 			} else if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWINDIRECTPATHMIX) {
-				// Check if the cache is enabled for this material
-				if (isPhotonGIEnabled) {
-					if (photonGICacheEnabledOnLastHit &&
-							(eyeRayHit.t > photonGICache->GetIndirectUsageThreshold(pathInfo.lastBSDFEvent,
-								pathInfo.lastGlossiness,
-								passThrough))) {
-						sampleResult.radiance[0] = Spectrum(0.f, 0.f, 1.f);
-						photonGIShowIndirectPathMixUsed = true;
-						break;
-					}
-
-					photonGICacheEnabledOnLastHit = true;
-				} else
-					photonGICacheEnabledOnLastHit = false;
+				// Where the indirect cache would be used
+				if (photonGICacheEnabledOnLastHit && photonGICache->IsIndirectEnabled(bsdf) &&
+						(eyeRayHit.t > photonGICache->GetIndirectUsageThreshold(pathInfo.lastBSDFEvent, passThrough))) {
+					sampleResult.radiance[0] = Spectrum(0.f, 0.f, 1.f);
+					photonGIShowIndirectPathMixUsed = true;
+					break;
+				}
 			} else {
-				// Check if the cache is enabled for this material
-				if (isPhotonGIEnabled) {
-					// TODO: add support for AOVs (possible ?)
+				// The caustic cache where the indirect cache isn't used (its
+				// irradiance has all the photons, the caustic ones too)
+				if (!photonGIIndirect && isPhotonGIEnabled && photonGICache->IsCausticEnabled() &&
+						(!hybridBackForwardEnable || pathInfo.depth.depth != 0)) {
+					const SpectrumGroup causticRadiance = photonGICache->ConnectWithCausticPaths(bsdf);
 
-					// The indirect cache first: its radiance has all the
-					// photons, the caustic ones too
-					if (photonGICache->IsIndirectEnabled() && photonGICacheEnabledOnLastHit &&
-							(eyeRayHit.t > photonGICache->GetIndirectUsageThreshold(pathInfo.lastBSDFEvent,
-								pathInfo.lastGlossiness,
-								// I hope to not introduce strange sample correlations
-								// by using passThrough here
-								passThrough))) {
-						const SpectrumGroup *group = photonGICache->GetIndirectRadiance(bsdf);
-						if (group) {
-							sampleResult.radiance.AddWeighted(pathThroughput, *group);
-							// I can terminate the path, all done
-							break;
-						}
-						// No cache entry here (the visibility pass placed
-						// none): the path goes on as if the cache was off
+					if (!causticRadiance.Black()) {
+						sampleResult.radiance.AddWeighted(pathThroughput, causticRadiance);
+						causticLookup = true;
 					}
+				}
 
-					if (photonGICache->IsCausticEnabled() && (!hybridBackForwardEnable || pathInfo.depth.depth != 0)) {
-						const SpectrumGroup causticRadiance = photonGICache->ConnectWithCausticPaths(bsdf);
-
-						if (!causticRadiance.Black()) {
-							sampleResult.radiance.AddWeighted(pathThroughput, causticRadiance);
-							causticLookup = true;
-						}
-					}
-
-					photonGICacheEnabledOnLastHit = true;
-				} else
-					photonGICacheEnabledOnLastHit = false;
+				// A volume vertex: the radiance the indirect cache holds
+				if (photonGIIndirect && bsdf.IsVolume())
+					sampleResult.radiance.AddWeighted(pathThroughput, *photonGIIndirect);
 			}
 		}
 
@@ -759,7 +800,14 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// subsurface walk too: the walk's light comes from there (the entry
 		// has no light sampling of the base), so the depths it reaches don't
 		// make the material black.
-		if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex && !subsurfaceExit)
+		// A vertex that uses the PhotonGI indirect cache samples the lights,
+		// the last one too (the cache has the light of the bounces after it)
+		if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex && !subsurfaceExit &&
+				!photonGIIndirect)
+			break;
+		// The radiance a volume vertex reads from the cache has the direct
+		// light too without the light sampling of the cache
+		if (photonGIIndirect && bsdf.IsVolume() && !photonGICache->IsIndirectLightSampling())
 			break;
 
 		const DirectLightResult directLightResult = DirectLightSampling(
@@ -771,9 +819,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_W),
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A),
 				pathInfo, 
-				pathThroughput, bsdf, &sampleResult, true, causticChain);
+				pathThroughput, bsdf, &sampleResult, true, causticChain, photonGIIndirect != nullptr,
+				photonGIIndirect && bsdf.IsVolume());
 
-		if (sampleResult.lastPathVertex)
+		if ((sampleResult.lastPathVertex && !photonGIIndirect) ||
+				(photonGIIndirect && bsdf.IsVolume()))
 			break;
 
 		//------------------------------------------------------------------
@@ -816,6 +866,25 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		}
 
 		verify (!bsdfSample.IsNaN() && !bsdfSample.IsInf() && !bsdfSample.IsNeg());
+
+		// The PhotonGI indirect cache: the diffuse lobe's part of the sample
+		// reflects the cached irradiance and ends there, the other lobes go on
+		// with the probability of their share of the pdf
+		float photonGIContinueProb = 1.f;
+		if (photonGIIndirect) {
+			float diffusePdfShare = 0.f;
+			const Spectrum diffuseSample = bsdfSample.Black() ? Spectrum() :
+				bsdf.GetDiffuseSample(sampledDir, bsdfEvent, bsdfPdfW, &diffusePdfShare);
+			if (!diffuseSample.Black())
+				sampleResult.radiance.AddWeighted(pathThroughput * diffuseSample * INV_PI, *photonGIIndirect);
+
+			if (sampleResult.lastPathVertex || (diffusePdfShare > PGIC_DIFFUSE_SHARE_END))
+				break;
+
+			photonGIContinueProb = 1.f - diffusePdfShare;
+			bsdfSample = (bsdfSample - diffuseSample).Clamp(0.f, INFINITY) / photonGIContinueProb;
+		}
+
 		if (bsdfSample.Black())
 			break;
 
@@ -827,18 +896,34 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		else {
 			pathInfo.AddVertex(bsdf, bsdfEvent, bsdfPdfW, hybridBackForwardGlossinessThreshold,
 					rrType != slg::ocl::RR_BOUNCE, regularizationRoughness);
-			if (photonGICache)
+			if (photonGICache) {
 				causticChain = photonGICache->NextCausticChain(causticChain, causticLookup,
 						bsdfEvent, bsdf.GetUnregularizedGlossiness());
+
+				// The indirect cache can stand for the next vertex after a
+				// bounce that isn't nearly specular
+				photonGICacheEnabledOnLastHit = !photonGICache->IsNearlySpecular(bsdfEvent,
+						bsdf.GetUnregularizedGlossiness());
+
+				// The BSDF sampling of a vertex that uses the indirect cache
+				// reaches the lights through the other lobes only: the pdf of
+				// its MIS weight is the one of their continuation (see
+				// DirectLightSampling())
+				if (photonGIIndirect)
+					pathInfo.lastBSDFPdfW *= photonGIContinueProb;
+			}
 		}
 
-		// Russian Roulette
+		// Russian Roulette, with the continuation of the other lobes of a
+		// vertex that uses the PhotonGI indirect cache
 		float rrProb = 1.f;
-		if (!shadowTransparencyPass && pathInfo.UseRR(rrDepth)) {
+		const bool useRR = !shadowTransparencyPass && pathInfo.UseRR(rrDepth);
+		if (useRR)
 			rrProb = RussianRouletteProb(bsdfSample, pathThroughput, pathInfo.etaScale);
-			if (rrProb < sampler.GetSample(sampleOffset + IDX_RR))
-				break;
-
+		if ((useRR || photonGIIndirect) &&
+				(rrProb * photonGIContinueProb < sampler.GetSample(sampleOffset + IDX_RR)))
+			break;
+		if (useRR) {
 			// Increase path contribution
 			bsdfSample /= rrProb;
 

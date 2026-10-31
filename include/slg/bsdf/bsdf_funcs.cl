@@ -378,6 +378,60 @@ OPENCL_FORCE_INLINE float3 BSDF_Sample(__global const BSDF *bsdf, const float u0
 	return result;
 }
 
+// The part of BSDF_Evaluate() of an eye path that comes from the diffuse
+// reflection lobe of the material (Material_EvaluateDiffuse()), with the
+// lobe's share of the pdf of BSDF_Sample() (see BSDF::EvaluateDiffuse())
+OPENCL_FORCE_INLINE float3 BSDF_EvaluateDiffuse(__global const BSDF *bsdf,
+		const float3 lightDir, float *pdfW
+		MATERIALS_PARAM_DECL) {
+	*pdfW = 0.f;
+	if (bsdf->isVolume)
+		return BLACK;
+
+	const float3 localLightDir = Frame_ToLocal(&bsdf->frame, lightDir);
+	const float3 localEyeDir = Frame_ToLocal(&bsdf->frame, VLOAD3F(&bsdf->hitPoint.fixedDir.x));
+	float diffusePdfW;
+	float3 result = Material_EvaluateDiffuse(bsdf->materialIndex, &bsdf->hitPoint,
+			localLightDir, localEyeDir, &diffusePdfW
+			MATERIALS_PARAM);
+	if (Spectrum_IsBlack(result) || !(diffusePdfW > 0.f))
+		return BLACK;
+
+	// Shadow terminator artefact avoidance, as BSDF_Evaluate() and
+	// BSDF_Sample() of a diffuse reflection
+	const float3 shadeN = VLOAD3F(&bsdf->hitPoint.shadeN.x);
+	const float3 interpolatedN = VLOAD3F(&bsdf->hitPoint.interpolatedN.x);
+	if ((shadeN.x != interpolatedN.x) || (shadeN.y != interpolatedN.y) || (shadeN.z != interpolatedN.z))
+		result *= BSDF_ShadowTerminatorAvoidanceFactor(BSDF_GetLandingInterpolatedN(bsdf),
+				BSDF_GetLandingShadeN(bsdf), lightDir);
+
+	*pdfW = diffusePdfW;
+
+	return result;
+}
+
+// The part of a BSDF sample (BSDF_Sample() of sampledDir, event and pdfW) that
+// comes from the diffuse lobe of the material, with the share of the pdf of
+// the lobe (see BSDF::GetDiffuseSample())
+OPENCL_FORCE_INLINE float3 BSDF_GetDiffuseSample(__global const BSDF *bsdf,
+		const float3 sampledDir, const BSDFEvent event, const float pdfW,
+		float *diffusePdfShare
+		MATERIALS_PARAM_DECL) {
+	*diffusePdfShare = 0.f;
+	if ((event & SPECULAR) || !(pdfW > 0.f))
+		return BLACK;
+
+	float diffusePdfW;
+	const float3 result = BSDF_EvaluateDiffuse(bsdf, sampledDir, &diffusePdfW
+			MATERIALS_PARAM);
+	if (Spectrum_IsBlack(result))
+		return BLACK;
+
+	*diffusePdfShare = fmin(diffusePdfW / pdfW, 1.f);
+
+	return result / pdfW;
+}
+
 OPENCL_FORCE_INLINE bool BSDF_IsLightSource(__global const BSDF *bsdf) {
 	return (bsdf->triangleLightSourceIndex != NULL_INDEX);
 }

@@ -47,6 +47,11 @@ public:
 	{ }
 	virtual ~Volume() { }
 
+	// The PhotonGI indirect cache stores the outgoing radiance of a volume
+	// (PGICVisibilityParticle::ComputeRadiance()) and a volume vertex
+	// reads it whole: there is no lobe to evaluate
+	virtual bool HasDiffuseLobe() const { return true; }
+
 	void SetVolumeLightID(const u_int id) { volumeLightID = id; }
 	u_int GetVolumeLightID() const { return volumeLightID; }
 	void SetPriority(const int p) { priority = p; }

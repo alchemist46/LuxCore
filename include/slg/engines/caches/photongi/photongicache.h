@@ -87,11 +87,17 @@ struct PGICVisibilityParticle : GenericPhoton {
 			(luxrays::Sqr(2.f * hitsAccumulatedDistance / hitsCount) * M_PI);
 	}
 
-	// area is the area of the surface the photons were gathered from
+	// What the indirect cache holds for the particle, from the photons
+	// gathered over the area of the surface: the indirect irradiance on a
+	// surface (the diffuse lobe of an eye path vertex reflects it, see
+	// PathTracer::RenderEyePath()), the outgoing radiance in a volume
 	luxrays::SpectrumGroup ComputeRadiance(const float area, const float photonTraced) const {
 		if (hitsCount > 0) {
 			luxrays::SpectrumGroup result = alphaAccumulated;
-			result *= (bsdfEvaluateTotal * INV_PI) / (photonTraced * area);
+			if (isVolume)
+				result *= (bsdfEvaluateTotal * INV_PI) / (photonTraced * area);
+			else
+				result *= 1.f / (photonTraced * area);
 
 			return result;
 		} else
@@ -207,6 +213,11 @@ typedef struct PhotonGICacheParams_t {
 		float lookUpRadius, lookUpRadius2, lookUpNormalAngle,
 				usageThresholdScale,
 				filterRadiusScale, haltThreshold;
+		// A vertex that uses the cache samples the lights for the direct
+		// light of its diffuse lobe, and the cache holds the indirect light
+		// only (the default); otherwise the cache holds the direct light too
+		// (blurred, but without the noise of the light sampling)
+		bool lightSampling;
 	} indirect;
 
 	struct {
@@ -260,6 +271,10 @@ protected:
 		ar & indirect.usageThresholdScale;
 		ar & indirect.filterRadiusScale;
 		ar & indirect.haltThreshold;
+		if (version >= 8)
+			ar & indirect.lightSampling;
+		else
+			indirect.lightSampling = false;
 
 		ar & caustic.enabled;
 		ar & caustic.maxSize;
@@ -290,12 +305,32 @@ public:
 	PhotonGIDebugType GetDebugType() const { return params.debugType; }
 
 	bool IsIndirectEnabled() const { return params.indirect.enabled; }
+	bool IsIndirectLightSampling() const { return params.indirect.lightSampling; }
 	bool IsCausticEnabled() const { return params.caustic.enabled; }
+	// The surfaces where the caustic cache is looked up: diffuse or glossy
+	// materials, no specular, no transmission, no glossiness under the
+	// threshold
 	bool IsPhotonGIEnabled(const BSDF &bsdf) const;
-	// The surfaces where a photon is stored (TracePhotonsThread)
+	// The surfaces where a caustic photon is stored (TracePhotonsThread)
 	bool IsPhotonDepositEnabled(const BSDF &bsdf) const;
-	float GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
-			const float lastGlossiness, const float u0) const;
+	// The surfaces where the indirect cache is looked up: the materials with
+	// a diffuse lobe (Material::HasDiffuseLobe(), the cache stands for that
+	// lobe), and the volumes
+	bool IsIndirectEnabled(const BSDF &bsdf) const;
+	// The surfaces where an indirect photon is stored
+	bool IsIndirectDepositEnabled(const BSDF &bsdf) const;
+	// The surfaces where a visibility particle is placed: the ones of the
+	// enabled caches
+	bool IsVisibilityParticleEnabled(const BSDF &bsdf) const;
+	// The shortest eye path segment after a bounce of type lastBSDFEvent
+	// that uses the indirect cache at its end (a random fraction u0 of the
+	// threshold: the blend zone). The bounce must not be nearly specular
+	// (IsNearlySpecular()).
+	float GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent, const float u0) const;
+	// A bounce the cache's blur must not be seen through: a specular one, or a
+	// glossy one under the glossiness threshold (the glossiness without the
+	// path regularization)
+	bool IsNearlySpecular(const BSDFEvent event, const float glossiness) const;
 	// The caustic cache owns the light paths it stores: the light hit, or the
 	// light sample with the event of a vertex, of such a path is not counted
 	// again. causticChain is where the eye path stands against the cache: 0
@@ -370,6 +405,13 @@ private:
 	void TraceVisibilityParticles();
 	void ComputeVisibilityParticlesArea();
 	float GetVisibilityParticleArea(const u_int index) const;
+	// True if the point p, in the lookup sphere of the visibility particle on
+	// a surface, is not hidden from the particle's viewpoint (see
+	// ComputeVisibilityParticlesArea()); always true in a volume
+	bool IsVisibleFromParticle(const u_int index, const luxrays::Point &p) const;
+	// True if nothing stands between the viewpoints of the two particles
+	bool AreParticlesVisible(const u_int index1, const u_int index2) const;
+	luxrays::Point GetParticleViewPoint(const u_int index) const;
 	void TracePhotons(const u_int seedBase, const u_int photonTracedCount,
 		const bool indirectCacheDone, const bool causticCacheDone,
 		std::atomic<u_int> &globalIndirectPhotonsTraced,
@@ -378,7 +420,7 @@ private:
 		std::atomic<u_int> &globalCausticSize);
 	void TracePhotons(const bool indirectEnabled, const bool causticEnabled);
 	void FilterVisibilityParticlesRadiance(const std::vector<luxrays::SpectrumGroup> &radianceValues,
-			std::vector<luxrays::SpectrumGroup> &filteredRadianceValues) const;
+			std::vector<luxrays::SpectrumGroup> &filteredRadianceValues, const bool visibilityTest) const;
 	void CreateRadiancePhotons();
 
 	std::string ComputeSignature() const;
@@ -408,6 +450,22 @@ private:
 	// from (computed by the pre-processing, not saved: the radiance photons
 	// have it)
 	std::vector<float> visibilityParticlesArea;
+	// What the viewpoint of each visibility particle on a surface sees of
+	// its lookup sphere (computed by ComputeVisibilityParticlesArea(), freed
+	// after the pre-processing): the height of the viewpoint above the
+	// particle (0 for none) and, per cell of the lookup disc, the height and
+	// the distance of the first surface seen through it (see
+	// IsVisibleFromParticle())
+	struct PGICViewMap {
+		float viewHeight;
+		// Per cell, the height of the first surface seen through it above
+		// the particle's tangent plane (in 1/127 of the radius) and its
+		// distance from the viewpoint (in 1/255 of 2 radii)
+		int8_t cellHeights[64];
+		u_char cellDistances[64];
+	};
+	std::vector<PGICViewMap> visibilityParticlesViewMap;
+	float visibilityHeightTolerance;
 
 	// Radiance photon map
 	std::vector<RadiancePhoton> radiancePhotons;
@@ -426,7 +484,7 @@ BOOST_CLASS_VERSION(slg::GenericPhoton, 1)
 BOOST_CLASS_VERSION(slg::PGICVisibilityParticle, 2)
 BOOST_CLASS_VERSION(slg::Photon, 2)
 BOOST_CLASS_VERSION(slg::RadiancePhoton, 2)
-BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 7)
+BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 8)
 BOOST_CLASS_VERSION(slg::PhotonGICache, 3)
 
 BOOST_CLASS_EXPORT_KEY(slg::GenericPhoton)

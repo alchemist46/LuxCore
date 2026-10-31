@@ -248,6 +248,24 @@ public:
 	// NOTE: this is called rho() in PBRT sources.
 	virtual luxrays::Spectrum EvaluateTotal(const HitPoint &hitPoint) const;
 
+	// The diffuse reflection lobe of the material, the part of the BSDF the
+	// PhotonGI indirect cache stands for at a vertex of an eye path (see
+	// PathTracer::RenderEyePath()): its value as Evaluate() returns it (the
+	// cosine of the light direction included) and in *pdfW its share of the
+	// pdf of Sample() (the pdf of sampling the light direction from the eye
+	// direction with the lobe, times the probability of picking the lobe).
+	// Eye paths only (hitPoint.fromLight is false). Black and a pdf of 0 for
+	// the directions the lobe doesn't reach (the other side of the surface)
+	// and for the materials without such a lobe.
+	virtual luxrays::Spectrum EvaluateDiffuse(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+		float *pdfW) const {
+		*pdfW = 0.f;
+		return luxrays::Spectrum();
+	}
+	// True if EvaluateDiffuse() can be non-black
+	virtual bool HasDiffuseLobe() const { return false; }
+
 	// Evaluate() is used to evaluate the material (i.e. get a color plus some
 	// related data) knowing the eye and light vector. It used by the
 	// path tracer to evaluate the material color when doing direct lighting

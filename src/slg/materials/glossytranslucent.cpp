@@ -318,4 +318,38 @@ PropertiesUPtr GlossyTranslucentMaterial::ToProperties(const ImageMapCache &imgM
 
 	return props;
 }
+
+// The diffuse reflection of the base under the coating of its side
+Spectrum GlossyTranslucentMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	const float cosLight = fabsf(localLightDir.z);
+	const float cosEye = fabsf(localEyeDir.z);
+	if ((cosLight < DEFAULT_COS_EPSILON_STATIC) || (cosEye < DEFAULT_COS_EPSILON_STATIC) ||
+			(localLightDir.z * localEyeDir.z <= 0.f))
+		return Spectrum();
+
+	const Spectrum kd = Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const Spectrum t = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * (Spectrum(1.f) - kd);
+
+	const GlossyTranslucentSide lightSide = GlossyTranslucent_GetSide(*this, hitPoint, localLightDir.z > 0.f);
+	const GlossyTranslucentSide eyeSide = GlossyTranslucent_GetSide(*this, hitPoint, localEyeDir.z > 0.f);
+
+	const Spectrum EcLight = GGXEnergy_CoatE(lightSide.u, lightSide.v, cosLight, lightSide.ks);
+	const Spectrum EcEye = GGXEnergy_CoatE(eyeSide.u, eyeSide.v, cosEye, eyeSide.ks);
+	const Spectrum EcLightAvg = GGXEnergy_CoatEavg(lightSide.u, lightSide.v, lightSide.ks);
+
+	// The reflection share of GlossyTranslucent_Pdf()
+	float pCoat, pReflect, pTransmit;
+	GlossyTranslucent_LobeProbabilities(EcEye, kd, t, &pCoat, &pReflect, &pTransmit);
+	*pdfW = pReflect * fabsf(localLightDir.z) * INV_PI;
+
+	Spectrum layer;
+	for (u_int c = 0; c < 3; ++c)
+		layer.c[c] = (1.f - EcLight.c[c]) * (1.f - EcEye.c[c]) / Max(1.f - EcLightAvg.c[c], 1e-4f);
+
+	const Spectrum absorption = CoatingAbsorption(cosLight, cosEye, eyeSide.alpha, eyeSide.d);
+
+	return absorption * layer * kd * (INV_PI * cosLight);
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

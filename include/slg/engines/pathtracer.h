@@ -116,7 +116,13 @@ public:
 		const bool useBSDFEVal = true,
 		// Where the path stands against the PhotonGI caustic cache (see
 		// PhotonGICache::NextCausticChain())
-		const u_int causticChain = 0) const;
+		const u_int causticChain = 0,
+		// A vertex that uses the PhotonGI indirect cache: its BSDF sampling
+		// doesn't reach the lights through the diffuse lobe, so the light
+		// sample has the weight 1 for that lobe, the MIS weight against the
+		// other lobes for the rest (see RenderEyePath()); the weight 1 for
+		// all if the path ends there (a volume vertex)
+		const bool photonGIIndirect = false, const bool photonGIIndirectEnd = false) const;
 
 	void RenderEyePath(
 		luxrays::IntersectionDeviceRef device,

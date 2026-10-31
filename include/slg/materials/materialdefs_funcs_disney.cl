@@ -335,6 +335,70 @@ OPENCL_FORCE_INLINE void DisneyMaterial_Sample(__global const Material* restrict
 	EvalStack_PushBSDFEvent(event);
 }
 
+// The diffuse lobe (EON, or the flattened subsurface) under the layers above it
+// (Material::EvaluateDiffuse(), see DisneyMaterial_EvaluateLayers())
+OPENCL_FORCE_INLINE void DisneyMaterial_EvaluateDiffuse(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+	if (lightDir.z * eyeDir.z <= 0.f) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	// Both faces: the back face is the mirror image of the front one
+	const float flip = (eyeDir.z < 0.f) ? -1.f : 1.f;
+	const float3 eye = MAKE_FLOAT3(eyeDir.x, eyeDir.y, flip * eyeDir.z);
+	const float3 light = MAKE_FLOAT3(lightDir.x, lightDir.y, flip * lightDir.z);
+	const float muL = light.z;
+	const float muE = eye.z;
+	if ((muL < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC)) {
+		MATERIAL_EVALUATE_RETURN_BLACK;
+	}
+
+	DisneyLobes p;
+	DisneyMaterial_GetLobes(material, hitPoint, &p TEXTURES_PARAM);
+
+	float3 diffuse = EON_Evaluate(p.color, p.roughness, light, eye) * muL;
+	if (p.subsurface > 0.f) {
+		const float3 H = normalize(light + eye);
+		const float LdotH = dot(light, H);
+		const float FL = pow(1.f - muL, 5.f);
+		const float FV = pow(1.f - muE, 5.f);
+		const float Fss90 = LdotH * LdotH * p.roughness;
+		const float Fss = mix(1.f, Fss90, FL) * mix(1.f, Fss90, FV);
+		const float ss = 1.25f * (Fss * (1.f / (muL + muE) - .5f) + .5f);
+		diffuse = mix(diffuse, (M_1_PI_F * ss * muL) * p.color, p.subsurface);
+	}
+	const float3 layerD = Coating_LayerScale(GGXEnergy_CoatE3(p.ax, p.ay, muL, p.F0d),
+			GGXEnergy_CoatE3(p.ax, p.ay, muE, p.F0d), GGXEnergy_CoatEavg3(p.ax, p.ay, p.F0d));
+
+	float sheenScale = 1.f;
+	if (p.sheen > 0.f) {
+		float a, b, albedo;
+		SheenLTC_Lookup(muE, DISNEY_SHEEN_ROUGHNESS, &a, &b, &albedo);
+		if ((fabs(a) >= 1e-5f) && (albedo >= 1e-5f))
+			sheenScale = 1.f - p.sheen * albedo;
+	}
+
+	float3 result = ((1.f - p.metallic) * sheenScale) * layerD * diffuse;
+	if (p.clearcoat > 0.f)
+		result *= 1.f - p.clearcoat * GGXEnergy_CoatE(p.alphaCC, p.alphaCC, muE, DISNEY_CLEARCOAT_F0);
+
+	// The diffuse share of DisneyMaterial_PdfLobes()
+	float wCC, wSpec, wSheen, wDiff, sheenA, sheenB;
+	DisneyMaterial_LobeWeights(&p, muE, &wCC, &wSpec, &wSheen, &wDiff, &sheenA, &sheenB);
+	const float directPdfW = wDiff * muL * M_1_PI_F;
+
+	const BSDFEvent event = DIFFUSE | REFLECT;
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
+}
+
 //------------------------------------------------------------------------------
 // Material specific EvalOp
 //------------------------------------------------------------------------------

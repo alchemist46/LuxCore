@@ -46,6 +46,7 @@ PhotonGICache::PhotonGICache() :
 		threadCount(0), lastUpdateSpp(0), updateSeedBase(1), updateGeneration(0),
 		finishUpdateFlag(false),
 		visibilityParticlesKdTree(nullptr),
+		visibilityHeightTolerance(0.f),
 		radiancePhotonsBVH(nullptr) ,
 		causticPhotonsBVH(nullptr) {
 }
@@ -55,6 +56,7 @@ PhotonGICache::PhotonGICache(SceneConstRef scn, const PhotonGICacheParams &p) :
 		threadCount(0), lastUpdateSpp(0), updateSeedBase(1), updateGeneration(0),
 		finishUpdateFlag(false),
 		visibilityParticlesKdTree(nullptr),
+		visibilityHeightTolerance(0.f),
 		radiancePhotonsBVH(nullptr) ,
 		indirectPhotonTracedCount(0),
 		causticPhotonsBVH(nullptr),
@@ -79,32 +81,44 @@ bool PhotonGICache::IsPhotonGIEnabled(const BSDF &bsdf) const {
 		return bsdf.IsPhotonGIEnabled();
 }
 
-bool PhotonGICache::IsPhotonDepositEnabled(const BSDF &bsdf) const {
-	// No photon on a surface that reflects nothing (a black diffuse emitter,
-	// like the mesh of an area light): the particles within the radius belong
-	// to other surfaces, which don't get this light. An area light just above
-	// a hole in a ceiling made the ceiling's top face and the light's
-	// underside trap direct light, counted for the ceiling's lower face (3.4x
-	// too bright around the light)
-	return IsPhotonGIEnabled(bsdf) &&
-			!(bsdf.Albedo().Black() && !(bsdf.GetEventTypes() & GLOSSY));
+// No photon on a surface that reflects nothing (a black diffuse emitter, like
+// the mesh of an area light): the particles within the radius belong to other
+// surfaces, which don't get this light. An area light just above a hole in a
+// ceiling made the ceiling's top face and the light's underside trap direct
+// light, counted for the ceiling's lower face (3.4x too bright around the
+// light)
+static bool PhotonGICache_ReflectsLight(const BSDF &bsdf) {
+	return !(bsdf.Albedo().Black() && !(bsdf.GetEventTypes() & GLOSSY));
 }
 
-float PhotonGICache::GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
-		const float lastGlossiness, const float u0) const {
-	// Decide if the glossy surface is "nearly specular"
+bool PhotonGICache::IsPhotonDepositEnabled(const BSDF &bsdf) const {
+	return IsPhotonGIEnabled(bsdf) && PhotonGICache_ReflectsLight(bsdf);
+}
 
-	if ((lastBSDFEvent & GLOSSY) && (lastGlossiness < params.glossinessUsageThreshold)) {
-		// Disable the cache, the surface is "nearly specular"
-		return numeric_limits<float>::infinity();
-	} else {
-		// Use a larger blend zone for glossy surface
-		const float scale = (lastBSDFEvent & GLOSSY) ? 2.f : 1.f;
+bool PhotonGICache::IsIndirectEnabled(const BSDF &bsdf) const {
+	return bsdf.IsPhotonGIEnabled() && bsdf.HasDiffuseLobe();
+}
 
-		// Enable the cache for diffuse or glossy "nearly diffuse" but only after
-		// the threshold (before I brute force and cache between 0x and 1x the threshold)
-		return scale * u0 * params.indirect.usageThresholdScale * params.indirect.lookUpRadius;
-	}
+bool PhotonGICache::IsIndirectDepositEnabled(const BSDF &bsdf) const {
+	return IsIndirectEnabled(bsdf) && PhotonGICache_ReflectsLight(bsdf);
+}
+
+bool PhotonGICache::IsVisibilityParticleEnabled(const BSDF &bsdf) const {
+	return (params.indirect.enabled && IsIndirectEnabled(bsdf)) ||
+			(params.caustic.enabled && IsPhotonGIEnabled(bsdf));
+}
+
+bool PhotonGICache::IsNearlySpecular(const BSDFEvent event, const float glossiness) const {
+	return PathInfo::IsNearlySpecular(event, glossiness, params.glossinessUsageThreshold);
+}
+
+float PhotonGICache::GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent, const float u0) const {
+	// Use a larger blend zone for glossy surface
+	const float scale = (lastBSDFEvent & GLOSSY) ? 2.f : 1.f;
+
+	// Enable the cache for diffuse or glossy "nearly diffuse" but only after
+	// the threshold (before I brute force and cache between 0x and 1x the threshold)
+	return scale * u0 * params.indirect.usageThresholdScale * params.indirect.lookUpRadius;
 }
 
 // The caustic photons are the light paths of 1 to photon.maxdepth - 1 nearly
@@ -274,7 +288,7 @@ void PhotonGICache::TracePhotons(const bool indirectEnabled, const bool causticE
 
 				if (params.indirect.filterRadiusScale > 0.f) {
 					vector<SpectrumGroup> filteredCurrentAlpha(visibilityParticles.size());
-					FilterVisibilityParticlesRadiance(currentAlpha, filteredCurrentAlpha);
+					FilterVisibilityParticlesRadiance(currentAlpha, filteredCurrentAlpha, false);
 
 					currentAlpha = filteredCurrentAlpha;
 				}
@@ -353,7 +367,7 @@ void PhotonGICache::TracePhotons(const bool indirectEnabled, const bool causticE
 }
 
 void PhotonGICache::FilterVisibilityParticlesRadiance(const vector<SpectrumGroup> &radianceValues,
-			vector<SpectrumGroup> &filteredRadianceValues) const {
+			vector<SpectrumGroup> &filteredRadianceValues, const bool visibilityTest) const {
 	const float lookUpRadius2 = Sqr(params.indirect.filterRadiusScale * params.indirect.lookUpRadius);
 	const float lookUpCosNormalAngle = cosf(Radians(params.indirect.lookUpNormalAngle));
 
@@ -375,13 +389,21 @@ void PhotonGICache::FilterVisibilityParticlesRadiance(const vector<SpectrumGroup
 			vp.p, vp.n, vp.isVolume,
 			lookUpRadius2, lookUpCosNormalAngle);
 
-		if (nearParticleIndices.size() > 0) {
-			SpectrumGroup &filtered = filteredRadianceValues[index];
-			for (auto nearIndex : nearParticleIndices)
+		// Only the particles that see each other (no blur across an
+		// occluder, see ComputeVisibilityParticlesArea()), but for the
+		// convergence test of the pre-processing (it would need more photons
+		// for the few particles that lose their neighbours)
+		SpectrumGroup &filtered = filteredRadianceValues[index];
+		u_int count = 0;
+		for (auto nearIndex : nearParticleIndices) {
+			if (!visibilityTest || (nearIndex == (size_t)index) || AreParticlesVisible(index, nearIndex)) {
 				filtered += radianceValues[nearIndex];
+				++count;
+			}
+		}
 
-			filtered /= nearParticleIndices.size();
-		} 
+		if (count > 0)
+			filtered /= count;
 	}
 }
 
@@ -407,7 +429,7 @@ void PhotonGICache::CreateRadiancePhotons() {
 		SLG_LOG("PhotonGI filtering radiance photons");
 
 		vector<SpectrumGroup> filteredOutgoingRadianceValues(visibilityParticles.size());
-		FilterVisibilityParticlesRadiance(outgoingRadianceValues, filteredOutgoingRadianceValues);
+		FilterVisibilityParticlesRadiance(outgoingRadianceValues, filteredOutgoingRadianceValues, true);
 
 		outgoingRadianceValues = filteredOutgoingRadianceValues;
 	}
@@ -540,6 +562,10 @@ void PhotonGICache::Preprocess(const u_int threadCnt) {
 		SLG_LOG("PhotonGI building radiance photon data");
 		CreateRadiancePhotons();
 
+		// Only the pre-processing uses them
+		visibilityParticlesViewMap.clear();
+		visibilityParticlesViewMap.shrink_to_fit();
+
 		if (radiancePhotons.size() > 0) {
 			SLG_LOG("PhotonGI building radiance photons BVH");
 			radiancePhotonsBVH = new PGICRadiancePhotonBvh(&radiancePhotons,
@@ -599,7 +625,7 @@ void PhotonGICache::Preprocess(const u_int threadCnt) {
 }
 
 const SpectrumGroup *PhotonGICache::GetIndirectRadiance(const BSDF &bsdf) const {
-	assert (IsPhotonGIEnabled(bsdf));
+	assert (IsIndirectEnabled(bsdf));
 
 	if (radiancePhotonsBVH) {
 		// Flip the normal if required

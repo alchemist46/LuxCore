@@ -461,6 +461,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 5;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
+				case slg::ocl::EVAL_EVALUATE_DIFFUSE:
 					// 6 x parameters and 5 x results
 					evalOpStackSize += 6;
 					break;
@@ -554,10 +555,11 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 26;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
+				case slg::ocl::EVAL_EVALUATE_DIFFUSE:
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP1, bumpSlotBase, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matAIndex, opType, bumpSlotBaseA, evalOps);
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_MIX_SETUP2, bumpSlotBase, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseB, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->mix.matBIndex, opType, bumpSlotBaseB, evalOps);
 					break;
 				case slg::ocl::EVAL_SAMPLE_MIX_SETUP1:
 					// 6 x parameters and 25 x results
@@ -621,8 +623,9 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					evalOpStackSize += 21;
 					break;
 				case slg::ocl::EVAL_EVALUATE:
+				case slg::ocl::EVAL_EVALUATE_DIFFUSE:
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_EVALUATE_GLOSSYCOATING_SETUP, bumpSlotBase, evalOps);
-					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, slg::ocl::EVAL_EVALUATE, bumpSlotBaseA, evalOps);
+					evalOpStackSize += CompileMaterialOps(mat->glossycoating.matBaseIndex, opType, bumpSlotBaseA, evalOps);
 					// The albedo of the base for the darkening, on top of the
 					// stack for the glossy coating evaluation
 					if (mat->glossycoating.darkening)
@@ -735,6 +738,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 					}
 					break;
 				case slg::ocl::EVAL_EVALUATE:
+				case slg::ocl::EVAL_EVALUATE_DIFFUSE:
 					evalOpStackSize += CompileMaterialOps(matIndex, slg::ocl::EVAL_TWOSIDED_SETUP, bumpSlotBase, evalOps);
 					evalOpStackSize += CompileMaterialConditionalOps(matIndex,
 							mat->twosided.frontMatIndex, opType, bumpSlotBaseA,
@@ -879,6 +883,17 @@ void CompiledScene::CompileMaterialOps() {
 		mat->evalSampleOpLength = matEvalOps.size() - mat->evalSampleOpStartIndex;
 
 		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalSampleOpsStackSizeFloat);
+
+		//----------------------------------------------------------------------
+		// EVAL_EVALUATE_DIFFUSE
+		//----------------------------------------------------------------------
+
+		mat->evalEvaluateDiffuseOpStartIndex = matEvalOps.size();
+		const u_int evalEvaluateDiffuseOpsStackSizeFloat = CompileMaterialOps(i,
+				slg::ocl::MaterialEvalOpType::EVAL_EVALUATE_DIFFUSE, 0, matEvalOps);
+		mat->evalEvaluateDiffuseOpLength = matEvalOps.size() - mat->evalEvaluateDiffuseOpStartIndex;
+
+		maxMaterialEvalStackSize = Max(maxMaterialEvalStackSize, evalEvaluateDiffuseOpsStackSizeFloat);
 	}
 
 	materialBumpCacheSize = 3 * Min<u_int>(maxBumpSlotCount, MATERIAL_BUMP_CACHE_MAX_SLOTS);
@@ -959,7 +974,7 @@ void CompiledScene::CompileMaterials() {
 		mat->avgPassThroughTransparency = m.GetAvgPassThroughTransparency();
 		mat->isShadowCatcher = m.IsShadowCatcher();
 		mat->isShadowCatcherOnlyInfiniteLights = m.IsShadowCatcherOnlyInfiniteLights();
-		mat->isPhotonGIEnabled = m.IsPhotonGIEnabled();
+		mat->isPhotonGIEnabled = m.IsPhotonGIEnabled() ? (m.HasDiffuseLobe() ? 3 : 1) : 0;
 		mat->isHoldout = m.IsHoldout();
 
 		// Bake Material::GetEventTypes() and Material::IsDelta()

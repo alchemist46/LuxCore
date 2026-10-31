@@ -37,4 +37,9 @@ typedef enum {
 	PGIC_DEBUG_NONE, PGIC_DEBUG_SHOWINDIRECT, PGIC_DEBUG_SHOWCAUSTIC,
 	PGIC_DEBUG_SHOWINDIRECTPATHMIX
 } PhotonGIDebugType;
+
+// At a vertex that uses the indirect cache, a BSDF sample whose pdf is more
+// than this share the diffuse lobe's ends the path (the share of a material
+// that is all diffuse is 1 within the rounding of the directions)
+#define PGIC_DIFFUSE_SHARE_END (1.f - 1e-4f)
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

@@ -149,6 +149,7 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 	taskState->photonGICausticChain = 0;
 	taskState->photonGICausticLookup = false;
 	taskState->photonGIShowIndirectPathMixUsed = false;
+	taskState->photonGIIndirect = NULL_INDEX;
 	// Initialize the trough a shadow transparency flag used by Scene_Intersect()
 	taskState->throughShadowTransparency = false;
 
@@ -215,8 +216,10 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 						pathInfo->lastFromVolume,
 						light->lightSceneIndex);
 
-				// MIS between BSDF sampling and direct light sampling
-				weight = PowerHeuristic(pathInfo->lastBSDFPdfW, directPdfW * lightPickProb);
+				// MIS between BSDF sampling and direct light sampling (see
+				// DirectHitFiniteLight())
+				const float lightPdfW = directPdfW * lightPickProb;
+				weight = (lightPdfW > 0.f) ? PowerHeuristic(pathInfo->lastBSDFPdfW, lightPdfW) : 1.f;
 			} else
 				weight = 1.f;
 			
@@ -264,10 +267,13 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x)))
 					MATERIALS_PARAM);
 
-			// MIS between BSDF sampling and direct light sampling
+			// MIS between BSDF sampling and direct light sampling (see
+			// PathTracer::DirectHitFiniteLight())
 			//
 			// Note: mats[bsdf->materialIndex].avgPassThroughTransparency = lightSource->GetAvgPassThroughTransparency()
-			weight = PowerHeuristic(pathInfo->lastBSDFPdfW * Light_GetAvgPassThroughTransparency(light LIGHTS_PARAM), directPdfW * lightPickProb);
+			const float lightPdfW = directPdfW * lightPickProb;
+			weight = (lightPdfW > 0.f) ?
+				PowerHeuristic(pathInfo->lastBSDFPdfW * Light_GetAvgPassThroughTransparency(light LIGHTS_PARAM), lightPdfW) : 1.f;
 		}
 
 		SampleResult_AddEmission(film, sampleResult, BSDF_GetLightID(bsdf
@@ -351,12 +357,15 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		__global const BSDF *bsdf,
 		const float3 pathThroughput,
 		const float3 shadowRayDir,
-		const uint photonGICausticChain
+		const uint photonGICausticChain,
+		// A vertex that uses the PhotonGI indirect cache (see
+		// PathTracer::DirectLightSampling())
+		const bool photonGIIndirect
 		LIGHTS_PARAM_DECL) {
 	// Sample the BSDF
 	BSDFEvent event;
 	float bsdfPdfW;
-	const float3 bsdfEval = BSDF_Evaluate(bsdf,
+	float3 bsdfEval = BSDF_Evaluate(bsdf,
 			shadowRayDir, &event, &bsdfPdfW
 			MATERIALS_PARAM);
 
@@ -381,6 +390,25 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 
 	const float directLightSamplingPdfW = info->directPdfW * info->pickPdf;
 	const float factor = 1.f / directLightSamplingPdfW;
+
+	// A vertex that uses the PhotonGI indirect cache: the diffuse lobe has the
+	// light sample only, the BSDF sampling of the other lobes goes on with the
+	// pdf left (see AdvancePaths_GenerateNextVertexRay())
+	float3 diffuseEval = BLACK;
+	if (photonGIIndirect) {
+		// Without path.photongi.indirect.lightsampling the cache has the
+		// direct light of the diffuse lobe, and the whole of a volume
+		if (bsdf->isVolume && !taskConfig->pathTracer.pgic.indirectLightSampling)
+			return false;
+
+		float diffusePdfW;
+		diffuseEval = BSDF_EvaluateDiffuse(bsdf, shadowRayDir, &diffusePdfW
+				MATERIALS_PARAM);
+		bsdfEval = fmax(bsdfEval - diffuseEval, BLACK);
+		bsdfPdfW = fmax(bsdfPdfW - diffusePdfW, 0.f);
+		if (!taskConfig->pathTracer.pgic.indirectLightSampling)
+			diffuseEval = BLACK;
+	}
 
 	// Russian Roulette: the BSDF technique continues the path with the
 	// probability computed from the sample weight of the direction, f cos / pdf,
@@ -420,7 +448,9 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		(1.f / weight) : 1.f;
 
 	const float3 lightRadiance = VLOAD3F(info->lightRadiance.c);
-	VSTORE3F(bsdfEval * (weight * factor) * lightRadiance, info->lightRadiance.c);
+	VSTORE3F(photonGIIndirect ?
+			((diffuseEval + bsdfEval * weight) * factor * lightRadiance) :
+			(bsdfEval * (weight * factor) * lightRadiance), info->lightRadiance.c);
 	VSTORE3F(factor * lightRadiance, info->lightIrradiance.c);
 
 	return true;

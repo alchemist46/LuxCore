@@ -37,6 +37,13 @@ OPENCL_FORCE_INLINE bool PhotonGICache_IsPhotonGIEnabled(__global const BSDF *bs
 	}
 }
 
+// The surfaces where the indirect cache is looked up: the materials with a
+// diffuse lobe, and the volumes (see PhotonGICache::IsIndirectEnabled())
+OPENCL_FORCE_INLINE bool PhotonGICache_IsIndirectEnabled(__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	return (mats[bsdf->materialIndex].isPhotonGIEnabled & 2);
+}
+
 // The caustic cache owns the light paths it stores. causticChain: 0 for none,
 // else 1 + the nearly specular bounces since the vertex where the caustic cache
 // was looked up with a result (see PhotonGICache::IsDirectLightHitVisible() and
@@ -82,25 +89,18 @@ OPENCL_FORCE_INLINE uint PhotonGICache_NextCausticChain(
 // Indirect cache related functions
 //------------------------------------------------------------------------------
 
+// See PhotonGICache::GetIndirectUsageThreshold(): the bounce must not be
+// nearly specular (photonGICacheEnabledOnLastHit)
 OPENCL_FORCE_INLINE float PhotonGICache_GetIndirectUsageThreshold(
-		const BSDFEvent lastBSDFEvent, const float lastGlossiness,
-		const float u0,
-		const float pgicGlossinessUsageThreshold,
+		const BSDFEvent lastBSDFEvent, const float u0,
 		const float pgicIndirectUsageThresholdScale,
 		const float pgicIndirectLookUpRadius) {
-	// Decide if the glossy surface is "nearly specular"
+	// Use a larger blend zone for glossy surface
+	const float scale = (lastBSDFEvent & GLOSSY) ? 2.f : 1.f;
 
-	if ((lastBSDFEvent & GLOSSY) && (lastGlossiness < pgicGlossinessUsageThreshold)) {
-		// Disable the cache, the surface is "nearly specular"
-		return INFINITY;
-	} else {
-		// Use a larger blend zone for glossy surface
-		const float scale = (lastBSDFEvent & GLOSSY) ? 2.f : 1.f;
-
-		// Enable the cache for diffuse or glossy "nearly diffuse" but only after
-		// the threshold (before I brute force and cache between 0x and 1x the threshold)
-		return scale * u0 * pgicIndirectUsageThresholdScale * pgicIndirectLookUpRadius;
-	}
+	// Enable the cache for diffuse or glossy "nearly diffuse" but only after
+	// the threshold (before I brute force and cache between 0x and 1x the threshold)
+	return scale * u0 * pgicIndirectUsageThresholdScale * pgicIndirectLookUpRadius;
 }
 
 OPENCL_FORCE_INLINE __global const RadiancePhoton* restrict RadiancePhotonsBVH_GetNearestEntry(
@@ -152,6 +152,27 @@ OPENCL_FORCE_INLINE __global const RadiancePhoton* restrict RadiancePhotonsBVH_G
 	}
 
 	return nearestEntry;
+}
+
+// The index in pgicRadiancePhotonsValues of the radiance group of the cache
+// entry of the vertex, NULL_INDEX if there is none
+OPENCL_FORCE_INLINE uint PhotonGICache_GetIndirectRadianceIndex(__global const BSDF *bsdf,
+		__global const RadiancePhoton* restrict pgicRadiancePhotons,
+		__global const IndexBVHArrayNode* restrict pgicRadiancePhotonsBVHNodes,
+		const float pgicIndirectLookUpRadius2, const float pgicIndirectLookUpNormalCosAngle) {
+	if (!pgicRadiancePhotons)
+		return NULL_INDEX;
+
+	const float3 p = VLOAD3F(&bsdf->hitPoint.p.x);
+	const float3 n = (bsdf->hitPoint.intoObject ? 1.f: -1.f) * VLOAD3F(&bsdf->hitPoint.geometryN.x);
+
+	__global const RadiancePhoton* restrict radiancePhoton = RadiancePhotonsBVH_GetNearestEntry(
+			pgicRadiancePhotons, pgicRadiancePhotonsBVHNodes,
+			pgicIndirectLookUpRadius2, pgicIndirectLookUpNormalCosAngle,
+			p, n, bsdf->isVolume
+			);
+
+	return radiancePhoton ? radiancePhoton->outgoingRadianceIndex : NULL_INDEX;
 }
 
 OPENCL_FORCE_INLINE __global const Spectrum* restrict PhotonGICache_GetIndirectRadiance(__global const BSDF *bsdf,

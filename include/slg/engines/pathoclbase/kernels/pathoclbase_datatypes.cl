@@ -131,6 +131,11 @@ typedef struct {
 			photonGIShowIndirectPathMixUsed,
 			// The shadow transparency lag used by Scene_Intersect()
 			throughShadowTransparency;
+	// At a vertex that uses the PhotonGI indirect cache (see
+	// AdvancePaths_PhotonGIIndirect()), the index of its radiance group in
+	// pgicRadiancePhotonsValues times 2, plus 1 if the path ends after the
+	// light sampling of the vertex; NULL_INDEX elsewhere
+	unsigned int photonGIIndirect;
 } GPUTaskState;
 
 typedef enum {

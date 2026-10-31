@@ -38,6 +38,10 @@ public:
 	virtual BSDFEvent GetEventTypes() const { return GLOSSY | REFLECT; }
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
+	virtual luxrays::Spectrum EvaluateDiffuse(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+		float *pdfW) const;
+	virtual bool HasDiffuseLobe() const { return true; }
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,

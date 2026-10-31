@@ -112,4 +112,11 @@ PropertiesUPtr RoughMatteMaterial::ToProperties(const ImageMapCache &imgMapCache
 
 	return props;
 }
+
+// The whole material is the diffuse lobe
+Spectrum RoughMatteMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	BSDFEvent event;
+	return Evaluate(hitPoint, localLightDir, localEyeDir, &event, pdfW, nullptr);
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

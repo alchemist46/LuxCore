@@ -52,6 +52,10 @@ public:
 	virtual BSDFEvent GetRegularizedEventTypes() const { return regularizedEventTypes; }
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
+	virtual luxrays::Spectrum EvaluateDiffuse(const HitPoint &hitPoint,
+		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
+		float *pdfW) const;
+	virtual bool HasDiffuseLobe() const { return hasDiffuseLobe; }
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,
@@ -118,6 +122,10 @@ private:
 
 	BSDFEvent eventTypes, regularizedEventTypes;
 	bool refractive, subsurfaceWalk, diffuseBesideWalk, isDelta;
+	// The opaque dielectric base can be there: its EON diffuse and the
+	// Lambertian stand-in of the subsurface are the diffuse lobe of
+	// EvaluateDiffuse()
+	bool hasDiffuseLobe;
 };
 
 }

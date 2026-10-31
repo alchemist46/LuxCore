@@ -1304,4 +1304,75 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 	return f / pdf;
 }
 
+// The diffuse reflection lobe of an eye path vertex (Material::EvaluateDiffuse()):
+// the EON diffuse and the Lambertian base of the subsurface where it is not the
+// random walk (the reflected half when thin-walled), under the specular, the
+// coat and the fuzz above them, as OpenPBR_EvaluateFront() has them, and their
+// share of the pdf of OpenPBR_Sample()
+OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateDiffuse(const OpenPBRBSDF *b,
+		const float3 localLightDir, const float3 localEyeDir, float *pdfW) {
+	*pdfW = 0.f;
+	if ((b->subsurfaceMode == HITPOINT_SSS_EXIT) || b->allDelta ||
+			!(localLightDir.z * localEyeDir.z > 0.f) ||
+			!(b->baseMetalness < 1.f) || !(b->transmissionWeight < 1.f))
+		return BLACK;
+
+	const bool eyeOutside = (localEyeDir.z > 0.f);
+	const float flip = eyeOutside ? 1.f : -1.f;
+	const float3 lightDir = OpenPBR_ToLobeFrame(b, localLightDir, flip);
+	const float3 eyeDir = OpenPBR_ToLobeFrame(b, localEyeDir, flip);
+	const float muL = lightDir.z;
+	const float muE = eyeDir.z;
+	if ((muL < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC))
+		return BLACK;
+	const bool sssEntry = (b->subsurfaceMode == HITPOINT_SSS_ENTRY) && eyeOutside && !b->thinWalled;
+
+	// The base (OpenPBR_EvaluateBase())
+	const float m = b->baseMetalness;
+	const bool specTerms = (m > 0.f) || b->dielectricSpec;
+	float av = 0.f, msScale = 1.f;
+	if (specTerms) {
+		av = OpenPBR_ViewAlpha(b->ax, b->ay, eyeDir);
+		const float E = GGXEnergy_E(av, av, muE, false);
+		const float Eavg = GGXEnergy_Eavg(av, av, false);
+		msScale = GGXEnergy_ReflectScale(E, Eavg, b->etaFavg);
+	}
+	float3 Espec;
+	const float3 baseE = OpenPBR_BaseAlbedo(b, muE, av, msScale, &Espec);
+
+	float3 diffuse = BLACK;
+	if (b->subsurfaceWeight < 1.f)
+		diffuse = (1.f - b->subsurfaceWeight) * muL * ((b->baseDiffuseRoughness > 0.f) ?
+			EON_Evaluate(b->albedo, b->baseDiffuseRoughness, lightDir, eyeDir) : (M_1_PI_F * b->albedo));
+	if ((b->subsurfaceWeight > 0.f) && !sssEntry)
+		diffuse += (b->subsurfaceWeight * (b->thinWalled ? .5f : 1.f) * M_1_PI_F * muL) * b->subsurfaceColor;
+
+	const float3 EspecFilm = OpenPBR_HasThinFilm(b) ? (Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
+	float3 result = ((1.f - m) * (1.f - b->transmissionWeight)) * (Spectrum_Clamp(WHITE - EspecFilm) * diffuse);
+
+	// The coat (OpenPBR_EvaluateFront())
+	if (b->coatWeight > 0.f) {
+		const float avc = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeDir);
+		const float msScaleC = OpenPBR_MSScale(avc, muE, b->coatEtaFavg);
+		const float Ec = b->coatWeight * GGXEnergy_DielectricE(avc, avc, muE, b->coatEta) * msScaleC;
+
+		result = (1.f - Ec) * OpenPBR_CoatTint(b, eyeDir, baseE) * result;
+	}
+
+	// The fuzz
+	if (b->fuzzWeight > 0.f) {
+		float ltcA, ltcB;
+		const float Ef = OpenPBR_FuzzE(b, muE, &ltcA, &ltcB);
+		if (Ef > 0.f)
+			result = (1.f - Ef) * result;
+	}
+
+	// The diffuse share of OpenPBR_PdfFront()
+	OpenPBRLobes lobes;
+	OpenPBR_LobeWeights(b, eyeDir, eyeOutside, false, &lobes);
+	*pdfW = lobes.wDiffuse * muL * M_1_PI_F;
+
+	return result;
+}
+
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

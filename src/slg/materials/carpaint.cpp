@@ -312,4 +312,27 @@ const struct CarPaintMaterial::CarPaintData CarPaintMaterial::data[8] = {
     1.0000f, 0.0460f, 0.1700f,
     0.1600f, 0.0750f, 0.0340f}
 };
+
+// The diffuse layer
+Spectrum CarPaintMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
+		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	*pdfW = 0.f;
+	if (localLightDir.z * localEyeDir.z <= 0.f)
+		return Spectrum();
+
+	// Absorption
+	const float cosi = fabsf(localLightDir.z);
+	const float coso = fabsf(localEyeDir.z);
+	const Spectrum alpha = Ka->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+	const float d = depth->GetFloatValue(hitPoint);
+	const Spectrum absorption = CoatingAbsorption(cosi, coso, alpha, d);
+
+	// One layer of the 1 + lobes.count of Sample()
+	u_int n = 1;
+	if ((localLightDir.z > 0.f) && (localEyeDir.z > 0.f))
+		n += GetCarPaintLobes(*this, hitPoint).count;
+	*pdfW = fabsf(localLightDir.z) * INV_PI / n;
+
+	return absorption * Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f) * INV_PI * cosi;
+}
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4
