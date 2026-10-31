@@ -245,7 +245,7 @@ void GetKernelParamters(vector<string> &params,
 }
 
 void AddPathKernelVariantParameters(vector<string> &params,
-		const bool privateEvalStack, const bool subsurface) {
+		const bool privateEvalStack, const bool subsurface, const bool photonGIIndirect) {
 	if (privateEvalStack) {
 		params.push_back("-D PARAM_EVALSTACK_PRIVATE");
 		params.push_back("-D PARAM_MATERIAL_EVALSTACK_SIZE=" + luxrays::ToString(PrivateMaterialEvalStackSize));
@@ -254,6 +254,9 @@ void AddPathKernelVariantParameters(vector<string> &params,
 
 	if (subsurface)
 		params.push_back("-D PARAM_ENABLE_SUBSURFACE");
+
+	if (photonGIIndirect)
+		params.push_back("-D PARAM_ENABLE_PHOTONGI_INDIRECT");
 }
 
 vector<string> GetHIPPathCompileOptions() {

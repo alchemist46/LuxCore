@@ -115,6 +115,7 @@ public:
 	) const;
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexsreferencedTexs) const;
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex);
+	virtual float GetGlossyLobesGlossiness() const;
 
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
 

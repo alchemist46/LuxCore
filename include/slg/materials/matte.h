@@ -41,6 +41,7 @@ public:
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *pdfW) const;
 	virtual bool HasDiffuseLobe() const { return true; }
+	virtual bool HasOnlyDiffuseLobe() const { return true; }
 	virtual luxrays::Spectrum EvaluateTotal(const HitPoint &hitPoint) const;
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,

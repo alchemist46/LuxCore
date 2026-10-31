@@ -51,7 +51,7 @@ void CompiledScene::CompilePhotonGI() {
 
 	compiledPathTracer.pgic.indirectEnabled = false;
 	compiledPathTracer.pgic.causticEnabled = false;
-	compiledPathTracer.pgic.indirectLightSampling = true;
+	compiledPathTracer.pgic.indirectLightSampling = false;
 
 	const PhotonGICache *photonGICache = pathTracer->GetPhotonGICache();
 	if (!photonGICache)

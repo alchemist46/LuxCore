@@ -50,6 +50,7 @@ PropertiesUPtr PhotonGICache::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.usagethresholdscale")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.filter.radiusscale")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.lightsampling")) <<
+			cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.glossythreshold")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.enabled")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.maxsize")) <<
 			cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.updatespp")) <<
@@ -85,7 +86,8 @@ PropertiesUPtr PhotonGICache::GetDefaultProps() {
 			Property("path.photongi.indirect.lookup.normalangle")(10.f) <<
 			Property("path.photongi.indirect.usagethresholdscale")(8.f) <<
 			Property("path.photongi.indirect.filter.radiusscale")(3.f) <<
-			Property("path.photongi.indirect.lightsampling")(true) <<
+			Property("path.photongi.indirect.lightsampling")(false) <<
+			Property("path.photongi.indirect.glossythreshold")(.05f) <<
 			Property("path.photongi.caustic.enabled")(false) <<
 			Property("path.photongi.caustic.maxsize")(100000) <<
 			Property("path.photongi.caustic.updatespp")(8) <<
@@ -104,6 +106,9 @@ PhotonGICache *PhotonGICache::FromProperties(SceneConstRef scn, const Properties
 	PhotonGICacheParams params;
 
 	params.indirect.enabled = cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.enabled")).Get<bool>();
+	// Read also when the indirect cache is off: the material compile of the
+	// GPU asks IsIndirectWholeBSDF() whenever there is a cache
+	params.indirect.glossyThreshold = Max(0.0, cfg.Get(GetDefaultProps()->Get("path.photongi.indirect.glossythreshold")).Get<double>());
 	params.caustic.enabled = cfg.Get(GetDefaultProps()->Get("path.photongi.caustic.enabled")).Get<bool>();
 	
 	if (params.indirect.enabled || params.caustic.enabled) {

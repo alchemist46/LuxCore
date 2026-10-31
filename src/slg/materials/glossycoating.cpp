@@ -549,6 +549,14 @@ void GlossyCoatingMaterial::UpdateTextureReferences(TextureConstRef oldTex, Text
 		glossiness = coatGlossiness;
 }
 
+float GlossyCoatingMaterial::GetGlossyLobesGlossiness() const {
+	// The coating, and the base if it has glossy lobes (glossiness is the
+	// smallest of both even for a base without, see BUGS.md)
+	const float coatGlossiness = ComputeGlossiness(nu, nv);
+	return (matBase->GetEventTypes() & GLOSSY) ?
+		Min(coatGlossiness, matBase->GetGlossyLobesGlossiness()) : coatGlossiness;
+}
+
 PropertiesUPtr GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const  {
 	auto props = std::make_unique<Properties>();
 

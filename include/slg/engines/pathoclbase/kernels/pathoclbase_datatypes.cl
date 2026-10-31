@@ -133,10 +133,21 @@ typedef struct {
 			throughShadowTransparency;
 	// At a vertex that uses the PhotonGI indirect cache (see
 	// AdvancePaths_PhotonGIIndirect()), the index of its radiance group in
-	// pgicRadiancePhotonsValues times 2, plus 1 if the path ends after the
-	// light sampling of the vertex; NULL_INDEX elsewhere
+	// pgicRadiancePhotonsValues times 4, plus 1 if the path ends after the
+	// light sampling of the vertex, plus 2 if the cache stands for the whole
+	// BSDF (the BSDF sample ends the path; no light sampling without
+	// path.photongi.indirect.lightsampling); NULL_INDEX elsewhere
 	unsigned int photonGIIndirect;
 } GPUTaskState;
+
+// The PhotonGI indirect cache is compiled only into the kernel of a scene that
+// uses it (PARAM_ENABLE_PHOTONGI_INDIRECT): it costs the other scenes up to 5%
+// (the code changes how the big kernel is compiled, not what it runs)
+#if defined(PARAM_ENABLE_PHOTONGI_INDIRECT)
+#define GPUTaskState_PhotonGIIndirect(taskState) ((taskState)->photonGIIndirect)
+#else
+#define GPUTaskState_PhotonGIIndirect(taskState) NULL_INDEX
+#endif
 
 typedef enum {
 	ILLUMINATED, SHADOWED, NOT_VISIBLE

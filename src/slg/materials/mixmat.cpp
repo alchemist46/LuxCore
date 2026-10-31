@@ -53,6 +53,20 @@ bool MixMaterial::IsLightSourceImpl() const {
 	return (Material::IsLightSource() || matA->IsLightSource() || matB->IsLightSource());
 }
 
+float MixMaterial::GetGlossyLobesGlossiness() const {
+	// As Preprocess() does for glossiness
+	const bool glossyA = matA->GetEventTypes() & GLOSSY;
+	const bool glossyB = matB->GetEventTypes() & GLOSSY;
+	if (glossyA && glossyB)
+		return Min(matA->GetGlossyLobesGlossiness(), matB->GetGlossyLobesGlossiness());
+	else if (glossyA)
+		return matA->GetGlossyLobesGlossiness();
+	else if (glossyB)
+		return matB->GetGlossyLobesGlossiness();
+	else
+		return 0.f;
+}
+
 bool MixMaterial::IsDeltaImpl() const {
 	return (matA->IsDelta() && matB->IsDelta());
 }

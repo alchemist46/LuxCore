@@ -107,6 +107,9 @@ public:
 	void SetPhotonGIEnabled(const bool v) { isPhotonGIEnabled = v; }
 	virtual bool IsPhotonGIEnabled() const { return isPhotonGIEnabled; }
 	virtual float GetGlossiness() const { return glossiness; }
+	// The glossiness of the glossy lobes alone (the smallest), the lobes of
+	// another kind left out
+	virtual float GetGlossyLobesGlossiness() const { return glossiness; }
 
 	void SetDirectLightSamplingType(const MaterialEmissionDLSType type) { directLightSamplingType = type; }
 	MaterialEmissionDLSType GetDirectLightSamplingType() const { return directLightSamplingType; }
@@ -265,6 +268,9 @@ public:
 	}
 	// True if EvaluateDiffuse() can be non-black
 	virtual bool HasDiffuseLobe() const { return false; }
+	// True if the diffuse lobe is the whole material: EvaluateDiffuse() is
+	// Evaluate() and Sample() samples it alone
+	virtual bool HasOnlyDiffuseLobe() const { return false; }
 
 	// Evaluate() is used to evaluate the material (i.e. get a color plus some
 	// related data) knowing the eye and light vector. It used by the

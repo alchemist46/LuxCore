@@ -111,7 +111,8 @@ string PhotonGICache::ComputeSignature() const {
 		ss << " indirect area 2 irradiance 1 " << params.indirect.maxSize << " " << params.indirect.haltThreshold <<
 				" " << params.indirect.lookUpRadius << " " << params.indirect.lookUpNormalAngle <<
 				" " << params.indirect.usageThresholdScale << " " << params.indirect.filterRadiusScale <<
-				" lightsampling " << params.indirect.lightSampling;
+				" lightsampling " << params.indirect.lightSampling <<
+				" glossythreshold " << params.indirect.glossyThreshold;
 	if (params.caustic.enabled)
 		ss << " caustic " << params.caustic.maxSize << " " << params.caustic.updateSpp <<
 				" " << params.caustic.lookUpRadius << " " << params.caustic.lookUpNormalAngle <<

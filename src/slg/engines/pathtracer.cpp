@@ -159,7 +159,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 		const EyePathInfo &pathInfo, const Spectrum &pathThroughput,
 		const BSDF &bsdf, SampleResult *sampleResult,
 		const bool useBSDFEVal, const u_int causticChain, const bool photonGIIndirect,
-		const bool photonGIIndirectEnd) const {
+		const bool photonGIIndirectEnd, const bool photonGIWholeBSDF) const {
 	if (!bsdf.IsDelta()) {
 		// Select the light strategy to use
 		auto& lightStrategy =
@@ -247,7 +247,12 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							// sampling of the other lobes goes on with the pdf
 							// left (see RenderEyePath())
 							Spectrum diffuseEval;
-							if (photonGIIndirect) {
+							if (photonGIWholeBSDF) {
+								// The cache stands for the whole BSDF
+								diffuseEval = bsdfEval;
+								bsdfEval = Spectrum();
+								bsdfPdfW = 0.f;
+							} else if (photonGIIndirect) {
 								float diffusePdfW;
 								diffuseEval = bsdf.EvaluateDiffuse(shadowRay.d, &diffusePdfW);
 								bsdfEval = (bsdfEval - diffuseEval).Clamp(0.f, INFINITY);
@@ -679,9 +684,16 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// lobes' with the MIS weight against the pdf of their continuation
 		// (DirectLightSampling()); TracePhotonsThread stores the photons of
 		// the bounces after the first hit. Without
-		// path.photongi.indirect.lightsampling the cache holds the direct light
-		// of the diffuse lobe too. A volume vertex adds the radiance the cache
-		// holds for it and ends the path (after the light sampling, with it).
+		// path.photongi.indirect.lightsampling (the default) the cache holds
+		// the direct light of the diffuse lobe too. The cache stands for the
+		// whole BSDF of a material that is its diffuse lobe alone, or whose
+		// glossy lobes are rough enough (path.photongi.indirect.glossythreshold,
+		// PhotonGICache::IsIndirectWholeBSDF()), as the cache did for every
+		// material before it was split by lobe: its BSDF sample ends the path,
+		// its light sample has the weight 1, and without the light sampling of
+		// the cache it samples no light. A volume
+		// vertex adds the radiance the cache holds for it and ends the path
+		// (after the light sampling, with it).
 		//----------------------------------------------------------------------
 
 		const SpectrumGroup *photonGIIndirect = nullptr;
@@ -809,8 +821,14 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// light too without the light sampling of the cache
 		if (photonGIIndirect && bsdf.IsVolume() && !photonGICache->IsIndirectLightSampling())
 			break;
+		// The cache stands for the whole BSDF of some materials (a diffuse lobe
+		// alone, or rough glossy lobes, see PhotonGICache::IsIndirectWholeBSDF()):
+		// the BSDF sample ends the path (below), so the light sample has the
+		// weight 1, and without the light sampling of the cache there is none
+		const bool photonGIWholeBSDF = photonGIIndirect && photonGICache->IsIndirectWholeBSDF(bsdf);
 
-		const DirectLightResult directLightResult = DirectLightSampling(
+		const DirectLightResult directLightResult =
+				(photonGIWholeBSDF && !photonGICache->IsIndirectLightSampling()) ? NOT_VISIBLE : DirectLightSampling(
 				device, scene,
 				eyeRay.time,
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_X),
@@ -818,9 +836,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_Z),
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_W),
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A),
-				pathInfo, 
+				pathInfo,
 				pathThroughput, bsdf, &sampleResult, true, causticChain, photonGIIndirect != nullptr,
-				photonGIIndirect && bsdf.IsVolume());
+				photonGIIndirect && (bsdf.IsVolume() || photonGIWholeBSDF), photonGIWholeBSDF);
 
 		if ((sampleResult.lastPathVertex && !photonGIIndirect) ||
 				(photonGIIndirect && bsdf.IsVolume()))
@@ -871,7 +889,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// reflects the cached irradiance and ends there, the other lobes go on
 		// with the probability of their share of the pdf
 		float photonGIContinueProb = 1.f;
-		if (photonGIIndirect) {
+		if (photonGIWholeBSDF) {
+			if (!bsdfSample.Black())
+				sampleResult.radiance.AddWeighted(pathThroughput * bsdfSample * INV_PI, *photonGIIndirect);
+			break;
+		} else if (photonGIIndirect) {
 			float diffusePdfShare = 0.f;
 			const Spectrum diffuseSample = bsdfSample.Black() ? Spectrum() :
 				bsdf.GetDiffuseSample(sampledDir, bsdfEvent, bsdfPdfW, &diffusePdfShare);

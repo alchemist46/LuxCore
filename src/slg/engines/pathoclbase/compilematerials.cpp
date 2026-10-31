@@ -25,6 +25,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include "slg/engines/pathoclbase/compiledscene.h"
+#include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/kernels/kernels.h"
 
 #include "slg/textures/constfloat.h"
@@ -974,7 +975,11 @@ void CompiledScene::CompileMaterials() {
 		mat->avgPassThroughTransparency = m.GetAvgPassThroughTransparency();
 		mat->isShadowCatcher = m.IsShadowCatcher();
 		mat->isShadowCatcherOnlyInfiniteLights = m.IsShadowCatcherOnlyInfiniteLights();
-		mat->isPhotonGIEnabled = m.IsPhotonGIEnabled() ? (m.HasDiffuseLobe() ? 3 : 1) : 0;
+		// The PhotonGI cache flags (see isPhotonGIEnabled in material_types.cl)
+		const PhotonGICache *photonGICache = pathTracer ? pathTracer->GetPhotonGICache() : nullptr;
+		const bool photonGIWholeBSDF = photonGICache ? photonGICache->IsIndirectWholeBSDF(m) : m.HasOnlyDiffuseLobe();
+		mat->isPhotonGIEnabled = m.IsPhotonGIEnabled() ?
+			(1 | ((m.HasDiffuseLobe() || photonGIWholeBSDF) ? 2 : 0) | (photonGIWholeBSDF ? 4 : 0)) : 0;
 		mat->isHoldout = m.IsHoldout();
 
 		// Bake Material::GetEventTypes() and Material::IsDelta()

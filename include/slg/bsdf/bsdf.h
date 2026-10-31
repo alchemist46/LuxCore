@@ -208,6 +208,8 @@ public:
 	// or a material without such a lobe)
 	luxrays::Spectrum EvaluateDiffuse(const luxrays::Vector &lightDir, float *pdfW) const;
 	bool HasDiffuseLobe() const { return material->HasDiffuseLobe(); }
+	bool HasOnlyDiffuseLobe() const { return material->HasOnlyDiffuseLobe(); }
+	MaterialConstRef GetMaterial() const { return *material; }
 	luxrays::Spectrum ShadowCatcherSample(Vector *sampledDir,
 		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
 	void Pdf(const luxrays::Vector &sampledDir, float *directPdfW, float *reversePdfW) const;

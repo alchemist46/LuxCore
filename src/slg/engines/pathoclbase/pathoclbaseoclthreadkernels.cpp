@@ -144,11 +144,12 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			(cscene->materialBumpCacheSize == 0) &&
 			(cscene->maxTextureEvalStackSize <= slg::ocl::PrivateTextureEvalStackSize);
 
-	// The random walk of the subsurface materials is compiled only for the
-	// scenes that have one: it costs the other scenes up to a few percent
-	// (the code changes how the big kernel is compiled, not what it runs)
+	// The random walk of the subsurface materials and the PhotonGI indirect
+	// cache are compiled only for the scenes that use them: they cost the
+	// other scenes up to a few percent (the code changes how the big kernel
+	// is compiled, not what it runs)
 	slg::ocl::AddPathKernelVariantParameters(kernelsParameters, privateEvalStack,
-			cscene->hasSubsurface);
+			cscene->hasSubsurface, cscene->compiledPathTracer.pgic.indirectEnabled);
 
 	// The working colour space matrix (no parameter in Rec.709)
 	if (!useKernelConstants)

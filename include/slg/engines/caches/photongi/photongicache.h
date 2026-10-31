@@ -215,9 +215,20 @@ typedef struct PhotonGICacheParams_t {
 				filterRadiusScale, haltThreshold;
 		// A vertex that uses the cache samples the lights for the direct
 		// light of its diffuse lobe, and the cache holds the indirect light
-		// only (the default); otherwise the cache holds the direct light too
-		// (blurred, but without the noise of the light sampling)
+		// only; otherwise (the default) the cache holds the direct light too
+		// (blurred, but without the noise and the cost of the light sampling:
+		// a vertex whose material is its diffuse lobe alone samples no light,
+		// see PathTracer::RenderEyePath())
 		bool lightSampling;
+		// The materials whose lobes are all diffuse, or glossy with a
+		// glossiness (roughness) of at least glossyThreshold, and none
+		// specular or transmissive: the cache stands for their whole BSDF, as
+		// if the incoming light were uniform, and the path ends there (see
+		// PhotonGICache::IsIndirectWholeBSDF()); the glossy lobes of the
+		// others go on with a real ray. The default, 0.05, is the default of
+		// glossinessUsageThreshold, the roughness the old cache stood for;
+		// above 1, only the diffuse materials (exact, slower)
+		float glossyThreshold;
 	} indirect;
 
 	struct {
@@ -275,6 +286,10 @@ protected:
 			ar & indirect.lightSampling;
 		else
 			indirect.lightSampling = false;
+		if (version >= 9)
+			ar & indirect.glossyThreshold;
+		else
+			indirect.glossyThreshold = INFINITY;
 
 		ar & caustic.enabled;
 		ar & caustic.maxSize;
@@ -315,8 +330,18 @@ public:
 	bool IsPhotonDepositEnabled(const BSDF &bsdf) const;
 	// The surfaces where the indirect cache is looked up: the materials with
 	// a diffuse lobe (Material::HasDiffuseLobe(), the cache stands for that
-	// lobe), and the volumes
+	// lobe) or whose whole BSDF the cache stands for (IsIndirectWholeBSDF()),
+	// and the volumes
 	bool IsIndirectEnabled(const BSDF &bsdf) const;
+	// The materials whose whole BSDF the cache stands for: the ones that are
+	// their diffuse lobe alone (Material::HasOnlyDiffuseLobe()), and the ones
+	// with only diffuse lobes and glossy lobes of a glossiness of at least
+	// path.photongi.indirect.glossythreshold (see PhotonGICacheParams). Not
+	// the volumes.
+	bool IsIndirectWholeBSDF(const Material &mat) const;
+	bool IsIndirectWholeBSDF(const BSDF &bsdf) const {
+		return !bsdf.IsVolume() && IsIndirectWholeBSDF(bsdf.GetMaterial());
+	}
 	// The surfaces where an indirect photon is stored
 	bool IsIndirectDepositEnabled(const BSDF &bsdf) const;
 	// The surfaces where a visibility particle is placed: the ones of the
@@ -484,7 +509,7 @@ BOOST_CLASS_VERSION(slg::GenericPhoton, 1)
 BOOST_CLASS_VERSION(slg::PGICVisibilityParticle, 2)
 BOOST_CLASS_VERSION(slg::Photon, 2)
 BOOST_CLASS_VERSION(slg::RadiancePhoton, 2)
-BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 8)
+BOOST_CLASS_VERSION(slg::PhotonGICacheParams, 9)
 BOOST_CLASS_VERSION(slg::PhotonGICache, 3)
 
 BOOST_CLASS_EXPORT_KEY(slg::GenericPhoton)

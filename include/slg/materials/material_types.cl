@@ -422,8 +422,9 @@ typedef struct {
 	unsigned int interiorVolumeIndex, exteriorVolumeIndex;
 	float glossiness, avgPassThroughTransparency;
 	// isPhotonGIEnabled: Material::IsPhotonGIEnabled() (1, the caustic
-	// cache), plus 2 if the material has a diffuse lobe for the indirect cache
-	// too (Material::HasDiffuseLobe())
+	// cache), plus 2 if the indirect cache is used on it too (a diffuse lobe,
+	// Material::HasDiffuseLobe(), or 4), plus 4 if the indirect cache stands
+	// for its whole BSDF (PhotonGICache::IsIndirectWholeBSDF())
 	int isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled,
 			isHoldout;
 

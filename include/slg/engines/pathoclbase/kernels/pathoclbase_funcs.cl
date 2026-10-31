@@ -358,9 +358,10 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		const float3 pathThroughput,
 		const float3 shadowRayDir,
 		const uint photonGICausticChain,
-		// A vertex that uses the PhotonGI indirect cache (see
-		// PathTracer::DirectLightSampling())
-		const bool photonGIIndirect
+		// At a vertex that uses the PhotonGI indirect cache, its
+		// GPUTaskState::photonGIIndirect (see PathTracer::DirectLightSampling()),
+		// NULL_INDEX elsewhere
+		const uint photonGIIndirect
 		LIGHTS_PARAM_DECL) {
 	// Sample the BSDF
 	BSDFEvent event;
@@ -395,19 +396,27 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 	// light sample only, the BSDF sampling of the other lobes goes on with the
 	// pdf left (see AdvancePaths_GenerateNextVertexRay())
 	float3 diffuseEval = BLACK;
-	if (photonGIIndirect) {
+	if (photonGIIndirect != NULL_INDEX) {
 		// Without path.photongi.indirect.lightsampling the cache has the
 		// direct light of the diffuse lobe, and the whole of a volume
 		if (bsdf->isVolume && !taskConfig->pathTracer.pgic.indirectLightSampling)
 			return false;
 
-		float diffusePdfW;
-		diffuseEval = BSDF_EvaluateDiffuse(bsdf, shadowRayDir, &diffusePdfW
-				MATERIALS_PARAM);
-		bsdfEval = fmax(bsdfEval - diffuseEval, BLACK);
-		bsdfPdfW = fmax(bsdfPdfW - diffusePdfW, 0.f);
-		if (!taskConfig->pathTracer.pgic.indirectLightSampling)
-			diffuseEval = BLACK;
+		if (photonGIIndirect & 2) {
+			// The cache stands for the whole BSDF (only with the light
+			// sampling of the cache, see AdvancePaths_HitObject())
+			diffuseEval = bsdfEval;
+			bsdfEval = BLACK;
+			bsdfPdfW = 0.f;
+		} else {
+			float diffusePdfW;
+			diffuseEval = BSDF_EvaluateDiffuse(bsdf, shadowRayDir, &diffusePdfW
+					MATERIALS_PARAM);
+			bsdfEval = fmax(bsdfEval - diffuseEval, BLACK);
+			bsdfPdfW = fmax(bsdfPdfW - diffusePdfW, 0.f);
+			if (!taskConfig->pathTracer.pgic.indirectLightSampling)
+				diffuseEval = BLACK;
+		}
 	}
 
 	// Russian Roulette: the BSDF technique continues the path with the
@@ -448,7 +457,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		(1.f / weight) : 1.f;
 
 	const float3 lightRadiance = VLOAD3F(info->lightRadiance.c);
-	VSTORE3F(photonGIIndirect ?
+	VSTORE3F((photonGIIndirect != NULL_INDEX) ?
 			((diffuseEval + bsdfEval * weight) * factor * lightRadiance) :
 			(bsdfEval * (weight * factor) * lightRadiance), info->lightRadiance.c);
 	VSTORE3F(factor * lightRadiance, info->lightIrradiance.c);

@@ -121,8 +121,11 @@ public:
 		// doesn't reach the lights through the diffuse lobe, so the light
 		// sample has the weight 1 for that lobe, the MIS weight against the
 		// other lobes for the rest (see RenderEyePath()); the weight 1 for
-		// all if the path ends there (a volume vertex)
-		const bool photonGIIndirect = false, const bool photonGIIndirectEnd = false) const;
+		// all if the path ends there (a volume vertex, or one whose whole
+		// BSDF the cache stands for: photonGIWholeBSDF, all of its BSDF has
+		// the light sample only)
+		const bool photonGIIndirect = false, const bool photonGIIndirectEnd = false,
+		const bool photonGIWholeBSDF = false) const;
 
 	void RenderEyePath(
 		luxrays::IntersectionDeviceRef device,

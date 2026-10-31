@@ -81,6 +81,7 @@ public:
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *pdfW) const;
 	virtual bool HasDiffuseLobe() const { return matA->HasDiffuseLobe() || matB->HasDiffuseLobe(); }
+	virtual bool HasOnlyDiffuseLobe() const { return matA->HasOnlyDiffuseLobe() && matB->HasOnlyDiffuseLobe(); }
 
 	virtual luxrays::Spectrum Evaluate(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir, BSDFEvent *event,
@@ -100,6 +101,7 @@ public:
 	) const;
 	virtual void AddReferencedTextures(std::unordered_set<const Texture *>  &referencedTexsreferencedTexs) const;
 	virtual void UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex);
+	virtual float GetGlossyLobesGlossiness() const;
 
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
 

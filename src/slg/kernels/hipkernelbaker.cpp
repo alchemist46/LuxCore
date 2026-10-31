@@ -159,27 +159,36 @@ int main(int argc, char *argv[]) {
 	for (const string &renderEngineType : renderEngineTypes) {
 		for (const bool privateEvalStack : { false, true }) {
 			for (const bool subsurface : { false, true }) {
-				// The parameters of the program, in the order of
-				// PathOCLBaseOCLRenderThread::InitKernels() and
-				// HIPDevice::AddKernelOpts(). Note: the epsilon values are not
-				// used with the kernel constants.
-				vector<string> params;
-				GetKernelParamters(params, renderEngineType, 0.f, 0.f, true);
-				AddPathKernelVariantParameters(params, privateEvalStack, subsurface);
-				const vector<string> deviceParams = GetHIPDeviceKernelParameters();
-				params.insert(params.end(), deviceParams.begin(), deviceParams.end());
-				const vector<string> compileOpts = GetHIPPathCompileOptions();
-				params.insert(params.end(), compileOpts.begin(), compileOpts.end());
+				// The PhotonGI indirect cache: PATHOCL only (RTPATHOCL has
+				// no PhotonGI)
+				for (const bool photonGIIndirect : { false, true }) {
+					if (photonGIIndirect && (renderEngineType != "PATHOCL"))
+						continue;
 
-				string stableName = renderEngineType;
-				transform(stableName.begin(), stableName.end(), stableName.begin(), ::tolower);
-				if (privateEvalStack)
-					stableName += "_private";
-				if (subsurface)
-					stableName += "_subsurface";
+					// The parameters of the program, in the order of
+					// PathOCLBaseOCLRenderThread::InitKernels() and
+					// HIPDevice::AddKernelOpts(). Note: the epsilon values are not
+					// used with the kernel constants.
+					vector<string> params;
+					GetKernelParamters(params, renderEngineType, 0.f, 0.f, true);
+					AddPathKernelVariantParameters(params, privateEvalStack, subsurface, photonGIIndirect);
+					const vector<string> deviceParams = GetHIPDeviceKernelParameters();
+					params.insert(params.end(), deviceParams.begin(), deviceParams.end());
+					const vector<string> compileOpts = GetHIPPathCompileOptions();
+					params.insert(params.end(), compileOpts.begin(), compileOpts.end());
 
-				if (!writeVariant(stableName, params, hipSource))
-					return EXIT_FAILURE;
+					string stableName = renderEngineType;
+					transform(stableName.begin(), stableName.end(), stableName.begin(), ::tolower);
+					if (privateEvalStack)
+						stableName += "_private";
+					if (subsurface)
+						stableName += "_subsurface";
+					if (photonGIIndirect)
+						stableName += "_photongi";
+
+					if (!writeVariant(stableName, params, hipSource))
+						return EXIT_FAILURE;
+				}
 			}
 		}
 	}

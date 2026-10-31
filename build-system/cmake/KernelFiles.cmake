@@ -198,11 +198,13 @@ set(SPIRV_VARIANTS
   rtpathocl_generic rtpathocl_amd rtpathocl_nvidia
 )
 
-# The HIP bake variants: (render engine, evaluation stacks, subsurface). The
-# names must match the ones used by the hip-kernel-baker tool (see
-# src/slg/kernels/hipkernelbaker.cpp).
+# The HIP bake variants: (render engine, evaluation stacks, subsurface,
+# PhotonGI indirect cache for PATHOCL). The names must match the ones used by
+# the hip-kernel-baker tool (see src/slg/kernels/hipkernelbaker.cpp).
 set(HIP_VARIANTS
   pathocl pathocl_subsurface pathocl_private pathocl_private_subsurface
+  pathocl_photongi pathocl_subsurface_photongi pathocl_private_photongi
+  pathocl_private_subsurface_photongi
   rtpathocl rtpathocl_subsurface rtpathocl_private rtpathocl_private_subsurface
 )
 

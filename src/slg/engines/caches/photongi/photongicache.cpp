@@ -96,7 +96,18 @@ bool PhotonGICache::IsPhotonDepositEnabled(const BSDF &bsdf) const {
 }
 
 bool PhotonGICache::IsIndirectEnabled(const BSDF &bsdf) const {
-	return bsdf.IsPhotonGIEnabled() && bsdf.HasDiffuseLobe();
+	return bsdf.IsPhotonGIEnabled() && (bsdf.HasDiffuseLobe() || IsIndirectWholeBSDF(bsdf));
+}
+
+bool PhotonGICache::IsIndirectWholeBSDF(const Material &mat) const {
+	if (mat.HasOnlyDiffuseLobe())
+		return true;
+
+	// Glossy lobes rough enough for the cache's uniform incoming light, and
+	// diffuse ones
+	const BSDFEvent eventTypes = mat.GetEventTypes();
+	return (eventTypes & GLOSSY) && !(eventTypes & (SPECULAR | TRANSMIT)) &&
+			(mat.GetGlossyLobesGlossiness() >= params.indirect.glossyThreshold);
 }
 
 bool PhotonGICache::IsIndirectDepositEnabled(const BSDF &bsdf) const {
