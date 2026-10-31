@@ -107,6 +107,26 @@ protected:
 	int priority;
 };
 
+class HomogeneousVolume;
+
+// The direct light scattered along the segments of a path ray in a
+// homogeneous volume (V5, see PathTracer::RenderEyePath()). Scene::Intersect()
+// calls Segment() for each segment where the distance sampling can scatter,
+// before its scatter decision, and Scattered() when it scatters there.
+class VolumeSegmentLight {
+public:
+	virtual ~VolumeSegmentLight() { }
+
+	// segment: the ray from ray.o, the segment is [mint, maxt] (maxt can be
+	// infinite); throughput: the one reaching the segment (it steers the
+	// distance sampling, see HomogeneousVolume::Scatter()); u: the
+	// pass-through event of the segment
+	virtual void Segment(const luxrays::Ray &segment, const HomogeneousVolume &volume,
+			const luxrays::Spectrum &throughput, const float u) = 0;
+	// The distance sampling scattered at the ray's t in the last segment
+	virtual void Scattered(const float t) = 0;
+};
+
 // An utility class
 class SchlickScatter {
 public:

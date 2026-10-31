@@ -44,6 +44,52 @@ HomogeneousVolume::HomogeneousVolume(
 	sigmaS(s)
 {}
 
+void HomogeneousVolume::DistanceChannelPdfs(const Spectrum &sigmaA, const Spectrum &sigmaS,
+		const Spectrum &throughput, float channelPdfs[3]) {
+	float channelPdfsSum = 0.f;
+	for (u_int i = 0; i < 3; ++i) {
+		channelPdfs[i] = (sigmaS.c[i] > 0.f) ?
+			(throughput.c[i] * sigmaS.c[i] / (sigmaA.c[i] + sigmaS.c[i])) : 0.f;
+		channelPdfsSum += channelPdfs[i];
+	}
+	if (!(channelPdfsSum > 0.f) || isinf(channelPdfsSum)) {
+		// No throughput: the channels that scatter, uniformly
+		channelPdfsSum = 0.f;
+		for (u_int i = 0; i < 3; ++i) {
+			channelPdfs[i] = (sigmaS.c[i] > 0.f) ? 1.f : 0.f;
+			channelPdfsSum += channelPdfs[i];
+		}
+	}
+
+	for (u_int i = 0; i < 3; ++i)
+		channelPdfs[i] /= channelPdfsSum;
+}
+
+float HomogeneousVolume::DistancePdf(const float t, const Spectrum &sigmaS,
+		const float channelPdfs[3]) {
+	float pdf = 0.f;
+	for (u_int i = 0; i < 3; ++i) {
+		if (channelPdfs[i] > 0.f)
+			pdf += channelPdfs[i] * expf(-t * sigmaS.c[i]) * sigmaS.c[i];
+	}
+
+	return pdf;
+}
+
+void HomogeneousVolume::GetSegmentCoefficients(const Ray &ray, const float u,
+		Spectrum &sigmaA, Spectrum &sigmaS) const {
+	// The same point as Scatter()
+	HitPoint hitPoint;
+	hitPoint.Init();
+	hitPoint.fixedDir = ray.d;
+	hitPoint.p = ray.o;
+	hitPoint.geometryN = hitPoint.interpolatedN = hitPoint.shadeN = Normal(-ray.d);
+	hitPoint.passThroughEvent = u;
+
+	sigmaA = SigmaA(hitPoint);
+	sigmaS = SigmaS(hitPoint);
+}
+
 float HomogeneousVolume::Scatter(const float u,
 		const bool scatterAllowed, const float segmentLength,
 		const Spectrum &sigmaA, const Spectrum &sigmaS, const Spectrum &emission,
@@ -69,23 +115,7 @@ float HomogeneousVolume::Scatter(const float u,
 		// sampler's stratification, see Scene::Intersect()), the channel a
 		// hash of it (a sequence of its own, not the pass-through one)
 		float channelPdfs[3];
-		float channelPdfsSum = 0.f;
-		for (u_int i = 0; i < 3; ++i) {
-			channelPdfs[i] = (sigmaS.c[i] > 0.f) ?
-				(throughput.c[i] * sigmaS.c[i] / (sigmaA.c[i] + sigmaS.c[i])) : 0.f;
-			channelPdfsSum += channelPdfs[i];
-		}
-		if (!(channelPdfsSum > 0.f) || isinf(channelPdfsSum)) {
-			// No throughput: the channels that scatter, uniformly
-			channelPdfsSum = 0.f;
-			for (u_int i = 0; i < 3; ++i) {
-				channelPdfs[i] = (sigmaS.c[i] > 0.f) ? 1.f : 0.f;
-				channelPdfsSum += channelPdfs[i];
-			}
-		}
-
-		for (u_int i = 0; i < 3; ++i)
-			channelPdfs[i] /= channelPdfsSum;
+		DistanceChannelPdfs(sigmaA, sigmaS, throughput, channelPdfs);
 
 		union {
 			float f;

@@ -122,7 +122,12 @@ public:
 		// sample has the weight 1 for that lobe, the MIS weight against the
 		// other lobes for the rest (see RenderEyePath()); the weight 1 for
 		// all if the path ends there (a volume vertex)
-		const bool photonGIIndirect = false, const bool photonGIIndirectEnd = false) const;
+		const bool photonGIIndirect = false, const bool photonGIIndirectEnd = false,
+		// The weight of the sample against the other light sample of the
+		// same volume segment (V5, see RenderEyePath()); a light sample of a
+		// point the path doesn't scatter at (the segment's equiangular one)
+		// leaves the irradiance AOV alone
+		const float segmentWeight = 1.f, const bool segmentSample = false) const;
 
 	void RenderEyePath(
 		luxrays::IntersectionDeviceRef device,
@@ -222,6 +227,12 @@ public:
 	
 	// Option flags
 	bool forceBlackBackground, hybridBackForwardEnable;
+
+	// path.volume.equiangular.enable: the direct light along the segments of
+	// the eye paths in homogeneous volumes, by equiangular sampling with MIS
+	// against the distance sampling (see EyeVolumeSegmentLight in
+	// pathtracer.cpp)
+	bool volumeSegmentLight;
 
 private:
 	void GenerateEyeRay(CameraConstRef camera, FilmConstRef film,

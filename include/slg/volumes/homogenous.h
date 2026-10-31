@@ -75,6 +75,18 @@ public:
 			luxrays::Spectrum &segmentTransmittance, luxrays::Spectrum &segmentEmission,
 			float *uNoScatter = nullptr);
 
+	// The distance sampling of Scatter(): the probability of each colour
+	// channel (the spectral MIS) for the throughput reaching the segment, and
+	// the pdf per unit length of a scatter event at the distance t from the
+	// start of the segment (the mix of the channels' pdfs)
+	static void DistanceChannelPdfs(const luxrays::Spectrum &sigmaA, const luxrays::Spectrum &sigmaS,
+			const luxrays::Spectrum &throughput, float channelPdfs[3]);
+	static float DistancePdf(const float t, const luxrays::Spectrum &sigmaS,
+			const float channelPdfs[3]);
+	// The coefficients Scatter() uses for the segment of the ray
+	void GetSegmentCoefficients(const luxrays::Ray &ray, const float u,
+			luxrays::Spectrum &sigmaA, luxrays::Spectrum &sigmaS) const;
+
 protected:
 	virtual luxrays::Spectrum SigmaA(const HitPoint &hitPoint) const;
 	virtual luxrays::Spectrum SigmaS(const HitPoint &hitPoint) const;

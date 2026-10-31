@@ -292,6 +292,10 @@ protected:
 	luxrays::HardwareDeviceBuffer *tasksDirectLightBuff;
 	luxrays::HardwareDeviceBuffer *tasksDirectLightVertexBuff;
 	luxrays::HardwareDeviceBuffer *tasksSSSWalkBuff;
+	luxrays::HardwareDeviceBuffer *tasksVolumeSegmentBuff;
+	// The kernel has the direct light along the volume segments (see
+	// InitKernels())
+	bool volumeSegmentLightKernel;
 	luxrays::HardwareDeviceBuffer *tasksStateBuff;
 	luxrays::HardwareDeviceBuffer *tasksBSDFBuff;
 	luxrays::HardwareDeviceBuffer *pathStatesBuff;

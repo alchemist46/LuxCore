@@ -97,6 +97,20 @@ public:
 			return obj.get();
 		});
 	}
+	// The bounds of the lights that are not infinite, when they all have
+	// bounds (see GetFiniteLightsBounds())
+	bool HasFiniteLightsBounds() const { return finiteLightsBoundsValid; }
+	const luxrays::BBox &GetFiniteLightsBounds() const { return finiteLightsBounds; }
+
+	// If there is a light that is not infinite (environmental or distant)
+	bool HasFiniteLights() const {
+		u_int count = 0;
+		for (u_int t = 0; t < LIGHT_SOURCE_TYPE_COUNT; ++t)
+			count += lightTypeCount[t];
+		return count > (lightTypeCount[TYPE_IL] + lightTypeCount[TYPE_SUN] +
+				lightTypeCount[TYPE_IL_CONSTANT] + lightTypeCount[TYPE_SHARPDISTANT] +
+				lightTypeCount[TYPE_DISTANT] + lightTypeCount[TYPE_IL_SKY2]);
+	}
 	auto GetEnvLightSources() const {
 		auto view = ViewEnvLightSources();
 		return std::vector<std::reference_wrapper<EnvLightSource>>(view.begin(), view.end());
@@ -147,6 +161,8 @@ private:
 	//--------------------------------------------------------------------------
 
 	u_int lightGroupCount;
+	luxrays::BBox finiteLightsBounds;
+	bool finiteLightsBoundsValid;
 
 	std::vector<u_int> lightTypeCount;
 

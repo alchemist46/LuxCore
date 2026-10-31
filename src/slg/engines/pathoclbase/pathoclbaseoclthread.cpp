@@ -116,6 +116,8 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	tasksDirectLightBuff = nullptr;
 	tasksDirectLightVertexBuff = nullptr;
 	tasksSSSWalkBuff = nullptr;
+	tasksVolumeSegmentBuff = nullptr;
+	volumeSegmentLightKernel = false;
 	tasksStateBuff = nullptr;
 	tasksBSDFBuff = nullptr;
 	pathStatesBuff = nullptr;
@@ -238,6 +240,7 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	intersectionDevice.FreeBuffer(&tasksDirectLightBuff);
 	intersectionDevice.FreeBuffer(&tasksDirectLightVertexBuff);
 	intersectionDevice.FreeBuffer(&tasksSSSWalkBuff);
+	intersectionDevice.FreeBuffer(&tasksVolumeSegmentBuff);
 	intersectionDevice.FreeBuffer(&tasksStateBuff);
 	intersectionDevice.FreeBuffer(&tasksBSDFBuff);
 	intersectionDevice.FreeBuffer(&pathStatesBuff);

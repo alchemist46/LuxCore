@@ -504,6 +504,9 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			&connectionThroughput, WHITE,
 			NULL,
 			true, &taskDirectLight->seedPassThroughEvent
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			, NULL, NULL
+#endif
 			MATERIALS_PARAM
 			);
 	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
@@ -566,6 +569,321 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 
 	return MK_RT_DL;
 }
+
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+//------------------------------------------------------------------------------
+// The direct light along the first volume segment of the vertex ray (see
+// EyeVolumeSegmentLight in pathtracer.cpp, where the method is described, and
+// GPUTaskVolumeSegment)
+//------------------------------------------------------------------------------
+
+// The vertex ray has crossed its first segment in a homogeneous volume that
+// can scatter: [segmentStart, segmentEnd] along the ray, the throughput
+// reaching it, its pass-through event u, the distance the distance sampling
+// scattered at (or a negative value). Sets up the light sample of the
+// equiangular point (segment->state 2) and the MIS weight of the light sample
+// of the scatter vertex.
+// The distance from the guide to the ray, in mean free paths, beyond which
+// the segment has no equiangular sample
+#define VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE 4.f
+
+// If the lights can be close enough to the segment for an equiangular sample
+// (the bounds of the lights, see EyeVolumeSegmentLight::Segment()): the cheap
+// test before AdvancePaths_VolumeSegmentLight()
+OPENCL_FORCE_INLINE bool AdvancePaths_VolumeSegmentNearLights(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global HitPoint *tmpHitPoint,
+		__global Ray *ray,
+		const float segmentStart, const float segmentEnd,
+		const uint volumeIndex, const float u
+		MATERIALS_PARAM_DECL) {
+	const float segmentLength = segmentEnd - segmentStart;
+	if (!taskConfig->pathTracer.volumeSegmentLightBounds || isinf(segmentLength))
+		return true;
+
+	__global const Material* restrict vol = &mats[volumeIndex];
+	const float3 rayOrig = VLOAD3F(&ray->o.x);
+	const float3 rayDir = VLOAD3F(&ray->d.x);
+	Volume_InitializeTmpHitPoint(tmpHitPoint, rayOrig, rayDir, u);
+	const float3 sigmaT = HomogeneousVolume_SigmaA(vol, tmpHitPoint TEXTURES_PARAM) +
+			HomogeneousVolume_SigmaS(vol, tmpHitPoint TEXTURES_PARAM);
+	const float sigmaTMin = fmin(sigmaT.x, fmin(sigmaT.y, sigmaT.z));
+
+	const float3 segmentFirst = rayOrig + segmentStart * rayDir;
+	const float3 segmentLast = segmentFirst + segmentLength * rayDir;
+	const float3 segmentMin = fmin(segmentFirst, segmentLast);
+	const float3 segmentMax = fmax(segmentFirst, segmentLast);
+	const float3 lightMin = VLOAD3F(taskConfig->pathTracer.volumeSegmentLightBoundsMin);
+	const float3 lightMax = VLOAD3F(taskConfig->pathTracer.volumeSegmentLightBoundsMax);
+	const float3 d = fmax(BLACK, fmax(lightMin - segmentMax, segmentMin - lightMax));
+
+	return !(sqrt(dot(d, d)) * sigmaTMin > VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE);
+}
+
+OPENCL_FORCE_NOT_INLINE void AdvancePaths_VolumeSegmentLight(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskVolumeSegment *segment,
+		__global GPUTaskTmp *taskTmp,
+		__global EyePathInfo *pathInfo,
+		__global Ray *ray,
+		const float segmentStart, const float segmentEnd,
+		const uint volumeIndex, const float3 throughput, const float u,
+		const float scatterT,
+		const float u0, const float u1, const float u2, const float u3,
+		const float u4, const uint photonGICausticChain
+		KERNEL_ARGS_INFINITELIGHTS
+		LIGHTS_PARAM_DECL) {
+	__global const Material* restrict vol = &mats[volumeIndex];
+	const float3 rayOrig = VLOAD3F(&ray->o.x);
+	const float3 rayDir = VLOAD3F(&ray->d.x);
+
+	// The coefficients of the segment, as HomogeneousVolume_Scatter()
+	Volume_InitializeTmpHitPoint(&taskTmp->tmpHitPoint, rayOrig, rayDir, u);
+	const float3 sigmaA = HomogeneousVolume_SigmaA(vol, &taskTmp->tmpHitPoint
+			TEXTURES_PARAM);
+	const float3 sigmaS = HomogeneousVolume_SigmaS(vol, &taskTmp->tmpHitPoint
+			TEXTURES_PARAM);
+	if (Spectrum_IsBlack(sigmaS))
+		return;
+	const float3 sigmaT = sigmaA + sigmaS;
+
+	const float segmentLength = segmentEnd - segmentStart;
+	const float3 origin = rayOrig + segmentStart * rayDir;
+
+	// (The caller has tested the lights' bounds,
+	// AdvancePaths_VolumeSegmentNearLights())
+	const float sigmaTMin = fmin(sigmaT.x, fmin(sigmaT.y, sigmaT.z));
+
+	// The channel probabilities of the distance sampling (see
+	// HomogeneousVolume_SegmentScatter())
+	const float sS[3] = { sigmaS.x, sigmaS.y, sigmaS.z };
+	const float sA[3] = { sigmaA.x, sigmaA.y, sigmaA.z };
+	const float tp[3] = { throughput.x, throughput.y, throughput.z };
+	float channelPdfs[3];
+	float channelPdfsSum = 0.f;
+	for (uint i = 0; i < 3; ++i) {
+		channelPdfs[i] = (sS[i] > 0.f) ? (tp[i] * sS[i] / (sA[i] + sS[i])) : 0.f;
+		channelPdfsSum += channelPdfs[i];
+	}
+	if (!(channelPdfsSum > 0.f) || isinf(channelPdfsSum)) {
+		channelPdfsSum = 0.f;
+		for (uint i = 0; i < 3; ++i) {
+			channelPdfs[i] = (sS[i] > 0.f) ? 1.f : 0.f;
+			channelPdfsSum += channelPdfs[i];
+		}
+	}
+	for (uint i = 0; i < 3; ++i)
+		channelPdfs[i] /= channelPdfsSum;
+
+	// The vertex a scatter in the segment would be: no light sample on the
+	// last one (but the first). Its point, the middle of the segment (no
+	// further than a mean free path), picks the guide.
+	__global BSDF *bsdf = &taskTmp->tmpBsdf;
+	const float tMid = fmin(.5f * segmentLength, 1.f / Spectrum_Filter(sigmaT));
+	BSDF_InitVolume(bsdf, false, mats, ray, volumeIndex, segmentStart + tMid, u);
+	const bool lastPathVertex = PathDepthInfo_IsLastPathVertex(&pathInfo->depth,
+			&taskConfig->pathTracer.maxPathDepth, PathDepthInfo_GetDepthEvent(bsdf,
+				BSDF_GetEventTypes(bsdf MATERIALS_PARAM) MATERIALS_PARAM));
+	if (lastPathVertex && (pathInfo->depth.depth != 0))
+		return;
+
+	//--------------------------------------------------------------------------
+	// The guide: a point on a light picked from the middle of the segment,
+	// with random numbers of its own
+	//--------------------------------------------------------------------------
+
+	union {
+		float f;
+		uint i;
+	} uBits;
+	uBits.f = u;
+	Seed rngSeed;
+	Rnd_Init(uBits.i ^ 0x2545f491u, &rngSeed);
+
+	float lightPickPdf;
+	float learnBoundsProb[LIGHTTREE_MAX_SLOTS];
+	const uint lightIndex = LightStrategy_SampleLights(lightsDistribution,
+			lightTreeNodes, lightTreeDistantLights,
+			lightTreeDistantLightCount, lightTreeLightIndex,
+			lightTreeLearn, lightTreeLearnCells,
+			VLOAD3F(&bsdf->hitPoint.p.x), BSDF_GetLandingShadeN(bsdf),
+			true, Rnd_FloatValue(&rngSeed), &lightPickPdf, learnBoundsProb);
+	if ((lightIndex == NULL_INDEX) || (lightPickPdf <= 0.f))
+		return;
+	__global const LightSource* restrict light = &lights[lightIndex];
+	switch (light->type) {
+		case TYPE_IL_CONSTANT:
+		case TYPE_IL:
+		case TYPE_IL_SKY2:
+		case TYPE_SUN:
+		case TYPE_SHARPDISTANT:
+		case TYPE_DISTANT:
+			return;
+		default:
+			break;
+	}
+
+	const float g0 = Rnd_FloatValue(&rngSeed);
+	const float g1 = Rnd_FloatValue(&rngSeed);
+	const float g2 = Rnd_FloatValue(&rngSeed);
+	__global Ray *shadowRay = &segment->shadowRay;
+	float guidePdfW;
+	const float3 guideRadiance = Light_Illuminate(light, bsdf,
+			ray->time, g0, g1, g2,
+			worldCenterX, worldCenterY, worldCenterZ, worldRadius,
+			&taskTmp->tmpHitPoint, shadowRay, &guidePdfW
+			LIGHTS_PARAM);
+	if (Spectrum_IsBlack(guideRadiance))
+		return;
+	const float3 guidePoint = VLOAD3F(&shadowRay->o.x) + shadowRay->maxt * VLOAD3F(&shadowRay->d.x);
+
+	// The guide in the frame of the segment
+	const float3 toGuide = guidePoint - origin;
+	const float delta = dot(toGuide, rayDir);
+	const float d2 = dot(toGuide, toGuide) - delta * delta;
+	if (!(d2 > 0.f))
+		return;
+	const float dist = sqrt(d2);
+	if (dist < 1e-5f * (fabs(delta) + 1.f))
+		return;
+	// The guide no closer to the segment than a few mean free paths: no
+	// technique E (as EyeVolumeSegmentLight::Segment())
+	const float deltaClamped = clamp(delta, 0.f, segmentLength);
+	if (sqrt(d2 + (delta - deltaClamped) * (delta - deltaClamped)) * sigmaTMin >
+			VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE)
+		return;
+	const float thetaA = atan2(-delta, dist);
+	const float thetaB = isinf(segmentLength) ? (.5f * M_PI_F) : atan2(segmentLength - delta, dist);
+	if (!(thetaB - thetaA > 1e-6f))
+		return;
+
+	//--------------------------------------------------------------------------
+	// The MIS weight of the light sample of the scatter vertex (technique D)
+	//--------------------------------------------------------------------------
+
+	if (scatterT >= 0.f) {
+		const float tD = scatterT - segmentStart;
+		const float xD = tD - delta;
+		const float pdfE = dist / ((thetaB - thetaA) * (dist * dist + xD * xD));
+		float pdfD = 0.f;
+		for (uint i = 0; i < 3; ++i) {
+			if (channelPdfs[i] > 0.f)
+				pdfD += channelPdfs[i] * exp(-tD * sS[i]) * sS[i];
+		}
+		if (pdfD > 0.f)
+			segment->scatterWeight = pdfD / (pdfD + pdfE);
+	}
+
+	//--------------------------------------------------------------------------
+	// Technique E
+	//--------------------------------------------------------------------------
+
+	const float tE = clamp(delta + dist * tan(mix(thetaA, thetaB, u)), 0.f,
+			isinf(segmentLength) ? INFINITY : segmentLength);
+	if (isinf(tE))
+		return;
+	const float xE = tE - delta;
+	const float pdfE = dist / ((thetaB - thetaA) * (dist * dist + xE * xE));
+	float pdfD = 0.f;
+	for (uint i = 0; i < 3; ++i) {
+		if (channelPdfs[i] > 0.f)
+			pdfD += channelPdfs[i] * exp(-tE * sS[i]) * sS[i];
+	}
+	if (!(pdfE > 0.f) || !(pdfD > 0.f))
+		return;
+
+	// The throughput the distance sampling would give the path at tE
+	const float3 distanceThroughput = throughput * Spectrum_Exp(-tE * sigmaT) * sigmaT / pdfD;
+	if (Spectrum_IsBlack(distanceThroughput))
+		return;
+	// w_E(tE) p_D(tE) / p_E(tE)
+	const float weight = (pdfE / (pdfE + pdfD)) * pdfD / pdfE;
+
+	BSDF_InitVolume(bsdf, false, mats, ray, volumeIndex, segmentStart + tE, u);
+
+	if (!DirectLight_Illuminate(bsdf, shadowRay,
+				worldCenterX, worldCenterY, worldCenterZ, worldRadius,
+				&taskTmp->tmpHitPoint, ray->time, u0, u1, u2, u3,
+				&segment->illumInfo
+				LIGHTS_PARAM) ||
+			!DirectLight_BSDFSampling(taskConfig, &segment->illumInfo, ray->time,
+				lastPathVertex, pathInfo, &taskTmp->tmpPathDepthInfo, bsdf,
+				distanceThroughput, VLOAD3F(&shadowRay->d.x), photonGICausticChain, false
+				LIGHTS_PARAM))
+		return;
+
+	VSTORE3F(weight * distanceThroughput, segment->throughput.c);
+	segment->p = bsdf->hitPoint.p;
+	const float3 landingN = BSDF_GetLandingShadeN(bsdf);
+	VSTORE3F(landingN, &segment->landingN.x);
+	Seed seedPassThroughEvent;
+	Rnd_InitFloat(u4, &seedPassThroughEvent);
+	segment->seedPassThroughEvent = seedPassThroughEvent;
+	segment->firstPassThroughEvent = u4;
+	segment->throughShadowTransparency = false;
+	segment->state = 2;
+}
+
+// The trace result of the shadow ray of the segment's light sample: true when
+// it is final (the light sample is added if the light is visible)
+OPENCL_FORCE_INLINE bool AdvancePaths_SegmentShadowRayHit(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskTmp *taskTmp,
+		__global HitPoint *intersectHitPoint,
+		__global GPUTaskVolumeSegment *segment,
+		__global Ray *ray,
+		__global RayHit *rayHit,
+		__global SampleResult *sampleResult
+		LIGHTS_PARAM_DECL) {
+	if (taskConfig->film.hasChannelRayCount)
+		sampleResult->rayCount += 1;
+
+	float3 connectionThroughput = WHITE;
+	const float passThroughEvent = AdvancePaths_NextPassThroughEvent(
+			&segment->firstPassThroughEvent, &segment->seedPassThroughEvent);
+	int throughShadowTransparency = segment->throughShadowTransparency;
+	const bool continueToTrace = Scene_Intersect(taskConfig,
+			EYE_RAY | SHADOW_RAY,
+			&throughShadowTransparency,
+			&segment->volInfo,
+			intersectHitPoint,
+			passThroughEvent,
+			ray, rayHit, &taskTmp->tmpBsdf,
+			&connectionThroughput, WHITE,
+			NULL,
+			true, &segment->seedPassThroughEvent, NULL, NULL
+			MATERIALS_PARAM
+			);
+	segment->throughShadowTransparency = throughShadowTransparency;
+	const float shadowTransparencyScale = (!continueToTrace && throughShadowTransparency) ?
+		segment->illumInfo.shadowTransparencyScale : 1.f;
+	VSTORE3F((shadowTransparencyScale * connectionThroughput) * VLOAD3F(segment->illumInfo.lightRadiance.c),
+			segment->illumInfo.lightRadiance.c);
+
+	if (continueToTrace)
+		return false;
+
+	if (rayHit->meshIndex == NULL_INDEX) {
+		// The light is visible
+		const float3 lightRadiance = VLOAD3F(segment->illumInfo.lightRadiance.c);
+		SampleResult_AddDirectLight(&taskConfig->film,
+				sampleResult, segment->illumInfo.lightID, DIFFUSE | REFLECT,
+				VLOAD3F(segment->throughput.c), lightRadiance, 0.f,
+				sampleResult->firstPathVertex, BLACK);
+
+		// The light tree learns what the light added at the point
+		if (lightTreeLearn)
+			LightTree_LearnAddContribution(lightTreeNodes, lightTreeLightIndex,
+					lightTreeLearn, lightTreeLearnSums, lightTreeLearnCounts,
+					VLOAD3F(&segment->p.x), VLOAD3F(&segment->landingN.x), false,
+					segment->illumInfo.lightIndex, segment->illumInfo.pickPdf,
+					Spectrum_Y(lightRadiance));
+	}
+
+	segment->state = 1;
+	return true;
+}
+#endif
 
 // Nothing was hit (the next state is MK_SPLAT_SAMPLE). The BSDF is the one of
 // the previous path vertex (only the members of AdvancePaths_SaveVertexBSDF()
@@ -1017,6 +1335,34 @@ __kernel void AdvancePaths_MK_RT(
 	// The shadow ray
 	//--------------------------------------------------------------------------
 
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+	//--------------------------------------------------------------------------
+	// The shadow ray of the light sample of the volume segment
+	//--------------------------------------------------------------------------
+
+	// Traced in the second slot, with the vertex's shadow ray (MK_RT_DL) or
+	// the next vertex ray (MK_RT_NEXT_VERTEX)
+	if (taskConfig->pathTracer.volumeSegmentLight && (tasksVolumeSegment[gid].state == 3)) {
+		if (AdvancePaths_SegmentShadowRayHit(taskConfig, taskTmp, intersectHitPoint,
+				&tasksVolumeSegment[gid], &rays[secondRayIndex], &rayHits[secondRayIndex], sampleResult
+				LIGHTS_PARAM))
+			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+	}
+
+	// Traced alone
+	if (pathState == MK_RT_SEGMENT_DL) {
+		if (AdvancePaths_SegmentShadowRayHit(taskConfig, taskTmp, intersectHitPoint,
+				&tasksVolumeSegment[gid], &rays[gid], &rayHits[gid], sampleResult
+				LIGHTS_PARAM)) {
+			pathState = tasksVolumeSegment[gid].nextState;
+
+			// The next vertex ray samples the BSDF the vertex stored
+			if (pathState == MK_GENERATE_NEXT_VERTEX_RAY)
+				*bsdf = *vertexBsdf;
+		}
+	}
+#endif
+
 	if ((pathState == MK_RT_DL) || (pathState == MK_RT_NEXT_VERTEX_DL) ||
 			(pathState == MK_RT_DL_SPLAT)) {
 		const size_t shadowRayIndex = (pathState == MK_RT_NEXT_VERTEX_DL) ? secondRayIndex : gid;
@@ -1033,6 +1379,23 @@ __kernel void AdvancePaths_MK_RT(
 		if (pathState == MK_RT_DL) {
 			pathState = shadowRayState;
 #if defined(LUXRAYS_CUDA_DEVICE)
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			// The shadow ray of the volume segment's light sample needs more
+			// traces: it goes on alone, in the slot of the vertex ray (with
+			// the next vertex ray, see below, but not with a random walk)
+			if (taskConfig->pathTracer.volumeSegmentLight && (pathState != MK_RT_DL) &&
+#if !defined(PARAM_ENABLE_SUBSURFACE)
+					(pathState != MK_GENERATE_NEXT_VERTEX_RAY) &&
+#endif
+					(tasksVolumeSegment[gid].state == 3)) {
+				rays[gid] = rays[secondRayIndex];
+				rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+				tasksVolumeSegment[gid].state = 2;
+				tasksVolumeSegment[gid].nextState = pathState;
+				pathState = MK_RT_SEGMENT_DL;
+			}
+#endif
+
 			// The next vertex ray samples the BSDF the previous iteration
 			// stored
 			if (pathState == MK_GENERATE_NEXT_VERTEX_RAY)
@@ -1067,7 +1430,14 @@ __kernel void AdvancePaths_MK_RT(
 	//--------------------------------------------------------------------------
 
 	bool shadowRayToTrace = false;
-	if (pathState == MK_RT_NEXT_VERTEX) {
+	if ((pathState == MK_RT_NEXT_VERTEX)
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			// The shadow ray of the volume segment's light sample traced
+			// with the vertex ray needs more traces: the vertex ray waits
+			// (it is traced again)
+			&& !(taskConfig->pathTracer.volumeSegmentLight && (tasksVolumeSegment[gid].state == 3))
+#endif
+			) {
 		// Count the ray traced by the RT kernel (the shadow rays are counted
 		// by AdvancePaths_ShadowRayHit())
 		if (taskConfig->film.hasChannelRayCount && !subsurfaceExit)
@@ -1077,6 +1447,14 @@ __kernel void AdvancePaths_MK_RT(
 		// The first trace of the vertex ray, not its continuation after a
 		// pass-through surface
 		const bool firstTrace = (taskState->firstPassThroughEvent >= 0.f);
+#endif
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+		// A new vertex ray: no volume segment crossed yet
+		const bool segmentLight = taskConfig->pathTracer.volumeSegmentLight;
+		if (segmentLight && (taskState->firstPassThroughEvent >= 0.f)) {
+			tasksVolumeSegment[gid].state = 0;
+			tasksVolumeSegment[gid].scatterWeight = 1.f;
+		}
 #endif
 		const float passThroughEvent = AdvancePaths_NextPassThroughEvent(
 				&taskState->firstPassThroughEvent, &taskState->seedPassThroughEvent);
@@ -1123,6 +1501,17 @@ __kernel void AdvancePaths_MK_RT(
 
 			float3 connectionThroughput;
 			int throughShadowTransparency = taskState->throughShadowTransparency;
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			// The first volume segment of the ray (see
+			// AdvancePaths_VolumeSegmentLight()): its extent and volumes
+			const bool segmentToDo = segmentLight && (tasksVolumeSegment[gid].state == 0);
+			float segmentStart = 0.f, segmentEnd = 0.f;
+			uint segmentVolumeIndex = NULL_INDEX;
+			if (segmentToDo) {
+				segmentStart = rays[gid].mint;
+				segmentEnd = (rayHits[gid].meshIndex != NULL_INDEX) ? rayHits[gid].t : rays[gid].maxt;
+			}
+#endif
 			continueToTrace = Scene_Intersect(taskConfig,
 					EYE_RAY | ((pathInfo->depth.depth == 0) ? CAMERA_RAY : INDIRECT_RAY),
 					&throughShadowTransparency,
@@ -1135,9 +1524,39 @@ __kernel void AdvancePaths_MK_RT(
 					// The camera sees the side it faces, a BSDF ray the side
 					// seen from the light (as PathTracer::RenderEyePath())
 					pathInfo->depth.depth > 0, NULL
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+					, segmentToDo ? &segmentVolumeIndex : NULL, &tasksVolumeSegment[gid].volInfo
+#endif
 					MATERIALS_PARAM
 					);
 			taskState->throughShadowTransparency = throughShadowTransparency;
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			// A segment in a homogeneous volume that can scatter
+			if (segmentToDo && (segmentVolumeIndex != NULL_INDEX) &&
+					(mats[segmentVolumeIndex].type == HOMOGENEOUS_VOL) &&
+					(!tasksVolumeSegment[gid].volInfo.scatteredStart ||
+						mats[segmentVolumeIndex].volume.homogenous.multiScattering) &&
+					// The first such segment of the ray
+					((tasksVolumeSegment[gid].state = 1) == 1) &&
+					AdvancePaths_VolumeSegmentNearLights(taskConfig, &taskTmp->tmpHitPoint,
+						&rays[gid], segmentStart, segmentEnd, segmentVolumeIndex, passThroughEvent
+						MATERIALS_PARAM)) {
+				const uint sampleOffset = taskConfig->pathTracer.eyeSampleBootSize +
+						pathInfo->depth.depth * taskConfig->pathTracer.eyeSampleStepSize;
+				AdvancePaths_VolumeSegmentLight(taskConfig, &tasksVolumeSegment[gid], taskTmp,
+						pathInfo, &rays[gid], segmentStart, segmentEnd, segmentVolumeIndex,
+						VLOAD3F(taskState->throughput.c), passThroughEvent,
+						(!continueToTrace && (rayHits[gid].meshIndex == 0xfffffffeu)) ? rayHits[gid].t : -1.f,
+						Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_X SAMPLER_PARAM),
+						Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Y SAMPLER_PARAM),
+						Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_Z SAMPLER_PARAM),
+						Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_W SAMPLER_PARAM),
+						Sampler_GetSample(taskConfig, sampleOffset + IDX_DIRECTLIGHT_A SAMPLER_PARAM),
+						taskState->photonGICausticChain,
+						worldCenterX, worldCenterY, worldCenterZ, worldRadius
+						LIGHTS_PARAM);
+			}
+#endif
 			VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
 		}
 
@@ -1226,6 +1645,16 @@ __kernel void AdvancePaths_MK_RT(
 						pgicRadiancePhotonsBVHNodes, pgicCausticPhotons, pgicCausticPhotonsBVHNodes
 						LIGHTS_PARAM);
 
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+				// The light sample of the vertex the distance sampling
+				// scattered at, against the segment's one
+				if (segmentLight && (pathState == MK_RT_DL) && (tasksVolumeSegment[gid].scatterWeight != 1.f)) {
+					__global DirectLightIlluminateInfo *illumInfo = &tasksDirectLight[gid].illumInfo;
+					VSTORE3F(tasksVolumeSegment[gid].scatterWeight * VLOAD3F(illumInfo->lightRadiance.c),
+							illumInfo->lightRadiance.c);
+				}
+#endif
+
 				// Otherwise the shadow ray took the place of the vertex ray, and
 				// the next vertex ray is sampled after it (MK_RT_DL)
 				if ((pathState == MK_RT_DL) && sampleNextVertexRayNow) {
@@ -1243,6 +1672,31 @@ __kernel void AdvancePaths_MK_RT(
 			}
 		}
 
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+		// The shadow ray of the volume segment's light sample before the path
+		// moves on (after the vertex's own one, see the shadow ray above)
+		if (segmentLight && !continueToTrace && (tasksVolumeSegment[gid].state == 2)) {
+			if (pathState == MK_RT_DL) {
+				// With the vertex's shadow ray
+				rays[secondRayIndex] = tasksVolumeSegment[gid].shadowRay;
+				tasksVolumeSegment[gid].state = 3;
+			}
+#if !defined(PARAM_ENABLE_SUBSURFACE)
+			else if (pathState == MK_GENERATE_NEXT_VERTEX_RAY) {
+				// With the next vertex ray
+				rays[secondRayIndex] = tasksVolumeSegment[gid].shadowRay;
+				tasksVolumeSegment[gid].state = 3;
+			}
+#endif
+			else if ((pathState == MK_GENERATE_NEXT_VERTEX_RAY) || (pathState == MK_SPLAT_SAMPLE)) {
+				// Alone
+				rays[gid] = tasksVolumeSegment[gid].shadowRay;
+				tasksVolumeSegment[gid].nextState = pathState;
+				pathState = MK_RT_SEGMENT_DL;
+			}
+		}
+#endif
+
 #if defined(LUXRAYS_CUDA_DEVICE)
 		// Keep what the next iteration reads of the BSDF (there is one if
 		// something was hit, or on a volume scatter event). A pass-through
@@ -1250,7 +1704,11 @@ __kernel void AdvancePaths_MK_RT(
 		// continues the same vertex ray, and if it misses, the environment
 		// lights read the BSDF of the vertex the ray left from.
 		if ((rayHits[gid].meshIndex != NULL_INDEX) && !continueToTrace) {
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+			if (((pathState == MK_RT_DL) || (pathState == MK_RT_SEGMENT_DL)) && !sampleResult->lastPathVertex)
+#else
 			if ((pathState == MK_RT_DL) && !sampleResult->lastPathVertex)
+#endif
 				*vertexBsdf = *bsdf;
 			else
 				AdvancePaths_SaveVertexBSDF(vertexBsdf, bsdf);
@@ -1264,6 +1722,19 @@ __kernel void AdvancePaths_MK_RT(
 				&tasksSSSWalk[gid], pgicLightGroupCounts, pgicRadiancePhotonsValues
 				SAMPLER_PARAM
 				MATERIALS_PARAM);
+
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+		// The path is over with the shadow ray of the volume segment's light
+		// sample still to trace: it goes on alone, then the sample is splat
+		if (taskConfig->pathTracer.volumeSegmentLight && (pathState == MK_SPLAT_SAMPLE) &&
+				(tasksVolumeSegment[gid].state == 3)) {
+			rays[gid] = rays[secondRayIndex];
+			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+			tasksVolumeSegment[gid].state = 2;
+			tasksVolumeSegment[gid].nextState = MK_SPLAT_SAMPLE;
+			pathState = MK_RT_SEGMENT_DL;
+		}
+#endif
 	}
 
 	if (shadowRayToTrace) {

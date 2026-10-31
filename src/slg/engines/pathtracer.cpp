@@ -25,6 +25,7 @@
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
+#include "slg/volumes/homogenous.h"
 #include <boost/algorithm/string.hpp>
 #include <cstring>
 #include <utility>
@@ -159,7 +160,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 		const EyePathInfo &pathInfo, const Spectrum &pathThroughput,
 		const BSDF &bsdf, SampleResult *sampleResult,
 		const bool useBSDFEVal, const u_int causticChain, const bool photonGIIndirect,
-		const bool photonGIIndirectEnd) const {
+		const bool photonGIIndirectEnd, const float segmentWeight, const bool segmentSample) const {
 	if (!bsdf.IsDelta()) {
 		// Select the light strategy to use
 		auto& lightStrategy =
@@ -286,12 +287,14 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 									pathInfo.IsSpecularPathAfter(event, bsdf.GetUnregularizedGlossiness(),
 										hybridBackForwardGlossinessThreshold));
 
-							const float weight = misEnabled ? PowerHeuristic(directLightSamplingPdfW, bsdfPdfW) : 1.f;
+							const float weight = (misEnabled ? PowerHeuristic(directLightSamplingPdfW, bsdfPdfW) : 1.f) *
+									segmentWeight;
 							const Spectrum incomingRadiance = photonGIIndirect ?
 								((diffuseEval + bsdfEval * weight) * factor * connectionThroughput * lightRadiance) :
 								(bsdfEval * (weight * factor) * connectionThroughput * lightRadiance);
 
-							sampleResult->AddDirectLight(light->GetID(), event, pathThroughput, incomingRadiance, 1.f);
+							sampleResult->AddDirectLight(light->GetID(), event, pathThroughput, incomingRadiance,
+									segmentSample ? 0.f : 1.f);
 							learnContribution = RGBColor(incomingRadiance.c[0], incomingRadiance.c[1], incomingRadiance.c[2]).Y();
 
 							// The first path vertex is not handled by AddDirectLight(). This is valid
@@ -301,7 +304,7 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 							// direct hit, no MIS, it would be useless)
 							//
 							// Note: RR is ignored here because it can not happen on first path vertex
-							if ((sampleResult->firstPathVertex) && !(bsdf.GetEventTypes() & SPECULAR))
+							if ((sampleResult->firstPathVertex) && !segmentSample && !(bsdf.GetEventTypes() & SPECULAR))
 								sampleResult->irradiance =
 										(INV_PI * fabsf(Dot(bsdf.hitPoint.shadeN, shadowRay.d)) *
 										factor) * connectionThroughput * lightRadiance;
@@ -533,6 +536,232 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 }
 
 //------------------------------------------------------------------------------
+// The direct light along the volume segments of an eye path (V5)
+//
+// The light scattered once along a segment of the path ray in a homogeneous
+// volume and then reaching a light has two estimates: the light sample of the
+// vertex the distance sampling scatters at (technique D, density p_D(t) of
+// HomogeneousVolume::DistancePdf()) and the light sample of a point drawn by
+// equiangular sampling (technique E, Kulla and Fajardo 2012) towards a point
+// on a light picked for the segment, the guide. The two are weighted by MIS
+// over the distance t along the segment (w_D(t) + w_E(t) = 1), on top of the
+// usual MIS weight of the light sample against the BSDF (phase) sampling of
+// the vertex: the vertex at t_D keeps its BSDF sampling, so the weight of a
+// light sample is w_L(t, w) w_D(t) at t_D and w_L(t, w) w_E(t) at t_E, and a
+// BSDF hit on the light keeps 1 - w_L(t, w). Technique E stands for the vertex
+// technique D would create: the same depth, the same dimensions for the light
+// sample, and the throughput the distance sampling would give the path at t_E
+// (for the Russian roulette in w_L), times p_D(t_E) / p_E(t_E). The guide has
+// random numbers of its own and doesn't depend on t, so the weights sum to 1
+// for every guide; a guide on an environmental light, or on the line of the
+// ray, gives technique E no sample and w_D = 1.
+//------------------------------------------------------------------------------
+
+namespace {
+
+// See VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE in pathoclbase_kernels_micro.cl
+#define VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE 4.f
+
+class EyeVolumeSegmentLight : public VolumeSegmentLight {
+public:
+	EyeVolumeSegmentLight(const PathTracer &pt, IntersectionDeviceRef dev,
+			SceneConstRef scn, Sampler &smp, const EyePathInfo &info,
+			SampleResult &result, const u_int offset, const u_int chain,
+			const float tm) :
+			scatterWeight(1.f), pathTracer(pt), device(dev), scene(scn), sampler(smp),
+			pathInfo(info), sampleResult(result), sampleOffset(offset),
+			causticChain(chain), time(tm), used(false), guide(false) {
+	}
+	virtual ~EyeVolumeSegmentLight() { }
+
+	virtual void Segment(const Ray &ray, const HomogeneousVolume &volume,
+			const Spectrum &throughput, const float u) {
+		guide = false;
+		// Only the first such segment of the ray (the GPU has room for one)
+		if (used)
+			return;
+		used = true;
+
+		Spectrum sigmaA;
+		volume.GetSegmentCoefficients(ray, u, sigmaA, sigmaS);
+		if (sigmaS.Black())
+			return;
+		sigmaT = sigmaA + sigmaS;
+		HomogeneousVolume::DistanceChannelPdfs(sigmaA, sigmaS, throughput, channelPdfs);
+
+		segmentStart = ray.mint;
+		segmentLength = ray.maxt - ray.mint;
+		const Point origin = ray(ray.mint);
+
+		// All the lights further than a few mean free paths from the segment
+		// (see below)
+		const float sigmaTMin = sigmaT.Min();
+		const auto &lightSources = scene.GetLightSources();
+		if (lightSources.HasFiniteLightsBounds() && !isinf(segmentLength)) {
+			const BBox &lightBounds = lightSources.GetFiniteLightsBounds();
+			const BBox segmentBounds = Union(BBox(origin), origin + segmentLength * ray.d);
+			float d2 = 0.f;
+			for (u_int i = 0; i < 3; ++i) {
+				const float d = Max(0.f, Max(lightBounds.pMin[i] - segmentBounds.pMax[i],
+						segmentBounds.pMin[i] - lightBounds.pMax[i]));
+				d2 += d * d;
+			}
+			if (sqrtf(d2) * sigmaTMin > VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE)
+				return;
+		}
+
+		// The vertex a scatter in the segment would be: no light sample on the
+		// last one (but the first, see RenderEyePath()). Its point (the middle
+		// of the segment, no further than a mean free path: a ray that hits
+		// nothing can end very far) picks the guide
+		BSDF bsdf;
+		const float tMid = Min(.5f * segmentLength, 1.f / sigmaT.Filter());
+		bsdf.Init(false, false, scene, ray, volume, ray.mint + tMid, u);
+		const bool lastPathVertex = pathInfo.depth.IsLastPathVertex(pathTracer.maxPathDepth,
+				PathDepthInfo::GetDepthEvent(bsdf, bsdf.GetEventTypes()));
+		if (lastPathVertex && !sampleResult.firstPathVertex)
+			return;
+
+		//----------------------------------------------------------------------
+		// The guide: a point on a light picked from the middle of the segment,
+		// with random numbers of its own
+		//----------------------------------------------------------------------
+
+		union {
+			float f;
+			u_int i;
+		} uBits;
+		uBits.f = u;
+		TauswortheRandomGenerator rng(uBits.i ^ 0x2545f491u);
+
+		const auto &lightStrategy = scene.GetLightSources().GetIlluminateLightStrategy();
+		const Normal landingNormal = bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
+		float lightPickPdf;
+		const auto light = lightStrategy.SampleLights(scene, rng.floatValue(),
+				bsdf.hitPoint.p, landingNormal, true, &lightPickPdf);
+		if (!light || light->IsInfinite())
+			return;
+
+		Ray guideRay;
+		float guidePdfW;
+		const float g0 = rng.floatValue();
+		const float g1 = rng.floatValue();
+		const float g2 = rng.floatValue();
+		const Spectrum guideRadiance = light->Illuminate(scene, bsdf, time, g0, g1, g2,
+				guideRay, guidePdfW);
+		if (guideRadiance.Black())
+			return;
+		const Point guidePoint = guideRay(guideRay.maxt);
+
+		// The guide in the frame of the segment
+		const Vector toGuide = guidePoint - origin;
+		delta = Dot(toGuide, ray.d);
+		const float d2 = toGuide.LengthSquared() - delta * delta;
+		if (!(d2 > 0.f))
+			return;
+		dist = sqrtf(d2);
+		if (dist < 1e-5f * (fabsf(delta) + 1.f))
+			return;
+		// The guide no closer to the segment than a few mean free paths: the
+		// distance sampling alone is already good (the 1 / r^2 of the light
+		// changes little where the transmittance does), no technique E. The
+		// lights' bounds can rule it out before the guide is picked (above).
+		const float deltaClamped = Clamp(delta, 0.f, segmentLength);
+		if (sqrtf(d2 + (delta - deltaClamped) * (delta - deltaClamped)) * sigmaTMin >
+				VOLUME_SEGMENT_LIGHT_MAX_OPTICAL_DISTANCE)
+			return;
+		thetaA = atan2f(-delta, dist);
+		thetaB = isinf(segmentLength) ? (.5f * M_PI) : atan2f(segmentLength - delta, dist);
+		if (!(thetaB - thetaA > 1e-6f))
+			return;
+		guide = true;
+
+		//----------------------------------------------------------------------
+		// Technique E
+		//----------------------------------------------------------------------
+
+		// The distance takes the pass-through event (the sampler's
+		// stratification, as the distance sampling)
+		const float tE = Clamp(delta + dist * tanf(thetaA + u * (thetaB - thetaA)), 0.f,
+				isinf(segmentLength) ? INFINITY : segmentLength);
+		if (isinf(tE))
+			return;
+		const float pdfE = EquiangularPdf(tE);
+		const float pdfD = HomogeneousVolume::DistancePdf(tE, sigmaS, channelPdfs);
+		if (!(pdfE > 0.f) || !(pdfD > 0.f))
+			return;
+
+		// The throughput the distance sampling would give the path at tE
+		const Spectrum distanceThroughput = throughput * Exp(-tE * sigmaT) * sigmaT / pdfD;
+		if (distanceThroughput.Black())
+			return;
+		// w_E(tE) p_D(tE) / p_E(tE)
+		const float weight = (pdfE / (pdfE + pdfD)) * pdfD / pdfE;
+
+		BSDF bsdfE;
+		bsdfE.Init(false, false, scene, ray, volume, ray.mint + tE, u);
+
+		// The light sample takes the dimensions of the vertex's
+		const float u0 = sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_X);
+		const float u1 = sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_Y);
+		const float u2 = sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_Z);
+		const float u3 = sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_W);
+		const float u4 = sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A);
+
+		const bool lastPathVertexSave = sampleResult.lastPathVertex;
+		sampleResult.lastPathVertex = lastPathVertex;
+		pathTracer.DirectLightSampling(device, scene, time, u0, u1, u2, u3, u4,
+				pathInfo, distanceThroughput, bsdfE, &sampleResult, true, causticChain,
+				false, false, weight, true);
+		sampleResult.lastPathVertex = lastPathVertexSave;
+	}
+
+	virtual void Scattered(const float t) {
+		scatterWeight = 1.f;
+		if (guide) {
+			const float tD = t - segmentStart;
+			const float pdfE = EquiangularPdf(tD);
+			const float pdfD = HomogeneousVolume::DistancePdf(tD, sigmaS, channelPdfs);
+			// The balance heuristic
+			if (pdfD > 0.f)
+				scatterWeight = pdfD / (pdfD + pdfE);
+		}
+	}
+
+	// The weight of the light sample of the vertex the last segment scattered at
+	float scatterWeight;
+
+private:
+	float EquiangularPdf(const float t) const {
+		const float x = t - delta;
+		return dist / ((thetaB - thetaA) * (dist * dist + x * x));
+	}
+
+	const PathTracer &pathTracer;
+	IntersectionDeviceRef device;
+	SceneConstRef scene;
+	Sampler &sampler;
+	const EyePathInfo &pathInfo;
+	SampleResult &sampleResult;
+	const u_int sampleOffset, causticChain;
+	const float time;
+
+	// The first segment of the ray is done
+	bool used;
+	// The segment
+	Spectrum sigmaS, sigmaT;
+	float channelPdfs[3];
+	float segmentStart, segmentLength;
+	// The guide in the frame of the segment: the distance along the ray to
+	// the foot of the perpendicular, the distance to the ray, the angles of
+	// the start and end of the segment
+	bool guide;
+	float delta, dist, thetaA, thetaB;
+};
+
+}
+
+//------------------------------------------------------------------------------
 // RenderEyePath methods
 //------------------------------------------------------------------------------
 
@@ -571,6 +800,9 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 	// BSDF is already initialized and there is no ray to trace
 	bool subsurfaceExit = false;
 	for (;;) {
+		// The weight of the light sample of a volume vertex against the
+		// segment's equiangular one (V5)
+		float vertexSegmentWeight = 1.f;
 		sampleResult.firstPathVertex = (pathInfo.depth.depth == 0);
 		const u_int sampleOffset = eyeSampleBootSize + pathInfo.depth.depth * eyeSampleStepSize;
 		// The caustic cache was looked up here with a result
@@ -584,6 +816,12 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 			eyeRayHit.t = 0.f;
 		} else {
 			Spectrum connectionThroughput;
+			// The direct light along the volume segments of the ray (V5)
+			EyeVolumeSegmentLight segmentLight(*this, device, scene, sampler,
+					pathInfo, sampleResult, sampleOffset, causticChain, eyeRay.time);
+			// (it needs a light that isn't environmental for its guide)
+			const bool useSegmentLight = volumeSegmentLight && !photonGICache &&
+					scene.GetLightSources().HasFiniteLights();
 			// The camera sees the side of a surface it faces (a backdrop
 			// card with transparency.front/back), a BSDF ray takes the side
 			// seen from the light, as the shadow ray of the direct light
@@ -594,8 +832,10 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&pathInfo.volume, passThrough,
 					&eyeRay, &eyeRayHit, hitBsdf, &connectionThroughput,
-					&pathThroughput, &sampleResult, !sampleResult.firstPathVertex);
+					&pathThroughput, &sampleResult, !sampleResult.firstPathVertex,
+					useSegmentLight ? &segmentLight : nullptr);
 			pathThroughput *= connectionThroughput;
+			vertexSegmentWeight = segmentLight.scatterWeight;
 			// Note: pass-through check is done inside Scene::Intersect()
 		}
 
@@ -820,7 +1060,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				sampler.GetSample(sampleOffset + IDX_DIRECTLIGHT_A),
 				pathInfo, 
 				pathThroughput, bsdf, &sampleResult, true, causticChain, photonGIIndirect != nullptr,
-				photonGIIndirect && bsdf.IsVolume());
+				photonGIIndirect && bsdf.IsVolume(), vertexSegmentWeight);
 
 		if ((sampleResult.lastPathVertex && !photonGIIndirect) ||
 				(photonGIIndirect && bsdf.IsVolume()))
@@ -1456,6 +1696,9 @@ void PathTracer::ParseOptions(
 	// Path depth settings
 	maxPathDepth = GetMaxPathDepth(cfg, defaultProps);
 
+	// The direct light along the volume segments
+	volumeSegmentLight = cfg.Get(defaultProps.Get("path.volume.equiangular.enable")).Get<bool>();
+
 	// Russian Roulette settings
 	rrType = String2RussianRouletteType(cfg.Get(defaultProps.Get("path.russianroulette.type")).Get<string>());
 	rrDepth = (u_int)Max(1, cfg.Get(defaultProps.Get("path.russianroulette.depth")).Get<int>());
@@ -1534,6 +1777,7 @@ PropertiesUPtr PathTracer::ToProperties(const Properties &cfg) {
 			cfg.Get(GetDefaultProps()->Get("path.regularization.roughness")) <<
 			cfg.Get(GetDefaultProps()->Get("path.clamping.variance.maxvalue")) <<
 			cfg.Get(GetDefaultProps()->Get("path.forceblackbackground.enable")) <<
+			cfg.Get(GetDefaultProps()->Get("path.volume.equiangular.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("path.albedospecular.type")) <<
 			cfg.Get(GetDefaultProps()->Get("path.albedospecular.glossinessthreshold")) <<
 			*Sampler::ToProperties(cfg);
@@ -1558,6 +1802,7 @@ PropertiesUPtr PathTracer::GetDefaultProps() {
 			Property("path.regularization.roughness")(.1f) <<
 			Property("path.clamping.variance.maxvalue")(0.f) <<
 			Property("path.forceblackbackground.enable")(false) <<
+			Property("path.volume.equiangular.enable")(false) <<
 			Property("path.albedospecular.type")("REFLECT_TRANSMIT") <<
 			Property("path.albedospecular.glossinessthreshold")(.05f);
 

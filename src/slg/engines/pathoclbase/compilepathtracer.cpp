@@ -24,6 +24,10 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+bool CompiledScene::HasVolumeSegmentLightBuffer() const {
+	return pathTracer->volumeSegmentLight && hasHomogeneousVolumes && !pathTracer->GetPhotonGICache();
+}
+
 void CompiledScene::CompilePathTracer() {
 	compiledPathTracer.eyeSampleBootSize = pathTracer->eyeSampleBootSize;
 	compiledPathTracer.eyeSampleStepSize = pathTracer->eyeSampleStepSize;
@@ -48,6 +52,19 @@ void CompiledScene::CompilePathTracer() {
 	compiledPathTracer.forceBlackBackground = pathTracer->forceBlackBackground;
 
 	CompilePhotonGI();
+
+	// The direct light along the volume segments of the vertex rays (as
+	// PathTracer::RenderEyePath(): not with the PhotonGI cache, and it needs
+	// a light that isn't infinite). The buffer of PathOCLBaseOCLRenderThread
+	// is allocated without the lights' condition, which an edit can change.
+	compiledPathTracer.volumeSegmentLight = HasVolumeSegmentLightBuffer() &&
+			scene.GetLightSources().HasFiniteLights();
+	compiledPathTracer.volumeSegmentLightBounds = scene.GetLightSources().HasFiniteLightsBounds();
+	const BBox &lightBounds = scene.GetLightSources().GetFiniteLightsBounds();
+	for (u_int i = 0; i < 3; ++i) {
+		compiledPathTracer.volumeSegmentLightBoundsMin[i] = lightBounds.pMin[i];
+		compiledPathTracer.volumeSegmentLightBoundsMax[i] = lightBounds.pMax[i];
+	}
 
 	compiledPathTracer.albedo.specularSetting = (slg::ocl::AlbedoSpecularSetting)pathTracer->albedoSpecularSetting;
 	compiledPathTracer.albedo.specularGlossinessThreshold = pathTracer->albedoSpecularGlossinessThreshold;

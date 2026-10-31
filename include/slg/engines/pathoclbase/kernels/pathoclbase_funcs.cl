@@ -460,6 +460,13 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 // Kernel parameters
 //------------------------------------------------------------------------------
 
+#if defined(PARAM_ENABLE_VOLUME_SEGMENT_LIGHT)
+#define KERNEL_ARGS_VOLUME_SEGMENT \
+		, __global GPUTaskVolumeSegment *tasksVolumeSegment
+#else
+#define KERNEL_ARGS_VOLUME_SEGMENT
+#endif
+
 #define KERNEL_ARGS_VOLUMES \
 		, __global PathVolumeInfo *directLightVolInfos
 
@@ -521,6 +528,7 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 		, __global GPUTaskDirectLight *tasksDirectLight \
 		, __global GPUTaskDirectLightVertex *tasksDirectLightVertex \
 		, __global GPUTaskSSSWalk *tasksSSSWalk \
+		KERNEL_ARGS_VOLUME_SEGMENT \
 		, __global GPUTaskState *tasksState \
 		, __global BSDF *tasksBSDF \
 		, __global PathState *pathStates \
