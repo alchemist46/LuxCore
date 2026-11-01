@@ -136,6 +136,12 @@ public:
 	}
 	bool IsPhotonGIEnabled() const { return material->IsPhotonGIEnabled(); }
 	bool IsHoldout() const { return material->IsHoldout(); }
+	// The whole direct light of the diffuse lobe of the vertex comes from the
+	// light sampling, without the MIS with the BSDF sampling, whose hits on the
+	// lights the light sampling can pick add nothing after that lobe: the toon
+	// material, whose diffuse BSDF sampling is the one of its indirect light
+	// (see ToonMaterial). Its direct light is EvaluateToon().
+	bool IsDirectLightSamplingOnly() const { return material->GetType() == TOON; }
 	bool IsAlbedoEndPoint(const AlbedoSpecularSetting albedoSpecularSetting,
 		const float albedoSpecularGlossinessThreshold) const;
 	u_int GetObjectID() const;
@@ -191,6 +197,12 @@ public:
 	luxrays::Spectrum GetVolumeSigmaT() const;
 	luxrays::Spectrum Evaluate(const luxrays::Vector &generatedDir,
 		BSDFEvent *event, float *directPdfW = NULL, float *reversePdfW = NULL) const;
+	// The direct light of a toon vertex of an eye path (see
+	// IsDirectLightSamplingOnly()): the toon part of the ramp direction
+	// rampDir, lightDir or the direction of the centre of the light (see
+	// ToonMaterial::EvaluateToon())
+	luxrays::Spectrum EvaluateToon(const luxrays::Vector &lightDir, const luxrays::Vector &rampDir,
+		BSDFEvent *event) const;
 	luxrays::Spectrum Sample(luxrays::Vector *sampledDir,
 		const float u0, const float u1,
 		float *pdfW, float *absCosSampledDir,

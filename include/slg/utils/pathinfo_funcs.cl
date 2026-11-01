@@ -122,8 +122,10 @@ OPENCL_FORCE_INLINE void EyePathInfo_AddVertex(__global EyePathInfo *pathInfo,
 		// All other vertices must be nearly specular
 		(pathInfo->isNearlyCaustic && isNewVertexNearlySpecular);
 
-	// Update last path vertex information
-	pathInfo->lastBSDFPdfW = pdfW;
+	// Update last path vertex information. A BSDF hit on a light after a
+	// vertex that takes its whole direct light from the light sampling adds
+	// nothing (see BSDF::IsDirectLightSamplingOnly())
+	pathInfo->lastBSDFPdfW = BSDF_IsDirectLightSamplingOnly(bsdf MATERIALS_PARAM) ? 0.f : pdfW;
 	const float3 shadeN = VLOAD3F(&bsdf->hitPoint.shadeN.x);
 	VSTORE3F(bsdf->hitPoint.intoObject ? shadeN : -shadeN, &pathInfo->lastShadeN.x);
 	pathInfo->lastP = bsdf->hitPoint.p;

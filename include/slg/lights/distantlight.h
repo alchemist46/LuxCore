@@ -37,6 +37,10 @@ public:
 		float *sin2ThetaMaxData, float *cosThetaMaxData) const;
 
 	virtual LightSourceType GetType() const { return TYPE_DISTANT; }
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+		*dir = -absoluteLightDir;
+		return true;
+	}
 	virtual float GetPower(SceneConstRef scene) const;
 
 	virtual luxrays::Spectrum Emit(SceneConstRef scene,

@@ -366,9 +366,19 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 	// Sample the BSDF
 	BSDFEvent event;
 	float bsdfPdfW;
-	float3 bsdfEval = BSDF_Evaluate(bsdf,
-			shadowRayDir, &event, &bsdfPdfW
-			MATERIALS_PARAM);
+	float3 bsdfEval;
+	// A toon vertex: the light sampling has the whole direct light, of the
+	// direction of the centre of the light with ToonParam::lightCenter, out
+	// of the MIS (see BSDF::IsDirectLightSamplingOnly())
+	const bool toon = BSDF_IsDirectLightSamplingOnly(bsdf MATERIALS_PARAM);
+	if (toon) {
+		bsdfEval = BSDF_EvaluateToon(bsdf, shadowRayDir, &lights[info->lightIndex], &event
+				MATERIALS_PARAM);
+		bsdfPdfW = 0.f;
+	} else
+		bsdfEval = BSDF_Evaluate(bsdf,
+				shadowRayDir, &event, &bsdfPdfW
+				MATERIALS_PARAM);
 
 	if (Spectrum_IsBlack(bsdfEval) ||
 			(taskConfig->pathTracer.hybridBackForward.enabled &&
@@ -409,8 +419,9 @@ OPENCL_FORCE_INLINE bool DirectLight_BSDFSampling(
 			bsdfEval = BLACK;
 			bsdfPdfW = 0.f;
 		} else {
-			float diffusePdfW;
-			diffuseEval = BSDF_EvaluateDiffuse(bsdf, shadowRayDir, &diffusePdfW
+			// The diffuse lobe of a toon vertex is the whole of it
+			float diffusePdfW = 0.f;
+			diffuseEval = toon ? bsdfEval : BSDF_EvaluateDiffuse(bsdf, shadowRayDir, &diffusePdfW
 					MATERIALS_PARAM);
 			bsdfEval = fmax(bsdfEval - diffuseEval, BLACK);
 			bsdfPdfW = fmax(bsdfPdfW - diffusePdfW, 0.f);

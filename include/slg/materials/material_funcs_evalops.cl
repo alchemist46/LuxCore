@@ -138,6 +138,12 @@ OPENCL_FORCE_NOT_INLINE uint Material_EvalOp(
 			OpenPBRMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
 			break;
 		//----------------------------------------------------------------------
+		// TOON
+		//----------------------------------------------------------------------
+		case TOON:
+			ToonMaterial_EvalOp(material, evalType, evalStack, evalStackOffset, hitPoint MATERIALS_PARAM);
+			break;
+		//----------------------------------------------------------------------
 		// SUBSURFACE
 		//----------------------------------------------------------------------
 #if defined(PARAM_ENABLE_SUBSURFACE)
@@ -251,6 +257,10 @@ OPENCL_FORCE_NOT_INLINE void MaterialDiffuse_EvalOp(
 		case VELVET:
 			// The whole material is the diffuse lobe
 			VelvetMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case TOON:
+			// The whole material is the diffuse lobe
+			ToonMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
 			break;
 		case MATTETRANSLUCENT:
 			MatteTranslucentMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);

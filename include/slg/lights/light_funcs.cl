@@ -1272,6 +1272,47 @@ OPENCL_FORCE_INLINE bool Light_IsEnvOrIntersectable(__global const LightSource *
 	}
 }
 
+// The direction from p to the centre of the light, false for the lights
+// without one (see LightSource::GetCenterDir())
+OPENCL_FORCE_INLINE bool Light_GetCenterDir(__global const LightSource *light,
+		const float3 p, float3 *dir) {
+	float3 center;
+	switch (light->type) {
+		case TYPE_TRIANGLE:
+			center = VLOAD3F(&light->triangle.emitterCenter.x);
+			break;
+		case TYPE_POINT:
+			center = VLOAD3F(&light->notIntersectable.point.absolutePos.x);
+			break;
+		case TYPE_MAPPOINT:
+			center = VLOAD3F(&light->notIntersectable.mapPoint.absolutePos.x);
+			break;
+		case TYPE_SPHERE:
+			center = VLOAD3F(&light->notIntersectable.sphere.absolutePos.x);
+			break;
+		case TYPE_MAPSPHERE:
+			center = VLOAD3F(&light->notIntersectable.mapSphere.sphere.absolutePos.x);
+			break;
+		case TYPE_SPOT:
+			center = VLOAD3F(&light->notIntersectable.spot.absolutePos.x);
+			break;
+		case TYPE_PROJECTION:
+			center = VLOAD3F(&light->notIntersectable.projection.absolutePos.x);
+			break;
+		case TYPE_SUN:
+			*dir = VLOAD3F(&light->notIntersectable.sun.absoluteDir.x);
+			return true;
+		case TYPE_DISTANT:
+			*dir = -VLOAD3F(&light->notIntersectable.distant.absoluteLightDir.x);
+			return true;
+		default:
+			return false;
+	}
+
+	*dir = normalize(center - p);
+	return true;
+}
+
 OPENCL_FORCE_INLINE float Light_GetAvgPassThroughTransparency(
 		__global const LightSource *light
 		LIGHTS_PARAM_DECL) {

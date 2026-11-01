@@ -20,6 +20,7 @@
 #include "slg/scene/scene.h"
 #include "slg/materials/glass.h"
 #include "slg/materials/subsurface.h"
+#include "slg/materials/toon.h"
 #include <memory>
 
 using namespace luxrays;
@@ -446,6 +447,32 @@ Spectrum BSDF::Evaluate(const Vector &generatedDir,
 		if (hitPoint.fromLight)
 			result *= (absDotEyeDirNG / absDotLightDirNG);
 	}
+
+	return result;
+}
+
+Spectrum BSDF::EvaluateToon(const Vector &lightDir, const Vector &rampDir,
+		BSDFEvent *event) const {
+	const Vector &eyeDir = hitPoint.fixedDir;
+
+	// The tests of Evaluate() for a material that only reflects
+	const float dotLightDirNG = Dot(lightDir, hitPoint.geometryN);
+	const float dotEyeDirNG = Dot(eyeDir, hitPoint.geometryN);
+	if ((fabsf(dotLightDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
+			(fabsf(dotEyeDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
+			(dotEyeDirNG * dotLightDirNG < 0.f) ||
+			(Dot(eyeDir, hitPoint.interpolatedN) * Dot(lightDir, hitPoint.interpolatedN) < 0.f))
+		return Spectrum();
+
+	const ToonMaterial *toon = static_cast<const ToonMaterial *>(material.get());
+	Spectrum result = toon->EvaluateToon(hitPoint, frame.ToLocal(lightDir), frame.ToLocal(rampDir),
+			frame.ToLocal(eyeDir));
+	*event = DIFFUSE | REFLECT;
+
+	// Shadow terminator artefact avoidance
+	if (hitPoint.shadeN != hitPoint.interpolatedN)
+		result *= ShadowTerminatorAvoidanceFactor(hitPoint.GetLandingInterpolatedN(),
+				hitPoint.GetLandingShadeN(), lightDir);
 
 	return result;
 }

@@ -255,6 +255,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/materials/roughmatte.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/roughmattetranslucent.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/thinfilmcoating.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/materials/toon.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/twosided.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/velvet.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/materials/subsurface.cpp
@@ -821,6 +822,7 @@ set(SLG_FILM_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/patterns.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/objectidmask.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/outputswitcher.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/outline.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/vignetting.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/premultiplyalpha.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/workingtorec709.cpp

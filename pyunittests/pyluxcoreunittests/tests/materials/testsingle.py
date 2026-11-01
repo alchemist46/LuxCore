@@ -226,6 +226,18 @@ class RoughMatteMaterial(ImageTest):
 RoughMatteMaterial = AddTests(RoughMatteMaterial, TestRoughMatteMaterial, GetTestCases())
 
 ################################################################################
+# Toon material test
+################################################################################
+
+def TestToonMaterial(cls, params):
+	StandardSceneTest(cls, params, "simple/mat-toon-area.cfg", "ToonMaterial")
+
+class ToonMaterial(ImageTest):
+    pass
+
+ToonMaterial = AddTests(ToonMaterial, TestToonMaterial, GetTestCases())
+
+################################################################################
 # Velvet material test
 ################################################################################
 

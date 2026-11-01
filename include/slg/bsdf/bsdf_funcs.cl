@@ -346,6 +346,49 @@ OPENCL_FORCE_INLINE float3 BSDF_Evaluate(__global const BSDF *bsdf,
 	return result;
 }
 
+// The direct light of a toon vertex (see BSDF_IsDirectLightSamplingOnly()):
+// the toon part of the ramp direction, lightDir or the direction of the
+// centre of the light with ToonParam::lightCenter (see BSDF::EvaluateToon()).
+// Inlined: a call costs the direct light of every material more scratch and
+// time (2026-11-01: +32 B, 1-4% slower).
+OPENCL_FORCE_INLINE float3 BSDF_EvaluateToon(__global const BSDF *bsdf,
+		const float3 lightDir, __global const LightSource* restrict light, BSDFEvent *event
+		MATERIALS_PARAM_DECL) {
+	float3 rampDir = lightDir;
+	if (mats[bsdf->materialIndex].toon.lightCenter) {
+		float3 centerDir;
+		if (Light_GetCenterDir(light, VLOAD3F(&bsdf->hitPoint.p.x), &centerDir))
+			rampDir = centerDir;
+	}
+
+	const float3 eyeDir = VLOAD3F(&bsdf->hitPoint.fixedDir.x);
+	const float3 geometryN = VLOAD3F(&bsdf->hitPoint.geometryN.x);
+	const float3 interpolatedN =  VLOAD3F(&bsdf->hitPoint.interpolatedN.x);
+	const float3 shadeN =  VLOAD3F(&bsdf->hitPoint.shadeN.x);
+
+	// The tests of BSDF_Evaluate() for a material that only reflects
+	const float dotLightDirNG = dot(lightDir, geometryN);
+	const float dotEyeDirNG = dot(eyeDir, geometryN);
+	if ((fabs(dotLightDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
+			(fabs(dotEyeDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
+			(dotEyeDirNG * dotLightDirNG < 0.f) ||
+			(dot(eyeDir, interpolatedN) * dot(lightDir, interpolatedN) < 0.f))
+		return BLACK;
+
+	__global const Frame *frame = &bsdf->frame;
+	float3 result = ToonMaterial_EvaluateToon(&mats[bsdf->materialIndex], &bsdf->hitPoint,
+			Frame_ToLocal(frame, lightDir), Frame_ToLocal(frame, rampDir), Frame_ToLocal(frame, eyeDir)
+			MATERIALS_PARAM);
+	*event = DIFFUSE | REFLECT;
+
+	// Shadow terminator artefact avoidance
+	if ((shadeN.x != interpolatedN.x) || (shadeN.y != interpolatedN.y) || (shadeN.z != interpolatedN.z))
+		result *= BSDF_ShadowTerminatorAvoidanceFactor(BSDF_GetLandingInterpolatedN(bsdf),
+				BSDF_GetLandingShadeN(bsdf), lightDir);
+
+	return result;
+}
+
 OPENCL_FORCE_INLINE float3 BSDF_Sample(__global const BSDF *bsdf, const float u0, const float u1,
 		float3 *sampledDir, float *pdfW, float *absCosSampledDir, BSDFEvent *event
 		MATERIALS_PARAM_DECL) {

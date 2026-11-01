@@ -70,7 +70,7 @@ def rough(a, suffix=""):
             f"scene.materials.m.vroughness{suffix} = {a}\n")
 
 
-def cases():
+def cases(env="inf"):
     """(name, material scene properties, expected furnace value or None)
 
     The same lossless parameter sets as tests/bsdf/bsdftest.cpp. The expected
@@ -245,6 +245,18 @@ def cases():
                   f"scene.materials.m.preset = {preset}\n"
                   "scene.materials.m.weft_kd = 0 0 0\nscene.materials.m.warp_kd = 0 0 0\n"
                   "scene.materials.m.weft_ks = 1 1 1\nscene.materials.m.warp_ks = 1 1 1\n", 1.0))
+    # Toon: the light sampling has the whole direct light (the stepped one), a
+    # BSDF hit on the light adds nothing, and the BSDF sampling is the Lambert
+    # indirect light. A ramp of factor 0.5 from cos 0.1 and 1 from cos 0.5
+    # reflects 2 (0.5 * 0.4 + 1 * 0.5) = 1.4 of the environment (a step at
+    # cos 0 reads 0.3% low: the light between the shading and the geometric
+    # horizons of the tessellated sphere); without the light sampling
+    # (boxnodls) the sphere is a white matte one
+    # (lightcenter off: the centre of the box is the one of the sphere)
+    c.append(("toon-ramp", "scene.materials.m.type = toon\nscene.materials.m.kd = 1 1 1\n"
+              "scene.materials.m.ramp.thresholds = 0.1 0.5\nscene.materials.m.ramp.factors = 0.5 1\n"
+              "scene.materials.m.lightcenter = 0\n",
+              1.0 if env == "boxnodls" else 1.4))
     for r in (0.2, 0.5, 1.0):
         c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.roughness = {r}\n", None))
@@ -524,7 +536,7 @@ def main():
               f"{'mu<.2':>6s} {'<.4':>6s} {'<.6':>6s} {'<.8':>6s} {'<=1':>6s}  {'relstd':>6s}  result")
     print(header)
     failures = 0
-    for name, props, expect in cases():
+    for name, props, expect in cases(opts["env"]):
         if opts["filter"] and not any(f in name for f in opts["filter"].split(",")):
             continue
         t0 = time.time()

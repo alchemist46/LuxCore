@@ -150,6 +150,8 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_materialdefs_funcs_roughglass << // Before glass: the regularized glass uses it
 			slg::ocl::KernelSource_materialdefs_funcs_glass <<
 			slg::ocl::KernelSource_materialdefs_funcs_roughmatte_translucent <<
+			slg::ocl::KernelSource_materialdefs_funcs_toon_ramp <<
+			slg::ocl::KernelSource_materialdefs_funcs_toon <<
 			slg::ocl::KernelSource_materialdefs_funcs_twosided <<
 			slg::ocl::KernelSource_materialdefs_funcs_velvet <<
 			slg::ocl::KernelSource_materialdefs_funcs_subsurface <<

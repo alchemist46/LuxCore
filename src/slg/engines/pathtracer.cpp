@@ -23,6 +23,7 @@
 #include "slg/usings.h"
 #include "slg/engines/pathtracer.h"
 #include "slg/engines/caches/photongi/photongicache.h"
+#include "slg/materials/toon.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
 #include <boost/algorithm/string.hpp>
@@ -194,8 +195,22 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 				BSDFEvent event;
 				float bsdfPdfW;
 				Spectrum bsdfEval;
-				
-				if (useBSDFEVal)
+				// A toon vertex: the light sampling has the whole direct light,
+				// of the direction of the centre of the light with
+				// ToonParam::lightCenter, out of the MIS (see
+				// BSDF::IsDirectLightSamplingOnly())
+				const bool toon = useBSDFEVal && bsdf.IsDirectLightSamplingOnly();
+
+				if (toon) {
+					Vector rampDir = shadowRay.d;
+					if (static_cast<const ToonMaterial &>(bsdf.GetMaterial()).UsesLightCenter()) {
+						Vector centerDir;
+						if (light->GetCenterDir(bsdf.hitPoint.p, &centerDir))
+							rampDir = centerDir;
+					}
+					bsdfEval = bsdf.EvaluateToon(shadowRay.d, rampDir, &event);
+					bsdfPdfW = 0.f;
+				} else if (useBSDFEVal)
 					bsdfEval = bsdf.Evaluate(shadowRay.d, &event, &bsdfPdfW);
 				else {
 					// This is used by BAKECPU and must be aligned with its BSDF sampling
@@ -253,8 +268,9 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 								bsdfEval = Spectrum();
 								bsdfPdfW = 0.f;
 							} else if (photonGIIndirect) {
-								float diffusePdfW;
-								diffuseEval = bsdf.EvaluateDiffuse(shadowRay.d, &diffusePdfW);
+								// The diffuse lobe of a toon vertex is the whole of it
+								float diffusePdfW = 0.f;
+								diffuseEval = toon ? bsdfEval : bsdf.EvaluateDiffuse(shadowRay.d, &diffusePdfW);
 								bsdfEval = (bsdfEval - diffuseEval).Clamp(0.f, INFINITY);
 								bsdfPdfW = Max(bsdfPdfW - diffusePdfW, 0.f);
 								// The cache has the direct light of the diffuse lobe

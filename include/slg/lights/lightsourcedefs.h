@@ -140,6 +140,9 @@ private:
 	void Preprocess(SceneConstRef scene, const bool useRTMode);
 	// Finds the quads of the triangle lights (see TriangleLight::quadLight)
 	void PairQuadLights(SceneConstRef scene);
+	// Sets the centre of each triangle light, the centroid of its lamp (see
+	// TriangleLight::emitterCenter)
+	void SetTriangleLightEmitterCenters(SceneConstRef scene);
 
 
 	//--------------------------------------------------------------------------

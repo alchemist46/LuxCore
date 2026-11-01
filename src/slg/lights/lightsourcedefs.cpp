@@ -17,6 +17,8 @@
  ***************************************************************************/
 
 #include <atomic>
+#include <cstring>
+#include <unordered_map>
 #include <thread>
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -383,6 +385,7 @@ void LightSourceDefinitions::Preprocess(SceneConstRef scene, const bool useRTMod
 	}
 
 	PairQuadLights(scene);
+	SetTriangleLightEmitterCenters(scene);
 
 //	const double end1 = WallClockTime();
 //	SLG_LOG("Light step #1 preprocessing time: " << (end1 - start) << "secs");
@@ -481,6 +484,89 @@ static bool IsQuad(const ExtMesh &mesh, const Transform &localToWorld,
 	*corner = ca;
 	*partnerCorner = cb;
 	return true;
+}
+
+void LightSourceDefinitions::SetTriangleLightEmitterCenters(SceneConstRef scene) {
+	// The meshes in parallel: each triangle light belongs to one mesh
+	const u_int meshCount = scene.GetObjects().GetSize();
+	tbb::parallel_for(tbb::blocked_range<u_int>(0, meshCount, 1),
+		[&](const tbb::blocked_range<u_int> &r) {
+			for (u_int meshIndex = r.begin(); meshIndex < r.end(); ++meshIndex) {
+				const u_int offset = lightIndexOffsetByMeshIndex[meshIndex];
+				if (offset == NULL_INDEX)
+					continue;
+
+				const ExtMesh &mesh = scene.GetObjects().GetSceneObject(meshIndex).GetExtMesh();
+				Transform localToWorld;
+				mesh.GetLocal2World(0.f, localToWorld);
+				const auto tris = mesh.GetTriangles();
+				const u_int triCount = mesh.GetTotalTriangleCount();
+
+				// The connected parts of the light triangles (separate lamps
+				// in one mesh), through the vertices at the same position (the
+				// vertices split by the UV seams and the sharp edges)
+				vector<u_int> parent;
+				auto find = [&](u_int i) {
+					while (parent[i] != i) {
+						parent[i] = parent[parent[i]];
+						i = parent[i];
+					}
+					return i;
+				};
+				struct PointHash {
+					size_t operator()(const Point &p) const {
+						u_int bits[3];
+						memcpy(bits, &p.x, sizeof(bits));
+						return (bits[0] * 73856093u) ^ (bits[1] * 19349663u) ^ (bits[2] * 83492791u);
+					}
+				};
+				std::unordered_map<Point, u_int, PointHash> nodeByPoint;
+				vector<u_int> triNodes(3 * triCount, NULL_INDEX);
+				for (u_int t = 0; t < triCount; ++t) {
+					if (lightIndexByTriIndex[offset + t] == NULL_INDEX)
+						continue;
+
+					for (u_int k = 0; k < 3; ++k) {
+						const Point p = mesh.GetVertex(localToWorld, tris[t].v[k]);
+						auto it = nodeByPoint.find(p);
+						if (it == nodeByPoint.end()) {
+							it = nodeByPoint.emplace(p, parent.size()).first;
+							parent.push_back(parent.size());
+						}
+						triNodes[3 * t + k] = it->second;
+					}
+					parent[find(triNodes[3 * t + 1])] = find(triNodes[3 * t]);
+					parent[find(triNodes[3 * t + 2])] = find(triNodes[3 * t]);
+				}
+
+				// The area-weighted centroid of each part
+				vector<Vector> sums(parent.size());
+				vector<double> areas(parent.size(), 0.0);
+				for (u_int t = 0; t < triCount; ++t) {
+					if (triNodes[3 * t] == NULL_INDEX)
+						continue;
+
+					const Point p0 = mesh.GetVertex(localToWorld, tris[t].v[0]);
+					const Point p1 = mesh.GetVertex(localToWorld, tris[t].v[1]);
+					const Point p2 = mesh.GetVertex(localToWorld, tris[t].v[2]);
+					const float a = .5f * Cross(p1 - p0, p2 - p0).Length();
+					const u_int part = find(triNodes[3 * t]);
+					sums[part] += (a / 3.f) * (Vector(p0) + Vector(p1) + Vector(p2));
+					areas[part] += a;
+				}
+
+				for (u_int t = 0; t < triCount; ++t) {
+					const u_int index = lightIndexByTriIndex[offset + t];
+					if (index == NULL_INDEX)
+						continue;
+
+					const u_int part = find(triNodes[3 * t]);
+					static_cast<TriangleLight &>(lights[index].get()).emitterCenter = (areas[part] > 0.0) ?
+						(Point() + sums[part] / static_cast<float>(areas[part])) :
+						mesh.GetVertex(localToWorld, tris[t].v[0]);
+				}
+			}
+		});
 }
 
 void LightSourceDefinitions::PairQuadLights(SceneConstRef scene) {

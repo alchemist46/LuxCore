@@ -294,6 +294,7 @@ void CompiledScene::CompileLights() {
 				oclLight->triangle.meshIndex = tl.meshIndex;
 				oclLight->triangle.triangleIndex = tl.triangleIndex;
 				oclLight->triangle.solidAngleSampling = tl.UsesSolidAngleSampling();
+				ASSIGN_VECTOR(oclLight->triangle.emitterCenter, tl.emitterCenter);
 
 				if (tl.quadLight) {
 					const TriangleLight &first = *tl.quadLight;

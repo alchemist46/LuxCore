@@ -136,6 +136,8 @@ set(SLG_KERNELS
     include/slg/materials/materialdefs_funcs_roughglass.cl
     include/slg/materials/materialdefs_funcs_roughmatte_translucent.cl
     include/slg/materials/materialdefs_funcs_thinfilmcoating.cl
+    include/slg/materials/materialdefs_funcs_toon_ramp.cl
+    include/slg/materials/materialdefs_funcs_toon.cl
     include/slg/materials/materialdefs_funcs_velvet.cl
     include/slg/materials/materialdefs_funcs_subsurface.cl
     include/slg/materials/subsurface_funcs.cl

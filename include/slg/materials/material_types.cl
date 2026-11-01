@@ -95,7 +95,7 @@ typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
 	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING, DISNEY,
-	TWOSIDED, SUBSURFACEMAT, OPENPBR,
+	TWOSIDED, SUBSURFACEMAT, OPENPBR, TOON,
 			
 	// Volumes
 	HOMOGENEOUS_VOL, CLEAR_VOL, HETEROGENEOUS_VOL
@@ -230,6 +230,38 @@ typedef struct {
 	// (OpenPBRMaterial::GetSubsurfaceWalkMaterial())
 	int subsurfaceWalk;
 } OpenPBRParam;
+
+// The toon material (see toon.cpp): the keys of its ramp, TOON_RAMP_MAX_STEPS
+// at most, and the blend of each key into the next one
+#define TOON_RAMP_MAX_STEPS 8
+
+typedef enum {
+	TOON_RAMP_CONSTANT, TOON_RAMP_LINEAR, TOON_RAMP_SMOOTH
+} ToonRampInterpolation;
+
+typedef struct {
+	unsigned int kdTexIndex, shadowColorTexIndex, ksTexIndex, rimTexIndex;
+	unsigned int roughnessTexIndex;
+
+	// The ramp: the colour of each key from its position on (a cosine of the
+	// light direction), the colour below the first key, the interpolation of
+	// each key (2 bits per key, ToonRampInterpolation) and whether the shadow
+	// colour fills what the ramp leaves (the factor ramps)
+	unsigned int rampCount;
+	float rampPositions[TOON_RAMP_MAX_STEPS];
+	float rampColors[TOON_RAMP_MAX_STEPS * 3];
+	float rampBase[3];
+	unsigned int rampInterpolations;
+	int rampShadowFill;
+	float rampSmooth;
+
+	// The size of the toon highlight is the one of roughnessTexIndex
+	float specularSmooth, specularStretchU, specularStretchV;
+	float rimSize, rimSmooth;
+	// The ramp and the toon specular take the direction of the centre of the
+	// light (see LightSource::GetCenterDir())
+	int lightCenter;
+} ToonParam;
 
 typedef enum {
 	DENIM, SILKSHANTUNG, SILKCHARMEUSE, COTTONTWILL, WOOLGABARDINE, POLYESTER
@@ -491,6 +523,7 @@ typedef struct {
 		TwoSidedParam twosided;
 		SubsurfaceParam subsurface;
 		OpenPBRParam openpbr;
+		ToonParam toon;
 		VolumeParam volume;
 	};
 

@@ -59,6 +59,10 @@ public:
 	virtual void Preprocess();
 
 	virtual LightSourceType GetType() const { return TYPE_TRIANGLE; }
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+		*dir = Normalize(emitterCenter - p);
+		return true;
+	}
 
 	virtual bool IsDirectLightSamplingEnabled() const;
 
@@ -107,6 +111,11 @@ public:
 	SceneObjectConstPtr sceneObject;
 	// Note: meshIndex is initialized in LightSourceDefinitions::Preprocess()
 	u_int meshIndex, triangleIndex;
+	// The centroid of the lamp of the triangle, the connected part of the light
+	// triangles of its mesh it belongs to (by area, in world
+	// space at time 0), set by LightSourceDefinitions::Preprocess() (see
+	// GetCenterDir())
+	luxrays::Point emitterCenter;
 	// Solid angle sampling of the direct light, set by
 	// LightSourceDefinitions::Preprocess() (lightstrategy.trianglelight.solidangle)
 	bool solidAngleSampling;

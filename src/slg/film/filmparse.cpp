@@ -51,6 +51,7 @@ namespace OCIO = OCIO_NAMESPACE;
 #include "slg/film/imagepipeline/plugins/premultiplyalpha.h"
 #include "slg/film/imagepipeline/plugins/workingtorec709.h"
 #include "slg/film/imagepipeline/plugins/mist.h"
+#include "slg/film/imagepipeline/plugins/outline.h"
 #include "slg/film/imagepipeline/plugins/intel_oidn.h"
 #include "slg/film/imagepipeline/plugins/whitebalance.h"
 #include "slg/film/imagepipeline/plugins/bakemapmargin.h"
@@ -714,6 +715,15 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const bool excludeBackground = props.Get(Property(prefix + ".excludebackground")(false)).Get<bool>();
 
 				imagePipeline->AddPlugin(new MistPlugin(color, amount, start, end, excludeBackground));
+			} else if (type == "OUTLINE") {
+				const Spectrum color = props.Get(Property(prefix + ".color")(0.f, 0.f, 0.f)).Get<Spectrum>();
+				const float amount = Clamp(props.Get(Property(prefix + ".amount")(1.0)).Get<double>(), 0.0, 1.0);
+				const float width = Clamp(props.Get(Property(prefix + ".width")(1.0)).Get<double>(), 1.0, 16.0);
+				const bool objectID = props.Get(Property(prefix + ".objectid.enable")(true)).Get<bool>();
+				const float depthThreshold = Max(props.Get(Property(prefix + ".depth.threshold")(.05)).Get<double>(), 0.0);
+				const float normalAngle = Clamp(props.Get(Property(prefix + ".normal.angle")(45.0)).Get<double>(), 0.0, 180.0);
+
+				imagePipeline->AddPlugin(new OutlinePlugin(color, amount, width, objectID, depthThreshold, normalAngle));
 			} else if (type == "BCD_DENOISER") {
 				const float warmUpSamplesPerPixel = Max(props.Get(Property(prefix + ".warmupspp")(2.0)).Get<double>(), 1.0);
 				const float histogramDistanceThreshold = Max(props.Get(Property(prefix + ".histdistthresh")(1.0)).Get<double>(), 0.0);
@@ -897,6 +907,19 @@ void Film::ParseImagePipelines(const Properties &props) {
 
 	if (denoiserFound)
 		SLG_LOG("BCD denoiser statistics collection enabled");
+
+	// The OUTLINE plugin reads these channels (a film already initialized
+	// keeps the ones it has, the plugin skips the tests without theirs)
+	if (!initialized) {
+		for (auto ip : imagePipelines) {
+			if (ip->GetPlugin(typeid(OutlinePlugin))) {
+				AddChannel(Film::DEPTH);
+				AddChannel(Film::OBJECT_ID);
+				AddChannel(Film::AVG_SHADING_NORMAL);
+				break;
+			}
+		}
+	}
 
 	// Enable or disable the collection statistics required by BCD_DENOISER plugin
 	filmDenoiser->SetEnabled(denoiserFound);

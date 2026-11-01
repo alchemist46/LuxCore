@@ -106,6 +106,14 @@ OPENCL_FORCE_INLINE float BSDF_GetUnregularizedGlossiness(__global const BSDF *b
 			MATERIALS_PARAM);
 }
 
+// See BSDF::IsDirectLightSamplingOnly()
+OPENCL_FORCE_INLINE bool BSDF_IsDirectLightSamplingOnly(__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	const uint matIndex = bsdf->materialIndex;
+
+	return (matIndex == NULL_INDEX) ? false : (mats[matIndex].type == TOON);
+}
+
 OPENCL_FORCE_INLINE float3 BSDF_GetPassThroughShadowTransparency(__global const BSDF *bsdf
 		MATERIALS_PARAM_DECL) {
 	return VLOAD3F(&mats[bsdf->materialIndex].passThroughShadowTransparency.c[0]);

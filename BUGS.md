@@ -31,6 +31,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `pyunittests/resources/scenes/simple/mat-matte-area.cfg`, PATHCPU, SOBOL, 600x400, `batch.haltspp = 4`, `batch.halttime = 0`, `film.opencl.enable = 0`, then `Start()` and `WaitForDone()`. The 52cdd211b build does the same.
 - Notes: the halt conditions of the CPU engines seem to be tested only in `UpdateStats()`. Not investigated further; the test scripts (`tests/furnace/parity.py`, the unit tests) poll and are not affected.
 
+### BiDir blends the toon material's steps with its Lambert look
+- Found: 2026-11-01
+- Area: material (toon), engine (BIDIRCPU)
+- Problem: the toon material's direct light is stepped in `Evaluate()` and its BSDF sampling is the Lambert lobe of kd; the path tracers take the whole direct light of a toon vertex from the light sampling (`BSDF::IsDirectLightSamplingOnly()`), BiDir does not, so its connections and its MIS mix the two looks. Furnace `toon-ramp` (expected 1.4): PATHCPU 1.4002, PATHOCL 1.4008, BIDIRCPU 1.114. Light tracing (LIGHTCPU, the hybrid back/forward caustics) sees `Evaluate()` at the camera connections only.
+- Reproduce: `tests/furnace/furnace.py BIDIRCPU toon spp=64 env=inf`.
+- Notes: by design the toon material is not a BSDF, so BiDir has no consistent estimator for it; the same rule (a connection at a toon eye vertex counted with weight 1 only for the light sampling strategy) would make BiDir agree with the path tracers. A toon inside a Mix, a glossy coating or a two-sided material gets the same blend on the path tracers too: only a top-level toon gets the rule (the Mix's pdf is the sum of its sub-materials', so the rule would need the toon's share of it). With point, spot and distant lights there is no MIS, so the steps stay sharp in every case. BiDir and a nested toon also ignore `lightcenter` (they evaluate the sampled direction; the light-centre direction is only in the path tracers' light sampling, `BSDF::EvaluateToon()`), so area lights blur their steps. A consistent BSDF (MoonRay's toon diffuse: the stepped lobe sampled and weighted as a BSDF) would fix both, but can't have `lightcenter`: a BSDF hit on a light would need the same value as the light sample of its centre.
+
 ### A glossycoating over a material without glossy lobes reports glossiness 0 (its glossy bounces count as nearly specular)
 - Found: 2026-10-31
 - Area: material

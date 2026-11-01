@@ -39,6 +39,10 @@ public:
 		float *VData, float *cosThetaMaxData, float *sin2ThetaMaxData) const;
 
 	virtual LightSourceType GetType() const { return TYPE_SUN; }
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+		*dir = absoluteSunDir;
+		return true;
+	}
 	virtual float GetPower(SceneConstRef scene) const;
 
 	virtual luxrays::Spectrum Emit(SceneConstRef scene,

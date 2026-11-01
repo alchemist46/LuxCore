@@ -36,6 +36,10 @@ public:
 	void GetPreprocessedData(float *localPos, float *absolutePos, float *emittedFactor) const;
 
 	virtual LightSourceType GetType() const { return TYPE_POINT; }
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+		*dir = Normalize(absolutePos - p);
+		return true;
+	}
 	virtual float GetPower(SceneConstRef scene) const;
 
 	virtual luxrays::Spectrum Emit(SceneConstRef scene,

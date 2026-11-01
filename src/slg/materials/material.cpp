@@ -375,6 +375,7 @@ string Material::MaterialType2String(const MaterialType type) {
 		case GLOSSYCOATING: return "GLOSSYCOATING";
 		case DISNEY: return "DISNEY";
 		case OPENPBR: return "OPENPBR";
+		case TOON: return "TOON";
 		case TWOSIDED: return "TWOSIDED";
 		case SUBSURFACEMAT: return "SUBSURFACE";
 

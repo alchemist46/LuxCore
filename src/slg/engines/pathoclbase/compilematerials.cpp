@@ -46,6 +46,7 @@
 #include "slg/materials/null.h"
 #include "slg/materials/roughglass.h"
 #include "slg/materials/roughmatte.h"
+#include "slg/materials/toon.h"
 #include "slg/materials/roughmattetranslucent.h"
 #include "slg/materials/twosided.h"
 #include "slg/materials/velvet.h"
@@ -136,6 +137,7 @@ static bool IsLeafMaterial(const slg::ocl::MaterialType type) {
 		case slg::ocl::GLOSSYTRANSLUCENT:
 		case slg::ocl::DISNEY:
 		case slg::ocl::OPENPBR:
+		case slg::ocl::TOON:
 		case slg::ocl::SUBSURFACEMAT:
 		case slg::ocl::HOMOGENEOUS_VOL:
 		case slg::ocl::CLEAR_VOL:
@@ -436,6 +438,7 @@ u_int CompiledScene::CompileMaterialOps(const u_int matIndex,
 		case GLOSSYTRANSLUCENT:
 		case DISNEY:
 		case OPENPBR:
+		case TOON:
 		case SUBSURFACEMAT:
 		case HOMOGENEOUS_VOL:
 		case CLEAR_VOL:
@@ -1028,6 +1031,18 @@ void CompiledScene::CompileMaterials() {
 
 				mat->type = slg::ocl::MATTE;
 				mat->matte.kdTexIndex = scene.GetTextures().GetTextureIndex(mm.GetKd());
+				break;
+			}
+			case TOON: {
+				auto& tm = dynamic_cast<const ToonMaterial &>(m);
+
+				mat->type = slg::ocl::TOON;
+				mat->toon = tm.GetParams();
+				mat->toon.kdTexIndex = scene.GetTextures().GetTextureIndex(tm.GetKd());
+				mat->toon.shadowColorTexIndex = scene.GetTextures().GetTextureIndex(tm.GetShadowColor());
+				mat->toon.ksTexIndex = scene.GetTextures().GetTextureIndex(tm.GetKs());
+				mat->toon.rimTexIndex = scene.GetTextures().GetTextureIndex(tm.GetRim());
+				mat->toon.roughnessTexIndex = scene.GetTextures().GetTextureIndex(tm.GetRoughness());
 				break;
 			}
 			case ROUGHMATTE: {

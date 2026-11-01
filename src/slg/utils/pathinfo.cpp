@@ -105,8 +105,10 @@ void EyePathInfo::AddVertex(const BSDF &bsdf,
 		// All other vertices must be nearly specular
 		(isNearlyCaustic && isNewVertexNearlySpecular);
 	
-	// Update last path vertex information
-	lastBSDFPdfW = pdfW;
+	// Update last path vertex information. A BSDF hit on a light after a
+	// vertex that takes its whole direct light from the light sampling adds
+	// nothing (see BSDF::IsDirectLightSamplingOnly())
+	lastBSDFPdfW = bsdf.IsDirectLightSamplingOnly() ? 0.f : pdfW;
 	lastShadeN = bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
 	lastP = bsdf.hitPoint.p;
 	lastFromVolume =  bsdf.IsVolume();

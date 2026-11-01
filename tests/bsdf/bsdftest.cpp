@@ -90,10 +90,16 @@ struct TestCase {
 	bool chi2;
 	// The role of the vertex for the subsurface material (HitPoint::subsurface)
 	int subsurface = HITPOINT_SSS_SURFACE;
+	// Check the value of Sample() against Evaluate() (off for the toon
+	// material, whose Evaluate() is the stepped direct light and Sample() the
+	// Lambert indirect light)
+	bool valueCheck = true;
 };
 
 // The HitPoint::subsurface of the current case
 int caseSubsurface = HITPOINT_SSS_SURFACE;
+// The TestCase::valueCheck of the current case
+bool caseValueCheck = true;
 
 const float NO_EXPECT = -1.f;
 
@@ -333,6 +339,18 @@ vector<TestCase> BuildTestCases() {
 	cases.push_back({ "cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n",
 		NO_EXPECT, true });
 
+	// Toon: non-physical by design, only its Sample() (a Lambert lobe of
+	// colour kd) and its pdfs are checked
+	cases.push_back({ "toon", "scene.materials.m.type = toon\nscene.materials.m.kd = 1 1 1\n"
+		"scene.materials.m.ks = 1 1 1\nscene.materials.m.specular.roughness = 0.6\n"
+		"scene.materials.m.rim = 1 1 1\n", 1.f, true,
+		HITPOINT_SSS_SURFACE, false });
+	cases.push_back({ "toon-colorramp", "scene.materials.m.type = toon\nscene.materials.m.kd = 1 1 1\n"
+		"scene.materials.m.ramp.positions = 0 0.4 0.8\n"
+		"scene.materials.m.ramp.colors = 0.1 0.1 0.2 0.5 0.4 0.3 1 1 1\n"
+		"scene.materials.m.ramp.interpolation = linear constant smooth\n", 1.f, true,
+		HITPOINT_SSS_SURFACE, false });
+
 	// The microfiber sheen alone: its albedo is the fiber layer's (< 1)
 	for (const float r : { 0.2f, 0.5f, 1.f })
 		cases.push_back({ "velvet-r" + to_string(r).substr(0, 3), "scene.materials.m.type = velvet\n"
@@ -569,7 +587,8 @@ ConfigResult RunConfig(const Material &mat, const Config &cfg, const u_int sampl
 		const Spectrum evalValue = EvaluateFixedGenerated(mat, hp, fixedDir, sampledDir,
 				&evalEvent, &directPdfW, &reversePdfW);
 		const u_int badBefore = res.value.bad + res.pdf.bad;
-		res.value.Add(value * pdfW, evalValue);
+		if (caseValueCheck)
+			res.value.Add(value * pdfW, evalValue);
 		res.pdf.Add(pdfW, directPdfW);
 		if ((res.value.bad + res.pdf.bad > badBefore) && (dumpCount < dumpMax)) {
 			++dumpCount;
@@ -890,6 +909,7 @@ int main(int argc, char *argv[]) {
 		}
 		const Material &mat = scene->GetMaterials().GetMaterial("m");
 		caseSubsurface = tc.subsurface;
+		caseValueCheck = tc.valueCheck;
 
 		mt19937 rng(12345);
 		bool caseFailed = false;

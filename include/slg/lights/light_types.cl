@@ -157,6 +157,10 @@ typedef struct {
 	unsigned int quadLightIndex;
 	unsigned int quadTriangleIndex, quadPartnerTriangleIndex;
 	unsigned int quadCorner, quadPartnerCorner;
+
+	// The centroid of the lamp of the triangle light (see
+	// slg::TriangleLight::emitterCenter)
+	Vector emitterCenter;
 } TriangleLightParam;
 
 typedef struct {
