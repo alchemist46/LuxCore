@@ -17,6 +17,20 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### Cloth: the denim specular reads 0.995 in the white furnace (0.99 head-on)
+- Found: 2026-11-01
+- Area: material
+- Problem: with the specular divided by its directional albedo E at every view direction (ROADMAP ME), the specular part alone should read 1 at every view angle. The other five presets read 0.997-1.001 (disk mean), but denim reads 0.995 (0.990-0.993 in the head-on band, mu > 0.8), on PATHCPU and PATHOCL, with or without light sampling. That is at the edge of the furnace tolerance (0.005): at 256 spp it can read 0.9948 and FAIL.
+- Reproduce: `tests/furnace/furnace.py PATHCPU cloth-specular-denim spp=1024` (0.9955; 0.9955 at 4096 spp too, so not noise).
+- Notes: the table is converged: regenerated with 2x the samples (`bsdftest --cloth-albedo-table`), its entries move by at most ±1% and its head-on rows by 0.01% on average. Before the change, the head-on band read 0.734, against 0.740 predicted by the table (cotton twill and polyester: 0.5% off, wool: exact), so the table's E is about 0.8% higher than what the sphere sees near head-on. Not checked: whether the table's uniform average over the weave tile (random UV, independent of the view azimuth) matches the sphere's UVs and shading frame; the bilinear interpolation and the clamp above mu = 31/32 account for less than 0.2%. bsdftest's albedo is at one fixed UV, so it can't check this. To run bsdftest from bash, put `out/install/Release/bin` in the PATH (embree4, OIDN, TBB); otherwise it exits 127 with a misleading message about `api-ms-win-crt-utility-l1-1-0.dll`.
+
+### PATHCPU: RenderSession.WaitForDone() never returns when nothing calls UpdateStats()
+- Found: 2026-11-01
+- Area: engine (PATHCPU), python
+- Problem: a script that calls `session.Start()` then `session.WaitForDone()` with `batch.haltspp = 4` keeps rendering forever on PATHCPU (2 h of CPU time on a 600x400 scene); the same script finishes in 1 s when it polls `while not session.HasDone(): session.UpdateStats()`. PATHOCL stops with `WaitForDone()` alone.
+- Reproduce: `pyunittests/resources/scenes/simple/mat-matte-area.cfg`, PATHCPU, SOBOL, 600x400, `batch.haltspp = 4`, `batch.halttime = 0`, `film.opencl.enable = 0`, then `Start()` and `WaitForDone()`. The 52cdd211b build does the same.
+- Notes: the halt conditions of the CPU engines seem to be tested only in `UpdateStats()`. Not investigated further; the test scripts (`tests/furnace/parity.py`, the unit tests) poll and are not affected.
+
 ### A glossycoating over a material without glossy lobes reports glossiness 0 (its glossy bounces count as nearly specular)
 - Found: 2026-10-31
 - Area: material

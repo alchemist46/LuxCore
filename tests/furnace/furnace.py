@@ -233,12 +233,18 @@ def cases():
     c.append(("cloth-diffuse", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n"
               "scene.materials.m.weft_kd = 1 1 1\nscene.materials.m.warp_kd = 1 1 1\n"
               "scene.materials.m.weft_ks = 0 0 0\nscene.materials.m.warp_ks = 0 0 0\n", 1.0))
-    c.append(("cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n", None))
-    # The specular part alone: at most 1 (its energy conservation, see
-    # materialdefs_funcs_cloth_albedo.cl), dark head-on by construction
-    c.append(("cloth-specular", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n"
-              "scene.materials.m.weft_kd = 0 0 0\nscene.materials.m.warp_kd = 0 0 0\n"
-              "scene.materials.m.weft_ks = 1 1 1\nscene.materials.m.warp_ks = 1 1 1\n", None))
+    # The default colours (kd 0.5, ks 0.5) are lossless too
+    c.append(("cloth-denim", "scene.materials.m.type = cloth\nscene.materials.m.preset = denim\n", 1.0))
+    # The specular part alone, per preset: 1 at every view angle (its energy
+    # conservation, see materialdefs_funcs_cloth_albedo.cl); denim reads 0.995,
+    # at the edge of the tolerance (BUGS.md "Cloth: the denim specular reads
+    # 0.995"), use spp=1024
+    for preset in ("denim", "silk_shantung", "silk_charmeuse", "cotton_twill", "wool_gabardine",
+                   "polyester_lining_cloth"):
+        c.append((f"cloth-specular-{preset}", "scene.materials.m.type = cloth\n"
+                  f"scene.materials.m.preset = {preset}\n"
+                  "scene.materials.m.weft_kd = 0 0 0\nscene.materials.m.warp_kd = 0 0 0\n"
+                  "scene.materials.m.weft_ks = 1 1 1\nscene.materials.m.warp_ks = 1 1 1\n", 1.0))
     for r in (0.2, 0.5, 1.0):
         c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.roughness = {r}\n", None))
