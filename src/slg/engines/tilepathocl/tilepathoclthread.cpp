@@ -127,13 +127,20 @@ void TilePathOCLRenderThread::RenderTileWork(const TileWork &tileWork,
 
 	// A step of a subsurface random walk takes an iteration too, and a walk can
 	// take up to SSS_MAX_BOUNCES (65536, subsurface_funcs.cl) of them, a few
-	// hundred in practice (the Russian roulette of the long walks): the kernels
-	// run until every task is done, checked from the path states every few
-	// iterations. RTPATHOCL doesn't wait for them, or a frame would take as
-	// long as its longest walk (~1700 launch-bound rounds per frame on the
-	// Cornell box with a subsurface material): the paths still in flight go on
-	// in the next frame (the Init kernel keeps them)
-	if (engine->compiledScene->hasSubsurface && (engine->GetType() != RTPATHOCL)) {
+	// hundred in practice (the Russian roulette of the long walks). So does
+	// each crossing of a pass-through surface, a volume boundary or a camera
+	// invisible object, by a vertex ray or a shadow ray. The kernels then run
+	// until every task is done, checked from the path states every few
+	// iterations: a path still in flight would be dropped by the next tile's
+	// Init (transparencyball read 0.9% dark). RTPATHOCL doesn't wait for them,
+	// or a frame would take as long as its longest walk (~1700 launch-bound
+	// rounds per frame on the Cornell box with a subsurface material): the
+	// paths still in flight go on in the next frame (the Init kernel keeps
+	// them)
+	const bool pathsMayNeedMoreIterations = engine->compiledScene->hasSubsurface ||
+			!engine->taskConfig.scene.shadowRayAnyHit ||
+			engine->compiledScene->hasCameraInvisibleObjects;
+	if (pathsMayNeedMoreIterations && (engine->GetType() != RTPATHOCL)) {
 		vector<slg::ocl::pathoclbase::PathState> pathStates(engine->taskCount);
 		// The walk steps of the deepest path that can still be in flight
 		const u_int maxExtraIterations = engine->pathTracer.maxPathDepth.depth * 65536;

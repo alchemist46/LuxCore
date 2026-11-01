@@ -102,6 +102,9 @@ public:
 
 	// Compiled Scene Objects
 	std::vector<slg::ocl::SceneObject> sceneObjs;
+	// True if an object is invisible to the camera (a camera ray goes on
+	// through it, in another iteration)
+	bool hasCameraInvisibleObjects;
 
 	// Compiled Lights (each one cleared and filled by CompileLights())
 	std::vector<slg::ocl::LightSource, DefaultInitAllocator<slg::ocl::LightSource>> lightDefs;

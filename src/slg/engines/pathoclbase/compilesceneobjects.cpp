@@ -33,6 +33,7 @@ void CompiledScene::CompileSceneObjects() {
 
 	const u_int objCount = scene.GetObjects().GetSize();
 	sceneObjs.resize(objCount);
+	hasCameraInvisibleObjects = false;
 	for (u_int i = 0; i < objCount; ++i) {
 		slg::ocl::SceneObject &oclScnObj = sceneObjs[i];
 		auto& scnObj = scene.GetObjects().GetSceneObject(i);
@@ -62,6 +63,8 @@ void CompiledScene::CompileSceneObjects() {
 		}
 
 		oclScnObj.cameraInvisible = scnObj.IsCameraInvisible();
+		if (oclScnObj.cameraInvisible)
+			hasCameraInvisibleObjects = true;
 	}
 }
 
