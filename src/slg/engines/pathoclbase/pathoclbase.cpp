@@ -211,6 +211,10 @@ void PathOCLBaseRenderEngine::InitGPUTaskConfiguration() {
 	taskConfig.scene.shadowRayAnyHit = !compiledScene->shadowRaysNeedBSDF &&
 			!renderConfig.GetScene().GetCamera().HasVolume() &&
 			renderConfig.GetProperty("pathocl.shadowray.anyhit.enable").Get<bool>();
+	// The shadow ray traced with the next vertex ray: always with the any-hit
+	// shadow rays (final after one trace), else unless turned off
+	taskConfig.scene.shadowRayWithVertexRay = taskConfig.scene.shadowRayAnyHit ||
+			renderConfig.GetProperty("pathocl.shadowray.withvertexray.enable").Get<bool>();
 
 	// Sampler configuration
 	taskConfig.sampler = *oclSampler;

@@ -508,11 +508,10 @@ void PathOCLBaseOCLRenderThread::SetKernelArgs() {
 void PathOCLBaseOCLRenderThread::EnqueueTraceRays() {
 	const u_int taskCount = renderEngine->taskCount;
 
-	// The vertex rays, then the shadow rays traced with them (only when the
-	// shadow rays are final after one trace and a path can have a next
-	// vertex, see AdvancePaths_MK_RT)
+	// The vertex rays, then the shadow rays traced with them (when a path can
+	// have a next vertex, see AdvancePaths_MK_RT)
 	const slg::ocl::pathoclbase::GPUTaskConfiguration &taskConfig = renderEngine->taskConfig;
-	const bool shadowRaysWithVertexRays = taskConfig.scene.shadowRayAnyHit &&
+	const bool shadowRaysWithVertexRays = taskConfig.scene.shadowRayWithVertexRay &&
 			(taskConfig.pathTracer.maxPathDepth.depth > 1);
 	intersectionDevice.EnqueueTraceRayBuffer(raysBuff, hitsBuff,
 			shadowRaysWithVertexRays ? (2 * taskCount) : taskCount);

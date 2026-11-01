@@ -333,6 +333,7 @@ PropertiesUPtr PathOCLRenderEngine::ToProperties(const Properties &cfg) {
 			PathTracer::ToProperties(cfg) <<
 			cfg.Get(GetDefaultProps()->Get("pathocl.pixelatomics.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("pathocl.shadowray.anyhit.enable")) <<
+			cfg.Get(GetDefaultProps()->Get("pathocl.shadowray.withvertexray.enable")) <<
 			cfg.Get(GetDefaultProps()->Get("opencl.task.count")) <<
 			Sampler::ToProperties(cfg) <<
 			PhotonGICache::ToProperties(cfg);
@@ -352,6 +353,7 @@ PropertiesUPtr PathOCLRenderEngine::GetDefaultProps() {
 			PathTracer::GetDefaultProps() <<
 			Property("pathocl.pixelatomics.enable")(true) <<
 			Property("pathocl.shadowray.anyhit.enable")(true) <<
+			Property("pathocl.shadowray.withvertexray.enable")(true) <<
 			Property("opencl.task.count")("AUTO") <<
 			PhotonGICache::GetDefaultProps();
 

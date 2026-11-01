@@ -43,6 +43,11 @@ typedef struct {
 	// without the BSDF of the blocker: nothing in the scene can let a shadow
 	// ray through (no transparent material, no shadow transparency, no volume)
 	unsigned int shadowRayAnyHit;
+	// 1 if the shadow ray of a vertex is traced with the next vertex ray (see
+	// AdvancePaths_MK_RT). Where a shadow ray needs more than one trace (it
+	// crosses a transparent surface or a volume boundary), the next vertex
+	// ray keeps its trace result and waits for it.
+	unsigned int shadowRayWithVertexRay;
 } Scene;
 
 #if defined(SLG_OPENCL_KERNEL)

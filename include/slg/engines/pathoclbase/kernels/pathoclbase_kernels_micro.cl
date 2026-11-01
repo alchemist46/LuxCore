@@ -947,11 +947,12 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 // - at the end of a path, the splat of the sample, the next sample and its
 //   camera ray.
 // The next vertex ray doesn't depend on the shadow ray, so both are traced
-// together and a path vertex takes one iteration, except where the result of
-// the shadow ray is needed first or the shadow ray may need more than one
-// trace (shadow catchers, shadow rays crossing transparent surfaces or
-// volumes): the next vertex ray is then sampled after the shadow ray (MK_RT_DL)
-// and a vertex takes two iterations.
+// together and a path vertex takes one iteration. A shadow ray that crosses a
+// transparent surface or a volume boundary is traced again, and the vertex ray
+// keeps its trace result and waits for it, masked (MK_RT_NEXT_VERTEX_DL). Where
+// the result of the shadow ray is needed first (shadow catchers) the next
+// vertex ray is sampled after the shadow ray (MK_RT_DL) and a vertex takes two
+// iterations.
 // It used to be ten kernels, one per state. The rays are traced before the
 // kernel and a task reads its state once, at the start, so it never consumes
 // a ray set up in the same iteration.
@@ -1043,10 +1044,21 @@ __kernel void AdvancePaths_MK_RT(
 				(pathState == MK_RT_DL) ? NULL : &tasksDirectLightVertex[gid]
 				LIGHTS_PARAM);
 
-		// The second slot is free again (the merged flow is used only when the
-		// shadow ray is final after one trace)
-		if (pathState == MK_RT_NEXT_VERTEX_DL)
-			rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+		if (pathState == MK_RT_NEXT_VERTEX_DL) {
+			if (shadowRayState == MK_RT_DL) {
+				// The shadow ray needs another trace (it crossed a
+				// transparent surface or a volume boundary): the vertex ray
+				// keeps its trace result and waits, masked, for the shadow
+				// ray to be final
+				rays[gid].flags = RAY_FLAGS_MASKED;
+			} else {
+				// The second slot is free again
+				rays[secondRayIndex].flags = RAY_FLAGS_MASKED;
+				// The vertex ray may have waited for the shadow ray
+				if (!scene->shadowRayAnyHit)
+					rays[gid].flags = RAY_FLAGS_NONE;
+			}
+		}
 
 		if (pathState == MK_RT_DL) {
 			pathState = shadowRayState;
@@ -1056,10 +1068,12 @@ __kernel void AdvancePaths_MK_RT(
 			if (pathState == MK_GENERATE_NEXT_VERTEX_RAY)
 				*bsdf = *vertexBsdf;
 #endif
-		} else if (pathState == MK_RT_DL_SPLAT)
-			pathState = MK_SPLAT_SAMPLE;
-		else
-			pathState = MK_RT_NEXT_VERTEX;
+		} else if (shadowRayState != MK_RT_DL) {
+			// The shadow ray is final: the sample is splat (MK_RT_DL_SPLAT)
+			// or the vertex ray is processed (MK_RT_NEXT_VERTEX_DL)
+			pathState = (pathState == MK_RT_DL_SPLAT) ? MK_SPLAT_SAMPLE : MK_RT_NEXT_VERTEX;
+		}
+		// Else the shadow ray is traced again, in the same state and slot
 	}
 
 	//--------------------------------------------------------------------------
@@ -1225,12 +1239,11 @@ __kernel void AdvancePaths_MK_RT(
 				}
 
 				// The next vertex ray can be sampled without waiting for the
-				// shadow ray if the shadow ray is final after one trace and
-				// the BSDF sampling doesn't depend on it (shadow catchers).
-				// The last vertex has no next vertex ray, and the entry
-				// into a subsurface material may need the ray slot for its
-				// walk.
-				const bool sampleNextVertexRayNow = scene->shadowRayAnyHit &&
+				// shadow ray if the BSDF sampling doesn't depend on it
+				// (shadow catchers). The last vertex has no next vertex ray,
+				// and the entry into a subsurface material may need the ray
+				// slot for its walk.
+				const bool sampleNextVertexRayNow = scene->shadowRayWithVertexRay &&
 						!sampleResult->lastPathVertex &&
 						!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM)
 #if defined(PARAM_ENABLE_SUBSURFACE)
