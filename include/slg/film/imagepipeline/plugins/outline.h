@@ -41,10 +41,12 @@ namespace slg {
 // neighbour pixels (a crease also when the pixels beyond them turn by more
 // than normalAngle and the boundary takes more than 0.4 of it, as the film's
 // filter spreads a crease over two boundaries). The line is drawn width
-// pixels wide on the near side of each edge, centred on a crease, along a
-// straight segment fitted to the edges around it, and each pixel takes the
-// fraction of its area that the lines cover (anti-aliased lines). The lines
-// are drawn only over the objects on the two sides of their edge.
+// pixels wide on the near side of each edge, centred on a crease and where
+// two objects touch (no depth jump by depthThreshold, or 0.05 without the
+// depth test), along a straight segment fitted to the edges around it, and
+// each pixel takes the fraction of its area that the lines cover
+// (anti-aliased lines). The lines are drawn only over the objects on the two
+// sides of their edge.
 //------------------------------------------------------------------------------
 
 class OutlinePlugin : public ImagePipelinePlugin {

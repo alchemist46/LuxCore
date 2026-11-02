@@ -134,12 +134,16 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 	}
 
 	const float maxAngle = Radians(normalAngle);
+	// An object edge has a near side when its depth jumps by more than this
+	const float sideThreshold = useDepth ? depthThreshold : .05f;
 
 	// The edges are on the boundaries between 4-neighbour pixels: the one on
 	// the right of pixel p is edgeSides[2 * p], the one below it
 	// edgeSides[2 * p + 1]. 1 when p is the near side of the edge, -1 when the
-	// other pixel is, 0 without an edge; 2 and -2 for the creases (only the
-	// normal changes), whose line is centred on the edge.
+	// other pixel is, 0 without an edge; 2 and -2 for the edges without a near
+	// side, whose line is centred on the edge: the creases (only the normal
+	// changes) and where two objects touch (no depth jump, the nearer pixel
+	// changes from one edge to the next).
 	vector<int8_t> edgeSides(2 * pixelCount, 0);
 
 	#pragma omp parallel for
@@ -160,8 +164,12 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 				if (isinf(depths[n]) && hasDepth)
 					continue;
 
-				if ((useObjectID && (ids[n] != ids[f])) ||
-						(useDepth && (depths[f] - depths[n] > depthThreshold * depths[n])))
+				// NaN without the DEPTH channel: no near side
+				const float jump = depths[f] - depths[n];
+				if (useObjectID && (ids[n] != ids[f]))
+					edgeSides[2 * p + axis] = (jump > sideThreshold * depths[n]) ?
+						(pNear ? 1 : -1) : (pNear ? 2 : -2);
+				else if (useDepth && (jump > depthThreshold * depths[n]))
 					edgeSides[2 * p + axis] = pNear ? 1 : -1;
 				// The background has no normal
 				else if (useNormal && (normals[p].LengthSquared() > 0.f) && (normals[q].LengthSquared() > 0.f)) {
@@ -231,8 +239,8 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 
 				// The normal of the line: the sum of the directions of the
 				// edges around it on the same side (the integral of the normal
-				// of their staircase). A crease has no near side: its direction
-				// is turned to the line's.
+				// of their staircase). An edge without a near side (a crease,
+				// a contact) has its direction turned to the line's.
 				float nx = 0.f, ny = 0.f;
 				forEachEdge(x, y, [&](const float ex, const float ey, float esx, float esy, const bool eCrease) {
 					if (esx * sx + esy * sy < 0.f) {
@@ -278,7 +286,7 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 				const u_int farPixel = (side > 0) ? q : p;
 
 				// The line covers the signed distances from -width (the near
-				// side) to 0, from -width / 2 to width / 2 for a crease,
+				// side) to 0, from -width / 2 to width / 2 without a near side,
 				// segmentHalfLength along it on each side of the edge
 				const float lineStart = crease ? (-.5f * width) : -width;
 				const float lineEnd = lineStart + width;
