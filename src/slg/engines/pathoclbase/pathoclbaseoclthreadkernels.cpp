@@ -144,12 +144,20 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			(cscene->materialBumpCacheSize == 0) &&
 			(cscene->maxTextureEvalStackSize <= slg::ocl::PrivateTextureEvalStackSize);
 
-	// The random walk of the subsurface materials and the PhotonGI indirect
-	// cache are compiled only for the scenes that use them: they cost the
-	// other scenes up to a few percent (the code changes how the big kernel
-	// is compiled, not what it runs)
+	// The random walk of the subsurface materials, the PhotonGI indirect
+	// cache and the OpenPBR coat.bumptex are compiled only for the scenes that
+	// use them: they cost the other scenes up to a few percent (the code
+	// changes how the big kernel is compiled, not what it runs; the coat bump
+	// 2.5-4.5% on HIP). The coat bump is not baked: without hiprtc, the coat
+	// keeps the normal before the bump.
+	const bool openPBRCoatBump = cscene->hasOpenPBRCoatBump &&
+			(!(intersectionDevice.GetDeviceDesc().GetType() & DEVICE_TYPE_HIP_ALL) || isHiprtcAvailable);
+	if (cscene->hasOpenPBRCoatBump && !openPBRCoatBump)
+		SLG_LOG("[PathOCLBaseRenderThread::" << threadIndex << "] WARNING: coat.bumptex of the "
+			"openpbr materials needs the HIP runtime compiler (hiprtc, the HIP SDK): ignored, "
+			"the coat keeps the normal before the bump");
 	slg::ocl::AddPathKernelVariantParameters(kernelsParameters, privateEvalStack,
-			cscene->hasSubsurface, cscene->compiledPathTracer.pgic.indirectEnabled);
+			cscene->hasSubsurface, cscene->compiledPathTracer.pgic.indirectEnabled, openPBRCoatBump);
 
 	// The working colour space matrix (no parameter in Rec.709)
 	if (!useKernelConstants)

@@ -229,6 +229,12 @@ typedef struct {
 	// The subsurface part is the random walk on eye paths
 	// (OpenPBRMaterial::GetSubsurfaceWalkMaterial())
 	int subsurfaceWalk;
+	// coat.bumptex, a texture bumped as bumpTexIndex (NULL_INDEX when not
+	// set), and whether the coat can have a frame of its own (a coat with the
+	// material's bump or coat.bumptex): OpenPBRMaterial_GetBSDF() then gives
+	// the coat the interpolated normal, or coat.bumptex bumped from it
+	unsigned int coatBumpTexIndex;
+	int coatFrame;
 } OpenPBRParam;
 
 // The toon material (see toon.cpp): the keys of its ramp, TOON_RAMP_MAX_STEPS

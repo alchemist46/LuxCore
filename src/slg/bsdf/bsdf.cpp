@@ -27,14 +27,12 @@ using namespace luxrays;
 using namespace slg;
 using namespace std;
 
-namespace {
-
 // The shading normal n bent towards the geometric normal ng (both on the side
 // of the eye direction eyeDir) just enough for the mirror reflection of eyeDir
 // to stay above the surface (Cycles' ensure_valid_specular_reflection()).
 // Smooth shading and bump mapping can otherwise put the eye below the shading
 // normal at grazing angles, where the materials see the back face: black.
-Vector BSDF_EnsureValidReflection(const Vector &ng, const Vector &eyeDir, const Vector &n) {
+Vector slg::BSDF_EnsureValidReflection(const Vector &ng, const Vector &eyeDir, const Vector &n) {
 	const float iz = Dot(eyeDir, ng);
 	// The reflection may be as shallow as the eye direction
 	const float threshold = Min(.9f * iz, .01f);
@@ -58,6 +56,8 @@ Vector BSDF_EnsureValidReflection(const Vector &ng, const Vector &eyeDir, const 
 
 	return Normalize(sqrtf(Max(0.f, 1.f - nz2)) * x + sqrtf(Max(0.f, nz2)) * ng);
 }
+
+namespace {
 
 // The interpolated and the shading normals of an eye path hit point made valid
 // for its eye direction (see BSDF_EnsureValidReflection())

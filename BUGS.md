@@ -17,6 +17,40 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### OpenPBR: coated glass reflects too much (the translucent Fresnel is relative to the exterior, not the coat)
+- Found: 2026-11-01
+- Area: material
+- Problem: under a coat, the specification gives the base dielectric's Fresnel with `specular.ior` relative to the coat. The opaque base does that (`OpenPBRBSDF::eta`), but the translucent interface (`etaT`, `OpenPBR_TranslucentEta()` in `materialdefs_funcs_openpbr_bsdf.cl`, with dispersion too) uses the IOR relative to the exterior for both its Fresnel and its refraction. A glass of IOR 1.5 under a coat of IOR 1.6 (coat.weight 1, transmission.weight 1) gets a base F0 of 4.0% instead of about 0.1%: about 9% reflected head-on instead of about 5.4%. The code is not consistent with itself either: `OpenPBR_BaseAlbedo()` (its transmission part) and `OpenPBR_DeltaBelowCoat()` feed the coat darkening with `eta`, and the film over the translucent interface is relative to the coat while its substrate is relative to the exterior.
+- Reproduce: bsdftest with `coat.weight 1`, `coat.ior 1.6`, `specular.ior 1.5`, `transmission.weight 1`, `specular.roughness 0`: the reflected albedo head-on.
+- Notes: found by the OpenPBR review (2026-11-01). The fix separates the two: the coat-mixed relative IOR for the Fresnel and its energy tables (with the total internal reflection of the inside face), `etaT` only for the refracted direction (through parallel layers it depends only on the exterior and the base). The rough transmission's Jacobian and the albedo tables use one eta today, so it is not a one-line change.
+
+### OpenPBR: the dispersion tints the whole BSDF, diffuse included
+- Found: 2026-11-01
+- Area: material
+- Problem: with a path wavelength, `OpenPBR_Disperse()` tints the whole value of the vertex at any hit with `transmission.weight > 0` and dispersion on, the diffuse and the opaque reflection included. A mostly opaque material (transmission 0.05 with dispersion) gets per-sample colour noise on its diffuse. The mean is right (suspected, not measured): only the noise.
+- Reproduce: an OpenPBR sphere with `transmission.weight 0.05`, `transmission.dispersionscale 1`, base colour white, under an area light, PATHOCL 64 spp: colour noise on the diffuse.
+- Notes: found by the OpenPBR review (2026-11-01). The opaque part (`eta`) does not depend on the wavelength; tinting only the translucent part needs the path's `dispersionTinted` handling to know which lobe was sampled.
+
+### OpenPBR: a textured transmission.depth that is 0 somewhere tints there twice
+- Found: 2026-11-01
+- Area: material
+- Problem: the interior volume uses the average of a textured `transmission.depth` (the volume needs a constant, `Scene::DefineOpenPBRInterior()` warns), but the surface takes `transmission.color` as its own tint where the depth reads 0 (`OpenPBRMaterial_GetBSDF()`, `OpenPBR_GetBSDF()`). There, the light gets the colour at the surface and again in the volume.
+- Reproduce: an OpenPBR glass with `transmission.depth` an image or checker with zeros, `transmission.color` red: the zero areas are redder.
+- Notes: found by the OpenPBR review (2026-11-01). Either the surface ignores the depth when the material has an interior volume, or a depth texture is not used for the volume.
+
+### OpenPBR: speed items left from the review
+- Found: 2026-11-01
+- Area: material
+- Problem: work done more than once, measured by reading the code only:
+  - `coat.bumptex` is bumped again on every `GetBSDF` (Sample, each light Evaluate, EvaluateDiffuse, Albedo): about 3 texture evaluations each time, with 6 stores and restores of the hit point on the GPU and a copy of the HitPoint on the CPU. Albedo does not need the coat normal.
+  - In Evaluate (eye path), Sample and EvaluateDiffuse, `OpenPBR_LobeWeights()` and `OpenPBR_EvaluateFront()` do the same albedo-table and sheen LTC lookups for the same eye direction (about 7 lookups).
+  - The thin film over a metal (`CalcFilmColorConductor()`) runs 3 full 34-wavelength loops and keeps one channel of each; one loop with the 3 substrates sharing the phase would be about 3x cheaper.
+  - The OpenPBRBSDF struct (about 95 dwords) sits in scratch on the GPU (EvaluateFront and EvaluateDiffuse take it by pointer); about 24 dwords are read only by `OpenPBR_Init()` (an input/derived split), `coatIor` duplicates `coatEta`, `dispersionColor` and `dispersionTint` can share one float3.
+  - With a coat normal, `OpenPBR_CoatBasis()` is rebuilt in every `ToCoatFrame`/`FromCoatFrame` (5-7 times per call).
+  - The CPU `Pdf()` runs the whole Evaluate (film loops included) for the pdfs.
+- Reproduce: n/a (code reading).
+- Notes: found by the OpenPBR review (2026-11-01). Each one needs its variance x time (or samples per second) measured, and the kernel's `[AdvancePaths_MK_RT] ... bytes of scratch` log line checked.
+
 ### Cloth: the denim specular reads 0.995 in the white furnace (0.99 head-on)
 - Found: 2026-11-01
 - Area: material

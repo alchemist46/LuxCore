@@ -46,6 +46,58 @@ OPENCL_FORCE_INLINE float3 OpenPBRMaterial_GetSpectrum(__global const Material* 
 		MAKE_FLOAT3(OpenPBR_Defaults[3 * input], OpenPBR_Defaults[3 * input + 1], OpenPBR_Defaults[3 * input + 2]);
 }
 
+#if defined(PARAM_ENABLE_OPENPBR_COAT_BUMP)
+// The coat's normal of coat.bumptex, bumped from the frame before the
+// material's bump: the interpolated normal, with dpdu and dpdv projected on
+// its plane. Not inlined: only the materials with coat.bumptex run it (a
+// Texture_Bump() call site changes how the kernel is compiled). The hit point
+// is left as it was.
+OPENCL_FORCE_NOT_INLINE float3 OpenPBRMaterial_CoatBump(__global const Material* restrict material,
+		__global const HitPoint *hitPointConst
+		TEXTURES_PARAM_DECL) {
+	__global HitPoint *hitPoint = (__global HitPoint *)hitPointConst;
+	const float3 shadeN = VLOAD3F(&hitPoint->shadeN.x);
+	const float3 dpdu = VLOAD3F(&hitPoint->dpdu.x);
+	const float3 dpdv = VLOAD3F(&hitPoint->dpdv.x);
+
+	const float3 n = VLOAD3F(&hitPoint->interpolatedN.x);
+	VSTORE3F(n, &hitPoint->shadeN.x);
+	VSTORE3F(dpdu - dot(dpdu, n) * n, &hitPoint->dpdu.x);
+	VSTORE3F(dpdv - dot(dpdv, n) * n, &hitPoint->dpdv.x);
+	const float3 coatN = Texture_Bump(material->openpbr.coatBumpTexIndex, hitPoint, material->bumpSampleDistance
+			TEXTURES_PARAM);
+
+	VSTORE3F(shadeN, &hitPoint->shadeN.x);
+	VSTORE3F(dpdu, &hitPoint->dpdu.x);
+	VSTORE3F(dpdv, &hitPoint->dpdv.x);
+
+	// Made valid for the eye direction, as the shading normal in
+	// BSDF_EnsureValidNormals()
+	const float3 fixedDir = VLOAD3F(&hitPoint->fixedDir.x);
+	const float side = hitPoint->intoObject ? 1.f : -1.f;
+	const float3 ng = side * VLOAD3F(&hitPoint->geometryN.x);
+	return (dot(fixedDir, ng) < DEFAULT_COS_EPSILON_STATIC) ? coatN :
+		(side * BSDF_EnsureValidReflection(ng, fixedDir, side * coatN));
+}
+#endif
+
+// The normal of coat.bumptex (world space) in b->coatN, for
+// OpenPBRMaterial_GetBSDF(): its callers compute it, a Texture_Bump() under
+// OpenPBRMaterial_GetBSDF() is one more level on the deepest call chain of
+// the kernel (400 bytes of scratch per lane, every scene 7% slower on HIP).
+// Only the scenes with coat.bumptex compile it
+// (PARAM_ENABLE_OPENPBR_COAT_BUMP, CompiledScene::hasOpenPBRCoatBump): even
+// so, its code costs the other scenes 2.5-4.5% on HIP.
+OPENCL_FORCE_INLINE void OpenPBRMaterial_CoatBumpNormal(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, OpenPBRBSDF *b
+		TEXTURES_PARAM_DECL) {
+#if defined(PARAM_ENABLE_OPENPBR_COAT_BUMP)
+	if (material->openpbr.coatBumpTexIndex != NULL_INDEX)
+		b->coatN = OpenPBRMaterial_CoatBump(material, hitPoint TEXTURES_PARAM);
+#endif
+}
+
+// With coat.bumptex, b->coatN is OpenPBRMaterial_CoatBumpNormal()
 OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* restrict material,
 		__global const HitPoint *hitPoint, OpenPBRBSDF *b
 		TEXTURES_PARAM_DECL) {
@@ -82,13 +134,14 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->coatColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_COAT_COLOR, hitPoint TEXTURES_PARAM);
 		b->coatRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_ROUGHNESS, hitPoint TEXTURES_PARAM);
 		b->coatAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_ANISOTROPY, hitPoint TEXTURES_PARAM);
-		b->coatIor = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_IOR, hitPoint TEXTURES_PARAM);
+		// coat.ior (OpenPBR_Init() makes it relative)
+		b->coatEta = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_IOR, hitPoint TEXTURES_PARAM);
 		b->coatDarkening = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_DARKENING, hitPoint TEXTURES_PARAM);
 	} else {
 		b->coatColor = WHITE;
 		b->coatRoughness = 0.f;
 		b->coatAnisotropy = 0.f;
-		b->coatIor = 1.6f;
+		b->coatEta = 1.6f;
 		b->coatDarkening = 0.f;
 	}
 	b->fuzzWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_WEIGHT, hitPoint TEXTURES_PARAM);
@@ -108,6 +161,21 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->thinFilmIor = 1.4f;
 	}
 	b->tangentRotation = OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM);
+	if (material->openpbr.coatFrame && (b->coatWeight > 0.f)) {
+		// The coat's normal in the shading frame of the hit point (as
+		// Frame_Set() builds it in BSDF_Init())
+#if defined(PARAM_ENABLE_OPENPBR_COAT_BUMP)
+		const float3 n = (material->openpbr.coatBumpTexIndex != NULL_INDEX) ?
+			b->coatN : VLOAD3F(&hitPoint->interpolatedN.x);
+#else
+		const float3 n = VLOAD3F(&hitPoint->interpolatedN.x);
+#endif
+		const float3 shadeN = VLOAD3F(&hitPoint->shadeN.x);
+		const float3 Y = normalize(cross(shadeN, VLOAD3F(&hitPoint->dpdu.x)));
+		const float3 X = cross(Y, shadeN);
+		b->coatN = MAKE_FLOAT3(dot(n, X), dot(n, Y), dot(n, shadeN));
+	} else
+		b->coatN = MAKE_FLOAT3(0.f, 0.f, 1.f);
 	b->exteriorIor = ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM);
 	b->subsurfaceMode = hitPoint->subsurface;
 	b->regularization = hitPoint->regularization;
@@ -123,8 +191,8 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_GetWalkParams(__global const Material* 
 		__global const HitPoint *hitPoint, float3 *color, float3 *radius, float *anisotropy, float *eta
 		TEXTURES_PARAM_DECL) {
 	*color = Spectrum_Clamp(OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM));
-	*radius = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_RADIUS, hitPoint TEXTURES_PARAM) *
-			OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint TEXTURES_PARAM);
+	*radius = Spectrum_Clamp(fmax(OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_RADIUS, hitPoint TEXTURES_PARAM), 0.f) *
+			OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_RADIUSSCALE, hitPoint TEXTURES_PARAM));
 	*anisotropy = clamp(OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_ANISOTROPY, hitPoint TEXTURES_PARAM), -.9f, .9f);
 	*eta = OpenPBR_WalkEta(OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM),
 			OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_WEIGHT, hitPoint TEXTURES_PARAM),
@@ -138,6 +206,7 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Albedo(__global const Material* restric
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
 	OpenPBRBSDF b;
+	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
 	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
 
 	const float3 albedo = OpenPBR_Albedo(&b);
@@ -182,6 +251,7 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Evaluate(__global const Material* restr
 	EvalStack_PopFloat3(lightDir);
 
 	OpenPBRBSDF b;
+	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
 	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
 
 	BSDFEvent event;
@@ -209,6 +279,7 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Sample(__global const Material* restric
 	EvalStack_PopFloat3(fixedDir);
 
 	OpenPBRBSDF b;
+	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
 	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
 
 	float3 sampledDir;
@@ -236,6 +307,7 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_EvaluateDiffuse(__global const Material
 	EvalStack_PopFloat3(lightDir);
 
 	OpenPBRBSDF b;
+	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
 	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
 
 	BSDFEvent event = DIFFUSE | REFLECT;

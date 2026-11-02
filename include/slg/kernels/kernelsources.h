@@ -56,11 +56,13 @@ constexpr unsigned int PrivateMaterialEvalStackSize = 16;
 constexpr unsigned int PrivateTextureEvalStackSize = 32;
 
 // Add the parameters of the path kernel variants that depend on the scene:
-// the private evaluation stacks (HIP only), the subsurface random walk and the
-// PhotonGI indirect cache. Used both at run time and at build time (by the
+// the private evaluation stacks (HIP only), the subsurface random walk, the
+// PhotonGI indirect cache and the OpenPBR coat.bumptex (not baked: compiled at
+// run time). Used both at run time and at build time (by the
 // hip-kernel-baker tool).
 void AddPathKernelVariantParameters(std::vector<std::string> &params,
-	const bool privateEvalStack, const bool subsurface, const bool photonGIIndirect);
+	const bool privateEvalStack, const bool subsurface, const bool photonGIIndirect,
+	const bool openPBRCoatBump);
 
 // The additional compiler options of the path programs on HIP devices (see
 // HardwareDevice::SetAdditionalCompileOpts()). Used both at run time and at

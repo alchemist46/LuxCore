@@ -171,7 +171,9 @@ int main(int argc, char *argv[]) {
 					// used with the kernel constants.
 					vector<string> params;
 					GetKernelParamters(params, renderEngineType, 0.f, 0.f, true);
-					AddPathKernelVariantParameters(params, privateEvalStack, subsurface, photonGIIndirect);
+					// (the OpenPBR coat.bumptex is not baked: rare, it would
+					// double the variants)
+					AddPathKernelVariantParameters(params, privateEvalStack, subsurface, photonGIIndirect, false);
 					const vector<string> deviceParams = GetHIPDeviceKernelParameters();
 					params.insert(params.end(), deviceParams.begin(), deviceParams.end());
 					const vector<string> compileOpts = GetHIPPathCompileOptions();

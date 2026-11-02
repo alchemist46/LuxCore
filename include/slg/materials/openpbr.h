@@ -31,8 +31,11 @@ namespace slg {
 // Every input is a texture named as the specification's parameter with a dot
 // for the first underscore (base_color is base.color, specular_ior is
 // specular.ior). An input that is not set (nullptr) has the default of the
-// specification. The BSDF is the kernel code shared with the GPU, see
-// materialdefs_funcs_openpbr_bsdf.cl.
+// specification. The geometry inputs are LuxCore's: bumptex is
+// geometry_normal and coat.bumptex (a texture bumped as bumptex, from the
+// interpolated normal) geometry_coat_normal; without it the coat keeps the
+// interpolated normal, as the specification's default. The BSDF is the kernel code shared with the
+// GPU, see materialdefs_funcs_openpbr_bsdf.cl.
 //------------------------------------------------------------------------------
 
 class OpenPBRMaterial : public Material {
@@ -41,7 +44,7 @@ public:
 
 	OpenPBRMaterial(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 			TextureConstPtr emitted, TextureConstPtr bump,
-			const Inputs &inputs, const bool thinWalled);
+			const Inputs &inputs, TextureConstPtr coatBump, const bool thinWalled);
 
 	virtual MaterialType GetType() const { return OPENPBR; }
 	virtual BSDFEvent GetEventTypes() const { return eventTypes; };
@@ -84,6 +87,11 @@ public:
 
 	// nullptr when the input is not set
 	TextureConstPtr GetInput(const ocl::OpenPBRInput input) const { return inputs[input]; }
+	// coat.bumptex, nullptr when not set
+	TextureConstPtr GetCoatBump() const { return coatBumpTex; }
+	// The coat can have a normal of its own: a coat with the material's bump
+	// or coat.bumptex (OpenPBRParam::coatFrame)
+	bool HasCoatFrame() const { return coatFrame; }
 	bool IsThinWalled() const { return thinWalled; }
 	// The transmission colour is the one of the interior volume
 	bool HasTransmissionDepth() const;
@@ -118,7 +126,8 @@ private:
 	void GetAlwaysDelta(bool *spec, bool *coat) const;
 
 	Inputs inputs;
-	bool thinWalled;
+	TextureConstPtr coatBumpTex;
+	bool thinWalled, coatFrame;
 
 	BSDFEvent eventTypes, regularizedEventTypes;
 	bool refractive, subsurfaceWalk, diffuseBesideWalk, isDelta;

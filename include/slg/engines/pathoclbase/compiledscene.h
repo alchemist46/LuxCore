@@ -151,6 +151,9 @@ public:
 	// True if a material is a random-walk subsurface one (PathOCL then needs
 	// the buffer of the walks)
 	bool hasSubsurface;
+	// True if an OpenPBR material has coat.bumptex (the path kernels then
+	// compile its bump, see OpenPBRMaterial_CoatBump())
+	bool hasOpenPBRCoatBump;
 
 	// Compiled Textures
 	std::vector<slg::ocl::Texture> texs;

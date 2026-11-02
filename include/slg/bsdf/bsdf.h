@@ -49,6 +49,12 @@ extern const std::string AlbedoSpecularSetting2String(const AlbedoSpecularSettin
 
 class Scene;
 
+// The shading normal n bent towards the geometric normal ng (both on the side
+// of the eye direction eyeDir) just enough for the mirror reflection of eyeDir
+// to stay above the surface
+extern luxrays::Vector BSDF_EnsureValidReflection(const luxrays::Vector &ng,
+		const luxrays::Vector &eyeDir, const luxrays::Vector &n);
+
 class BSDF {
 public:
 	// An empty BSDF

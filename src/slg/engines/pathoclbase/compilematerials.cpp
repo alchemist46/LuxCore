@@ -1350,6 +1350,9 @@ void CompiledScene::CompileMaterials() {
 				}
 				mat->openpbr.thinWalled = opm.IsThinWalled() ? 1 : 0;
 				mat->openpbr.subsurfaceWalk = opm.GetSubsurfaceWalkMaterial() ? 1 : 0;
+				mat->openpbr.coatBumpTexIndex = opm.GetCoatBump() ?
+					scene.GetTextures().GetTextureIndex(opm.GetCoatBump()) : NULL_INDEX;
+				mat->openpbr.coatFrame = opm.HasCoatFrame() ? 1 : 0;
 				break;
 			}
 			case SUBSURFACEMAT: {
@@ -1467,6 +1470,14 @@ void CompiledScene::CompileMaterials() {
 	for (const slg::ocl::Material &mat : mats) {
 		if (mat.subsurfaceWalkMatIndex != NULL_INDEX) {
 			hasSubsurface = true;
+			break;
+		}
+	}
+
+	hasOpenPBRCoatBump = false;
+	for (const slg::ocl::Material &mat : mats) {
+		if ((mat.type == slg::ocl::OPENPBR) && (mat.openpbr.coatBumpTexIndex != NULL_INDEX)) {
+			hasOpenPBRCoatBump = true;
 			break;
 		}
 	}

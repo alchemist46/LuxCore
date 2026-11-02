@@ -94,12 +94,23 @@ struct TestCase {
 	// material, whose Evaluate() is the stepped direct light and Sample() the
 	// Lambert indirect light)
 	bool valueCheck = true;
+	// The normal before the bump (HitPoint::interpolatedN), the normal of an
+	// OpenPBR coat with a frame of its own (with bumptex or coat.bumptex)
+	Normal coatNormal = Normal(0.f, 0.f, 1.f);
+	// Check the reverse pdf of light paths (off for coat.bumptex: its normal
+	// is made valid for the eye direction of an eye path, as the shading
+	// normal in BSDF_EnsureValidNormals(), so the swapped vertex, an eye
+	// one, sees another coat normal; the engines take both pdfs from the
+	// BSDF of the vertex)
+	bool lightRevPdfCheck = true;
 };
 
 // The HitPoint::subsurface of the current case
 int caseSubsurface = HITPOINT_SSS_SURFACE;
 // The TestCase::valueCheck of the current case
 bool caseValueCheck = true;
+// The TestCase::coatNormal of the current case
+Normal caseCoatNormal = Normal(0.f, 0.f, 1.f);
 
 const float NO_EXPECT = -1.f;
 
@@ -233,6 +244,22 @@ vector<TestCase> BuildTestCases() {
 			"scene.materials.m.coat.ior = 1.8\n" + coatRough,
 			NO_EXPECT, a >= 0.2f });
 
+		// A coat with a normal of its own, tilted by 20 degrees from the
+		// shading normal (the interpolated one, under a bump): of coat.bumptex
+		// over a white dielectric and, of a bumptex, anisotropic with a
+		// tangent rotation, over a half glass (consistency only: the coat lobe
+		// has its own cosine, so the sum is not lossless)
+		const Normal tilted = Normalize(Normal(.3f, -.2f, 1.f));
+		cases.push_back({ "openpbr-coattilt-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
+			"scene.materials.m.coat.bumptex = 0\n" + coatRough,
+			NO_EXPECT, a >= 0.2f, HITPOINT_SSS_SURFACE, true, tilted, false });
+		cases.push_back({ "openpbr-coattiltglass-" + Tag(a), "scene.materials.m.type = openpbr\n"
+			"scene.materials.m.base.color = 0.8 0.8 0.8\nscene.materials.m.transmission.weight = 0.5\n"
+			"scene.materials.m.specular.roughness = 0.4\nscene.materials.m.coat.anisotropy = 0.6\n"
+			"scene.materials.m.tangent.rotation = 0.15\nscene.materials.m.bumptex = 0\n" + coatRough,
+			NO_EXPECT, a >= 0.2f, HITPOINT_SSS_SURFACE, true, tilted });
+
 		// OpenPBR transmission: the white rough dielectric interface (eye
 		// paths see the radiance form, (1 - F) / eta^2 transmitted: no albedo
 		// target, the furnace checks it), the thin wall (lossless), half glass
@@ -268,6 +295,18 @@ vector<TestCase> BuildTestCases() {
 	cases.push_back({ "openpbr-coat-smooth", "scene.materials.m.type = openpbr\n"
 		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
 		"scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = 0\n", 1.f, false });
+	// A smooth coat of its own normal: over a rough base, and over a smooth
+	// glass (every lobe a delta, but not allDelta: two mirror directions)
+	cases.push_back({ "openpbr-coattilt-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.base.color = 1 1 1\nscene.materials.m.specular.roughness = 0.5\n"
+		"scene.materials.m.coat.weight = 1\nscene.materials.m.coat.roughness = 0\n"
+		"scene.materials.m.coat.bumptex = 0\n", NO_EXPECT, false, HITPOINT_SSS_SURFACE, true,
+		Normalize(Normal(.3f, -.2f, 1.f)), false });
+	cases.push_back({ "openpbr-coattiltglass-smooth", "scene.materials.m.type = openpbr\n"
+		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0\n"
+		"scene.materials.m.coat.weight = 0.7\nscene.materials.m.coat.roughness = 0\n"
+		"scene.materials.m.bumptex = 0\n", NO_EXPECT, false, HITPOINT_SSS_SURFACE, true,
+		Normalize(Normal(.3f, -.2f, 1.f)) });
 	cases.push_back({ "openpbr-glass-smooth", "scene.materials.m.type = openpbr\n"
 		"scene.materials.m.transmission.weight = 1\nscene.materials.m.specular.roughness = 0\n", NO_EXPECT, false });
 	cases.push_back({ "openpbr-coatmetal-smooth", "scene.materials.m.type = openpbr\n"
@@ -495,6 +534,7 @@ void SetupHitPoint(HitPoint &hp, const Vector &fixedDir, const bool fromLight) {
 	hp.fromLight = fromLight;
 	hp.intoObject = (fixedDir.z > 0.f);
 	hp.subsurface = caseSubsurface;
+	hp.interpolatedN = caseCoatNormal;
 }
 
 // The side test of BSDF::Evaluate() (bsdf.cpp): a material without TRANSMIT
@@ -910,6 +950,7 @@ int main(int argc, char *argv[]) {
 		const Material &mat = scene->GetMaterials().GetMaterial("m");
 		caseSubsurface = tc.subsurface;
 		caseValueCheck = tc.valueCheck;
+		caseCoatNormal = tc.coatNormal;
 
 		mt19937 rng(12345);
 		bool caseFailed = false;
@@ -925,7 +966,7 @@ int main(int argc, char *argv[]) {
 				fails.push_back("value");
 			if (r.pdf.Failed())
 				fails.push_back("pdf");
-			if (r.revPdf.Failed())
+			if (r.revPdf.Failed() && (tc.lightRevPdfCheck || !cfg.fromLight))
 				fails.push_back("revpdf");
 			if (r.pdfFunc.Failed())
 				fails.push_back("Pdf()");

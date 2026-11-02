@@ -22,6 +22,7 @@
 
 #include <cmath>
 
+#include "slg/bsdf/bsdf.h"
 #include "slg/materials/openpbr.h"
 #include "slg/textures/constfloat.h"
 #include "slg/volumes/volume.h"
@@ -102,29 +103,80 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 	b.specularIor = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
 	b.specularAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, hitPoint);
 	b.thinWalled = mat.IsThinWalled();
+	// The inputs of the lobes that are off are not read, with the same values
+	// as OpenPBRMaterial_GetBSDF() on the GPU
+	const slg::ocl::float3 white = slg::ocl::make_float3(1.f, 1.f, 1.f);
 	b.transmissionWeight = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, hitPoint);
-	// At depth, the interior volume does the colour
-	b.transmissionColor = ((b.transmissionWeight > 0.f) && !(!b.thinWalled &&
-			(mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, hitPoint) > 0.f))) ?
-		slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_TRANSMISSION_COLOR, hitPoint)) :
-		slg::ocl::make_float3(1.f, 1.f, 1.f);
-	b.transmissionDispersionScale = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONSCALE, hitPoint);
-	b.transmissionDispersionAbbe = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONABBENUMBER, hitPoint);
+	if (b.transmissionWeight > 0.f) {
+		// At depth, the interior volume does the colour
+		b.transmissionColor = (!b.thinWalled &&
+				(mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, hitPoint) > 0.f)) ?
+			white : slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_TRANSMISSION_COLOR, hitPoint));
+	} else
+		b.transmissionColor = white;
+	if ((b.transmissionWeight > 0.f) && !b.thinWalled) {
+		b.transmissionDispersionScale = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONSCALE, hitPoint);
+		b.transmissionDispersionAbbe = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DISPERSIONABBENUMBER, hitPoint);
+	} else {
+		b.transmissionDispersionScale = 0.f;
+		b.transmissionDispersionAbbe = 20.f;
+	}
 	b.subsurfaceWeight = mat.GetFloat(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, hitPoint);
-	b.subsurfaceColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint));
+	b.subsurfaceColor = (b.subsurfaceWeight > 0.f) ?
+		slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint)) : white;
 	b.coatWeight = mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint);
-	b.coatColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_COAT_COLOR, hitPoint));
-	b.coatRoughness = mat.GetFloat(slg::ocl::OPENPBR_COAT_ROUGHNESS, hitPoint);
-	b.coatAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_COAT_ANISOTROPY, hitPoint);
-	b.coatIor = mat.GetFloat(slg::ocl::OPENPBR_COAT_IOR, hitPoint);
-	b.coatDarkening = mat.GetFloat(slg::ocl::OPENPBR_COAT_DARKENING, hitPoint);
+	if (b.coatWeight > 0.f) {
+		b.coatColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_COAT_COLOR, hitPoint));
+		b.coatRoughness = mat.GetFloat(slg::ocl::OPENPBR_COAT_ROUGHNESS, hitPoint);
+		b.coatAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_COAT_ANISOTROPY, hitPoint);
+		// coat.ior (OpenPBR_Init() makes it relative)
+		b.coatEta = mat.GetFloat(slg::ocl::OPENPBR_COAT_IOR, hitPoint);
+		b.coatDarkening = mat.GetFloat(slg::ocl::OPENPBR_COAT_DARKENING, hitPoint);
+	} else {
+		b.coatColor = white;
+		b.coatRoughness = 0.f;
+		b.coatAnisotropy = 0.f;
+		b.coatEta = 1.6f;
+		b.coatDarkening = 0.f;
+	}
 	b.fuzzWeight = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_WEIGHT, hitPoint);
-	b.fuzzColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_FUZZ_COLOR, hitPoint));
-	b.fuzzRoughness = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_ROUGHNESS, hitPoint);
+	if (b.fuzzWeight > 0.f) {
+		b.fuzzColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_FUZZ_COLOR, hitPoint));
+		b.fuzzRoughness = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_ROUGHNESS, hitPoint);
+	} else {
+		b.fuzzColor = white;
+		b.fuzzRoughness = .5f;
+	}
 	b.thinFilmWeight = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_WEIGHT, hitPoint);
-	b.thinFilmThickness = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_THICKNESS, hitPoint);
-	b.thinFilmIor = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_IOR, hitPoint);
+	if (b.thinFilmWeight > 0.f) {
+		b.thinFilmThickness = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_THICKNESS, hitPoint);
+		b.thinFilmIor = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_IOR, hitPoint);
+	} else {
+		b.thinFilmThickness = 0.f;
+		b.thinFilmIor = 1.4f;
+	}
 	b.tangentRotation = mat.GetFloat(slg::ocl::OPENPBR_TANGENT_ROTATION, hitPoint);
+	if (mat.HasCoatFrame() && (b.coatWeight > 0.f)) {
+		// The coat's normal in the shading frame (as OpenPBRMaterial_GetBSDF()
+		// on the GPU): the interpolated normal, or coat.bumptex bumped from it
+		Normal n = hitPoint.interpolatedN;
+		if (mat.GetCoatBump()) {
+			HitPoint hp = hitPoint;
+			hp.shadeN = n;
+			hp.dpdu -= Dot(hp.dpdu, n) * Vector(n);
+			hp.dpdv -= Dot(hp.dpdv, n) * Vector(n);
+			n = mat.GetCoatBump()->Bump(hp, mat.GetBumpSampleDistance());
+
+			// Made valid for the eye direction, as the shading normal in
+			// BSDF_EnsureValidNormals()
+			const float side = hitPoint.intoObject ? 1.f : -1.f;
+			const Vector ng = side * Vector(hitPoint.geometryN);
+			if (!hitPoint.fromLight && (Dot(hitPoint.fixedDir, ng) >= DEFAULT_COS_EPSILON_STATIC))
+				n = Normal(side * BSDF_EnsureValidReflection(ng, hitPoint.fixedDir, side * Vector(n)));
+		}
+		b.coatN = slg::ocl::ToFloat3(hitPoint.GetFrame().ToLocal(Vector(n)));
+	} else
+		b.coatN = slg::ocl::make_float3(0.f, 0.f, 1.f);
 	b.exteriorIor = ExtractExteriorIors(hitPoint, nullptr);
 	b.subsurfaceMode = hitPoint.subsurface;
 	b.regularization = hitPoint.regularization;
@@ -146,9 +198,9 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 
 OpenPBRMaterial::OpenPBRMaterial(TextureConstPtr frontTransp, TextureConstPtr backTransp,
 		TextureConstPtr emitted, TextureConstPtr bump,
-		const Inputs &ins, const bool thin) :
+		const Inputs &ins, TextureConstPtr coatBump, const bool thin) :
 		Material(frontTransp, backTransp, emitted, bump),
-		inputs(ins), thinWalled(thin) {
+		inputs(ins), coatBumpTex(coatBump), thinWalled(thin) {
 	Update();
 }
 
@@ -275,6 +327,8 @@ void OpenPBRMaterial::Update() {
 	// diffuse lobes beside the walk
 	diffuseBesideWalk = !(GetConstant(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, &value) && (value >= 1.f)) ||
 			!IsZero(slg::ocl::OPENPBR_FUZZ_WEIGHT);
+	// Without a bump of either, the coat has the shading frame
+	coatFrame = !IsZero(slg::ocl::OPENPBR_COAT_WEIGHT) && (bumpTex || coatBumpTex);
 
 	UpdateGlossiness();
 }
@@ -373,6 +427,8 @@ void OpenPBRMaterial::AddReferencedTextures(std::unordered_set<const Texture *> 
 		if (tex)
 			tex->AddReferencedTextures(referencedTexs);
 	}
+	if (coatBumpTex)
+		coatBumpTex->AddReferencedTextures(referencedTexs);
 }
 
 void OpenPBRMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef newTex) {
@@ -382,6 +438,8 @@ void OpenPBRMaterial::UpdateTextureReferences(TextureConstRef oldTex, TextureRef
 		if (tex == &oldTex)
 			tex = &newTex;
 	}
+	if (coatBumpTex == &oldTex)
+		coatBumpTex = &newTex;
 
 	Update();
 }
@@ -396,6 +454,8 @@ PropertiesUPtr OpenPBRMaterial::ToProperties(const ImageMapCache &imgMapCache, c
 		if (inputs[i])
 			props->Set(Property("scene.materials." + name + "." + OpenPBRInputNames[i])(inputs[i]->GetSDLValue()));
 	}
+	if (coatBumpTex)
+		props->Set(Property("scene.materials." + name + ".coat.bumptex")(coatBumpTex->GetSDLValue()));
 	if (thinWalled)
 		props->Set(Property("scene.materials." + name + ".geometry.thinwalled")(true));
 	props->Set(Material::ToProperties(imgMapCache, useRealFileName));

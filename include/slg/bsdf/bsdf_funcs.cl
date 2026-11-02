@@ -18,37 +18,6 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
-// The shading normal n bent towards the geometric normal ng (both on the side
-// of the eye direction eyeDir) just enough for the mirror reflection of eyeDir
-// to stay above the surface (Cycles' ensure_valid_specular_reflection()).
-// Smooth shading and bump mapping can otherwise put the eye below the shading
-// normal at grazing angles, where the materials see the back face: black.
-// BSDF_EnsureValidReflection() in bsdf.cpp is the CPU version.
-OPENCL_FORCE_INLINE float3 BSDF_EnsureValidReflection(const float3 ng, const float3 eyeDir, const float3 n) {
-	const float iz = dot(eyeDir, ng);
-	// The reflection may be as shallow as the eye direction
-	const float threshold = fmin(.9f * iz, .01f);
-	const float3 r = (2.f * dot(n, eyeDir)) * n - eyeDir;
-	if (dot(ng, r) >= threshold)
-		return n;
-
-	// The new normal is in the plane of ng and n, x the part of n orthogonal
-	// to ng: the root of dot(ng, r) = threshold
-	const float3 t = n - dot(n, ng) * ng;
-	const float tLength = length(t);
-	if (tLength <= 0.f)
-		return ng;
-	const float3 x = t / tLength;
-	const float ix = dot(eyeDir, x);
-	const float a = ix * ix + iz * iz;
-	const float b = 2.f * (a + iz * threshold);
-	const float c = (threshold + iz) * (threshold + iz);
-	const float d = sqrt(fmax(0.f, b * b - 4.f * a * c));
-	const float nz2 = .25f * ((ix < 0.f) ? (b + d) : (b - d)) / a;
-
-	return normalize(sqrt(fmax(0.f, 1.f - nz2)) * x + sqrt(fmax(0.f, nz2)) * ng);
-}
-
 // The interpolated and the shading normals of a hit point made valid for its
 // eye direction (see BSDF_EnsureValidReflection())
 OPENCL_FORCE_INLINE void BSDF_EnsureValidNormals(__global HitPoint *hitPoint) {

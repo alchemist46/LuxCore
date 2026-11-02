@@ -42,7 +42,9 @@
 //             the darkening (1 - K) / (1 - E_base K) of the internal
 //             reflection K of the coat (times coat.darkening), the base IOR
 //             relative to the coat and the base roughness raised to
-//             (r^4 + 2 r_coat^4)^(1/4)
+//             (r^4 + 2 r_coat^4)^(1/4). The coat has a normal of its own
+//             (coat.bumptex, else the normal before the material's
+//             bump): its lobe, its albedo and its tint are in that frame.
 //  base       mix(dielectric, metal, base.metalness)
 //    metal    GGX with the F82-tint Fresnel of F0 = base.weight base.color
 //             and the edge tint specular.color, times specular.weight
@@ -144,12 +146,21 @@ typedef struct {
 	float transmissionDispersionScale, transmissionDispersionAbbe;
 	float subsurfaceWeight;
 	float3 subsurfaceColor;
-	float coatWeight, coatRoughness, coatAnisotropy, coatIor, coatDarkening;
+	// (coat.ior is in coatEta, see below)
+	float coatWeight, coatRoughness, coatAnisotropy, coatDarkening;
 	float3 coatColor;
 	float fuzzWeight, fuzzRoughness;
 	float3 fuzzColor;
 	float thinFilmWeight, thinFilmThickness, thinFilmIor;
 	float tangentRotation;
+	// The normal of the coat in the shading frame (0, 0, 1 without a frame of
+	// its own, see OpenPBRParam::coatFrame): the interpolated normal, before
+	// the material's bump, or coat.bumptex bumped from it (the coat doesn't
+	// follow the bump of the base, as the specification's
+	// geometry_coat_normal). OpenPBR_Init() turns it into the lobe frame of the
+	// front face, exactly (0, 0, 1) within 1e-6 of the shading normal (see
+	// OpenPBR_CoatTilted()).
+	float3 coatN;
 	// The IOR of the exterior volume (1 without one)
 	float exteriorIor;
 	int thinWalled;
@@ -176,21 +187,22 @@ typedef struct {
 	float cosRot, sinRot;
 	// The relative IOR of the base dielectric Fresnel (specular.weight and the
 	// coat applied) and of the coat, with their hemispherical average
-	// reflectances
+	// reflectances. coatEta is the input coat.ior before OpenPBR_Init() (one
+	// field less: OpenPBRBSDF is in the frame of the material's EvalOp, on the
+	// deepest call chain of the GPU kernel, so its size is scratch per lane)
 	float eta, etaFavg, coatEta, coatEtaFavg;
 	// The relative IOR of the translucent interface, the interior over the
 	// exterior (specular.weight applied, >= 1 when thin-walled, at the
 	// wavelength of the dispersion), and the luminances of its reflection and
 	// transmission tints
 	float etaT, transYR, transYT;
-	// The colour of the wavelength of the dispersion (white without) of the
-	// refraction, without a wavelength of the path
-	float3 dispersionColor;
 	// With a wavelength of the path: whether the dispersion is active (the
-	// BSDF depends on the wavelength), and the colour of the whole BSDF
+	// BSDF depends on the wavelength). The colour of the wavelength of the
+	// dispersion (white without): without a wavelength of the path, of the
+	// refraction (OpenPBR_RefractionColor()); with one, of the whole BSDF
 	// value, white if the path already has it (OpenPBR_Disperse())
 	int dispersed;
-	float3 dispersionTint;
+	float3 dispersionColor;
 	// Whether the base specular lobes (metal, dielectric, translucent) and the
 	// coat are smooth enough to be delta lobes, and whether every lobe of the
 	// hit point is a delta (OpenPBR_SampleDelta())
@@ -227,13 +239,25 @@ typedef struct {
 #define OpenPBR_Y(b, c) fmax(0.f, Spectrum_Y(c))
 #endif
 
+// Whether the coat has a normal of its own (OpenPBRBSDF::coatN, after
+// OpenPBR_Init())
+OPENCL_FORCE_INLINE bool OpenPBR_CoatTilted(const OpenPBRBSDF *b) {
+	return (b->coatN.z < 1.f);
+}
+
+// The colour of the refraction's wavelength (see OpenPBRBSDF::dispersionColor)
+OPENCL_FORCE_INLINE float3 OpenPBR_RefractionColor(const OpenPBRBSDF *b) {
+	return b->dispersed ? WHITE : b->dispersionColor;
+}
+
 // The IOR of the base dielectric over the medium above it (the exterior, or
 // the coat where coated), specular.weight modulating its F0, as OpenPBR_Init():
-// the boundary of the subsurface walk
+// the boundary of the subsurface walk. The inputs are clamped as there.
 OPENCL_FORCE_INLINE float OpenPBR_WalkEta(const float specularIor, const float specularWeight,
 		const float exteriorIor, const float coatWeight, const float coatIor) {
-	const float invExteriorIor = 1.f / exteriorIor;
-	const float ior = specularIor * (invExteriorIor + coatWeight * (1.f / coatIor - invExteriorIor));
+	const float invExteriorIor = 1.f / fmax(exteriorIor, 1e-3f);
+	const float ior = fmax(specularIor, 1e-3f) *
+			(invExteriorIor + clamp(coatWeight, 0.f, 1.f) * (1.f / fmax(coatIor, 1.f) - invExteriorIor));
 	const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
 	const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
 	const float sqrtF0 = sqrt(clamp(specularWeight * r0 * r0, 0.f, .99f));
@@ -361,7 +385,7 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->coatColor = Spectrum_Clamp(b->coatColor);
 	b->coatRoughness = clamp(b->coatRoughness, 0.f, 1.f);
 	b->coatAnisotropy = clamp(b->coatAnisotropy, 0.f, 1.f);
-	b->coatIor = fmax(b->coatIor, 1.f);
+	const float coatIor = fmax(b->coatEta, 1.f);
 	b->coatDarkening = clamp(b->coatDarkening, 0.f, 1.f);
 	b->fuzzWeight = clamp(b->fuzzWeight, 0.f, 1.f);
 	b->fuzzColor = Spectrum_Clamp(b->fuzzColor);
@@ -389,16 +413,32 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->specDelta = (b->ax <= OPENPBR_MIN_ALPHA) && (b->ay <= OPENPBR_MIN_ALPHA);
 	b->coatDelta = (b->coatAx <= OPENPBR_MIN_ALPHA) && (b->coatAy <= OPENPBR_MIN_ALPHA);
 
-	const float angle = 2.f * M_PI_F * b->tangentRotation;
-	b->cosRot = cos(angle);
-	b->sinRot = sin(angle);
+	if (b->tangentRotation != 0.f) {
+		const float angle = 2.f * M_PI_F * b->tangentRotation;
+		b->cosRot = cos(angle);
+		b->sinRot = sin(angle);
+	} else {
+		b->cosRot = 1.f;
+		b->sinRot = 0.f;
+	}
+
+	// The coat's own normal, on the side of the shading normal, in the lobe
+	// frame of the front face. Within 1e-6 of the shading normal (no bump) the
+	// coat shares the frame of the base.
+	const float3 coatIn = b->coatN;
+	const float coatLen = sqrt(dot(coatIn, coatIn));
+	const float3 nc = (coatLen > 0.f) ? (coatIn * (((coatIn.z < 0.f) ? -1.f : 1.f) / coatLen)) :
+		MAKE_FLOAT3(0.f, 0.f, 1.f);
+	b->coatN = ((b->coatWeight > 0.f) && (nc.z < 1.f - 1e-6f)) ?
+		MAKE_FLOAT3(b->cosRot * nc.x + b->sinRot * nc.y, b->cosRot * nc.y - b->sinRot * nc.x, nc.z) :
+		MAKE_FLOAT3(0.f, 0.f, 1.f);
 
 	// The base IOR is relative to the exterior, or to the coat where coated.
 	// specular.weight multiplies its F0, mapped back to an IOR (the
 	// specification's modulation). The opaque base reflects the same from
 	// both sides: an IOR below 1 is inverted.
 	const float invExteriorIor = 1.f / b->exteriorIor;
-	const float ior = b->specularIor * (invExteriorIor + b->coatWeight * (1.f / b->coatIor - invExteriorIor));
+	const float ior = b->specularIor * (invExteriorIor + b->coatWeight * (1.f / coatIor - invExteriorIor));
 	const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
 	const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
 	const float sqrtF0 = sqrt(clamp(b->specularWeight * r0 * r0, 0.f, .99f));
@@ -431,7 +471,6 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	// wavelength.
 	b->dispersionColor = WHITE;
 	b->dispersed = 0;
-	b->dispersionTint = WHITE;
 	// (an Abbe number of 0 or less is no dispersion: no data)
 	if ((b->transmissionWeight > 0.f) && !b->thinWalled && (b->transmissionDispersionScale > 0.f) &&
 			(b->transmissionDispersionAbbe > 0.f)) {
@@ -450,18 +489,23 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 		if (b->wavelength > 0.f) {
 			b->dispersed = 1;
 			if (!b->dispersionTinted)
-				b->dispersionTint = OpenPBR_WaveLengthColor(b, lambda);
+				b->dispersionColor = OpenPBR_WaveLengthColor(b, lambda);
 		} else
 			b->dispersionColor = OpenPBR_WaveLengthColor(b, lambda);
 	}
 
 	// Only delta lobes: a smooth metal or glass (no opaque dielectric, whose
-	// diffuse isn't a delta), under a smooth coat or none, without fuzz
-	b->allDelta = b->specDelta && !(b->fuzzWeight > 0.f) && (!(b->coatWeight > 0.f) || b->coatDelta) &&
+	// diffuse isn't a delta), under a smooth coat of the same normal or none,
+	// without fuzz
+	b->allDelta = b->specDelta && !(b->fuzzWeight > 0.f) &&
+			(!(b->coatWeight > 0.f) || (b->coatDelta && !OpenPBR_CoatTilted(b))) &&
 			((b->baseMetalness >= 1.f) || (b->transmissionWeight >= 1.f)) &&
 			(b->subsurfaceMode != HITPOINT_SSS_EXIT);
 
-	b->coatEta = b->coatIor;
+	// The coat's IOR relative to the exterior, the same from both sides (an
+	// IOR below 1 is inverted, as the opaque base's)
+	const float coatRel = coatIor * invExteriorIor;
+	b->coatEta = (coatRel < 1.f) ? (1.f / coatRel) : coatRel;
 	b->coatEtaFavg = OpenPBR_DielectricFavg(b->coatEta);
 	// What the coat transmits from inside, averaged over the hemisphere, is
 	// (1 - Favg) / eta^2 of the outside transmission
@@ -475,8 +519,11 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	b->metalB = schlickBar * (WHITE - b->specularColor) * (1.f / .0566527f);
 	b->metalFavg = Spectrum_Clamp(b->specularWeight * (F0 + (WHITE - F0) * (1.f / 21.f) - b->metalB * (1.f / 126.f)));
 
-	if (OpenPBR_HasThinFilm(b)) {
-		b->thinFilmEta = b->thinFilmIor * (invExteriorIor + b->coatWeight * (1.f / b->coatIor - invExteriorIor));
+	if (OpenPBR_HasThinFilm(b))
+		b->thinFilmEta = b->thinFilmIor * (invExteriorIor + b->coatWeight * (1.f / coatIor - invExteriorIor));
+	// The complex IOR of the metal under the film, only where there is metal
+	// (OpenPBR_FilmMetal())
+	if (OpenPBR_HasThinFilm(b) && (b->baseMetalness > 0.f)) {
 #if defined(LUXRAYS_CPU_DEVICE)
 		const float3 s = b->specularColor;
 		const float3 f0 = MAKE_FLOAT3(dot(b->toRec709[0], F0), dot(b->toRec709[1], F0), dot(b->toRec709[2], F0));
@@ -523,7 +570,46 @@ OPENCL_FORCE_INLINE float OpenPBR_MSScale(const float av, const float mu, const 
 			GGXEnergy_Eavg(av, av, false), Favg);
 }
 
-// The albedo of the coat seen from the direction w, times coat.weight
+// The normal of the coat in the lobe frame of the face of flip (1 the front,
+// -1 the back): the back face's lobe frame mirrors the shading frame, and the
+// surface's normal there is the opposite one
+OPENCL_FORCE_INLINE float3 OpenPBR_CoatNormal(const OpenPBRBSDF *b, const float flip) {
+	return MAKE_FLOAT3(flip * b->coatN.x, flip * b->coatN.y, b->coatN.z);
+}
+
+// The tangent frame of the coat of the normal nc (lobe frame): the tangent of
+// the lobe frame projected on the coat's plane, so the coat's anisotropy keeps
+// tangent.rotation
+OPENCL_FORCE_INLINE void OpenPBR_CoatBasis(const float3 nc, float3 *t, float3 *bt) {
+	const float3 x = (fabs(nc.x) < .999f) ? MAKE_FLOAT3(1.f, 0.f, 0.f) : MAKE_FLOAT3(0.f, 1.f, 0.f);
+	*t = normalize(x - dot(x, nc) * nc);
+	*bt = cross(nc, *t);
+}
+
+// A direction of the lobe frame in the frame of the coat of the normal nc
+// (OpenPBR_CoatNormal()), and back. Below the coat's plane a direction has a
+// negative z: the coat lobe is 0 there and the albedo tables read the grazing
+// value (they clamp mu).
+OPENCL_FORCE_INLINE float3 OpenPBR_ToCoatFrame(const OpenPBRBSDF *b, const float3 nc, const float3 w) {
+	if (!OpenPBR_CoatTilted(b))
+		return w;
+
+	float3 t, bt;
+	OpenPBR_CoatBasis(nc, &t, &bt);
+	return MAKE_FLOAT3(dot(w, t), dot(w, bt), dot(w, nc));
+}
+
+OPENCL_FORCE_INLINE float3 OpenPBR_FromCoatFrame(const OpenPBRBSDF *b, const float3 nc, const float3 w) {
+	if (!OpenPBR_CoatTilted(b))
+		return w;
+
+	float3 t, bt;
+	OpenPBR_CoatBasis(nc, &t, &bt);
+	return w.x * t + w.y * bt + w.z * nc;
+}
+
+// The albedo of the coat seen from the direction w (coat frame), times
+// coat.weight
 OPENCL_FORCE_INLINE float OpenPBR_CoatE(const OpenPBRBSDF *b, const float3 w) {
 	if (!(b->coatWeight > 0.f))
 		return 0.f;
@@ -550,9 +636,9 @@ OPENCL_FORCE_INLINE float OpenPBR_FuzzE(const OpenPBRBSDF *b, const float mu,
 	return b->fuzzWeight * albedo;
 }
 
-// The factor of what is beneath the coat seen from the eye direction, blended
-// by coat.weight: the transmission coat.color^(1 / cos_t) and the darkening
-// (1 - K) / (1 - E_base K) of the base albedo E_base
+// The factor of what is beneath the coat seen from the eye direction (coat
+// frame), blended by coat.weight: the transmission coat.color^(1 / cos_t)
+// and the darkening (1 - K) / (1 - E_base K) of the base albedo E_base
 OPENCL_FORCE_INLINE float3 OpenPBR_CoatTint(const OpenPBRBSDF *b, const float3 eyeDir, const float3 baseE) {
 	const float mu = eyeDir.z;
 	const float sin2T = (1.f - mu * mu) / (b->coatEta * b->coatEta);
@@ -630,7 +716,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateTranslucent(const OpenPBRBSDF *b,
 		ThinFilm_TransmissionScale(F, OpenPBR_FilmDielectric(b, cosEH, eta)) : WHITE;
 
 	return ((-cosLH) * cosEH * Microfacet_D(b->ax, b->ay, wh) * Microfacet_G(b->ax, b->ay, lightDir, eyeDir) /
-			(muE * lengthSquared) * (1.f - F) * msScale) * b->transmissionColor * b->dispersionColor * filmT;
+			(muE * lengthSquared) * (1.f - F) * msScale) * b->transmissionColor * OpenPBR_RefractionColor(b) * filmT;
 }
 
 // The pdf of sampling sampledDir from fixedDir (above the surface) with the
@@ -754,7 +840,8 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 			}
 
 			// The diffuse gets what the specular (with the film) leaves
-			const float3 EspecFilm = OpenPBR_HasThinFilm(b) ? (Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
+			const float3 EspecFilm = (OpenPBR_HasThinFilm(b) && !Spectrum_IsBlack(diffuse)) ?
+				(Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
 			result += ((1.f - m) * opaque) * (specular + Spectrum_Clamp(WHITE - EspecFilm) * diffuse);
 		}
 	} else if (!delta && b->thinWalled && (b->subsurfaceWeight > 0.f) && (b->transmissionWeight < 1.f)) {
@@ -770,9 +857,13 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 }
 
 // f |cos light| for the eye direction above the surface (front face, rotated
-// frame), see OpenPBR_EvaluateBase() for etaEye, sssEntry and delta
+// frame), coatN the coat's normal of that face (OpenPBR_CoatNormal()), see
+// OpenPBR_EvaluateBase() for etaEye, sssEntry and delta. A coat of its own
+// normal is a lobe of that frame with its own cosine (as Cycles' closures of
+// their own normal), and the layers below see its albedo from the eye
+// direction in that frame.
 OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
-		const float3 lightDir, const float3 eyeDir, const float etaEye,
+		const float3 lightDir, const float3 eyeDir, const float3 coatN, const float etaEye,
 		const bool sssEntry, const bool delta) {
 	const float muE = eyeDir.z;
 	if ((fabs(lightDir.z) < DEFAULT_COS_EPSILON_STATIC) || (muE < DEFAULT_COS_EPSILON_STATIC))
@@ -783,20 +874,25 @@ OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
 	float3 result = OpenPBR_EvaluateBase(b, lightDir, eyeDir, etaEye, sssEntry, delta, &baseE);
 
 	if (b->coatWeight > 0.f) {
-		const float av = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeDir);
-		const float msScale = OpenPBR_MSScale(av, muE, b->coatEtaFavg);
-		const float Ec = b->coatWeight * GGXEnergy_DielectricE(av, av, muE, b->coatEta) * msScale;
+		const float3 eyeC = OpenPBR_ToCoatFrame(b, coatN, eyeDir);
+		const float muEC = eyeC.z;
+		const float av = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeC);
+		const float msScale = OpenPBR_MSScale(av, muEC, b->coatEtaFavg);
+		const float Ec = b->coatWeight * GGXEnergy_DielectricE(av, av, muEC, b->coatEta) * msScale;
 
 		float coat = 0.f;
 		if (reflect && ((b->coatDelta != 0) == delta)) {
-			const float3 wh = normalize(lightDir + eyeDir);
-			const float cosEH = fmax(0.f, dot(eyeDir, wh));
-			coat = b->coatWeight * msScale *
-					Microfacet_D(b->coatAx, b->coatAy, wh) * Microfacet_G(b->coatAx, b->coatAy, lightDir, eyeDir) / (4.f * muE) *
-					FresnelCauchy_Evaluate(b->coatEta, cosEH);
+			const float3 lightC = OpenPBR_ToCoatFrame(b, coatN, lightDir);
+			if ((lightC.z > 0.f) && (muEC > 0.f)) {
+				const float3 wh = normalize(lightC + eyeC);
+				const float cosEH = fmax(0.f, dot(eyeC, wh));
+				coat = b->coatWeight * msScale *
+						Microfacet_D(b->coatAx, b->coatAy, wh) * Microfacet_G(b->coatAx, b->coatAy, lightC, eyeC) / (4.f * muEC) *
+						FresnelCauchy_Evaluate(b->coatEta, cosEH);
+			}
 		}
 
-		result = TO_FLOAT3(coat) + (1.f - Ec) * OpenPBR_CoatTint(b, eyeDir, baseE) * result;
+		result = TO_FLOAT3(coat) + (1.f - Ec) * OpenPBR_CoatTint(b, eyeC, baseE) * result;
 	}
 
 	if (b->fuzzWeight > 0.f) {
@@ -811,12 +907,14 @@ OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
 }
 
 // The probabilities of the lobes from the fixed direction, the LTC of the
-// fixed direction (the fuzz of eye paths) and the relative IOR of the
-// translucent interface seen from it
+// fixed direction (the fuzz of eye paths), the relative IOR of the
+// translucent interface seen from it and the face of the lobe frame it is in
+// (the flip of OpenPBR_CoatNormal())
 typedef struct {
 	float wFuzz, wCoat, wGlossy, wDiffuse, wTranslucent, wDiffuseT, wSubsurface;
 	float ltcA, ltcB;
 	float eta;
+	float flip;
 } OpenPBRLobes;
 
 // w is the fixed direction above the surface (front face, rotated frame),
@@ -825,7 +923,9 @@ OPENCL_FORCE_INLINE void OpenPBR_LobeWeights(const OpenPBRBSDF *b, const float3 
 		const bool outside, const bool fromLight, OpenPBRLobes *lobes) {
 	const float mu = w.z;
 	const float Ef = OpenPBR_FuzzE(b, mu, &lobes->ltcA, &lobes->ltcB);
-	const float Ec = OpenPBR_CoatE(b, w);
+	lobes->flip = outside ? 1.f : -1.f;
+	const float3 wC = OpenPBR_ToCoatFrame(b, OpenPBR_CoatNormal(b, lobes->flip), w);
+	const float Ec = OpenPBR_CoatE(b, wC);
 	lobes->eta = (b->thinWalled || outside) ? b->etaT : (1.f / b->etaT);
 
 	const float m = b->baseMetalness;
@@ -867,7 +967,9 @@ OPENCL_FORCE_INLINE void OpenPBR_LobeWeights(const OpenPBRBSDF *b, const float3 
 
 	const float rest = (1.f - Ef) * (1.f - Ec);
 	lobes->wFuzz = Ef * OpenPBR_Y(b, b->fuzzColor);
-	lobes->wCoat = (1.f - Ef) * Ec;
+	// A coat of its own normal can't be sampled from below its plane (it still
+	// covers the layers below by its grazing albedo)
+	lobes->wCoat = (!OpenPBR_CoatTilted(b) || (wC.z > 0.f)) ? ((1.f - Ef) * Ec) : 0.f;
 	lobes->wGlossy = rest * glossy;
 	lobes->wDiffuse = rest * diffuse;
 	lobes->wTranslucent = rest * translucent;
@@ -907,8 +1009,13 @@ OPENCL_FORCE_INLINE float OpenPBR_PdfFront(const OpenPBRBSDF *b, const OpenPBRLo
 		}
 		if ((lobes->wGlossy > 0.f) && specLobes)
 			pdf += lobes->wGlossy * Microfacet_PdfReflect(b->ax, b->ay, fixedDir, sampledDir);
-		if ((lobes->wCoat > 0.f) && ((b->coatDelta != 0) == delta))
-			pdf += lobes->wCoat * Microfacet_PdfReflect(b->coatAx, b->coatAy, fixedDir, sampledDir);
+		if ((lobes->wCoat > 0.f) && ((b->coatDelta != 0) == delta)) {
+			const float3 coatN = OpenPBR_CoatNormal(b, lobes->flip);
+			const float3 sampledC = OpenPBR_ToCoatFrame(b, coatN, sampledDir);
+			if (sampledC.z > 0.f)
+				pdf += lobes->wCoat * Microfacet_PdfReflect(b->coatAx, b->coatAy,
+						OpenPBR_ToCoatFrame(b, coatN, fixedDir), sampledC);
+		}
 	} else if (sampledDir.z < 0.f) {
 		if (!delta)
 			pdf = lobes->wDiffuseT * (-sampledDir.z) * M_1_PI_F;
@@ -952,7 +1059,8 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateLocal(const OpenPBRBSDF *b,
 	const float etaEye = (b->thinWalled || eyeOutside) ? b->etaT : (1.f / b->etaT);
 	const bool sssEntry = (b->subsurfaceMode == HITPOINT_SSS_ENTRY) && eyeOutside && !b->thinWalled;
 
-	const float3 result = OpenPBR_EvaluateFront(b, lightDir, eyeDir, etaEye, sssEntry, delta);
+	const float3 result = OpenPBR_EvaluateFront(b, lightDir, eyeDir, OpenPBR_CoatNormal(b, flip),
+			etaEye, sssEntry, delta);
 
 	return (fromLight && delta && (lightDir.z < 0.f) && !b->thinWalled) ? (result * (etaEye * etaEye)) : result;
 }
@@ -992,7 +1100,8 @@ OPENCL_FORCE_INLINE float3 OpenPBR_SampleDelta(const OpenPBRBSDF *b,
 	// The relative IOR of the other side over the fixed one
 	const float eta = (b->thinWalled || outside) ? b->etaT : (1.f / b->etaT);
 
-	const float3 filmD = OpenPBR_FilmDielectric(b, mu, eta);
+	// (the film of the dielectric, the part that isn't metal)
+	const float3 filmD = (m < 1.f) ? OpenPBR_FilmDielectric(b, mu, eta) : WHITE;
 
 	// The reflection: the coat, then what it leaves of the metal and of the
 	// translucent interface's reflection
@@ -1030,7 +1139,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_SampleDelta(const OpenPBRBSDF *b,
 		}
 		// Without the scale for now
 		transmit = ((1.f - m) * (1.f - FT)) * OpenPBR_DeltaBelowCoat(b, muE) *
-				b->transmissionColor * b->dispersionColor * ThinFilm_TransmissionScale(FT, filmD);
+				b->transmissionColor * OpenPBR_RefractionColor(b) * ThinFilm_TransmissionScale(FT, filmD);
 	}
 
 	const float yR = OpenPBR_Y(b, reflect);
@@ -1068,7 +1177,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Disperse(const OpenPBRBSDF *b, const float3 r
 		return result;
 
 	*event |= DISPERSED;
-	return result * b->dispersionTint;
+	return result * b->dispersionColor;
 }
 
 OPENCL_FORCE_INLINE float3 OpenPBR_Albedo(const OpenPBRBSDF *b) {
@@ -1132,13 +1241,13 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Evaluate(const OpenPBRBSDF *b,
 		*reversePdfW = OpenPBR_PdfFront(b, &reverseLobes, !fromLight, sampledDir,
 				OpenPBR_ToLobeFrame(b, localFixedDir, sampledFlip), false);
 	}
-	// The kind of the non-delta lobes
+	// The kind of the non-delta lobes (DIFFUSE when no lobe has a weight)
 	const float wSpec = b->specDelta ? 0.f : (lobes.wGlossy + lobes.wTranslucent);
 	const float wCoat = b->coatDelta ? 0.f : lobes.wCoat;
 	if (reflect)
-		*event = ((wSpec + wCoat >= lobes.wDiffuse + lobes.wFuzz) ? GLOSSY : DIFFUSE) | REFLECT;
+		*event = ((wSpec + wCoat > lobes.wDiffuse + lobes.wFuzz) ? GLOSSY : DIFFUSE) | REFLECT;
 	else
-		*event = ((!b->specDelta && (lobes.wTranslucent >= lobes.wDiffuseT)) ? GLOSSY : DIFFUSE) | TRANSMIT;
+		*event = ((!b->specDelta && (lobes.wTranslucent > lobes.wDiffuseT)) ? GLOSSY : DIFFUSE) | TRANSMIT;
 
 	return result;
 }
@@ -1179,8 +1288,10 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 		return BLACK;
 
 	float3 sampledDir;
-	// Whether the sampled lobe is a delta
+	// Whether the sampled lobe is a delta, and the probability of the sampled
+	// delta event
 	bool delta = false;
+	float deltaPdf = 0.f;
 	const float cFuzz = lobes.wFuzz;
 	const float cCoat = cFuzz + lobes.wCoat;
 	const float cGlossy = cCoat + lobes.wGlossy;
@@ -1195,14 +1306,24 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 			sampledDir = Sheen_SampleLTC(lobes.ltcA, lobes.ltcB, fixedDir, u0, u1);
 		*event = DIFFUSE | REFLECT;
 	} else if (passThroughEvent < cCoat) {
-		if (Microfacet_SampleReflect(b->coatAx, b->coatAy, fixedDir, u0, u1, &sampledDir) <= 0.f)
+		// In the coat's frame (OpenPBR_LobeWeights() leaves the coat out where
+		// the fixed direction is below its plane)
+		const float3 coatN = OpenPBR_CoatNormal(b, flip);
+		float3 sampledC;
+		if (Microfacet_SampleReflect(b->coatAx, b->coatAy, OpenPBR_ToCoatFrame(b, coatN, fixedDir),
+				u0, u1, &sampledC) <= 0.f)
+			return BLACK;
+		sampledDir = OpenPBR_FromCoatFrame(b, coatN, sampledC);
+		if (sampledDir.z <= 0.f)
 			return BLACK;
 		delta = b->coatDelta;
+		deltaPdf = lobes.wCoat;
 		*event = (delta ? SPECULAR : GLOSSY) | REFLECT;
 	} else if (passThroughEvent < cGlossy) {
 		if (Microfacet_SampleReflect(b->ax, b->ay, fixedDir, u0, u1, &sampledDir) <= 0.f)
 			return BLACK;
 		delta = b->specDelta;
+		deltaPdf = lobes.wGlossy;
 		*event = (delta ? SPECULAR : GLOSSY) | REFLECT;
 	} else if (passThroughEvent < cTranslucent) {
 		// A visible normal, then the reflection or the transmission chosen
@@ -1217,6 +1338,7 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 		const float pR = OpenPBR_TranslucentReflectProb(b, FresnelCauchy_Evaluate(lobes.eta, cosFH));
 		const float u = (passThroughEvent - cGlossy) / lobes.wTranslucent;
 		delta = b->specDelta;
+		deltaPdf = lobes.wTranslucent * ((u < pR) ? pR : (1.f - pR));
 		const BSDFEvent kind = delta ? SPECULAR : GLOSSY;
 		if ((u < pR) || b->thinWalled) {
 			sampledDir = 2.f * cosFH * wh - fixedDir;
@@ -1255,10 +1377,14 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 		const float av = OpenPBR_ViewAlpha(b->ax, b->ay, fixedDir);
 		float3 Espec;
 		const float3 baseE = OpenPBR_BaseAlbedo(b, muE, av, OpenPBR_MSScale(av, muE, b->etaFavg), &Espec);
+		// (with the film, as the diffuse of OpenPBR_EvaluateBase())
+		const float3 EspecFilm = OpenPBR_HasThinFilm(b) ? (Espec * OpenPBR_FilmDielectric(b, muE, b->eta)) : Espec;
 		float3 weight = ((1.f - b->baseMetalness) * (1.f - b->transmissionWeight) * b->subsurfaceWeight) *
-				(WHITE - Espec);
-		if (b->coatWeight > 0.f)
-			weight *= (1.f - OpenPBR_CoatE(b, fixedDir)) * OpenPBR_CoatTint(b, fixedDir, baseE);
+				Spectrum_Clamp(WHITE - EspecFilm);
+		if (b->coatWeight > 0.f) {
+			const float3 fixedC = OpenPBR_ToCoatFrame(b, OpenPBR_CoatNormal(b, flip), fixedDir);
+			weight *= (1.f - OpenPBR_CoatE(b, fixedC)) * OpenPBR_CoatTint(b, fixedC, baseE);
+		}
 		if (b->fuzzWeight > 0.f) {
 			float ltcA, ltcB;
 			weight *= 1.f - OpenPBR_FuzzE(b, muE, &ltcA, &ltcB);
@@ -1296,10 +1422,9 @@ OPENCL_FORCE_INLINE float3 OpenPBR_Sample(const OpenPBRBSDF *b,
 	if (Spectrum_IsBlack(f))
 		return BLACK;
 
-	// A delta sample's pdf is the probability of its lobes (as the glass
+	// A delta sample's pdf is the probability of its event (as the glass
 	// material: the engines don't use it for MIS)
-	*pdfW = delta ? ((b->coatDelta ? lobes.wCoat : 0.f) +
-			(b->specDelta ? (lobes.wGlossy + lobes.wTranslucent) : 0.f)) : pdf;
+	*pdfW = delta ? deltaPdf : pdf;
 
 	return f / pdf;
 }
@@ -1352,11 +1477,12 @@ OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateDiffuse(const OpenPBRBSDF *b,
 
 	// The coat (OpenPBR_EvaluateFront())
 	if (b->coatWeight > 0.f) {
-		const float avc = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeDir);
-		const float msScaleC = OpenPBR_MSScale(avc, muE, b->coatEtaFavg);
-		const float Ec = b->coatWeight * GGXEnergy_DielectricE(avc, avc, muE, b->coatEta) * msScaleC;
+		const float3 eyeC = OpenPBR_ToCoatFrame(b, OpenPBR_CoatNormal(b, flip), eyeDir);
+		const float avc = OpenPBR_ViewAlpha(b->coatAx, b->coatAy, eyeC);
+		const float msScaleC = OpenPBR_MSScale(avc, eyeC.z, b->coatEtaFavg);
+		const float Ec = b->coatWeight * GGXEnergy_DielectricE(avc, avc, eyeC.z, b->coatEta) * msScaleC;
 
-		result = (1.f - Ec) * OpenPBR_CoatTint(b, eyeDir, baseE) * result;
+		result = (1.f - Ec) * OpenPBR_CoatTint(b, eyeC, baseE) * result;
 	}
 
 	// The fuzz

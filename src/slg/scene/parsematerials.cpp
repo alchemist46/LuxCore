@@ -57,7 +57,9 @@
 #include "slg/materials/subsurface.h"
 #include "slg/textures/colordepth.h"
 #include "slg/textures/constfloat.h"
+#include "slg/textures/math/clamp.h"
 #include "slg/textures/math/scale.h"
+#include "slg/textures/math/subtract.h"
 #include "slg/volumes/homogenous.h"
 
 #include "slg/textures/texture.h"
@@ -812,15 +814,13 @@ MaterialUPtr Scene::CreateMaterial(
 				parseTex(inputName, OpenPBRMaterial::GetInputDefault(input)) : nullptr;
 		}
 
-		// The parts of the specification that are not implemented yet
-		for (const string inputName : { "coat.bumptex" }) {
-			if (isDefined(inputName))
-				SLG_LOG("WARNING: openpbr material " << matName << ": " << inputName << " is not supported yet and is ignored");
-		}
+		// The coat's normal (the specification's geometry_coat_normal): a
+		// texture bumped as bumptex
+		auto coatBumpTex = parseTextureConstPtr("coat.bumptex", {1.f});
 
 		mat = std::make_unique<OpenPBRMaterial>(
 			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
-			inputs, parseBool("geometry.thinwalled", false)
+			inputs, coatBumpTex, parseBool("geometry.thinwalled", false)
 		);
 	} else
 		throw runtime_error("Unknown material type: " + matType);
@@ -971,14 +971,51 @@ VolumeConstPtr Scene::DefineOpenPBRInterior(const OpenPBRMaterial &mat) {
 	}
 	depth = Max(depth, 1e-3f);
 
-	// sigma_a = -ln(transmission.color) / depth, sigma_s =
-	// transmission.scatter / depth
-	TextureRef absorption = defineTexture(std::make_unique<ColorDepthTexture>(depth,
-			input(slg::ocl::OPENPBR_TRANSMISSION_COLOR)), volName + "-absorption");
-	TextureRef scattering = mat.GetInput(slg::ocl::OPENPBR_TRANSMISSION_SCATTER) ?
+	// As the specification and MaterialX's graph: the extinction sigma_t =
+	// -ln(transmission.color) / depth, sigma_s = transmission.scatter / depth
+	// and sigma_a = sigma_t - sigma_s, shifted by its smallest channel where
+	// that is negative (more scattering than extinction)
+	TextureRef extinction = defineTexture(std::make_unique<ColorDepthTexture>(depth,
+			input(slg::ocl::OPENPBR_TRANSMISSION_COLOR)), volName + "-extinction");
+	TextureConstPtr scatterTex = mat.GetInput(slg::ocl::OPENPBR_TRANSMISSION_SCATTER);
+	TextureRef scattering = scatterTex ?
 		defineTexture(std::make_unique<ScaleTexture>(input(slg::ocl::OPENPBR_TRANSMISSION_SCATTER),
 				GetTexture(Property(volName + ".invdepth")(1.f / depth))), volName + "-scattering") :
 		GetTexture(Property(volName + ".scattering")(0.f, 0.f, 0.f));
+
+	// The value of a colour input that is not set or a constant
+	auto constantColor = [&](const slg::ocl::OpenPBRInput i, Spectrum *v) {
+		TextureConstPtr tex = mat.GetInput(i);
+		if (!tex)
+			*v = OpenPBRMaterial::GetInputDefault(i);
+		else if (tex->GetType() == CONST_FLOAT3)
+			*v = static_cast<const ConstFloat3Texture *>(tex.get())->GetColor();
+		else if (tex->GetType() == CONST_FLOAT)
+			*v = Spectrum(static_cast<const ConstFloatTexture *>(tex.get())->GetValue());
+		else
+			return false;
+		return true;
+	};
+	TextureRef absorption = [&]() -> TextureRef {
+		if (!scatterTex)
+			return extinction;
+
+		Spectrum color, scatter;
+		if (constantColor(slg::ocl::OPENPBR_TRANSMISSION_COLOR, &color) &&
+				constantColor(slg::ocl::OPENPBR_TRANSMISSION_SCATTER, &scatter)) {
+			Spectrum sigmaA = (Spectrum(0.f) - Ln(color.Clamp(1e-9f, 1.f)) - scatter) / depth;
+			const float minA = Min(sigmaA.c[0], Min(sigmaA.c[1], sigmaA.c[2]));
+			if (minA < 0.f)
+				sigmaA -= Spectrum(minA);
+			return GetTexture(Property(volName + ".absorption")(sigmaA.c[0], sigmaA.c[1], sigmaA.c[2]));
+		}
+
+		// Textured: clamped at 0 instead of shifted (they differ only where
+		// the scattering exceeds the extinction)
+		return defineTexture(std::make_unique<ClampTexture>(
+				defineTexture(std::make_unique<SubtractTexture>(extinction, scattering), volName + "-sigmaa"),
+				0.f, INFINITY), volName + "-absorption");
+	}();
 
 	auto vol = std::make_unique<HomogeneousVolume>(input(slg::ocl::OPENPBR_SPECULAR_IOR), nullptr,
 			absorption, scattering, input(slg::ocl::OPENPBR_TRANSMISSION_SCATTERANISOTROPY), true);
