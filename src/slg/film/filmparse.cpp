@@ -718,7 +718,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "OUTLINE") {
 				const Spectrum color = props.Get(Property(prefix + ".color")(0.f, 0.f, 0.f)).Get<Spectrum>();
 				const float amount = Clamp(props.Get(Property(prefix + ".amount")(1.0)).Get<double>(), 0.0, 1.0);
-				const float width = Clamp(props.Get(Property(prefix + ".width")(1.0)).Get<double>(), 1.0, 16.0);
+				const float width = Clamp(props.Get(Property(prefix + ".width")(1.0)).Get<double>(), .25, 16.0);
 				const bool objectID = props.Get(Property(prefix + ".objectid.enable")(true)).Get<bool>();
 				const float depthThreshold = Max(props.Get(Property(prefix + ".depth.threshold")(.05)).Get<double>(), 0.0);
 				const float normalAngle = Clamp(props.Get(Property(prefix + ".normal.angle")(45.0)).Get<double>(), 0.0, 180.0);

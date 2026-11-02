@@ -37,9 +37,14 @@ namespace slg {
 // the DEPTH jumps by more than depthThreshold of the nearer depth, and where
 // the AVG_SHADING_NORMAL turns by more than normalAngle (the creases). Each
 // test needs its channel (Film::Parse() adds them when the film is not
-// initialized yet) and is skipped without it. A pixel is on a line when a
-// pixel within width pixels differs from it and is farther away: the line is
-// drawn on the near side of the edge, width pixels wide.
+// initialized yet) and is skipped without it. The edges are found between
+// neighbour pixels (a crease also when the pixels beyond them turn by more
+// than normalAngle and the boundary takes more than 0.4 of it, as the film's
+// filter spreads a crease over two boundaries). The line is drawn width
+// pixels wide on the near side of each edge, centred on a crease, along a
+// straight segment fitted to the edges around it, and each pixel takes the
+// fraction of its area that the lines cover (anti-aliased lines). The lines
+// are drawn only over the objects on the two sides of their edge.
 //------------------------------------------------------------------------------
 
 class OutlinePlugin : public ImagePipelinePlugin {
