@@ -59,8 +59,15 @@ public:
 	virtual void Preprocess();
 
 	virtual LightSourceType GetType() const { return TYPE_TRIANGLE; }
-	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
-		*dir = Normalize(emitterCenter - p);
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir, float *angularRadius) const {
+		const luxrays::Vector d = emitterCenter - p;
+		const float distance2 = d.LengthSquared();
+		*dir = Normalize(d);
+		// The lamp as a disc of its area seen from p: of its area-weighted
+		// normal (a flat lamp), at least a quarter of its area (a sphere's)
+		const float projectedArea = fmaxf(fabsf(Dot(emitterNormal, *dir)), .25f * emitterArea);
+		*angularRadius = (distance2 > 0.f) ?
+			fminf(sqrtf(projectedArea / (static_cast<float>(M_PI) * distance2)), static_cast<float>(M_PI) * .5f) : 0.f;
 		return true;
 	}
 
@@ -114,8 +121,11 @@ public:
 	// The centroid of the lamp of the triangle, the connected part of the light
 	// triangles of its mesh it belongs to (by area, in world
 	// space at time 0), set by LightSourceDefinitions::Preprocess() (see
-	// GetCenterDir())
+	// GetCenterDir()), the sum of the areas times the normals of its
+	// triangles and its area
 	luxrays::Point emitterCenter;
+	luxrays::Vector emitterNormal;
+	float emitterArea;
 	// Solid angle sampling of the direct light, set by
 	// LightSourceDefinitions::Preprocess() (lightstrategy.trianglelight.solidangle)
 	bool solidAngleSampling;

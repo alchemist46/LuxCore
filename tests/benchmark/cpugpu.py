@@ -71,6 +71,33 @@ CASES = {
             "scene.materials.lamp.type = matte\nscene.materials.lamp.kd = 0 0 0\n"
             "scene.materials.lamp.emission = 5 5 5\nscene.materials.lamp.emission.temperature = 3000\n"
             "scene.objects.lamp.shape = lampquad\nscene.objects.lamp.material = lamp\n",
+    # The toon material with the options of Redshift's Toon (the weights, the
+    # rim ramp, the indirect scale) under the lamp (the direction of its
+    # centre)
+    "toon": "scene.materials.s.type = toon\nscene.materials.s.kd = 0.8 0.3 0.2\n"
+            "scene.materials.s.ramp.positions = 0 0.3 0.7\n"
+            "scene.materials.s.ramp.colors = 0.1 0.1 0.3 0.5 0.5 0.6 1 1 1\n"
+            "scene.materials.s.ramp.smooth = 0.03\nscene.materials.s.base.weight = 0.8\n"
+            "scene.materials.s.indirect.scale = 0.5\n"
+            "scene.materials.s.ks = 1 1 1\nscene.materials.s.specular.roughness = 0.5\n"
+            "scene.materials.s.specular.weight = 0.7\nscene.materials.s.specular.stretch.u = 0.5\n"
+            "scene.materials.s.rim = 0.4 0.4 1\nscene.materials.s.rim.weight = 0.7\n"
+            "scene.materials.s.rim.ramp.positions = 0 1\nscene.materials.s.rim.ramp.colors = 0 0 0 1 1 1\n"
+            "scene.materials.s.rim.ramp.interpolation = linear\n"
+            "scene.materials.lamp.type = matte\nscene.materials.lamp.kd = 0 0 0\n"
+            "scene.materials.lamp.emission = 5 5 5\n"
+            "scene.objects.lamp.shape = lampquad\nscene.objects.lamp.material = lamp\n",
+    # The reflection tonemap on the glossy highlight
+    "toon-glossy": "scene.materials.s.type = toon\nscene.materials.s.kd = 0.8 0.3 0.2\n"
+                   "scene.materials.s.ks = 1 1 1\nscene.materials.s.specular.roughness = 0.4\n"
+                   "scene.materials.s.specular.ramp.positions = 0 0.3 0.6\n"
+                   "scene.materials.s.specular.ramp.colors = 0 0 0 0.2 0.3 1 1 1 1\n"
+                   "scene.materials.s.specular.ramp.interpolation = linear constant constant\n"
+                   "scene.materials.s.specular.ramp.smooth = 0.05\n"
+                   "scene.materials.s.specular.stretch.v = 1\n"
+                   "scene.materials.lamp.type = matte\nscene.materials.lamp.kd = 0 0 0\n"
+                   "scene.materials.lamp.emission = 5 5 5\n"
+                   "scene.objects.lamp.shape = lampquad\nscene.objects.lamp.material = lamp\n",
 }
 
 

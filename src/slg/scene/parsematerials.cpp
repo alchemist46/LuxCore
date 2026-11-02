@@ -306,7 +306,8 @@ MaterialUPtr Scene::CreateMaterial(
 		auto ks = parseTex("ks", {0.f, 0.f, 0.f});
 		auto rim = parseTex("rim", {0.f, 0.f, 0.f});
 
-		// The size of the toon highlight (see ToonMaterial_HighlightAngle())
+		// The glossy highlight of the toon specular (see
+		// ToonMaterial_GlossyIntensity())
 		auto roughness = parseTex("specular.roughness", .5f);
 
 		auto parseFloatList = [&](const string &suffix, const vector<float> &defaultVals) {
@@ -319,21 +320,21 @@ MaterialUPtr Scene::CreateMaterial(
 			return vals;
 		};
 
-		// The keys of the ramp on the cosine of the light direction: colours
-		// (ramp.positions, ramp.colors, ramp.interpolation), or the legacy
-		// (threshold, factor) steps over the shadow colour
-		ToonRamp ramp;
-		if (isDefined("ramp.colors")) {
-			ramp.positions = parseFloatList(isDefined("ramp.positions") ? "ramp.positions" : "ramp.thresholds", {});
-			const vector<float> colors = parseFloatList("ramp.colors", {});
+		// A colour ramp: its keys (prefix.positions, prefix.colors,
+		// prefix.interpolation) and the softness of its constant steps
+		auto parseColorRamp = [&](const string &prefix, const string &positionsName) {
+			ToonRamp ramp;
+			ramp.positions = parseFloatList(positionsName, {});
+			const vector<float> colors = parseFloatList(prefix + ".colors", {});
 			if (colors.size() != 3 * ramp.positions.size())
 				throw runtime_error("The toon material " + matName + " has " + ToString(ramp.positions.size()) +
-						" ramp positions and " + ToString(colors.size()) + " ramp color values (3 per position)");
+						" " + prefix + " positions and " + ToString(colors.size()) + " " + prefix +
+						" color values (3 per position)");
 			for (u_int i = 0; i < ramp.positions.size(); ++i)
 				ramp.colors.push_back(Spectrum(colors[3 * i], colors[3 * i + 1], colors[3 * i + 2]));
 
-			if (isDefined("ramp.interpolation")) {
-				const Property &prop = props.Get(Property(propName + ".ramp.interpolation"));
+			if (isDefined(prefix + ".interpolation")) {
+				const Property &prop = props.Get(Property(propName + "." + prefix + ".interpolation"));
 				for (u_int i = 0; i < prop.GetSize(); ++i) {
 					const string mode = prop.Get<string>(i);
 					if (mode == "constant")
@@ -343,28 +344,52 @@ MaterialUPtr Scene::CreateMaterial(
 					else if (mode == "smooth")
 						ramp.interpolations.push_back(slg::ocl::TOON_RAMP_SMOOTH);
 					else
-						throw runtime_error("Unknown toon material ramp interpolation: " + mode);
+						throw runtime_error("Unknown toon material " + prefix + " interpolation: " + mode);
 				}
 			}
-		} else {
-			ramp.positions = parseFloatList("ramp.thresholds", {0.f, .3f});
+			ramp.smooth = parseFloat(prefix + ".smooth", 0.f);
+
+			return ramp;
+		};
+
+		ToonOptions options;
+		// The keys of the base ramp on the cosine of the light direction:
+		// colours, or the legacy (threshold, factor) steps over the shadow
+		// colour
+		if (isDefined("ramp.colors"))
+			options.ramp = parseColorRamp("ramp", isDefined("ramp.positions") ? "ramp.positions" : "ramp.thresholds");
+		else {
+			options.ramp.positions = parseFloatList("ramp.thresholds", {0.f, .3f});
 			const vector<float> factors = parseFloatList("ramp.factors", {.3f, 1.f});
-			if (factors.size() != ramp.positions.size())
-				throw runtime_error("The toon material " + matName + " ramp has " + ToString(ramp.positions.size()) +
+			if (factors.size() != options.ramp.positions.size())
+				throw runtime_error("The toon material " + matName + " ramp has " + ToString(options.ramp.positions.size()) +
 						" thresholds and " + ToString(factors.size()) + " factors");
 			for (const float f : factors)
-				ramp.colors.push_back(Spectrum(Max(f, 0.f)));
-			ramp.shadowFill = true;
+				options.ramp.colors.push_back(Spectrum(Max(f, 0.f)));
+			options.ramp.shadowFill = true;
+			options.ramp.smooth = parseFloat("ramp.smooth", 0.f);
 		}
-		ramp.smooth = parseFloat("ramp.smooth", 0.f);
+		// The specular ramp on the intensity of the glossy highlight and the
+		// rim ramp across the rim (none: the steps)
+		if (isDefined("specular.ramp.colors"))
+			options.specularRamp = parseColorRamp("specular.ramp", "specular.ramp.positions");
+		if (isDefined("rim.ramp.colors"))
+			options.rimRamp = parseColorRamp("rim.ramp", "rim.ramp.positions");
+
+		options.specularSmooth = parseFloat("specular.smooth", .05f);
+		options.specularStretchU = parseFloat("specular.stretch.u", 0.f);
+		options.specularStretchV = parseFloat("specular.stretch.v", 0.f);
+		options.rimSize = parseFloat("rim.size", .2f);
+		options.rimSmooth = parseFloat("rim.smooth", .05f);
+		options.baseWeight = parseFloat("base.weight", 1.f);
+		options.specularWeight = parseFloat("specular.weight", 1.f);
+		options.rimWeight = parseFloat("rim.weight", 1.f);
+		options.indirectScale = parseFloat("indirect.scale", 1.f);
+		options.lightCenter = parseBool("lightcenter", true);
 
 		mat = std::make_unique<ToonMaterial>(
 			frontTransparencyTex, backTransparencyTex, emissionTex, bumpTex,
-			kd, shadowColor, ks, rim, roughness, ramp,
-			parseFloat("specular.smooth", .05f),
-			parseFloat("specular.stretch.u", 0.f), parseFloat("specular.stretch.v", 0.f),
-			parseFloat("rim.size", .2f), parseFloat("rim.smooth", .05f),
-			props.Get(Property(propName + ".lightcenter")(true)).Get<bool>()
+			kd, shadowColor, ks, rim, roughness, options
 		);
 	} else if (matType == "mirror") {
 		auto kr = parseTex("kr", {1.f, 1.f, 1.f});

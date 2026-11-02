@@ -34,18 +34,20 @@ using namespace slg;
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::OutlinePlugin)
 
-OutlinePlugin::OutlinePlugin(const Spectrum &col, const float amnt, const float w,
-		const bool objID, const float depthT, const float normalA) :
-		color(col), amount(amnt), width(w), objectIDEnabled(objID),
-		depthThreshold(depthT), normalAngle(normalA) {
+OutlinePlugin::OutlinePlugin(const LineStyle &ext, const LineStyle &intern,
+		const SeparateMeshes sepMeshes, const float depthT, const float normalA,
+		const float s, const bool resRelative) :
+		external(ext), internal(intern), separateMeshes(sepMeshes),
+		depthThreshold(depthT), normalAngle(normalA), scale(s), resolutionRelative(resRelative) {
 }
 
-OutlinePlugin::OutlinePlugin() : color(0.f), amount(1.f), width(1.f), objectIDEnabled(true),
-		depthThreshold(.05f), normalAngle(45.f) {
+OutlinePlugin::OutlinePlugin() : separateMeshes(SEPARATE_MESHES_INTERSECTING),
+		depthThreshold(.05f), normalAngle(45.f), scale(1.f), resolutionRelative(true) {
 }
 
 ImagePipelinePlugin *OutlinePlugin::Copy() const {
-	return new OutlinePlugin(color, amount, width, objectIDEnabled, depthThreshold, normalAngle);
+	return new OutlinePlugin(external, internal, separateMeshes, depthThreshold, normalAngle,
+			scale, resolutionRelative);
 }
 
 //------------------------------------------------------------------------------
@@ -86,19 +88,39 @@ const float segmentHalfLength = .75f;
 // Covers the two radiuses above
 const int fitRadius = 4;
 
+// The edges (edgeSides in Apply()): their shape (sided or centred), whether
+// they are internal lines, whether the line also covers the far side
+const int8_t edgeSided = 1;
+const int8_t edgeCentred = 2;
+const int8_t edgeShapeMask = 3;
+const int8_t edgeInternal = 4;
+const int8_t edgeFarSide = 8;
+
 }
 
 void OutlinePlugin::Apply(Film &film, const u_int index) {
-	const bool useObjectID = objectIDEnabled && film.HasChannel(Film::OBJECT_ID);
+	const int filmWidth = film.GetWidth();
+	const int filmHeight = film.GetHeight();
+	const u_int pixelCount = filmWidth * filmHeight;
+
+	// The widths of the external and the internal lines in pixels (0: not
+	// drawn)
+	const float resolutionScale = resolutionRelative ?
+		sqrtf(static_cast<float>(pixelCount) / (1920.f * 1080.f)) : 1.f;
+	auto lineWidth = [&](const LineStyle &style) {
+		const float w = (style.enable && (style.opacity > 0.f)) ?
+			Min(style.thickness * scale * resolutionScale, 32.f) : 0.f;
+		return (w >= .01f) ? w : 0.f;
+	};
+	const float widths[2] = { lineWidth(external), lineWidth(internal) };
+
+	const bool useObjectID = (widths[0] > 0.f) && film.HasChannel(Film::OBJECT_ID);
 	const bool useDepth = (depthThreshold > 0.f) && film.HasChannel(Film::DEPTH);
-	const bool useNormal = (normalAngle > 0.f) && film.HasChannel(Film::AVG_SHADING_NORMAL);
+	const bool useNormal = (widths[1] > 0.f) && (normalAngle > 0.f) && film.HasChannel(Film::AVG_SHADING_NORMAL);
 	if (!useObjectID && !useDepth && !useNormal)
 		return;
 
 	Spectrum *pixels = (Spectrum *)film.channel_IMAGEPIPELINEs[index]->GetPixels();
-	const int filmWidth = film.GetWidth();
-	const int filmHeight = film.GetHeight();
-	const u_int pixelCount = filmWidth * filmHeight;
 
 	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
 	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
@@ -137,13 +159,21 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 	// An object edge has a near side when its depth jumps by more than this
 	const float sideThreshold = useDepth ? depthThreshold : .05f;
 
+	const bool drawContacts = (separateMeshes == SEPARATE_MESHES_INTERSECTING) ||
+			(separateMeshes == SEPARATE_MESHES_BOTH);
+	const bool drawFarSide = (separateMeshes == SEPARATE_MESHES_OVERLAPPING) ||
+			(separateMeshes == SEPARATE_MESHES_BOTH);
+
 	// The edges are on the boundaries between 4-neighbour pixels: the one on
 	// the right of pixel p is edgeSides[2 * p], the one below it
-	// edgeSides[2 * p + 1]. 1 when p is the near side of the edge, -1 when the
-	// other pixel is, 0 without an edge; 2 and -2 for the edges without a near
-	// side, whose line is centred on the edge: the creases (only the normal
-	// changes) and where two objects touch (no depth jump, the nearer pixel
-	// changes from one edge to the next).
+	// edgeSides[2 * p + 1]. Positive when p is the near side of the edge,
+	// negative when the other pixel is, 0 without an edge. Its absolute value
+	// is edgeSided, or edgeCentred for the edges without a near side, whose
+	// line is centred on the edge: the creases (only the normal changes) and
+	// where two objects touch (no depth jump, the nearer pixel changes from
+	// one edge to the next); plus edgeInternal for the internal lines (the
+	// same object on both sides) and edgeFarSide when the line also covers
+	// the far object.
 	vector<int8_t> edgeSides(2 * pixelCount, 0);
 
 	#pragma omp parallel for
@@ -166,11 +196,24 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 
 				// NaN without the DEPTH channel: no near side
 				const float jump = depths[f] - depths[n];
-				if (useObjectID && (ids[n] != ids[f]))
-					edgeSides[2 * p + axis] = (jump > sideThreshold * depths[n]) ?
-						(pNear ? 1 : -1) : (pNear ? 2 : -2);
-				else if (useDepth && (jump > depthThreshold * depths[n]))
-					edgeSides[2 * p + axis] = pNear ? 1 : -1;
+				int8_t edge = 0;
+				if (hasIDs && (ids[n] != ids[f])) {
+					// Two objects, or an object and the background: an
+					// external line
+					if (useObjectID) {
+						if (jump > sideThreshold * depths[n])
+							edge = edgeSided | ((drawFarSide && !isinf(depths[f])) ? edgeFarSide : 0);
+						else if (drawContacts)
+							edge = edgeCentred;
+					}
+				} else if (useDepth && (jump > depthThreshold * depths[n])) {
+					// Self-occlusion: an internal line (an external one
+					// without the OBJECT_ID)
+					if (!hasIDs && (widths[0] > 0.f))
+						edge = edgeSided;
+					else if (hasIDs && (widths[1] > 0.f))
+						edge = edgeSided | edgeInternal;
+				}
 				// The background has no normal
 				else if (useNormal && (normals[p].LengthSquared() > 0.f) && (normals[q].LengthSquared() > 0.f)) {
 					const float angle = acosf(Clamp(Dot(normals[p], normals[q]), -1.f, 1.f));
@@ -193,8 +236,10 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 					}
 
 					if (crease)
-						edgeSides[2 * p + axis] = pNear ? 2 : -2;
+						edge = edgeCentred | edgeInternal;
 				}
+
+				edgeSides[2 * p + axis] = pNear ? edge : -edge;
 			}
 		}
 	}
@@ -208,18 +253,18 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 				const u_int e = 2 * (ex + ey * filmWidth);
 				if (edgeSides[e])
 					f(ex + .5f, static_cast<float>(ey), (edgeSides[e] > 0) ? 1.f : -1.f, 0.f,
-							abs(edgeSides[e]) == 2);
+							(abs(edgeSides[e]) & edgeShapeMask) == edgeCentred);
 				if (edgeSides[e + 1])
 					f(static_cast<float>(ex), ey + .5f, 0.f, (edgeSides[e + 1] > 0) ? 1.f : -1.f,
-							abs(edgeSides[e + 1]) == 2);
+							(abs(edgeSides[e + 1]) & edgeShapeMask) == edgeCentred);
 			}
 		}
 	};
 
 	// The staircase of the edges is anti-aliased: each edge draws a short line
 	// fitted to the edges around it, and each pixel takes the fraction of its
-	// area that the lines cover
-	vector<float> coverages(pixelCount, 0.f);
+	// area that the lines cover, for the external and the internal lines
+	vector<float> coverages[2] = { vector<float>(pixelCount, 0.f), vector<float>(pixelCount, 0.f) };
 
 	#pragma omp parallel for schedule(dynamic, 8)
 	for (int y = 0; y < filmHeight; ++y) {
@@ -233,7 +278,10 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 
 				const float mx = x + ((axis == 0) ? .5f : 0.f);
 				const float my = y + ((axis == 1) ? .5f : 0.f);
-				const bool crease = (abs(side) == 2);
+				const int edge = abs(side);
+				const bool crease = ((edge & edgeShapeMask) == edgeCentred);
+				const u_int kind = (edge & edgeInternal) ? 1 : 0;
+				const float width = widths[kind];
 				const float sx = (axis == 0) ? ((side > 0) ? 1.f : -1.f) : 0.f;
 				const float sy = (axis == 1) ? ((side > 0) ? 1.f : -1.f) : 0.f;
 
@@ -286,16 +334,17 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 				const u_int farPixel = (side > 0) ? q : p;
 
 				// The line covers the signed distances from -width (the near
-				// side) to 0, from -width / 2 to width / 2 without a near side,
+				// side) to 0 (to width when it covers the far side too), from
+				// -width / 2 to width / 2 without a near side,
 				// segmentHalfLength along it on each side of the edge
 				const float lineStart = crease ? (-.5f * width) : -width;
-				const float lineEnd = lineStart + width;
+				const float lineEnd = (edge & edgeFarSide) ? width : (lineStart + width);
 				const float a = Min(fabsf(nx), fabsf(ny));
 				const float b = Max(fabsf(nx), fabsf(ny));
 				const float cx = lx + .5f * (lineStart + lineEnd) * nx;
 				const float cy = ly + .5f * (lineStart + lineEnd) * ny;
-				const float extentX = segmentHalfLength * fabsf(tx) + .5f * width * fabsf(nx) + 1.f;
-				const float extentY = segmentHalfLength * fabsf(ty) + .5f * width * fabsf(ny) + 1.f;
+				const float extentX = segmentHalfLength * fabsf(tx) + .5f * (lineEnd - lineStart) * fabsf(nx) + 1.f;
+				const float extentY = segmentHalfLength * fabsf(ty) + .5f * (lineEnd - lineStart) * fabsf(ny) + 1.f;
 				const int x0 = Max(0, static_cast<int>(floorf(cx - extentX)));
 				const int x1 = Min(filmWidth - 1, static_cast<int>(ceilf(cx + extentX)));
 				const int y0 = Max(0, static_cast<int>(floorf(cy - extentY)));
@@ -315,7 +364,7 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 						const float d = dx * nx + dy * ny;
 						const float coverage = SquareCDF(lineEnd - d, a, b) - SquareCDF(lineStart - d, a, b);
 						if (coverage > 0.f)
-							AtomicMax(&coverages[pixel], coverage);
+							AtomicMax(&coverages[kind][pixel], coverage);
 					}
 				}
 			}
@@ -329,8 +378,11 @@ void OutlinePlugin::Apply(Film &film, const u_int index) {
 			unsigned
 #endif
 			int i = 0; i < pixelCount; ++i) {
-		if (coverages[i] > 0.f)
-			pixels[i] = Lerp(amount * coverages[i], pixels[i], color);
+		// The external lines cover the internal ones
+		if (coverages[1][i] > 0.f)
+			pixels[i] = Lerp(internal.opacity * coverages[1][i], pixels[i], internal.color);
+		if (coverages[0][i] > 0.f)
+			pixels[i] = Lerp(external.opacity * coverages[0][i], pixels[i], external.color);
 	}
 }
 

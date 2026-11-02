@@ -539,8 +539,8 @@ void LightSourceDefinitions::SetTriangleLightEmitterCenters(SceneConstRef scene)
 					parent[find(triNodes[3 * t + 2])] = find(triNodes[3 * t]);
 				}
 
-				// The area-weighted centroid of each part
-				vector<Vector> sums(parent.size());
+				// The area-weighted centroid, normal and area of each part
+				vector<Vector> sums(parent.size()), normals(parent.size());
 				vector<double> areas(parent.size(), 0.0);
 				for (u_int t = 0; t < triCount; ++t) {
 					if (triNodes[3 * t] == NULL_INDEX)
@@ -549,9 +549,11 @@ void LightSourceDefinitions::SetTriangleLightEmitterCenters(SceneConstRef scene)
 					const Point p0 = mesh.GetVertex(localToWorld, tris[t].v[0]);
 					const Point p1 = mesh.GetVertex(localToWorld, tris[t].v[1]);
 					const Point p2 = mesh.GetVertex(localToWorld, tris[t].v[2]);
-					const float a = .5f * Cross(p1 - p0, p2 - p0).Length();
+					const Vector n = .5f * Cross(p1 - p0, p2 - p0);
+					const float a = n.Length();
 					const u_int part = find(triNodes[3 * t]);
 					sums[part] += (a / 3.f) * (Vector(p0) + Vector(p1) + Vector(p2));
+					normals[part] += n;
 					areas[part] += a;
 				}
 
@@ -561,9 +563,12 @@ void LightSourceDefinitions::SetTriangleLightEmitterCenters(SceneConstRef scene)
 						continue;
 
 					const u_int part = find(triNodes[3 * t]);
-					static_cast<TriangleLight &>(lights[index].get()).emitterCenter = (areas[part] > 0.0) ?
+					TriangleLight &tl = static_cast<TriangleLight &>(lights[index].get());
+					tl.emitterCenter = (areas[part] > 0.0) ?
 						(Point() + sums[part] / static_cast<float>(areas[part])) :
 						mesh.GetVertex(localToWorld, tris[t].v[0]);
+					tl.emitterNormal = normals[part];
+					tl.emitterArea = static_cast<float>(areas[part]);
 				}
 			}
 		});

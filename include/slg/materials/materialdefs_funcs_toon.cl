@@ -26,8 +26,8 @@ OPENCL_FORCE_INLINE void ToonMaterial_Albedo(__global const Material* restrict m
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
-	const float3 albedo = Spectrum_Clamp(Texture_GetSpectrumValue(material->toon.kdTexIndex,
-			hitPoint TEXTURES_PARAM));
+	const float3 albedo = Spectrum_Clamp(Spectrum_Clamp(Texture_GetSpectrumValue(material->toon.kdTexIndex,
+			hitPoint TEXTURES_PARAM)) * material->toon.baseWeight);
 
 	EvalStack_PushFloat3(albedo);
 }
@@ -61,11 +61,12 @@ OPENCL_FORCE_INLINE void ToonMaterial_GetEmittedRadiance(__global const Material
 }
 
 // The direct light of an eye path: the toon part of the ramp direction
-// rampDir (lightDir, or the direction of the centre of the light, see
-// ToonMaterial::EvaluateToon())
+// rampDir (lightDir, or the direction of the centre of the light of angular
+// radius lightRadius, see ToonMaterial::EvaluateToon())
 OPENCL_FORCE_NOT_INLINE float3 ToonMaterial_EvaluateToon(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
-		const float3 localLightDir, const float3 localRampDir, const float3 localEyeDir
+		const float3 localLightDir, const float3 localRampDir, const float3 localEyeDir,
+		const float lightRadius
 		MATERIALS_PARAM_DECL) {
 	if (CosTheta(localLightDir) * CosTheta(localEyeDir) <= 0.f)
 		return BLACK;
@@ -77,21 +78,22 @@ OPENCL_FORCE_NOT_INLINE float3 ToonMaterial_EvaluateToon(__global const Material
 
 	__global const ToonParam *toon = &material->toon;
 
-	const float3 ramp = ToonMaterial_Ramp(toon, rampDir.z);
-	float3 result = Spectrum_Clamp(Texture_GetSpectrumValue(toon->kdTexIndex, hitPoint TEXTURES_PARAM)) * ramp;
-	if (toon->rampShadowFill)
+	const float3 ramp = ToonMaterial_Ramp(&toon->ramp, rampDir.z);
+	float3 result = Spectrum_Clamp(Texture_GetSpectrumValue(toon->kdTexIndex, hitPoint TEXTURES_PARAM)) *
+			toon->baseWeight * ramp;
+	if (toon->ramp.shadowFill)
 		result += fmax(Texture_GetSpectrumValue(toon->shadowColorTexIndex, hitPoint TEXTURES_PARAM), BLACK) *
 				fmax(WHITE - ramp, BLACK);
 
 	const float3 ks = fmax(Texture_GetSpectrumValue(toon->ksTexIndex, hitPoint TEXTURES_PARAM), BLACK);
 	if (!Spectrum_IsBlack(ks)) {
 		const float roughness = Texture_GetFloatValue(toon->roughnessTexIndex, hitPoint TEXTURES_PARAM);
-		result += ks * ToonMaterial_Highlight(toon, roughness, rampDir, eyeDir);
+		result += ks * ToonMaterial_Highlight(toon, roughness, lightRadius, rampDir, eyeDir);
 	}
 
-	const float rimStep = ToonMaterial_RimStep(toon, eyeDir.z);
-	if (rimStep > 0.f)
-		result += fmax(Texture_GetSpectrumValue(toon->rimTexIndex, hitPoint TEXTURES_PARAM), BLACK) * rimStep;
+	const float3 rimFactor = ToonMaterial_Rim(toon, eyeDir.z);
+	if (!Spectrum_IsBlack(rimFactor))
+		result += fmax(Texture_GetSpectrumValue(toon->rimTexIndex, hitPoint TEXTURES_PARAM), BLACK) * rimFactor;
 
 	return result * M_1_PI_F;
 }
@@ -104,7 +106,7 @@ OPENCL_FORCE_INLINE void ToonMaterial_Evaluate(__global const Material* restrict
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
-	const float3 result = ToonMaterial_EvaluateToon(material, hitPoint, lightDir, lightDir, eyeDir
+	const float3 result = ToonMaterial_EvaluateToon(material, hitPoint, lightDir, lightDir, eyeDir, 0.f
 			MATERIALS_PARAM);
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
@@ -122,7 +124,7 @@ OPENCL_FORCE_INLINE void ToonMaterial_Evaluate(__global const Material* restrict
 	EvalStack_PushFloat(directPdfW);
 }
 
-// The indirect light: a matte material of colour kd
+// The indirect light: a matte material of colour kd, times indirectScale
 OPENCL_FORCE_INLINE void ToonMaterial_Sample(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
@@ -134,7 +136,8 @@ OPENCL_FORCE_INLINE void ToonMaterial_Sample(__global const Material* restrict m
 	float3 fixedDir;
 	EvalStack_PopFloat3(fixedDir);
 
-	if (fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC) {
+	__global const ToonParam *toon = &material->toon;
+	if ((fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC) || (toon->indirectScale <= 0.f)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
 
@@ -145,8 +148,8 @@ OPENCL_FORCE_INLINE void ToonMaterial_Sample(__global const Material* restrict m
 	}
 	sampledDir *= signbit(fixedDir.z) ? -1.f : 1.f;
 
-	const float3 result = Spectrum_Clamp(Texture_GetSpectrumValue(material->toon.kdTexIndex,
-			hitPoint TEXTURES_PARAM));
+	const float3 result = Spectrum_Clamp(Spectrum_Clamp(Texture_GetSpectrumValue(toon->kdTexIndex,
+			hitPoint TEXTURES_PARAM)) * toon->baseWeight) * toon->indirectScale;
 	const BSDFEvent event = DIFFUSE | REFLECT;
 
 	EvalStack_PushFloat3(result);

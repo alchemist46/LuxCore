@@ -112,9 +112,12 @@ public:
 
 	// The direction from p to the centre of the light (its position, the
 	// direction of a sun or of a distant light, the centroid of the lamp of a
-	// triangle light), for the toon material (see ToonParam::lightCenter);
-	// false for the lights without one (the environment lights)
-	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const { return false; }
+	// triangle light) and the angular radius of the light seen from p (0 for
+	// a point), for the toon material (see ToonParam::lightCenter); false for
+	// the lights without one (the environment lights)
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir, float *angularRadius) const {
+		return false;
+	}
 
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
 

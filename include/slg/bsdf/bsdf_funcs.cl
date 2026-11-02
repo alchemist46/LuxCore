@@ -38,6 +38,55 @@ OPENCL_FORCE_INLINE void BSDF_EnsureValidNormals(__global HitPoint *hitPoint) {
 }
 
 // Used when hitting a surface
+// The offset of a hit point p to the tangent plane of a vertex v of normal n,
+// only outwards (on the side sideN of the eye)
+OPENCL_FORCE_INLINE float3 BSDF_TangentPlaneOffset(const float3 p, const float3 v, const float3 vn,
+		const float3 sideN) {
+	const float3 n = (dot(vn, sideN) < 0.f) ? -normalize(vn) : normalize(vn);
+	const float d = dot(p - v, n);
+
+	return (d < 0.f) ? (-d * n) : MAKE_FLOAT3(0.f, 0.f, 0.f);
+}
+
+// "Hacking the Shadow Terminator" by Johannes Hanika (Ray Tracing Gems II,
+// Cycles' shadow terminator geometry offset): the point of a toon vertex is
+// moved to the smooth surface above its flat triangle, the barycentric blend
+// of its projections on the tangent planes of the three vertices. The rays
+// that leave it see the smooth surface, so the shadow terminator follows the
+// shading normal instead of the edges of the triangles of a coarse mesh
+// (the steps of the toon ramp end where the light is, and show the
+// staircase of the flat triangles a matte material hides near its
+// terminator). See SmoothSurfacePoint() in bsdf.cpp.
+OPENCL_FORCE_NOT_INLINE void BSDF_SetSmoothSurfacePoint(__global HitPoint *hitPoint,
+		const uint meshIndex, const uint triangleIndex
+		EXTMESH_PARAM_DECL) {
+	__global const ExtMesh* restrict meshDesc = &meshDescs[meshIndex];
+	if (meshDesc->normalsOffset == NULL_INDEX)
+		return;
+
+	Transform motionLocalToWorld;
+	ExtMesh_GetMotionLocal2World(hitPoint->time, meshIndex, &motionLocalToWorld EXTMESH_PARAM);
+	float3 v0, v1, v2;
+	ExtMesh_GetTriangleVertices(&motionLocalToWorld, meshIndex, triangleIndex, &v0, &v1, &v2 EXTMESH_PARAM);
+
+	__global const Triangle* restrict tri = &triangles[meshDesc->trisOffset + triangleIndex];
+	__global const Normal* restrict vns = &vertNormals[meshDesc->normalsOffset];
+	const float3 n0 = ExtMesh_LocalToWorldNormal(meshDesc, &motionLocalToWorld, VLOAD3F(&vns[tri->v[0]].x));
+	const float3 n1 = ExtMesh_LocalToWorldNormal(meshDesc, &motionLocalToWorld, VLOAD3F(&vns[tri->v[1]].x));
+	const float3 n2 = ExtMesh_LocalToWorldNormal(meshDesc, &motionLocalToWorld, VLOAD3F(&vns[tri->v[2]].x));
+
+	const float3 geometryN = VLOAD3F(&hitPoint->geometryN.x);
+	const float3 sideN = hitPoint->intoObject ? geometryN : -geometryN;
+	const float3 p = VLOAD3F(&hitPoint->p.x);
+	const float b1 = hitPoint->triangleBariCoord1;
+	const float b2 = hitPoint->triangleBariCoord2;
+	const float3 offset = (1.f - b1 - b2) * BSDF_TangentPlaneOffset(p, v0, n0, sideN) +
+			b1 * BSDF_TangentPlaneOffset(p, v1, n1, sideN) +
+			b2 * BSDF_TangentPlaneOffset(p, v2, n2, sideN);
+
+	VSTORE3F(p + offset, &hitPoint->p.x);
+}
+
 OPENCL_FORCE_INLINE void BSDF_Init(
 		__global BSDF *bsdf,
 		const bool throughShadowTransparency,
@@ -114,6 +163,10 @@ OPENCL_FORCE_INLINE void BSDF_Init(
 
 	// Get the material
 	bsdf->materialIndex = matIndex;
+
+	// A toon vertex: its point on the smooth surface
+	if (mats[matIndex].type == TOON)
+		BSDF_SetSmoothSurfacePoint(&bsdf->hitPoint, meshIndex, triangleIndex EXTMESH_PARAM);
 
 	//--------------------------------------------------------------------------
 	// Set interior and exterior volumes
@@ -324,10 +377,14 @@ OPENCL_FORCE_INLINE float3 BSDF_EvaluateToon(__global const BSDF *bsdf,
 		const float3 lightDir, __global const LightSource* restrict light, BSDFEvent *event
 		MATERIALS_PARAM_DECL) {
 	float3 rampDir = lightDir;
+	float lightRadius = 0.f;
 	if (mats[bsdf->materialIndex].toon.lightCenter) {
 		float3 centerDir;
-		if (Light_GetCenterDir(light, VLOAD3F(&bsdf->hitPoint.p.x), &centerDir))
+		float centerRadius;
+		if (Light_GetCenterDir(light, VLOAD3F(&bsdf->hitPoint.p.x), &centerDir, &centerRadius)) {
 			rampDir = centerDir;
+			lightRadius = centerRadius;
+		}
 	}
 
 	const float3 eyeDir = VLOAD3F(&bsdf->hitPoint.fixedDir.x);
@@ -335,18 +392,19 @@ OPENCL_FORCE_INLINE float3 BSDF_EvaluateToon(__global const BSDF *bsdf,
 	const float3 interpolatedN =  VLOAD3F(&bsdf->hitPoint.interpolatedN.x);
 	const float3 shadeN =  VLOAD3F(&bsdf->hitPoint.shadeN.x);
 
-	// The tests of BSDF_Evaluate() for a material that only reflects
-	const float dotLightDirNG = dot(lightDir, geometryN);
-	const float dotEyeDirNG = dot(eyeDir, geometryN);
-	if ((fabs(dotLightDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
-			(fabs(dotEyeDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
-			(dotEyeDirNG * dotLightDirNG < 0.f) ||
+	// The tests of BSDF_Evaluate() for a material that only reflects, the side
+	// of the light on the interpolated normal: the light of a direction below
+	// a flat triangle but above the smooth surface reaches its point on the
+	// smooth surface (see BSDF_SetSmoothSurfacePoint())
+	if ((fabs(dot(eyeDir, geometryN)) < DEFAULT_COS_EPSILON_STATIC) ||
+			(fabs(dot(lightDir, interpolatedN)) < DEFAULT_COS_EPSILON_STATIC) ||
 			(dot(eyeDir, interpolatedN) * dot(lightDir, interpolatedN) < 0.f))
 		return BLACK;
 
 	__global const Frame *frame = &bsdf->frame;
 	float3 result = ToonMaterial_EvaluateToon(&mats[bsdf->materialIndex], &bsdf->hitPoint,
-			Frame_ToLocal(frame, lightDir), Frame_ToLocal(frame, rampDir), Frame_ToLocal(frame, eyeDir)
+			Frame_ToLocal(frame, lightDir), Frame_ToLocal(frame, rampDir), Frame_ToLocal(frame, eyeDir),
+			lightRadius
 			MATERIALS_PARAM);
 	*event = DIFFUSE | REFLECT;
 

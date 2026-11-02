@@ -716,14 +716,52 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 				imagePipeline->AddPlugin(new MistPlugin(color, amount, start, end, excludeBackground));
 			} else if (type == "OUTLINE") {
+				// The parameters of Redshift's Contour shader: external and
+				// internal lines. The keys of the first version (color,
+				// amount, width, objectid.enable, depth.threshold,
+				// normal.angle) are the defaults of both kinds, and their
+				// width is in pixels at any resolution.
 				const Spectrum color = props.Get(Property(prefix + ".color")(0.f, 0.f, 0.f)).Get<Spectrum>();
-				const float amount = Clamp(props.Get(Property(prefix + ".amount")(1.0)).Get<double>(), 0.0, 1.0);
-				const float width = Clamp(props.Get(Property(prefix + ".width")(1.0)).Get<double>(), .25, 16.0);
+				const float amount = props.Get(Property(prefix + ".amount")(1.0)).Get<double>();
+				const float width = props.Get(Property(prefix + ".width")(1.0)).Get<double>();
 				const bool objectID = props.Get(Property(prefix + ".objectid.enable")(true)).Get<bool>();
-				const float depthThreshold = Max(props.Get(Property(prefix + ".depth.threshold")(.05)).Get<double>(), 0.0);
-				const float normalAngle = Clamp(props.Get(Property(prefix + ".normal.angle")(45.0)).Get<double>(), 0.0, 180.0);
+				const bool legacyWidth = props.IsDefined(prefix + ".width") &&
+						!props.IsDefined(prefix + ".external.thickness") &&
+						!props.IsDefined(prefix + ".internal.thickness");
 
-				imagePipeline->AddPlugin(new OutlinePlugin(color, amount, width, objectID, depthThreshold, normalAngle));
+				auto parseStyle = [&](const string &kind, const bool enable) {
+					OutlinePlugin::LineStyle style;
+					style.enable = props.Get(Property(prefix + "." + kind + ".enable")(enable)).Get<bool>();
+					style.color = props.Get(Property(prefix + "." + kind + ".color")(color)).Get<Spectrum>();
+					style.opacity = Clamp(props.Get(Property(prefix + "." + kind + ".opacity")(amount)).Get<double>(), 0.0, 1.0);
+					style.thickness = Clamp(props.Get(Property(prefix + "." + kind + ".thickness")(width)).Get<double>(), 0.0, 32.0);
+					return style;
+				};
+				const OutlinePlugin::LineStyle external = parseStyle("external", objectID);
+				const OutlinePlugin::LineStyle internal = parseStyle("internal", true);
+
+				const string separateMeshesName = props.Get(Property(prefix + ".external.separatemeshes")("intersecting")).Get<string>();
+				OutlinePlugin::SeparateMeshes separateMeshes;
+				if (separateMeshesName == "off")
+					separateMeshes = OutlinePlugin::SEPARATE_MESHES_OFF;
+				else if (separateMeshesName == "intersecting")
+					separateMeshes = OutlinePlugin::SEPARATE_MESHES_INTERSECTING;
+				else if (separateMeshesName == "overlapping")
+					separateMeshes = OutlinePlugin::SEPARATE_MESHES_OVERLAPPING;
+				else if (separateMeshesName == "both")
+					separateMeshes = OutlinePlugin::SEPARATE_MESHES_BOTH;
+				else
+					throw runtime_error("Unknown OUTLINE external.separatemeshes in image pipeline: " + separateMeshesName);
+
+				const float depthThreshold = Max(props.Get(Property(prefix + ".internal.depth.threshold")(
+						props.Get(Property(prefix + ".depth.threshold")(.05)).Get<double>())).Get<double>(), 0.0);
+				const float normalAngle = Clamp(props.Get(Property(prefix + ".internal.angle")(
+						props.Get(Property(prefix + ".normal.angle")(45.0)).Get<double>())).Get<double>(), 0.0, 180.0);
+				const float scale = Max(props.Get(Property(prefix + ".scale")(1.0)).Get<double>(), 0.0);
+				const bool resolutionRelative = props.Get(Property(prefix + ".resolution.relative")(!legacyWidth)).Get<bool>();
+
+				imagePipeline->AddPlugin(new OutlinePlugin(external, internal, separateMeshes,
+						depthThreshold, normalAngle, scale, resolutionRelative));
 			} else if (type == "BCD_DENOISER") {
 				const float warmUpSamplesPerPixel = Max(props.Get(Property(prefix + ".warmupspp")(2.0)).Get<double>(), 1.0);
 				const float histogramDistanceThreshold = Max(props.Get(Property(prefix + ".histdistthresh")(1.0)).Get<double>(), 0.0);
@@ -912,11 +950,14 @@ void Film::ParseImagePipelines(const Properties &props) {
 	// keeps the ones it has, the plugin skips the tests without theirs)
 	if (!initialized) {
 		for (auto ip : imagePipelines) {
-			if (ip->GetPlugin(typeid(OutlinePlugin))) {
-				AddChannel(Film::DEPTH);
-				AddChannel(Film::OBJECT_ID);
-				AddChannel(Film::AVG_SHADING_NORMAL);
-				break;
+			const OutlinePlugin *outline = (const OutlinePlugin *)ip->GetPlugin(typeid(OutlinePlugin));
+			if (outline) {
+				if (outline->UsesDepth())
+					AddChannel(Film::DEPTH);
+				if (outline->UsesObjectID())
+					AddChannel(Film::OBJECT_ID);
+				if (outline->UsesNormal())
+					AddChannel(Film::AVG_SHADING_NORMAL);
 			}
 		}
 	}

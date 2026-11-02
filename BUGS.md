@@ -67,6 +67,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `pyunittests/resources/scenes/simple/mat-matte-area.cfg`, PATHCPU, SOBOL, 600x400, `batch.haltspp = 4`, `batch.halttime = 0`, `film.opencl.enable = 0`, then `Start()` and `WaitForDone()`. The 52cdd211b build does the same.
 - Notes: the halt conditions of the CPU engines seem to be tested only in `UpdateStats()`. Not investigated further; the test scripts (`tests/furnace/parity.py`, the unit tests) poll and are not affected.
 
+### Toon: a small notch in the terminator at the pole cap of a very coarse UV sphere
+- Found: 2026-11-02
+- Area: material (toon), engine (all path tracers)
+- Problem: with the toon vertex on the smooth surface (Hanika's offset, `SmoothSurfacePoint()` and `BSDF_SetSmoothSurfacePoint()`) the terminator of a coarse smooth sphere follows the shading normal, but a 12x6 UV sphere still shows a small notch where the terminator crosses the triangle fan of the bottom pole cap (a few pixels at 256x256).
+- Reproduce: a 12x6 smooth UV sphere, a toon of one white ramp key, a point light from the side and above (-23, -6, 19), an orthographic camera from -Y, 16 spp (the scratch script of the 2026-11-02 session; the addon's `tests/test_toon.py` "Shadow terminator" check measures the same scene).
+- Notes: suspected: a shadow ray from the smooth point of a long thin cap triangle still crosses the plane of its own triangle inside it (LuxCore's shadow rays do not skip the triangle they leave, Cycles' do), or the interpolated normal of the fan differs from the smooth surface there. Not seen at 32x16.
+
 ### BiDir blends the toon material's steps with its Lambert look
 - Found: 2026-11-01
 - Area: material (toon), engine (BIDIRCPU)

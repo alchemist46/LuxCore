@@ -389,6 +389,16 @@ vector<TestCase> BuildTestCases() {
 		"scene.materials.m.ramp.colors = 0.1 0.1 0.2 0.5 0.4 0.3 1 1 1\n"
 		"scene.materials.m.ramp.interpolation = linear constant smooth\n", 1.f, true,
 		HITPOINT_SSS_SURFACE, false });
+	// The weights and the ramps of Redshift's Toon: the albedo of Sample() is
+	// kd base.weight indirect.scale
+	cases.push_back({ "toon-redshift", "scene.materials.m.type = toon\nscene.materials.m.kd = 1 1 1\n"
+		"scene.materials.m.base.weight = 0.5\nscene.materials.m.indirect.scale = 0.6\n"
+		"scene.materials.m.ks = 1 1 1\nscene.materials.m.specular.weight = 2\n"
+		"scene.materials.m.rim = 1 1 1\nscene.materials.m.rim.weight = 0.5\n"
+		"scene.materials.m.rim.ramp.positions = 0 0.5\n"
+		"scene.materials.m.rim.ramp.colors = 0 0 1 1 1 1\n"
+		"scene.materials.m.rim.ramp.interpolation = linear\n", .3f, true,
+		HITPOINT_SSS_SURFACE, false });
 
 	// The microfiber sheen alone: its albedo is the fiber layer's (< 1)
 	for (const float r : { 0.2f, 0.5f, 1.f })

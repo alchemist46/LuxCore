@@ -38,8 +38,9 @@ public:
 		const luxrays::Transform **alignedLight2World, const luxrays::Transform **lightProjection) const;
 
 	virtual LightSourceType GetType() const { return TYPE_PROJECTION; }
-	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir, float *angularRadius) const {
 		*dir = Normalize(absolutePos - p);
+		*angularRadius = 0.f;
 		return true;
 	}
 	virtual float GetPower(SceneConstRef scene) const;

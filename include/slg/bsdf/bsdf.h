@@ -205,10 +205,10 @@ public:
 		BSDFEvent *event, float *directPdfW = NULL, float *reversePdfW = NULL) const;
 	// The direct light of a toon vertex of an eye path (see
 	// IsDirectLightSamplingOnly()): the toon part of the ramp direction
-	// rampDir, lightDir or the direction of the centre of the light (see
-	// ToonMaterial::EvaluateToon())
+	// rampDir, lightDir or the direction of the centre of the light of
+	// angular radius lightRadius (see ToonMaterial::EvaluateToon())
 	luxrays::Spectrum EvaluateToon(const luxrays::Vector &lightDir, const luxrays::Vector &rampDir,
-		BSDFEvent *event) const;
+		const float lightRadius, BSDFEvent *event) const;
 	luxrays::Spectrum Sample(luxrays::Vector *sampledDir,
 		const float u0, const float u1,
 		float *pdfW, float *absCosSampledDir,

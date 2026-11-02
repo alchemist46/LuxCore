@@ -37,8 +37,9 @@ public:
 		float *sin2ThetaMaxData, float *cosThetaMaxData) const;
 
 	virtual LightSourceType GetType() const { return TYPE_DISTANT; }
-	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir) const {
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir, float *angularRadius) const {
 		*dir = -absoluteLightDir;
+		*angularRadius = acosf(fminf(fmaxf(cosThetaMax, -1.f), 1.f));
 		return true;
 	}
 	virtual float GetPower(SceneConstRef scene) const;

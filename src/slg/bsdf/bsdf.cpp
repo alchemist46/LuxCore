@@ -59,6 +59,34 @@ Vector slg::BSDF_EnsureValidReflection(const Vector &ng, const Vector &eyeDir, c
 
 namespace {
 
+// "Hacking the Shadow Terminator" by Johannes Hanika (Ray Tracing Gems II,
+// Cycles' shadow terminator geometry offset): the point of the smooth surface
+// above a hit point p of a smooth shaded triangle, the barycentric blend of
+// its projections on the tangent planes of the three vertices, moved only
+// outwards (on the side sideN of the eye). The rays that leave it see the
+// smooth surface, so the shadow terminator follows the shading normal instead
+// of the edges of the triangles of a coarse mesh. Used by the toon material
+// (the steps of its ramp end where the light is, and show the staircase of
+// the flat triangles a matte material hides near its terminator), see
+// BSDF_SetSmoothSurfacePoint() for the GPU.
+Point SmoothSurfacePoint(const ExtMesh &mesh, const Transform &local2World,
+		const u_int triIndex, const float b1, const float b2, const Point &p, const Normal &sideN) {
+	const Triangle &tri = mesh.GetTriangles()[triIndex];
+	const float b[3] = { 1.f - b1 - b2, b1, b2 };
+
+	Vector offset;
+	for (u_int i = 0; i < 3; ++i) {
+		Normal n = Normalize(mesh.GetShadeNormal(local2World, triIndex, i));
+		if (Dot(n, sideN) < 0.f)
+			n = -n;
+		const float d = Dot(p - mesh.GetVertex(local2World, tri.v[i]), n);
+		if (d < 0.f)
+			offset -= (b[i] * d) * Vector(n);
+	}
+
+	return p + offset;
+}
+
 // The interpolated and the shading normals of an eye path hit point made valid
 // for its eye direction (see BSDF_EnsureValidReflection())
 void BSDF_EnsureValidNormals(HitPoint &hitPoint) {
@@ -97,6 +125,12 @@ void BSDF::Init(
 
 	// Get the material
 	material = &sceneObject->GetMaterial();
+
+	// A toon vertex on a smooth shaded triangle: its point on the smooth
+	// surface
+	if ((material->GetType() == TOON) && mesh.HasNormals())
+		hitPoint.p = SmoothSurfacePoint(mesh, hitPoint.localToWorld, rayHit.triangleIndex,
+				rayHit.b1, rayHit.b2, hitPoint.p, (hitPoint.intoObject ? 1.f : -1.f) * hitPoint.geometryN);
 
 	// Set interior and exterior volumes
 	volInfo->SetHitPointVolumes(hitPoint,
@@ -452,21 +486,21 @@ Spectrum BSDF::Evaluate(const Vector &generatedDir,
 }
 
 Spectrum BSDF::EvaluateToon(const Vector &lightDir, const Vector &rampDir,
-		BSDFEvent *event) const {
+		const float lightRadius, BSDFEvent *event) const {
 	const Vector &eyeDir = hitPoint.fixedDir;
 
-	// The tests of Evaluate() for a material that only reflects
-	const float dotLightDirNG = Dot(lightDir, hitPoint.geometryN);
-	const float dotEyeDirNG = Dot(eyeDir, hitPoint.geometryN);
-	if ((fabsf(dotLightDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
-			(fabsf(dotEyeDirNG) < DEFAULT_COS_EPSILON_STATIC) ||
-			(dotEyeDirNG * dotLightDirNG < 0.f) ||
+	// The tests of Evaluate() for a material that only reflects, the side of
+	// the light on the interpolated normal: the light of a direction below a
+	// flat triangle but above the smooth surface reaches its point on the
+	// smooth surface (see SmoothSurfacePoint())
+	if ((fabsf(Dot(eyeDir, hitPoint.geometryN)) < DEFAULT_COS_EPSILON_STATIC) ||
+			(fabsf(Dot(lightDir, hitPoint.interpolatedN)) < DEFAULT_COS_EPSILON_STATIC) ||
 			(Dot(eyeDir, hitPoint.interpolatedN) * Dot(lightDir, hitPoint.interpolatedN) < 0.f))
 		return Spectrum();
 
 	const ToonMaterial *toon = static_cast<const ToonMaterial *>(material.get());
 	Spectrum result = toon->EvaluateToon(hitPoint, frame.ToLocal(lightDir), frame.ToLocal(rampDir),
-			frame.ToLocal(eyeDir));
+			frame.ToLocal(eyeDir), lightRadius);
 	*event = DIFFUSE | REFLECT;
 
 	// Shadow terminator artefact avoidance

@@ -32,6 +32,7 @@ using namespace slg;
 TriangleLight::TriangleLight() : sceneObject(nullptr), 
 		meshIndex(NULL_INDEX), triangleIndex(NULL_INDEX),
 		solidAngleSampling(false),
+		emitterArea(0.f),
 		quadLight(nullptr), quadPartner(nullptr), quadCorner(0), quadPartnerCorner(0),
 		triangleArea(0.f), invTriangleArea(0.f),
 		meshArea(0.f), invMeshArea(0.f) {

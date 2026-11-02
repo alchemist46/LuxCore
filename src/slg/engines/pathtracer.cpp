@@ -203,12 +203,16 @@ PathTracer::DirectLightResult PathTracer::DirectLightSampling(
 
 				if (toon) {
 					Vector rampDir = shadowRay.d;
+					float lightRadius = 0.f;
 					if (static_cast<const ToonMaterial &>(bsdf.GetMaterial()).UsesLightCenter()) {
 						Vector centerDir;
-						if (light->GetCenterDir(bsdf.hitPoint.p, &centerDir))
+						float centerRadius;
+						if (light->GetCenterDir(bsdf.hitPoint.p, &centerDir, &centerRadius)) {
 							rampDir = centerDir;
+							lightRadius = centerRadius;
+						}
 					}
-					bsdfEval = bsdf.EvaluateToon(shadowRay.d, rampDir, &event);
+					bsdfEval = bsdf.EvaluateToon(shadowRay.d, rampDir, lightRadius, &event);
 					bsdfPdfW = 0.f;
 				} else if (useBSDFEVal)
 					bsdfEval = bsdf.Evaluate(shadowRay.d, &event, &bsdfPdfW);

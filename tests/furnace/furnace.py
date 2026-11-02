@@ -257,6 +257,13 @@ def cases(env="inf"):
               "scene.materials.m.ramp.thresholds = 0.1 0.5\nscene.materials.m.ramp.factors = 0.5 1\n"
               "scene.materials.m.lightcenter = 0\n",
               1.0 if env == "boxnodls" else 1.4))
+    # The same with base.weight 0.5 (the direct and the indirect light) and
+    # indirect.scale 0.5 (the indirect light only, all of it in boxnodls)
+    c.append(("toon-weights", "scene.materials.m.type = toon\nscene.materials.m.kd = 1 1 1\n"
+              "scene.materials.m.ramp.thresholds = 0.1 0.5\nscene.materials.m.ramp.factors = 0.5 1\n"
+              "scene.materials.m.lightcenter = 0\nscene.materials.m.base.weight = 0.5\n"
+              "scene.materials.m.indirect.scale = 0.5\n",
+              0.25 if env == "boxnodls" else 0.7))
     for r in (0.2, 0.5, 1.0):
         c.append((f"velvet-r{r}", "scene.materials.m.type = velvet\nscene.materials.m.kd = 1 1 1\n"
                   f"scene.materials.m.roughness = {r}\n", None))

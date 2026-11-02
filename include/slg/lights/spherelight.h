@@ -37,6 +37,13 @@ public:
 	virtual void Preprocess();
 
 	virtual LightSourceType GetType() const { return TYPE_SPHERE; }
+	virtual bool GetCenterDir(const luxrays::Point &p, luxrays::Vector *dir, float *angularRadius) const {
+		const luxrays::Vector d = absolutePos - p;
+		const float distance = d.Length();
+		*dir = d / distance;
+		*angularRadius = asinf(fminf(radius / distance, 1.f));
+		return true;
+	}
 
 	virtual luxrays::Spectrum Emit(SceneConstRef scene,
 		const float time, const float u0, const float u1,

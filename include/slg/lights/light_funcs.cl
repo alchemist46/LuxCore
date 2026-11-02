@@ -1272,15 +1272,26 @@ OPENCL_FORCE_INLINE bool Light_IsEnvOrIntersectable(__global const LightSource *
 	}
 }
 
-// The direction from p to the centre of the light, false for the lights
-// without one (see LightSource::GetCenterDir())
+// The direction from p to the centre of the light and the angular radius of
+// the light, false for the lights without one (see
+// LightSource::GetCenterDir())
 OPENCL_FORCE_INLINE bool Light_GetCenterDir(__global const LightSource *light,
-		const float3 p, float3 *dir) {
+		const float3 p, float3 *dir, float *angularRadius) {
 	float3 center;
+	float radius = 0.f;
 	switch (light->type) {
-		case TYPE_TRIANGLE:
-			center = VLOAD3F(&light->triangle.emitterCenter.x);
-			break;
+		case TYPE_TRIANGLE: {
+			const float3 d = VLOAD3F(&light->triangle.emitterCenter.x) - p;
+			const float distance2 = dot(d, d);
+			*dir = normalize(d);
+			// The lamp as a disc of its area seen from p (see
+			// TriangleLight::GetCenterDir())
+			const float projectedArea = fmax(fabs(dot(VLOAD3F(&light->triangle.emitterNormal.x), *dir)),
+					.25f * light->triangle.emitterArea);
+			*angularRadius = (distance2 > 0.f) ?
+				fmin(sqrt(projectedArea / (M_PI_F * distance2)), M_PI_F * .5f) : 0.f;
+			return true;
+		}
 		case TYPE_POINT:
 			center = VLOAD3F(&light->notIntersectable.point.absolutePos.x);
 			break;
@@ -1289,9 +1300,11 @@ OPENCL_FORCE_INLINE bool Light_GetCenterDir(__global const LightSource *light,
 			break;
 		case TYPE_SPHERE:
 			center = VLOAD3F(&light->notIntersectable.sphere.absolutePos.x);
+			radius = light->notIntersectable.sphere.radius;
 			break;
 		case TYPE_MAPSPHERE:
 			center = VLOAD3F(&light->notIntersectable.mapSphere.sphere.absolutePos.x);
+			radius = light->notIntersectable.mapSphere.sphere.radius;
 			break;
 		case TYPE_SPOT:
 			center = VLOAD3F(&light->notIntersectable.spot.absolutePos.x);
@@ -1301,15 +1314,18 @@ OPENCL_FORCE_INLINE bool Light_GetCenterDir(__global const LightSource *light,
 			break;
 		case TYPE_SUN:
 			*dir = VLOAD3F(&light->notIntersectable.sun.absoluteDir.x);
+			*angularRadius = acos(clamp(light->notIntersectable.sun.cosThetaMax, -1.f, 1.f));
 			return true;
 		case TYPE_DISTANT:
 			*dir = -VLOAD3F(&light->notIntersectable.distant.absoluteLightDir.x);
+			*angularRadius = acos(clamp(light->notIntersectable.distant.cosThetaMax, -1.f, 1.f));
 			return true;
 		default:
 			return false;
 	}
 
 	*dir = normalize(center - p);
+	*angularRadius = (radius > 0.f) ? asin(fmin(radius / length(center - p), 1.f)) : 0.f;
 	return true;
 }
 

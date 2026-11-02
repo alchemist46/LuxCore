@@ -260,7 +260,7 @@ typedef struct {
 // The diffuse base only (EON or Lambertian): OpenPBR_DiffuseOnly*()
 #define OPENPBR_IS_DIFFUSE_ONLY(lobes) (((lobes) & ~OPENPBR_LOBE_EON) == 0u)
 
-// The toon material (see toon.cpp): the keys of its ramp, TOON_RAMP_MAX_STEPS
+// The toon material (see toon.cpp): the keys of its ramps, TOON_RAMP_MAX_STEPS
 // at most, and the blend of each key into the next one
 #define TOON_RAMP_MAX_STEPS 8
 
@@ -268,25 +268,36 @@ typedef enum {
 	TOON_RAMP_CONSTANT, TOON_RAMP_LINEAR, TOON_RAMP_SMOOTH
 } ToonRampInterpolation;
 
+// A ramp of the toon material: the colour of each key from its position, the
+// colour below the first key, the interpolation of each key (2 bits per key,
+// ToonRampInterpolation) and whether the shadow colour fills what the ramp
+// leaves (the factor ramps). count 0 is no ramp.
+typedef struct {
+	unsigned int count;
+	float positions[TOON_RAMP_MAX_STEPS];
+	float colors[TOON_RAMP_MAX_STEPS * 3];
+	float base[3];
+	unsigned int interpolations;
+	int shadowFill;
+	float smooth;
+} ToonRampParam;
+
 typedef struct {
 	unsigned int kdTexIndex, shadowColorTexIndex, ksTexIndex, rimTexIndex;
 	unsigned int roughnessTexIndex;
 
-	// The ramp: the colour of each key from its position on (a cosine of the
-	// light direction), the colour below the first key, the interpolation of
-	// each key (2 bits per key, ToonRampInterpolation) and whether the shadow
-	// colour fills what the ramp leaves (the factor ramps)
-	unsigned int rampCount;
-	float rampPositions[TOON_RAMP_MAX_STEPS];
-	float rampColors[TOON_RAMP_MAX_STEPS * 3];
-	float rampBase[3];
-	unsigned int rampInterpolations;
-	int rampShadowFill;
-	float rampSmooth;
+	// The ramps (Redshift's tonemaps): the base one on the cosine of the light
+	// direction, the specular one on the intensity of the glossy highlight
+	// (none: the step of specularSmooth) and the rim one across the rim (none:
+	// the step of rimSmooth)
+	ToonRampParam ramp, specularRamp, rimRamp;
 
 	// The size of the toon highlight is the one of roughnessTexIndex
 	float specularSmooth, specularStretchU, specularStretchV;
 	float rimSize, rimSmooth;
+	float baseWeight, specularWeight, rimWeight;
+	// The scale of the indirect light (the Lambert lobe of Sample())
+	float indirectScale;
 	// The ramp and the toon specular take the direction of the centre of the
 	// light (see LightSource::GetCenterDir())
 	int lightCenter;
