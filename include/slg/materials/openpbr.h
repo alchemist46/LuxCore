@@ -93,6 +93,8 @@ public:
 	// or coat.bumptex (OpenPBRParam::coatFrame)
 	bool HasCoatFrame() const { return coatFrame; }
 	bool IsThinWalled() const { return thinWalled; }
+	// The parts the material can have (OPENPBR_LOBE_*, OpenPBRParam::lobes)
+	u_int GetLobes() const { return lobes; }
 	// The transmission colour is the one of the interior volume
 	bool HasTransmissionDepth() const;
 
@@ -135,6 +137,7 @@ private:
 	// Lambertian stand-in of the subsurface are the diffuse lobe of
 	// EvaluateDiffuse()
 	bool hasDiffuseLobe;
+	u_int lobes;
 };
 
 }

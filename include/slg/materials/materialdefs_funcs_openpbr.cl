@@ -97,21 +97,38 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_CoatBumpNormal(__global const Material*
 #endif
 }
 
-// With coat.bumptex, b->coatN is OpenPBRMaterial_CoatBumpNormal()
-OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* restrict material,
+// With coat.bumptex, b->coatN is OpenPBRMaterial_CoatBumpNormal(). Inlined, as
+// OpenPBR_EvaluateFront(): passed to a call, OpenPBRBSDF goes through scratch
+// memory (both not inlined: OpenPBR plastic, metal and coat 11% slower on
+// HIP, the native scenes of the other materials within 2%)
+OPENCL_FORCE_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* restrict material,
 		__global const HitPoint *hitPoint, OpenPBRBSDF *b
 		TEXTURES_PARAM_DECL) {
+	// The inputs of the lobes that are off (the material's or this hit
+	// point's) are not read
+	const uint lobes = material->openpbr.lobes;
 	b->baseWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_WEIGHT, hitPoint TEXTURES_PARAM);
 	b->baseColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_BASE_COLOR, hitPoint TEXTURES_PARAM);
-	b->baseDiffuseRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint TEXTURES_PARAM);
-	b->baseMetalness = OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_METALNESS, hitPoint TEXTURES_PARAM);
-	b->specularWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_WEIGHT, hitPoint TEXTURES_PARAM);
-	b->specularColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_SPECULAR_COLOR, hitPoint TEXTURES_PARAM);
-	b->specularRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ROUGHNESS, hitPoint TEXTURES_PARAM);
-	b->specularIor = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM);
-	b->specularAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ANISOTROPY, hitPoint TEXTURES_PARAM);
+	b->baseDiffuseRoughness = (lobes & OPENPBR_LOBE_EON) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint TEXTURES_PARAM) : 0.f;
+	b->baseMetalness = (lobes & OPENPBR_LOBE_METAL) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_METALNESS, hitPoint TEXTURES_PARAM) : 0.f;
+	b->specularWeight = (lobes & OPENPBR_LOBE_SPECULAR) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
+	if (lobes & OPENPBR_LOBES_BASE_SPECULAR) {
+		b->specularColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_SPECULAR_COLOR, hitPoint TEXTURES_PARAM);
+		b->specularRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ROUGHNESS, hitPoint TEXTURES_PARAM);
+		b->specularIor = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_IOR, hitPoint TEXTURES_PARAM);
+		b->specularAnisotropy = OpenPBRMaterial_GetFloat(material, OPENPBR_SPECULAR_ANISOTROPY, hitPoint TEXTURES_PARAM);
+	} else {
+		b->specularColor = WHITE;
+		b->specularRoughness = .3f;
+		b->specularIor = 1.5f;
+		b->specularAnisotropy = 0.f;
+	}
 	b->thinWalled = material->openpbr.thinWalled;
-	b->transmissionWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->transmissionWeight = (lobes & OPENPBR_LOBE_TRANSMISSION) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	if (b->transmissionWeight > 0.f) {
 		// At depth, the interior volume does the colour
 		b->transmissionColor = (!b->thinWalled &&
@@ -126,10 +143,12 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->transmissionDispersionScale = 0.f;
 		b->transmissionDispersionAbbe = 20.f;
 	}
-	b->subsurfaceWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->subsurfaceWeight = (lobes & OPENPBR_LOBE_SUBSURFACE) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_SUBSURFACE_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	b->subsurfaceColor = (b->subsurfaceWeight > 0.f) ?
 		OpenPBRMaterial_GetSpectrum(material, OPENPBR_SUBSURFACE_COLOR, hitPoint TEXTURES_PARAM) : WHITE;
-	b->coatWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->coatWeight = (lobes & OPENPBR_LOBE_COAT) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	if (b->coatWeight > 0.f) {
 		b->coatColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_COAT_COLOR, hitPoint TEXTURES_PARAM);
 		b->coatRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_ROUGHNESS, hitPoint TEXTURES_PARAM);
@@ -144,7 +163,8 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->coatEta = 1.6f;
 		b->coatDarkening = 0.f;
 	}
-	b->fuzzWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->fuzzWeight = (lobes & OPENPBR_LOBE_FUZZ) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	if (b->fuzzWeight > 0.f) {
 		b->fuzzColor = OpenPBRMaterial_GetSpectrum(material, OPENPBR_FUZZ_COLOR, hitPoint TEXTURES_PARAM);
 		b->fuzzRoughness = OpenPBRMaterial_GetFloat(material, OPENPBR_FUZZ_ROUGHNESS, hitPoint TEXTURES_PARAM);
@@ -152,7 +172,8 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->fuzzColor = WHITE;
 		b->fuzzRoughness = .5f;
 	}
-	b->thinFilmWeight = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_WEIGHT, hitPoint TEXTURES_PARAM);
+	b->thinFilmWeight = (lobes & OPENPBR_LOBE_THINFILM) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	if (b->thinFilmWeight > 0.f) {
 		b->thinFilmThickness = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_THICKNESS, hitPoint TEXTURES_PARAM);
 		b->thinFilmIor = OpenPBRMaterial_GetFloat(material, OPENPBR_THINFILM_IOR, hitPoint TEXTURES_PARAM);
@@ -160,7 +181,8 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->thinFilmThickness = 0.f;
 		b->thinFilmIor = 1.4f;
 	}
-	b->tangentRotation = OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM);
+	b->tangentRotation = (lobes & OPENPBR_LOBE_ROTATION) ?
+		OpenPBRMaterial_GetFloat(material, OPENPBR_TANGENT_ROTATION, hitPoint TEXTURES_PARAM) : 0.f;
 	if (material->openpbr.coatFrame && (b->coatWeight > 0.f)) {
 		// The coat's normal in the shading frame of the hit point (as
 		// Frame_Set() builds it in BSDF_Init())
@@ -176,7 +198,8 @@ OPENCL_FORCE_NOT_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* re
 		b->coatN = MAKE_FLOAT3(dot(n, X), dot(n, Y), dot(n, shadeN));
 	} else
 		b->coatN = MAKE_FLOAT3(0.f, 0.f, 1.f);
-	b->exteriorIor = ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM);
+	b->exteriorIor = (lobes & OPENPBR_LOBES_EXTERIOR_IOR) ?
+		ExtractExteriorIors(hitPoint, NULL_INDEX TEXTURES_PARAM) : 1.f;
 	b->subsurfaceMode = hitPoint->subsurface;
 	b->regularization = hitPoint->regularization;
 	b->wavelengthU = hitPoint->passThroughEvent;
@@ -201,15 +224,33 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_GetWalkParams(__global const Material* 
 			OpenPBRMaterial_GetFloat(material, OPENPBR_COAT_IOR, hitPoint TEXTURES_PARAM));
 }
 
+// The albedo and the roughness of a material of the diffuse base only
+// (OpenPBR_DiffuseOnly*()), clamped as OpenPBR_Init()
+OPENCL_FORCE_INLINE float3 OpenPBRMaterial_DiffuseOnlyAlbedo(__global const Material* restrict material,
+		__global const HitPoint *hitPoint, float *roughness
+		TEXTURES_PARAM_DECL) {
+	*roughness = (material->openpbr.lobes & OPENPBR_LOBE_EON) ?
+		clamp(OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint TEXTURES_PARAM), 0.f, 1.f) : 0.f;
+
+	return clamp(OpenPBRMaterial_GetFloat(material, OPENPBR_BASE_WEIGHT, hitPoint TEXTURES_PARAM), 0.f, 1.f) *
+			Spectrum_Clamp(OpenPBRMaterial_GetSpectrum(material, OPENPBR_BASE_COLOR, hitPoint TEXTURES_PARAM));
+}
+
 OPENCL_FORCE_INLINE void OpenPBRMaterial_Albedo(__global const Material* restrict material,
 		__global const HitPoint *hitPoint,
 		__global float *evalStack, uint *evalStackOffset
 		MATERIALS_PARAM_DECL) {
-	OpenPBRBSDF b;
-	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
-	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+	float3 albedo;
+	if (OPENPBR_IS_DIFFUSE_ONLY(material->openpbr.lobes)) {
+		float roughness;
+		albedo = OpenPBRMaterial_DiffuseOnlyAlbedo(material, hitPoint, &roughness TEXTURES_PARAM);
+	} else {
+		OpenPBRBSDF b;
+		OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
+		OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
 
-	const float3 albedo = OpenPBR_Albedo(&b);
+		albedo = OpenPBR_Albedo(&b);
+	}
 
 	EvalStack_PushFloat3(albedo);
 }
@@ -250,14 +291,22 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Evaluate(__global const Material* restr
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
-	OpenPBRBSDF b;
-	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
-	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
-
 	BSDFEvent event;
 	float directPdfW;
-	const float3 result = OpenPBR_Disperse(&b, OpenPBR_Evaluate(&b, lightDir, eyeDir, false,
-			&event, &directPdfW, NULL), &event);
+	float3 result;
+	if (OPENPBR_IS_DIFFUSE_ONLY(material->openpbr.lobes)) {
+		float roughness;
+		const float3 albedo = OpenPBRMaterial_DiffuseOnlyAlbedo(material, hitPoint, &roughness TEXTURES_PARAM);
+		result = OpenPBR_DiffuseOnlyEvaluate(albedo, roughness, lightDir, eyeDir, false,
+				&event, &directPdfW, NULL);
+	} else {
+		OpenPBRBSDF b;
+		OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
+		OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+		result = OpenPBR_Disperse(&b, OpenPBR_Evaluate(&b, lightDir, eyeDir, false,
+				&event, &directPdfW, NULL), &event);
+	}
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_EVALUATE_RETURN_BLACK;
 	}
@@ -278,15 +327,23 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_Sample(__global const Material* restric
 	float3 fixedDir;
 	EvalStack_PopFloat3(fixedDir);
 
-	OpenPBRBSDF b;
-	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
-	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
-
 	float3 sampledDir;
 	float pdfW;
 	BSDFEvent event;
-	const float3 result = OpenPBR_Disperse(&b, OpenPBR_Sample(&b, fixedDir, u0, u1, passThroughEvent, false,
-			&sampledDir, &pdfW, &event), &event);
+	float3 result;
+	if (OPENPBR_IS_DIFFUSE_ONLY(material->openpbr.lobes)) {
+		float roughness;
+		const float3 albedo = OpenPBRMaterial_DiffuseOnlyAlbedo(material, hitPoint, &roughness TEXTURES_PARAM);
+		result = OpenPBR_DiffuseOnlySample(albedo, roughness, fixedDir, u0, u1, false,
+				&sampledDir, &pdfW, &event);
+	} else {
+		OpenPBRBSDF b;
+		OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
+		OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+		result = OpenPBR_Disperse(&b, OpenPBR_Sample(&b, fixedDir, u0, u1, passThroughEvent, false,
+				&sampledDir, &pdfW, &event), &event);
+	}
 	if (Spectrum_IsBlack(result)) {
 		MATERIAL_SAMPLE_RETURN_BLACK;
 	}
@@ -306,13 +363,24 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_EvaluateDiffuse(__global const Material
 	EvalStack_PopFloat3(eyeDir);
 	EvalStack_PopFloat3(lightDir);
 
-	OpenPBRBSDF b;
-	OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
-	OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
-
 	BSDFEvent event = DIFFUSE | REFLECT;
 	float directPdfW;
-	const float3 result = OpenPBR_Disperse(&b, OpenPBR_EvaluateDiffuse(&b, lightDir, eyeDir, &directPdfW), &event);
+	float3 result;
+	if (OPENPBR_IS_DIFFUSE_ONLY(material->openpbr.lobes)) {
+		// The whole BSDF
+		float roughness;
+		const float3 albedo = OpenPBRMaterial_DiffuseOnlyAlbedo(material, hitPoint, &roughness TEXTURES_PARAM);
+		BSDFEvent diffuseEvent;
+		directPdfW = 0.f;
+		result = OpenPBR_DiffuseOnlyEvaluate(albedo, roughness, lightDir, eyeDir, false,
+				&diffuseEvent, &directPdfW, NULL);
+	} else {
+		OpenPBRBSDF b;
+		OpenPBRMaterial_CoatBumpNormal(material, hitPoint, &b TEXTURES_PARAM);
+		OpenPBRMaterial_GetBSDF(material, hitPoint, &b TEXTURES_PARAM);
+
+		result = OpenPBR_Disperse(&b, OpenPBR_EvaluateDiffuse(&b, lightDir, eyeDir, &directPdfW), &event);
+	}
 
 	EvalStack_PushFloat3(result);
 	EvalStack_PushBSDFEvent(event);

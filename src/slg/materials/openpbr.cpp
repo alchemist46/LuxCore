@@ -93,20 +93,31 @@ Vector ToVector(const slg::ocl::float3 &v) {
 
 void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		const WorkingColorSpace &workingColorSpace, slg::ocl::OpenPBRBSDF &b) {
+	// The inputs of the lobes that are off (the material's or this hit
+	// point's) are not read, with the same values as OpenPBRMaterial_GetBSDF()
+	// on the GPU
+	const u_int lobes = mat.GetLobes();
+	const slg::ocl::float3 white = slg::ocl::make_float3(1.f, 1.f, 1.f);
 	b.baseWeight = mat.GetFloat(slg::ocl::OPENPBR_BASE_WEIGHT, hitPoint);
 	b.baseColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_BASE_COLOR, hitPoint));
-	b.baseDiffuseRoughness = mat.GetFloat(slg::ocl::OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint);
-	b.baseMetalness = mat.GetFloat(slg::ocl::OPENPBR_BASE_METALNESS, hitPoint);
-	b.specularWeight = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_WEIGHT, hitPoint);
-	b.specularColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SPECULAR_COLOR, hitPoint));
-	b.specularRoughness = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS, hitPoint);
-	b.specularIor = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
-	b.specularAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, hitPoint);
+	b.baseDiffuseRoughness = (lobes & OPENPBR_LOBE_EON) ?
+		mat.GetFloat(slg::ocl::OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint) : 0.f;
+	b.baseMetalness = (lobes & OPENPBR_LOBE_METAL) ? mat.GetFloat(slg::ocl::OPENPBR_BASE_METALNESS, hitPoint) : 0.f;
+	b.specularWeight = (lobes & OPENPBR_LOBE_SPECULAR) ? mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_WEIGHT, hitPoint) : 0.f;
+	if (lobes & OPENPBR_LOBES_BASE_SPECULAR) {
+		b.specularColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SPECULAR_COLOR, hitPoint));
+		b.specularRoughness = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ROUGHNESS, hitPoint);
+		b.specularIor = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_IOR, hitPoint);
+		b.specularAnisotropy = mat.GetFloat(slg::ocl::OPENPBR_SPECULAR_ANISOTROPY, hitPoint);
+	} else {
+		b.specularColor = white;
+		b.specularRoughness = .3f;
+		b.specularIor = 1.5f;
+		b.specularAnisotropy = 0.f;
+	}
 	b.thinWalled = mat.IsThinWalled();
-	// The inputs of the lobes that are off are not read, with the same values
-	// as OpenPBRMaterial_GetBSDF() on the GPU
-	const slg::ocl::float3 white = slg::ocl::make_float3(1.f, 1.f, 1.f);
-	b.transmissionWeight = mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, hitPoint);
+	b.transmissionWeight = (lobes & OPENPBR_LOBE_TRANSMISSION) ?
+		mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, hitPoint) : 0.f;
 	if (b.transmissionWeight > 0.f) {
 		// At depth, the interior volume does the colour
 		b.transmissionColor = (!b.thinWalled &&
@@ -121,10 +132,11 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.transmissionDispersionScale = 0.f;
 		b.transmissionDispersionAbbe = 20.f;
 	}
-	b.subsurfaceWeight = mat.GetFloat(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, hitPoint);
+	b.subsurfaceWeight = (lobes & OPENPBR_LOBE_SUBSURFACE) ?
+		mat.GetFloat(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT, hitPoint) : 0.f;
 	b.subsurfaceColor = (b.subsurfaceWeight > 0.f) ?
 		slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_SUBSURFACE_COLOR, hitPoint)) : white;
-	b.coatWeight = mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint);
+	b.coatWeight = (lobes & OPENPBR_LOBE_COAT) ? mat.GetFloat(slg::ocl::OPENPBR_COAT_WEIGHT, hitPoint) : 0.f;
 	if (b.coatWeight > 0.f) {
 		b.coatColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_COAT_COLOR, hitPoint));
 		b.coatRoughness = mat.GetFloat(slg::ocl::OPENPBR_COAT_ROUGHNESS, hitPoint);
@@ -139,7 +151,7 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.coatEta = 1.6f;
 		b.coatDarkening = 0.f;
 	}
-	b.fuzzWeight = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_WEIGHT, hitPoint);
+	b.fuzzWeight = (lobes & OPENPBR_LOBE_FUZZ) ? mat.GetFloat(slg::ocl::OPENPBR_FUZZ_WEIGHT, hitPoint) : 0.f;
 	if (b.fuzzWeight > 0.f) {
 		b.fuzzColor = slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_FUZZ_COLOR, hitPoint));
 		b.fuzzRoughness = mat.GetFloat(slg::ocl::OPENPBR_FUZZ_ROUGHNESS, hitPoint);
@@ -147,7 +159,8 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.fuzzColor = white;
 		b.fuzzRoughness = .5f;
 	}
-	b.thinFilmWeight = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_WEIGHT, hitPoint);
+	b.thinFilmWeight = (lobes & OPENPBR_LOBE_THINFILM) ?
+		mat.GetFloat(slg::ocl::OPENPBR_THINFILM_WEIGHT, hitPoint) : 0.f;
 	if (b.thinFilmWeight > 0.f) {
 		b.thinFilmThickness = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_THICKNESS, hitPoint);
 		b.thinFilmIor = mat.GetFloat(slg::ocl::OPENPBR_THINFILM_IOR, hitPoint);
@@ -155,7 +168,8 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.thinFilmThickness = 0.f;
 		b.thinFilmIor = 1.4f;
 	}
-	b.tangentRotation = mat.GetFloat(slg::ocl::OPENPBR_TANGENT_ROTATION, hitPoint);
+	b.tangentRotation = (lobes & OPENPBR_LOBE_ROTATION) ?
+		mat.GetFloat(slg::ocl::OPENPBR_TANGENT_ROTATION, hitPoint) : 0.f;
 	if (mat.HasCoatFrame() && (b.coatWeight > 0.f)) {
 		// The coat's normal in the shading frame (as OpenPBRMaterial_GetBSDF()
 		// on the GPU): the interpolated normal, or coat.bumptex bumped from it
@@ -177,7 +191,7 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.coatN = slg::ocl::ToFloat3(hitPoint.GetFrame().ToLocal(Vector(n)));
 	} else
 		b.coatN = slg::ocl::make_float3(0.f, 0.f, 1.f);
-	b.exteriorIor = ExtractExteriorIors(hitPoint, nullptr);
+	b.exteriorIor = (lobes & OPENPBR_LOBES_EXTERIOR_IOR) ? ExtractExteriorIors(hitPoint, nullptr) : 1.f;
 	b.subsurfaceMode = hitPoint.subsurface;
 	b.regularization = hitPoint.regularization;
 	b.wavelengthU = hitPoint.passThroughEvent;
@@ -192,6 +206,17 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		b.toRec709[i] = slg::ocl::make_float3(mt[i][0], mt[i][1], mt[i][2]);
 
 	slg::ocl::OpenPBR_Init(&b);
+}
+
+// The albedo and the roughness of a material of the diffuse base only
+// (OpenPBR_DiffuseOnly*()), clamped as OpenPBR_Init()
+slg::ocl::float3 OpenPBR_DiffuseOnlyAlbedo(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
+		float *roughness) {
+	*roughness = (mat.GetLobes() & OPENPBR_LOBE_EON) ?
+		Clamp(mat.GetFloat(slg::ocl::OPENPBR_BASE_DIFFUSEROUGHNESS, hitPoint), 0.f, 1.f) : 0.f;
+
+	return slg::ocl::ToFloat3(Clamp(mat.GetFloat(slg::ocl::OPENPBR_BASE_WEIGHT, hitPoint), 0.f, 1.f) *
+			mat.GetSpectrum(slg::ocl::OPENPBR_BASE_COLOR, hitPoint).Clamp(0.f, 1.f));
 }
 
 }
@@ -330,6 +355,22 @@ void OpenPBRMaterial::Update() {
 	// Without a bump of either, the coat has the shading frame
 	coatFrame = !IsZero(slg::ocl::OPENPBR_COAT_WEIGHT) && (bumpTex || coatBumpTex);
 
+	// A part is off where its input is a constant OpenPBR_Init() clamps to 0
+	auto canBeOn = [&](const slg::ocl::OpenPBRInput input) {
+		return !(GetConstant(input, &value) && !(value > 0.f));
+	};
+	lobes = (canBeOn(slg::ocl::OPENPBR_BASE_METALNESS) ? OPENPBR_LOBE_METAL : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_SPECULAR_WEIGHT) ? OPENPBR_LOBE_SPECULAR : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT) ? OPENPBR_LOBE_TRANSMISSION : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_SUBSURFACE_WEIGHT) ? OPENPBR_LOBE_SUBSURFACE : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_FUZZ_WEIGHT) ? OPENPBR_LOBE_FUZZ : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_COAT_WEIGHT) ? OPENPBR_LOBE_COAT : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_THINFILM_WEIGHT) ? OPENPBR_LOBE_THINFILM : 0u) |
+			(canBeOn(slg::ocl::OPENPBR_BASE_DIFFUSEROUGHNESS) ? OPENPBR_LOBE_EON : 0u) |
+			// (not clamped: only 0 is no rotation)
+			((GetConstant(slg::ocl::OPENPBR_TANGENT_ROTATION, &value) && (value == 0.f)) ?
+				0u : OPENPBR_LOBE_ROTATION);
+
 	UpdateGlossiness();
 }
 
@@ -349,6 +390,11 @@ void OpenPBRMaterial::UpdateGlossiness() {
 }
 
 Spectrum OpenPBRMaterial::Albedo(const HitPoint &hitPoint) const {
+	if (OPENPBR_IS_DIFFUSE_ONLY(lobes)) {
+		float roughness;
+		return ToSpectrum(OpenPBR_DiffuseOnlyAlbedo(*this, hitPoint, &roughness));
+	}
+
 	slg::ocl::OpenPBRBSDF b;
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 
@@ -358,6 +404,14 @@ Spectrum OpenPBRMaterial::Albedo(const HitPoint &hitPoint) const {
 Spectrum OpenPBRMaterial::Evaluate(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 		float *directPdfW, float *reversePdfW) const {
+	if (OPENPBR_IS_DIFFUSE_ONLY(lobes)) {
+		float roughness;
+		const slg::ocl::float3 albedo = OpenPBR_DiffuseOnlyAlbedo(*this, hitPoint, &roughness);
+		return ToSpectrum(slg::ocl::OpenPBR_DiffuseOnlyEvaluate(albedo, roughness,
+				slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
+				hitPoint.fromLight, event, directPdfW, reversePdfW));
+	}
+
 	slg::ocl::OpenPBRBSDF b;
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 
@@ -370,13 +424,21 @@ Spectrum OpenPBRMaterial::Sample(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
 		float *pdfW, BSDFEvent *event) const {
-	slg::ocl::OpenPBRBSDF b;
-	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
-
 	slg::ocl::float3 sampledDir;
-	const Spectrum result = ToSpectrum(slg::ocl::OpenPBR_Disperse(&b, slg::ocl::OpenPBR_Sample(&b,
-			slg::ocl::ToFloat3(localFixedDir), u0, u1, passThroughEvent, hitPoint.fromLight,
-			&sampledDir, pdfW, event), event));
+	Spectrum result;
+	if (OPENPBR_IS_DIFFUSE_ONLY(lobes)) {
+		float roughness;
+		const slg::ocl::float3 albedo = OpenPBR_DiffuseOnlyAlbedo(*this, hitPoint, &roughness);
+		result = ToSpectrum(slg::ocl::OpenPBR_DiffuseOnlySample(albedo, roughness,
+				slg::ocl::ToFloat3(localFixedDir), u0, u1, hitPoint.fromLight, &sampledDir, pdfW, event));
+	} else {
+		slg::ocl::OpenPBRBSDF b;
+		OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
+
+		result = ToSpectrum(slg::ocl::OpenPBR_Disperse(&b, slg::ocl::OpenPBR_Sample(&b,
+				slg::ocl::ToFloat3(localFixedDir), u0, u1, passThroughEvent, hitPoint.fromLight,
+				&sampledDir, pdfW, event), event));
+	}
 	if (result.Black())
 		return Spectrum();
 
@@ -388,10 +450,25 @@ Spectrum OpenPBRMaterial::Sample(const HitPoint &hitPoint,
 void OpenPBRMaterial::Pdf(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
+	BSDFEvent event;
+	if (OPENPBR_IS_DIFFUSE_ONLY(lobes)) {
+		float roughness;
+		const slg::ocl::float3 albedo = OpenPBR_DiffuseOnlyAlbedo(*this, hitPoint, &roughness);
+		const Spectrum f = ToSpectrum(slg::ocl::OpenPBR_DiffuseOnlyEvaluate(albedo, roughness,
+				slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
+				hitPoint.fromLight, &event, directPdfW, reversePdfW));
+		if (f.Black()) {
+			if (directPdfW)
+				*directPdfW = 0.f;
+			if (reversePdfW)
+				*reversePdfW = 0.f;
+		}
+		return;
+	}
+
 	slg::ocl::OpenPBRBSDF b;
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 
-	BSDFEvent event;
 	const Spectrum f = ToSpectrum(slg::ocl::OpenPBR_Evaluate(&b, slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
 			hitPoint.fromLight, &event, directPdfW, reversePdfW));
 	if (f.Black()) {
@@ -468,6 +545,17 @@ PropertiesUPtr OpenPBRMaterial::ToProperties(const ImageMapCache &imgMapCache, c
 
 Spectrum OpenPBRMaterial::EvaluateDiffuse(const HitPoint &hitPoint,
 		const Vector &localLightDir, const Vector &localEyeDir, float *pdfW) const {
+	if (OPENPBR_IS_DIFFUSE_ONLY(lobes)) {
+		// The whole BSDF
+		float roughness;
+		const slg::ocl::float3 albedo = OpenPBR_DiffuseOnlyAlbedo(*this, hitPoint, &roughness);
+		BSDFEvent event;
+		*pdfW = 0.f;
+		return ToSpectrum(slg::ocl::OpenPBR_DiffuseOnlyEvaluate(albedo, roughness,
+				slg::ocl::ToFloat3(localLightDir), slg::ocl::ToFloat3(localEyeDir),
+				false, &event, pdfW, nullptr));
+	}
+
 	slg::ocl::OpenPBRBSDF b;
 	OpenPBR_GetBSDF(*this, hitPoint, workingColorSpace, b);
 

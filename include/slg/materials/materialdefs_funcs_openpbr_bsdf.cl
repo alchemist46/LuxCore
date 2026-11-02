@@ -208,7 +208,8 @@ typedef struct {
 	// hit point is a delta (OpenPBR_SampleDelta())
 	int specDelta, coatDelta, allDelta;
 	// Whether the opaque dielectric has a specular reflection (specular.weight
-	// and specular.color not 0): without, its albedo tables are skipped
+	// and specular.color not 0, base.metalness below 1): without, its albedo
+	// tables are skipped
 	int dielectricSpec;
 	// The hemispherical average reflectance of the coat seen from inside
 	float coatK;
@@ -397,21 +398,38 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 
 	b->albedo = b->baseWeight * b->baseColor;
 
-	// The coat roughens the base (the specification: r^4 + 2 r_coat^4, the
-	// GGX alpha^2 of the two crossings added), where it is present
-	const float r = b->specularRoughness;
-	const float r2 = r * r;
-	const float rc2 = b->coatRoughness * b->coatRoughness;
-	const float rCoated = fmin(1.f, sqrt(sqrt(r2 * r2 + 2.f * rc2 * rc2)));
-	OpenPBR_Alphas(r + b->coatWeight * (rCoated - r), b->specularAnisotropy,
-			b->regularization, &b->ax, &b->ay);
-	OpenPBR_Alphas(b->coatRoughness, b->coatAnisotropy, b->regularization,
-			&b->coatAx, &b->coatAy);
+	// The parts that are off skip their terms below (their values are unused)
+	const bool baseSpecular = (b->baseMetalness > 0.f) || (b->specularWeight > 0.f) ||
+			(b->transmissionWeight > 0.f);
+	const bool coated = (b->coatWeight > 0.f);
+
 	// A smooth lobe (roughness up to 0.01, not regularized) is a delta, as the
 	// glass material and Cycles' sharp closures: sampled only, a SPECULAR
 	// event (the specular path depth), left out of Evaluate() and of the pdf
-	b->specDelta = (b->ax <= OPENPBR_MIN_ALPHA) && (b->ay <= OPENPBR_MIN_ALPHA);
-	b->coatDelta = (b->coatAx <= OPENPBR_MIN_ALPHA) && (b->coatAy <= OPENPBR_MIN_ALPHA);
+	if (baseSpecular) {
+		// The coat roughens the base (the specification: r^4 + 2 r_coat^4, the
+		// GGX alpha^2 of the two crossings added), where it is present
+		const float r = b->specularRoughness;
+		const float r2 = r * r;
+		const float rc2 = b->coatRoughness * b->coatRoughness;
+		const float rCoated = fmin(1.f, sqrt(sqrt(r2 * r2 + 2.f * rc2 * rc2)));
+		OpenPBR_Alphas(r + b->coatWeight * (rCoated - r), b->specularAnisotropy,
+				b->regularization, &b->ax, &b->ay);
+		b->specDelta = (b->ax <= OPENPBR_MIN_ALPHA) && (b->ay <= OPENPBR_MIN_ALPHA);
+	} else {
+		b->ax = OPENPBR_MIN_ALPHA;
+		b->ay = OPENPBR_MIN_ALPHA;
+		b->specDelta = 0;
+	}
+	if (coated) {
+		OpenPBR_Alphas(b->coatRoughness, b->coatAnisotropy, b->regularization,
+				&b->coatAx, &b->coatAy);
+		b->coatDelta = (b->coatAx <= OPENPBR_MIN_ALPHA) && (b->coatAy <= OPENPBR_MIN_ALPHA);
+	} else {
+		b->coatAx = OPENPBR_MIN_ALPHA;
+		b->coatAy = OPENPBR_MIN_ALPHA;
+		b->coatDelta = 0;
+	}
 
 	if (b->tangentRotation != 0.f) {
 		const float angle = 2.f * M_PI_F * b->tangentRotation;
@@ -438,19 +456,33 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 	// specification's modulation). The opaque base reflects the same from
 	// both sides: an IOR below 1 is inverted.
 	const float invExteriorIor = 1.f / b->exteriorIor;
-	const float ior = b->specularIor * (invExteriorIor + b->coatWeight * (1.f / coatIor - invExteriorIor));
-	const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
-	const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
-	const float sqrtF0 = sqrt(clamp(b->specularWeight * r0 * r0, 0.f, .99f));
-	b->eta = (1.f + sqrtF0) / (1.f - sqrtF0);
-	b->etaFavg = OpenPBR_DielectricFavg(b->eta);
-	b->dielectricSpec = (sqrtF0 > 0.f) && (OpenPBR_Y(b, b->specularColor) > 0.f);
+	if (b->specularWeight > 0.f) {
+		const float ior = b->specularIor * (invExteriorIor + b->coatWeight * (1.f / coatIor - invExteriorIor));
+		const float etaIn = (ior < 1.f) ? (1.f / ior) : ior;
+		const float r0 = (etaIn - 1.f) / (etaIn + 1.f);
+		const float sqrtF0 = sqrt(clamp(b->specularWeight * r0 * r0, 0.f, .99f));
+		b->eta = (1.f + sqrtF0) / (1.f - sqrtF0);
+		b->etaFavg = OpenPBR_DielectricFavg(b->eta);
+		b->dielectricSpec = (sqrtF0 > 0.f) && (OpenPBR_Y(b, b->specularColor) > 0.f) &&
+				(b->baseMetalness < 1.f);
+	} else {
+		// (what the above gives at specular.weight 0: F0 = 0)
+		b->eta = 1.f;
+		b->etaFavg = 0.f;
+		b->dielectricSpec = 0;
+	}
 
 	// The translucent interface refracts with the IOR relative to the exterior
 	// (the coat, a parallel layer, doesn't change the refracted direction)
-	b->etaT = OpenPBR_TranslucentEta(b, b->specularIor * invExteriorIor);
-	b->transYR = OpenPBR_Y(b, b->specularColor);
-	b->transYT = OpenPBR_Y(b, b->transmissionColor);
+	if (b->transmissionWeight > 0.f) {
+		b->etaT = OpenPBR_TranslucentEta(b, b->specularIor * invExteriorIor);
+		b->transYR = OpenPBR_Y(b, b->specularColor);
+		b->transYT = OpenPBR_Y(b, b->transmissionColor);
+	} else {
+		b->etaT = 1.f;
+		b->transYR = 0.f;
+		b->transYT = 0.f;
+	}
 
 	// The dispersion: the IOR at the wavelength lambda of this vertex (uniform
 	// in 380-780 nm), n_d + (n_d - 1) / V (523640 nm^2 / lambda^2 - 1.5168),
@@ -504,20 +536,31 @@ OPENCL_FORCE_INLINE void OpenPBR_Init(OpenPBRBSDF *b) {
 
 	// The coat's IOR relative to the exterior, the same from both sides (an
 	// IOR below 1 is inverted, as the opaque base's)
-	const float coatRel = coatIor * invExteriorIor;
-	b->coatEta = (coatRel < 1.f) ? (1.f / coatRel) : coatRel;
-	b->coatEtaFavg = OpenPBR_DielectricFavg(b->coatEta);
-	// What the coat transmits from inside, averaged over the hemisphere, is
-	// (1 - Favg) / eta^2 of the outside transmission
-	b->coatK = 1.f - (1.f - b->coatEtaFavg) / (b->coatEta * b->coatEta);
+	if (coated) {
+		const float coatRel = coatIor * invExteriorIor;
+		b->coatEta = (coatRel < 1.f) ? (1.f / coatRel) : coatRel;
+		b->coatEtaFavg = OpenPBR_DielectricFavg(b->coatEta);
+		// What the coat transmits from inside, averaged over the hemisphere, is
+		// (1 - Favg) / eta^2 of the outside transmission
+		b->coatK = 1.f - (1.f - b->coatEtaFavg) / (b->coatEta * b->coatEta);
+	} else {
+		b->coatEta = 1.f;
+		b->coatEtaFavg = 0.f;
+		b->coatK = 0.f;
+	}
 
 	// The F82-tint metal (Kutz et al. 2021, the specification's "Metal"): b
 	// makes F(1/7) the Schlick value times specular.color. mu (1 - mu)^6 at
 	// mu = 1/7 is 0.0566527, its cosine-weighted average 1/126.
 	const float3 F0 = b->albedo;
-	const float3 schlickBar = F0 + (WHITE - F0) * .462664f;
-	b->metalB = schlickBar * (WHITE - b->specularColor) * (1.f / .0566527f);
-	b->metalFavg = Spectrum_Clamp(b->specularWeight * (F0 + (WHITE - F0) * (1.f / 21.f) - b->metalB * (1.f / 126.f)));
+	if (b->baseMetalness > 0.f) {
+		const float3 schlickBar = F0 + (WHITE - F0) * .462664f;
+		b->metalB = schlickBar * (WHITE - b->specularColor) * (1.f / .0566527f);
+		b->metalFavg = Spectrum_Clamp(b->specularWeight * (F0 + (WHITE - F0) * (1.f / 21.f) - b->metalB * (1.f / 126.f)));
+	} else {
+		b->metalB = BLACK;
+		b->metalFavg = BLACK;
+	}
 
 	if (OpenPBR_HasThinFilm(b))
 		b->thinFilmEta = b->thinFilmIor * (invExteriorIor + b->coatWeight * (1.f / coatIor - invExteriorIor));
@@ -861,8 +904,8 @@ OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateBase(const OpenPBRBSDF *b,
 // OpenPBR_EvaluateBase() for etaEye, sssEntry and delta. A coat of its own
 // normal is a lobe of that frame with its own cosine (as Cycles' closures of
 // their own normal), and the layers below see its albedo from the eye
-// direction in that frame.
-OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
+// direction in that frame. Inlined (see OpenPBRMaterial_GetBSDF()).
+OPENCL_FORCE_INLINE float3 OpenPBR_EvaluateFront(const OpenPBRBSDF *b,
 		const float3 lightDir, const float3 eyeDir, const float3 coatN, const float etaEye,
 		const bool sssEntry, const bool delta) {
 	const float muE = eyeDir.z;
@@ -1499,6 +1542,73 @@ OPENCL_FORCE_NOT_INLINE float3 OpenPBR_EvaluateDiffuse(const OpenPBRBSDF *b,
 	*pdfW = lobes.wDiffuse * muL * M_1_PI_F;
 
 	return result;
+}
+
+//------------------------------------------------------------------------------
+// A material of the diffuse base only (OPENPBR_IS_DIFFUSE_ONLY(): every other
+// part off, no tangent.rotation, so no subsurface walk either), without
+// OpenPBRBSDF: the EON diffuse of the albedo (base.weight base.color, clamped
+// as OpenPBR_Init()), Lambertian at the roughness 0. The same BSDF and pdf as
+// the general path, where the diffuse lobe has the whole weight (as the matte
+// material).
+//------------------------------------------------------------------------------
+
+// f |cos light| (OpenPBR_Evaluate()) of the lobe frame of the eye's face
+OPENCL_FORCE_INLINE float3 OpenPBR_DiffuseOnlyF(const float3 albedo, const float roughness,
+		const float3 lightDir, const float3 eyeDir) {
+	return lightDir.z * ((roughness > 0.f) ?
+		EON_Evaluate(albedo, roughness, lightDir, eyeDir) : (M_1_PI_F * albedo));
+}
+
+OPENCL_FORCE_INLINE float3 OpenPBR_DiffuseOnlyEvaluate(const float3 albedo, const float roughness,
+		const float3 localLightDir, const float3 localEyeDir, const bool fromLight,
+		BSDFEvent *event, float *directPdfW, float *reversePdfW) {
+	if (!(localLightDir.z * localEyeDir.z > 0.f))
+		return BLACK;
+
+	// The back face mirrors the front one
+	const float flip = (localEyeDir.z > 0.f) ? 1.f : -1.f;
+	const float3 lightDir = MAKE_FLOAT3(localLightDir.x, localLightDir.y, flip * localLightDir.z);
+	const float3 eyeDir = MAKE_FLOAT3(localEyeDir.x, localEyeDir.y, flip * localEyeDir.z);
+	if ((lightDir.z < DEFAULT_COS_EPSILON_STATIC) || (eyeDir.z < DEFAULT_COS_EPSILON_STATIC))
+		return BLACK;
+
+	const float3 result = OpenPBR_DiffuseOnlyF(albedo, roughness, lightDir, eyeDir);
+	if (Spectrum_IsBlack(result))
+		return BLACK;
+
+	if (directPdfW)
+		*directPdfW = (fromLight ? eyeDir.z : lightDir.z) * M_1_PI_F;
+	if (reversePdfW)
+		*reversePdfW = (fromLight ? lightDir.z : eyeDir.z) * M_1_PI_F;
+	*event = DIFFUSE | REFLECT;
+
+	return result;
+}
+
+// f |cos light| / pdf (OpenPBR_Sample()): the cosine sampling of the diffuse
+OPENCL_FORCE_INLINE float3 OpenPBR_DiffuseOnlySample(const float3 albedo, const float roughness,
+		const float3 localFixedDir, const float u0, const float u1, const bool fromLight,
+		float3 *localSampledDir, float *pdfW, BSDFEvent *event) {
+	if ((fabs(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC) || Spectrum_IsBlack(albedo))
+		return BLACK;
+
+	float pdf;
+	const float3 sampledDir = CosineSampleHemisphereWithPdf(u0, u1, &pdf);
+	if (sampledDir.z < DEFAULT_COS_EPSILON_STATIC)
+		return BLACK;
+
+	const float flip = (localFixedDir.z > 0.f) ? 1.f : -1.f;
+	*localSampledDir = MAKE_FLOAT3(sampledDir.x, sampledDir.y, flip * sampledDir.z);
+	*pdfW = pdf;
+	*event = DIFFUSE | REFLECT;
+
+	if (roughness > 0.f) {
+		const float3 fixedDir = MAKE_FLOAT3(localFixedDir.x, localFixedDir.y, flip * localFixedDir.z);
+		return (fromLight ? OpenPBR_DiffuseOnlyF(albedo, roughness, fixedDir, sampledDir) :
+				OpenPBR_DiffuseOnlyF(albedo, roughness, sampledDir, fixedDir)) / pdf;
+	} else
+		return fromLight ? (albedo * (fabs(localFixedDir.z) / sampledDir.z)) : albedo;
 }
 
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

@@ -235,7 +235,30 @@ typedef struct {
 	// the coat the interpolated normal, or coat.bumptex bumped from it
 	unsigned int coatBumpTexIndex;
 	int coatFrame;
+	// The parts the material can have (OPENPBR_LOBE_*): the inputs of the
+	// others are not read
+	unsigned int lobes;
 } OpenPBRParam;
+
+// The parts of an OpenPBR material (OpenPBRParam::lobes): one is off when its
+// input is a constant that OpenPBR_Init() makes 0 (OpenPBRMaterial::Update())
+#define OPENPBR_LOBE_METAL 1u			// base.metalness
+#define OPENPBR_LOBE_SPECULAR 2u		// specular.weight
+#define OPENPBR_LOBE_TRANSMISSION 4u	// transmission.weight
+#define OPENPBR_LOBE_SUBSURFACE 8u		// subsurface.weight
+#define OPENPBR_LOBE_FUZZ 16u			// fuzz.weight
+#define OPENPBR_LOBE_COAT 32u			// coat.weight
+#define OPENPBR_LOBE_THINFILM 64u		// thinfilm.weight
+#define OPENPBR_LOBE_EON 128u			// base.diffuseroughness (Lambertian at 0)
+#define OPENPBR_LOBE_ROTATION 256u		// tangent.rotation (0 exactly)
+// The base specular lobes: the metal, the dielectric's specular and the
+// translucent interface (the specular.* inputs)
+#define OPENPBR_LOBES_BASE_SPECULAR (OPENPBR_LOBE_METAL | OPENPBR_LOBE_SPECULAR | OPENPBR_LOBE_TRANSMISSION)
+// The parts that depend on the IOR of the exterior volume
+#define OPENPBR_LOBES_EXTERIOR_IOR (OPENPBR_LOBE_SPECULAR | OPENPBR_LOBE_TRANSMISSION | \
+		OPENPBR_LOBE_COAT | OPENPBR_LOBE_THINFILM)
+// The diffuse base only (EON or Lambertian): OpenPBR_DiffuseOnly*()
+#define OPENPBR_IS_DIFFUSE_ONLY(lobes) (((lobes) & ~OPENPBR_LOBE_EON) == 0u)
 
 // The toon material (see toon.cpp): the keys of its ramp, TOON_RAMP_MAX_STEPS
 // at most, and the blend of each key into the next one

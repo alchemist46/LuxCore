@@ -1353,6 +1353,7 @@ void CompiledScene::CompileMaterials() {
 				mat->openpbr.coatBumpTexIndex = opm.GetCoatBump() ?
 					scene.GetTextures().GetTextureIndex(opm.GetCoatBump()) : NULL_INDEX;
 				mat->openpbr.coatFrame = opm.HasCoatFrame() ? 1 : 0;
+				mat->openpbr.lobes = opm.GetLobes();
 				break;
 			}
 			case SUBSURFACEMAT: {
