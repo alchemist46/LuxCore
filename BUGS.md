@@ -48,8 +48,9 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
   - The OpenPBRBSDF struct (about 95 dwords) sits in scratch on the GPU (EvaluateFront and EvaluateDiffuse take it by pointer); about 24 dwords are read only by `OpenPBR_Init()` (an input/derived split), `coatIor` duplicates `coatEta`, `dispersionColor` and `dispersionTint` can share one float3.
   - With a coat normal, `OpenPBR_CoatBasis()` is rebuilt in every `ToCoatFrame`/`FromCoatFrame` (5-7 times per call).
   - The CPU `Pdf()` runs the whole Evaluate (film loops included) for the pdfs.
-- Reproduce: n/a (code reading).
-- Notes: found by the OpenPBR review (2026-11-01). Each one needs its variance x time (or samples per second) measured, and the kernel's `[AdvancePaths_MK_RT] ... bytes of scratch` log line checked.
+- Measured (2026-11-02, 82d17bcfb): OpenPBR against the legacy material that looks most like it, on the cube and the sphere of the simple test scene (walls matte), time per pass ratio legacy/OpenPBR on HIP (PATHOCL) / CPU (PATHCPU): matte 0.85 / 0.89, plastic (Glossy2) 0.89 / 1.03, metal (Metal2 gold) 0.83 / 0.96, smooth glass 0.91 / 0.92, rough glass 0.74 / 0.74 (OpenPBR's paths are longer: Fresnel choice instead of 50/50), coated (GlossyCoating over Matte) 1.11 / 0.93. With the noise at equal spp (efficiency = 1 / (variance x time) on the objects): matte 0.85 / 0.89, plastic 1.07 / 1.30, metal 0.95 / 1.08, glass 1.99 / 2.04, rough glass 3.87 / 4.30, coated 1.38 / 1.32. So the plain cost shows where OpenPBR has no noise advantage: as a Lambert diffuse (same image and noise as Matte) it costs 18% more time per pass on HIP, 12% on the CPU.
+- Reproduce: n/a for the code-reading items; the measurement: `C:\Users\Ricardo\lc-work\opbr\matspeed.py PATHOCL 256 2` (and `PATHCPU 128 2`), with the pyluxcore venv's python.
+- Notes: found by the OpenPBR review (2026-11-01). Each one needs its variance x time (or samples per second) measured, and the kernel's `[AdvancePaths_MK_RT] ... bytes of scratch` log line checked. Not measured yet: which part of a call costs the diffuse case (GetBSDF's input reads, OpenPBR_Init(), the lobe weights of the lobes that are off, the struct in scratch on HIP, two GetBSDF + Init per vertex for Evaluate and Sample).
 
 ### Cloth: the denim specular reads 0.995 in the white furnace (0.99 head-on)
 - Found: 2026-11-01
