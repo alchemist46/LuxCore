@@ -76,6 +76,7 @@ set(SLG_KERNELS
     include/slg/film/imagepipeline/plugins/plugin_cameraresponse_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_coloraberration_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_gammacorrection_funcs.cl
+    include/slg/film/imagepipeline/plugins/plugin_glare_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_gaussianblur3x3_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_objectidmask_funcs.cl
     include/slg/film/imagepipeline/plugins/plugin_optixdenoiser_funcs.cl

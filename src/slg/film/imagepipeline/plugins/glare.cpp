@@ -20,6 +20,8 @@
 
 #include "pocketfft_hdronly.h"
 
+#include "luxrays/kernels/kernels.h"
+#include "slg/kernels/kernels.h"
 #include "slg/film/film.h"
 #include "slg/film/imagepipeline/plugins/glare.h"
 #include "slg/film/imagepipeline/plugins/coloraberration.h"
@@ -57,15 +59,25 @@ GlarePlugin::GlarePlugin(const float fs, const float sw,
 		fstop(fs), sensorWidth(sw), blades(b), rotation(rot), roundness(round),
 		obstruction(obs), scatter(sc), scatterRadius(scR), scatterFalloff(scF),
 		scale(s), radius(r), samples(ws),
-		otfWidth(0), otfHeight(0), paddedWidth(0), paddedHeight(0) {
+		otfWidth(0), otfHeight(0), otfHW(false), paddedWidth(0), paddedHeight(0),
+		hardwareDevice(nullptr), hwWidth(0), hwHeight(0),
+		hwData{ nullptr, nullptr }, hwOTF{ nullptr, nullptr, nullptr }, hwForwardPassCount(0) {
 	InitWavelengthTable(colorSpace);
 }
 
 GlarePlugin::GlarePlugin() :
-		otfWidth(0), otfHeight(0), paddedWidth(0), paddedHeight(0) {
+		otfWidth(0), otfHeight(0), otfHW(false), paddedWidth(0), paddedHeight(0),
+		hardwareDevice(nullptr), hwWidth(0), hwHeight(0),
+		hwData{ nullptr, nullptr }, hwOTF{ nullptr, nullptr, nullptr }, hwForwardPassCount(0) {
 }
 
 GlarePlugin::~GlarePlugin() {
+	if (hardwareDevice) {
+		for (auto &b : hwData)
+			hardwareDevice->FreeBuffer(&b);
+		for (auto &b : hwOTF)
+			hardwareDevice->FreeBuffer(&b);
+	}
 }
 
 ImagePipelinePlugin *GlarePlugin::Copy() const {
@@ -189,7 +201,22 @@ float GlarePlugin::ApertureOTF(const float sx, const float sy) const {
 // The transfer function of the image
 //------------------------------------------------------------------------------
 
-void GlarePlugin::InitOTF(const u_int width, const u_int height) {
+// The smallest size of the factors 2, 3 and 5 (the radices of the GPU FFT,
+// plugin_glare_funcs.cl) not smaller than n
+static u_int GoodSizeHW(const u_int n) {
+	u_int best = 0;
+	for (u_int p2 = 1; p2 < 2 * n; p2 *= 2) {
+		for (u_int p3 = p2; p3 < 2 * n; p3 *= 3) {
+			for (u_int p5 = p3; p5 < 2 * n; p5 *= 5) {
+				if ((p5 >= n) && ((best == 0) || (p5 < best)))
+					best = p5;
+			}
+		}
+	}
+	return best;
+}
+
+void GlarePlugin::InitOTF(const u_int width, const u_int height, const bool hw) {
 	if (apertureOTF.empty())
 		InitApertureOTF();
 
@@ -200,10 +227,16 @@ void GlarePlugin::InitOTF(const u_int width, const u_int height) {
 	const float diagonal = sqrtf((float)width * width + (float)height * height);
 	const float r = Max(1.f, radius * diagonal);
 	const u_int ri = Ceil2UInt(r);
-	paddedWidth = (u_int)pocketfft::detail::util::good_size_real(width + 2 * ri);
-	paddedHeight = (u_int)pocketfft::detail::util::good_size_real(height + 2 * ri);
+	if (hw) {
+		paddedWidth = GoodSizeHW(width + 2 * ri);
+		paddedHeight = GoodSizeHW(height + 2 * ri);
+	} else {
+		paddedWidth = (u_int)pocketfft::detail::util::good_size_real(width + 2 * ri);
+		paddedHeight = (u_int)pocketfft::detail::util::good_size_real(height + 2 * ri);
+	}
 	otfWidth = width;
 	otfHeight = height;
+	otfHW = hw;
 
 	const u_int halfWidth = paddedWidth / 2 + 1;
 	const size_t realSize = (size_t)paddedWidth * paddedHeight;
@@ -417,8 +450,8 @@ void GlarePlugin::Apply(Film &film, const u_int index) {
 	const u_int width = film.GetWidth();
 	const u_int height = film.GetHeight();
 
-	if ((width != otfWidth) || (height != otfHeight))
-		InitOTF(width, height);
+	if ((width != otfWidth) || (height != otfHeight) || otfHW)
+		InitOTF(width, height, false);
 
 	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
 	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
@@ -480,3 +513,175 @@ void GlarePlugin::Apply(Film &film, const u_int index) {
 		}
 	}
 }
+
+//------------------------------------------------------------------------------
+// HardwareDevice version
+//------------------------------------------------------------------------------
+
+void GlarePlugin::AddHWChannelsUsed(Film::FilmChannels &hwChannelsUsed) const {
+	hwChannelsUsed.insert(Film::IMAGEPIPELINE);
+}
+
+// The radices of the passes of a FFT of length n (a size of GoodSizeHW())
+static vector<u_int> FFTRadices(u_int n) {
+	vector<u_int> radices;
+	while (n % 4 == 0) {
+		radices.push_back(4);
+		n /= 4;
+	}
+	for (const u_int r : { 2u, 3u, 5u }) {
+		while (n % r == 0) {
+			radices.push_back(r);
+			n /= r;
+		}
+	}
+	if (n != 1)
+		throw runtime_error("Internal error in GlarePlugin FFTRadices(): a size with a factor other than 2, 3 and 5");
+
+	return radices;
+}
+
+void GlarePlugin::InitHW(Film &film, const u_int width, const u_int height) {
+	if ((width != otfWidth) || (height != otfHeight) || !otfHW)
+		InitOTF(width, height, true);
+
+	hardwareDevice = film.hardwareDevice;
+	hwWidth = width;
+	hwHeight = height;
+
+	const size_t complexSize = (size_t)paddedWidth * paddedHeight * 2 * sizeof(float);
+	hardwareDevice->AllocBufferRW(&hwData[0], nullptr, complexSize, "Glare FFT buffer");
+	hardwareDevice->AllocBufferRW(&hwData[1], nullptr, complexSize, "Glare FFT temporary buffer");
+	for (u_int c = 0; c < 3; ++c)
+		hardwareDevice->AllocBufferRO(&hwOTF[c], otf[c].data(), otf[c].size() * sizeof(float), "Glare transfer function");
+
+	// Compile sources
+	const double tStart = WallClockTime();
+
+	vector<string> opts;
+	opts.push_back("-D LUXRAYS_OPENCL_KERNEL");
+	opts.push_back("-D SLG_OPENCL_KERNEL");
+
+	auto program = hardwareDevice->CompileProgram(
+			opts,
+			luxrays::ocl::KernelSource_luxrays_types +
+			luxrays::ocl::KernelSource_utils_funcs +
+			slg::ocl::KernelSource_plugin_glare_funcs,
+			"GlarePlugin");
+
+	SLG_LOG("[GlarePlugin] Compiling GlarePlugin kernels");
+
+	// The two rounds: red and green, then blue (3 for none)
+	const u_int channels0[2] = { 0, 2 };
+	const u_int channels1[2] = { 1, 3 };
+	for (u_int round = 0; round < 2; ++round) {
+		hwPadKernel[round] = hardwareDevice->GetKernel(*program, "GlarePlugin_Pad");
+		u_int argIndex = 0;
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, width);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, height);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, paddedWidth);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, paddedHeight);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, channels0[round]);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, channels1[round]);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, film.hw_IMAGEPIPELINE);
+		hardwareDevice->SetKernelArg(hwPadKernel[round], argIndex++, hwData[0]);
+	}
+
+	// The steps, from buffer 0 (the padded image) back and forth: the forward
+	// FFT of the rows then of the columns, the product of the spectra with the
+	// transfer functions, the inverse FFT of the columns then of the rows,
+	// which ends in buffer 1 (2 * hwForwardPassCount + 1 steps)
+	const vector<u_int> rowRadices = FFTRadices(paddedWidth);
+	const vector<u_int> columnRadices = FFTRadices(paddedHeight);
+	hwPassKernels.clear();
+	hwPassSizes.clear();
+	u_int step = 0;
+	auto AddPasses = [&](const vector<u_int> &radices, const bool rows, const float sign) {
+		const u_int n = rows ? paddedWidth : paddedHeight;
+		const u_int count = rows ? paddedHeight : paddedWidth;
+		const u_int elemStride = rows ? 1 : paddedWidth;
+		const u_int batchStride = rows ? paddedWidth : 1;
+		u_int p = 1;
+		for (const u_int radix : radices) {
+			HardwareDeviceKernelUPtr kernel = hardwareDevice->GetKernel(*program, "GlarePlugin_FFTPass");
+			u_int argIndex = 0;
+			hardwareDevice->SetKernelArg(kernel, argIndex++, n);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, count);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, elemStride);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, batchStride);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, radix);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, p);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, sign);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, hwData[step % 2]);
+			hardwareDevice->SetKernelArg(kernel, argIndex++, hwData[(step + 1) % 2]);
+
+			hwPassKernels.push_back(std::move(kernel));
+			hwPassSizes.push_back(count * (n / radix));
+			p *= radix;
+			++step;
+		}
+	};
+	AddPasses(rowRadices, true, -1.f);
+	AddPasses(columnRadices, false, -1.f);
+	hwForwardPassCount = step;
+
+	// The blue round multiplies both parts by the blue transfer function
+	for (u_int round = 0; round < 2; ++round) {
+		hwMultiplyKernel[round] = hardwareDevice->GetKernel(*program, "GlarePlugin_Multiply");
+		u_int argIndex = 0;
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, paddedWidth);
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, paddedHeight);
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, hwOTF[channels0[round]]);
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, hwOTF[(round == 0) ? channels1[round] : channels0[round]]);
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, hwData[step % 2]);
+		hardwareDevice->SetKernelArg(hwMultiplyKernel[round], argIndex++, hwData[(step + 1) % 2]);
+	}
+	++step;
+
+	AddPasses(columnRadices, false, 1.f);
+	AddPasses(rowRadices, true, 1.f);
+
+	for (u_int round = 0; round < 2; ++round) {
+		hwStoreKernel[round] = hardwareDevice->GetKernel(*program, "GlarePlugin_Store");
+		u_int argIndex = 0;
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, width);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, height);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, paddedWidth);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, channels0[round]);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, channels1[round]);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, hwData[step % 2]);
+		hardwareDevice->SetKernelArg(hwStoreKernel[round], argIndex++, film.hw_IMAGEPIPELINE);
+	}
+
+	const double tEnd = WallClockTime();
+	SLG_LOG("[GlarePlugin] Kernels compilation time: " << int((tEnd - tStart) * 1000.0) << "ms, " <<
+			hwPassKernels.size() << " FFT passes of " << paddedWidth << "x" << paddedHeight);
+}
+
+void GlarePlugin::ApplyHW(Film &film, const u_int index) {
+	const u_int width = film.GetWidth();
+	const u_int height = film.GetHeight();
+
+	if (!hwPadKernel[0] || (width != hwWidth) || (height != hwHeight))
+		InitHW(film, width, height);
+
+	const u_int paddedSize = paddedWidth * paddedHeight;
+	for (u_int round = 0; round < 2; ++round) {
+		hardwareDevice->EnqueueKernel(hwPadKernel[round],
+				HardwareDeviceRange(RoundUp(paddedSize, 256u)), HardwareDeviceRange(256));
+
+		for (u_int i = 0; i < hwPassKernels.size(); ++i) {
+			if (i == hwForwardPassCount)
+				hardwareDevice->EnqueueKernel(hwMultiplyKernel[round],
+						HardwareDeviceRange(RoundUp(paddedSize, 256u)), HardwareDeviceRange(256));
+
+			hardwareDevice->EnqueueKernel(hwPassKernels[i],
+					HardwareDeviceRange(RoundUp(hwPassSizes[i], 256u)), HardwareDeviceRange(256));
+		}
+
+		hardwareDevice->EnqueueKernel(hwStoreKernel[round],
+				HardwareDeviceRange(RoundUp(width * height, 256u)), HardwareDeviceRange(256));
+	}
+}
+
+// vim: autoindent noexpandtab tabstop=4 shiftwidth=4

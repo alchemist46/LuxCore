@@ -19,8 +19,8 @@
 
 # The GLARE image pipeline plugin (ROADMAP F10): it keeps the energy of a point
 # source and a flat image, its diffraction has the Airy core of the f-number
-# and 2N spikes for N odd straight blades (N for N even), and a saved film
-# keeps it
+# and 2N spikes for N odd straight blades (N for N even), a hardware device
+# gives the same image and a saved film keeps it
 
 import math
 import os
@@ -29,13 +29,14 @@ import unittest
 import pyluxcore
 
 from pyluxcoreunittests.tests.utils import *
+from pyluxcoreunittests.tests.basic.testimagepipelinehw import HWDeviceIndex
 
 # After the imports above: utils does "from array import *"
 import array as pyarray
 
 SIZE = 128
 
-def Render(pipelines, flat=False, size=SIZE):
+def Render(pipelines, flat=False, size=SIZE, hwEnable=0, hwDevice=0):
 	cfgProps = pyluxcore.Properties()
 	cfgProps.SetFromString("""
 		renderengine.type = TILEPATHCPU
@@ -49,7 +50,9 @@ def Render(pipelines, flat=False, size=SIZE):
 		film.filter.type = BOX
 		film.filter.width = 0.5
 		film.imagepipelines.0.0.type = NOP
-		""" % (size, size))
+		film.opencl.enable = %d
+		film.hw.device = %d
+		""" % (size, size, hwEnable, hwDevice))
 	for i, plugin in enumerate(pipelines):
 		cfgProps.SetFromString("film.imagepipelines.%d.0.type = GLARE\n" % (i + 1))
 		for k, v in plugin.items():
@@ -181,6 +184,21 @@ class Glare(unittest.TestCase):
 		self.assertEqual(CountSpikes(images[1], SIZE, 20.), 10)
 		self.assertEqual(CountSpikes(images[2], SIZE, 20.), 6)
 
+	@unittest.skipUnless(HWDeviceIndex() is not None, "no HIP or CUDA device")
+	def test_Glare_SameAsCPU(self):
+		# The GPU FFTs have other padded sizes (the factors 2, 3 and 5): the
+		# same image up to the rounding. 151 is padded to 200 on the GPU, the
+		# flat 101 to 135.
+		hwDevice = HWDeviceIndex()
+		pipelines = [{}, {"scale": 20, "scatter": 0.1}, {"blades": 5, "scale": 10}]
+		for flat, size in ((False, 151), (True, 101)):
+			cpu = GetImages(Render(pipelines, flat, size, 0, hwDevice), 4)
+			hw = GetImages(Render(pipelines, flat, size, 1, hwDevice), 4)
+			for index in (1, 2, 3):
+				peak = max(cpu[index])
+				maxDiff = max(abs(a - b) for a, b in zip(cpu[index], hw[index]))
+				self.assertLess(maxDiff / peak, 1e-5, "size %d pipeline %d" % (size, index))
+
 	def test_Glare_SaveLoad(self):
 		filmA = Render([{"scale": 20}])
 		with tempfile.TemporaryDirectory() as tmpDir:
@@ -189,4 +207,8 @@ class Glare(unittest.TestCase):
 			filmB = pyluxcore.Film(fileName)
 		imageA = GetImages(filmA, 2)[1]
 		imageB = GetImages(filmB, 2)[1]
-		self.assertLess(max(abs(a - b) for a, b in zip(imageA, imageB)), 1e-6)
+		# The loaded film runs its image pipeline on a hardware device if there
+		# is one (film.opencl.enable is on by default): the rounding of the GPU
+		# FFTs (see test_Glare_SameAsCPU)
+		maxDiff = max(abs(a - b) for a, b in zip(imageA, imageB))
+		self.assertLess(maxDiff / max(imageA), 1e-5)

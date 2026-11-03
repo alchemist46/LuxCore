@@ -154,6 +154,7 @@ extern std::string KernelSource_plugin_bloom_funcs;
 extern std::string KernelSource_plugin_cameraresponse_funcs;
 extern std::string KernelSource_plugin_coloraberration_funcs;
 extern std::string KernelSource_plugin_gammacorrection_funcs;
+extern std::string KernelSource_plugin_glare_funcs;
 extern std::string KernelSource_plugin_gaussianblur3x3_funcs;
 extern std::string KernelSource_plugin_objectidmask_funcs;
 extern std::string KernelSource_plugin_optixdenoiser_funcs;

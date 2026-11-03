@@ -23,6 +23,7 @@
 #include <complex>
 
 #include "luxrays/luxrays.h"
+#include "luxrays/core/hardwaredevice.h"
 #include "luxrays/utils/serializationutils.h"
 #include "slg/core/workingcolorspace.h"
 #include "slg/film/imagepipeline/imagepipeline.h"
@@ -46,6 +47,9 @@ class Film;
 // summed over the wavelengths with the colours of COLOR_ABERRATION's SPECTRAL
 // mode. At the physical scale the Airy core is smaller than a pixel: what
 // shows is the tail, with the 2N spikes of N (odd) straight blades.
+//
+// The GPU version (plugin_glare_funcs.cl) convolves two channels with each
+// complex FFT, of sizes with the factors 2, 3 and 5 only.
 //------------------------------------------------------------------------------
 
 class GlarePlugin : public ImagePipelinePlugin {
@@ -62,7 +66,10 @@ public:
 
 	virtual ImagePipelinePlugin *Copy() const;
 
+	virtual bool CanUseHW() const { return true; }
+	virtual void AddHWChannelsUsed(Film::FilmChannels &hwChannelsUsed) const;
 	virtual void Apply(Film &film, const u_int index);
+	virtual void ApplyHW(Film &film, const u_int index);
 
 	// The f-number and the sensor width (mm): the pixel pitch is
 	// sensorWidth / film width
@@ -109,7 +116,9 @@ private:
 	bool InsideAperture(const float x, const float y) const;
 	void InitApertureOTF();
 	float ApertureOTF(const float sx, const float sy) const;
-	void InitOTF(const u_int width, const u_int height);
+	// hw: the padded sizes of the GPU FFTs
+	void InitOTF(const u_int width, const u_int height, const bool hw);
+	void InitHW(Film &film, const u_int width, const u_int height);
 
 	// For each wavelength: the wavelength (nm) and the weights of the 3 channels
 	std::vector<float> wavelengthTable;
@@ -119,9 +128,10 @@ private:
 	// aperture diameter being APERTURE_DIAMETER samples
 	std::vector<float> apertureOTF;
 
-	// The image size the transfer functions are for, and the padded size of
-	// the FFTs
+	// The image size the transfer functions are for (on the GPU or the CPU),
+	// and the padded size of the FFTs
 	u_int otfWidth, otfHeight;
+	bool otfHW;
 	u_int paddedWidth, paddedHeight;
 	// The transfer function of each channel (real, the point spread function
 	// being symmetric), times the 1 / (paddedWidth * paddedHeight) of the
@@ -130,6 +140,22 @@ private:
 
 	std::vector<float> realBuffer;
 	std::vector<std::complex<float> > complexBuffer;
+
+	// The GPU version: the image size its buffers and kernels are for, the
+	// two complex images of the FFT passes (ping-pong) and the transfer
+	// functions
+	luxrays::HardwareDevice *hardwareDevice;
+	u_int hwWidth, hwHeight;
+	luxrays::HardwareDeviceBuffer *hwData[2];
+	luxrays::HardwareDeviceBuffer *hwOTF[3];
+
+	// Two rounds: the red and green channels, then the blue one
+	luxrays::HardwareDeviceKernelUPtr hwPadKernel[2], hwMultiplyKernel[2], hwStoreKernel[2];
+	// The passes of the forward FFT (rows, then columns), then the inverse
+	// one (columns, then rows), and their global sizes
+	std::vector<luxrays::HardwareDeviceKernelUPtr> hwPassKernels;
+	std::vector<u_int> hwPassSizes;
+	u_int hwForwardPassCount;
 };
 
 }
