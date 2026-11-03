@@ -44,7 +44,10 @@ def Render(pipelines, flat=False, size=SIZE, hwEnable=0, hwDevice=0):
 		tilepath.sampling.aa.size = 2
 		native.threads.count = 1
 		renderengine.seed = 7
-		batch.haltspp = 4
+		# One pass of 4 spp: the threads end on their own, at the same
+		# point in every run (a halt by spp is seen by the film tests at any
+		# point of the next pass)
+		tile.multipass.enable = 0
 		film.width = %d
 		film.height = %d
 		film.filter.type = BOX

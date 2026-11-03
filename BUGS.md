@@ -99,6 +99,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `scene.colorspace.working = rec2020` (or acescg), a pipeline TONEMAP_LINEAR, GAMMA_CORRECTION, WHITE_BALANCE 3000 K; compare with WHITE_BALANCE in front of GAMMA_CORRECTION (on a linear image the two orders differ only by the gamma).
 - Notes: found while adding the spectral COLOR_ABERRATION (ROADMAP F10), which takes `isRec709 ? WorkingColorSpace() : workingColorSpace` at its place in the pipeline. The same fix applies to both: pass the space of the image at the plugin's place. Not measured.
 
+### TILEPATHCPU: a render halted by spp stops at a different point of the next pass in each run
+- Found: 2026-11-03
+- Area: engine (TILEPATHCPU), film
+- Problem: the film's halt test is `spp > batch.haltspp` (`Film::RunTests()`), and it runs only in `RenderEngine::UpdateFilm()` (`UpdateStats()`, and since 836f8345f `WaitForDone()` every 50 ms). TILEPATH reaches the halt spp at the end of a pass, so the test is met only once part of the next pass is in the film, and the threads see it at their next `TileRepository::NextTile()` after the test ran: the render has the halt spp plus a part of the next pass that depends on the timing. With a fixed seed and one thread, two runs differ (151x101, aa 2, `batch.haltspp = 4`: up to 0.097 per pixel, image means 0.445342 against 0.445355). Before 836f8345f a script that only called `WaitForDone()` got no halt at all: TILEPATH rendered its multipass passes until the tile convergence test, the same image every run, which the GLARE, COLOR_ABERRATION and ImagePipelineHW unit tests relied on (they now set `tile.multipass.enable = 0`, one pass of 4 spp).
+- Reproduce: the 2026-11-03 session scratchpad `hwpipe_dbg.py` (ImagePipelineHW's render three times) with the `tile.multipass.enable = 0` line taken out of `testimagepipelinehw.py`.
+- Notes: a fix would make the tile repository stop handing out passes once a tile has the halt spp (passes x aa^2 >= haltspp, with no halt time and no normalized halt spp), so the render ends at a whole pass every time. TILEPATHOCL not checked. Low priority (TILEPATH is rarely used).
+
 ### WaitNewFrame(generation, timeoutMs) sees the CPU engines' samples one Windows timer tick late
 - Found: 2026-10-30
 - Area: engine (film generation, ROADMAP E6 (c))
