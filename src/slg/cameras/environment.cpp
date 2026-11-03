@@ -87,10 +87,10 @@ void EnvironmentCamera::Update(const u_int width, const u_int height, const u_in
 	InitPixelArea();
 }
 
-void EnvironmentCamera::GenerateRay(const float time,
+Spectrum EnvironmentCamera::GenerateRay(const float time,
 		const float filmX, const float filmY,
 		Ray *ray, PathVolumeInfo *volInfo,
-		const float u0, const float u1) const {
+		const float u0, const float u1, const float wavelength) const {
 	InitRay(ray, filmX, filmY);
 	if (HasVolume()) volInfo->AddVolume(GetVolume());
 
@@ -105,6 +105,8 @@ void EnvironmentCamera::GenerateRay(const float time,
 		ray->d = Normalize(ray->d);
 	} else
 		*ray = camTrans.cameraToWorld * (*ray);
+
+	return Spectrum(1.f);
 }
 
 void EnvironmentCamera::ClampRay(Ray *ray) const {

@@ -176,6 +176,7 @@ string GetPathOCLBaseKernelSources() {
 			slg::ocl::KernelSource_pathinfo_funcs <<
 			slg::ocl::KernelSource_pathtracer_funcs <<
 			slg::ocl::KernelSource_subsurface_funcs <<
+			slg::ocl::KernelSource_lens_funcs <<
 			slg::ocl::KernelSource_camera_funcs <<
 			slg::ocl::KernelSource_elvc_funcs <<
 			slg::ocl::KernelSource_sphericaltriangle_funcs << // Required by lighttree_funcs

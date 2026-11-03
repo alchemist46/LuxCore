@@ -136,6 +136,7 @@ void PathCPURenderEngine::StartLockLess() {
 		pathTracer.DisableHybridBackForward(RenderEngineType2String(GetType()));
 	else
 		pathTracer.CheckHybridBackForwardPartition(RenderEngineType2String(GetType()));
+	pathTracer.CheckCameraForHybridBackForward(renderConfig.GetScene().GetCamera());
 
 	if (pathTracer.hybridBackForwardEnable)
 		lightSamplerSharedData = MetropolisSamplerSharedData::FromProperties(Properties(), seedBaseGenerator, GetFilm());

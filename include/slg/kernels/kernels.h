@@ -45,6 +45,7 @@ extern std::string KernelSource_filter_types;
 extern std::string KernelSource_filter_funcs;
 extern std::string KernelSource_camera_types;
 extern std::string KernelSource_camera_funcs;
+extern std::string KernelSource_lens_funcs;
 extern std::string KernelSource_bsdf_types;
 extern std::string KernelSource_bsdf_funcs;
 extern std::string KernelSource_bsdfutils_funcs;

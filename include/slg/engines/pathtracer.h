@@ -227,10 +227,18 @@ public:
 	bool forceBlackBackground, hybridBackForwardEnable;
 
 private:
-	void GenerateEyeRay(CameraConstRef camera, FilmConstRef film,
+	// Returns the weight of the camera ray (see Camera::GenerateRay())
+	luxrays::Spectrum GenerateEyeRay(CameraConstRef camera, FilmConstRef film,
 			luxrays::Ray &eyeRay, PathVolumeInfo &volInfo,
 			Sampler& sampler,
 			SampleResult &sampleResult) const;
+
+public:
+	// The hybrid back/forward light paths need a camera lens they can reach
+	// the film through (Camera::SupportsLightTracing())
+	void CheckCameraForHybridBackForward(CameraConstRef camera);
+
+private:
 
 	// RenderEyeSample methods
 

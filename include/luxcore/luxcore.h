@@ -747,7 +747,8 @@ public:
 		PERSPECTIVE,
 		ORTHOGRAPHIC,
 		STEREO,
-		ENVIRONMENT
+		ENVIRONMENT,
+		REALISTIC
 	} CameraType;
 
 	virtual ~Camera();

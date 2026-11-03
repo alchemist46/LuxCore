@@ -24,6 +24,7 @@
 #include "slg/engines/pathtracer.h"
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/materials/toon.h"
+#include "slg/materials/glass.h"
 #include "slg/samplers/metropolis.h"
 #include "slg/utils/varianceclamping.h"
 #include <boost/algorithm/string.hpp>
@@ -441,7 +442,7 @@ void PathTracer::DirectHitInfiniteLight(SceneConstRef scene,
 	}	
 }
 
-void PathTracer::GenerateEyeRay(CameraConstRef camera, FilmConstRef film, Ray &eyeRay,
+Spectrum PathTracer::GenerateEyeRay(CameraConstRef camera, FilmConstRef film, Ray &eyeRay,
 		PathVolumeInfo &volInfo, Sampler& sampler, SampleResult &sampleResult) const {
 	const float filmX = sampler.GetSample(0);
 	const float filmY = sampler.GetSample(1);
@@ -469,8 +470,12 @@ void PathTracer::GenerateEyeRay(CameraConstRef camera, FilmConstRef film, Ray &e
 	const float timeSample = sampler.GetSample(IDX_EYE_TIME(eyeSampleSize));
 	const float time = camera.GenerateRayTime(timeSample);
 
-	camera.GenerateRay(time, sampleResult.filmX, sampleResult.filmY, &eyeRay, &volInfo,
-		sampler.GetSample(IDX_DOF_X(eyeSampleSize)), sampler.GetSample(IDX_DOF_Y(eyeSampleSize)));
+	// The wavelength of the path (see RenderEyePath()) for a dispersive lens
+	const float wavelength = PathInfo::Wavelength(sampler.GetSample(IDX_WAVELENGTH(eyeSampleSize)));
+
+	return camera.GenerateRay(time, sampleResult.filmX, sampleResult.filmY, &eyeRay, &volInfo,
+		sampler.GetSample(IDX_DOF_X(eyeSampleSize)), sampler.GetSample(IDX_DOF_Y(eyeSampleSize)),
+		wavelength);
 }
 
 //------------------------------------------------------------------------------
@@ -1040,9 +1045,18 @@ void PathTracer::RenderEyeSample(
 
 	EyePathInfo pathInfo;
 	Ray eyeRay;
-	GenerateEyeRay(scene.GetCamera(), film, eyeRay, pathInfo.volume, sampler, sampleResults[0]);
+	CameraConstRef camera = scene.GetCamera();
+	Spectrum cameraWeight = GenerateEyeRay(camera, film, eyeRay, pathInfo.volume, sampler, sampleResults[0]);
+	if (camera.TintsPath()) {
+		// A dispersive lens: the path has the colour of its wavelength, as
+		// after a dispersive glass
+		cameraWeight *= GlassMaterial::WaveLengthColor(
+				PathInfo::Wavelength(sampler.GetSample(IDX_WAVELENGTH(eyeSampleSize))),
+				scene.GetWorkingColorSpace());
+		pathInfo.dispersionTinted = true;
+	}
 
-	RenderEyePath(device, scene, sampler, pathInfo, eyeRay, Spectrum(1.f), sampleResults);
+	RenderEyePath(device, scene, sampler, pathInfo, eyeRay, cameraWeight, sampleResults);
 }
 
 //------------------------------------------------------------------------------
@@ -1349,6 +1363,13 @@ bool PathTracer::HasToRenderEyeSample(PathTracerThreadState &state) const {
 	} else {
 		state.eyeSampleCount += 1.0;
 		return true;
+	}
+}
+
+void PathTracer::CheckCameraForHybridBackForward(CameraConstRef camera) {
+	if (hybridBackForwardEnable && !camera.SupportsLightTracing()) {
+		SLG_LOG("WARNING: the light paths can not reach the film through the lens of the camera, path.hybridbackforward.enable is ignored");
+		hybridBackForwardEnable = false;
 	}
 }
 

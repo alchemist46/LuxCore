@@ -24,6 +24,7 @@
 #include "luxrays/core/geometry/transform.h"
 #include "luxrays/core/geometry/motionsystem.h"
 #include "luxrays/utils/mc.h"
+#include "luxrays/core/color/color.h"
 #include "slg/volumes/volume.h"
 
 #include "slg/imagemap/imagemapcache.h"
@@ -50,7 +51,7 @@ class PathVolumeInfo;
 class Camera {
 public:
 	typedef enum {
-		PERSPECTIVE, ORTHOGRAPHIC, STEREO, ENVIRONMENT
+		PERSPECTIVE, ORTHOGRAPHIC, STEREO, ENVIRONMENT, REALISTIC
 	} CameraType;
 
 	Camera(const CameraType t) : clipHither(1e-3f), clipYon(1e30f),
@@ -95,9 +96,20 @@ public:
 
 	// Rendering methods
 	float GenerateRayTime(const float u) const { return luxrays::Lerp(u, shutterOpen, shutterClose); }
-	virtual void GenerateRay(const float time, const float filmX, const float filmY,
+	// The ray of the film point at the wavelength (nm) of the path: returns
+	// its weight, 1 but for the lens effects that change the light reaching
+	// the film (the optical vignetting, a realistic lens), black if the lens
+	// stops the ray (the ray is then a valid one, through the center of the
+	// lens)
+	virtual luxrays::Spectrum GenerateRay(const float time, const float filmX, const float filmY,
 		luxrays::Ray *ray, PathVolumeInfo *volInfo,
-		const float u0, const float u1) const = 0;
+		const float u0, const float u1, const float wavelength = 587.56f) const = 0;
+	// The lens disperses the light: the eye path has the colour of its
+	// wavelength (GlassMaterial::WaveLengthColor()) from the camera on
+	virtual bool TintsPath() const { return false; }
+	// The light paths (LIGHTCPU, BIDIRCPU, the hybrid back/forward of the
+	// path tracers) can reach the film: GetSamplePosition() inverts the lens
+	virtual bool SupportsLightTracing() const { return true; }
 	
 	// Used for connecting light paths to the camera
 	virtual void ClampRay(luxrays::Ray *ray) const { }

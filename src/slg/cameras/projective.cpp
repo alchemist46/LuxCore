@@ -156,10 +156,10 @@ void ProjectiveCamera::ApplyArbitraryClippingPlane(Ray *ray) const {
 	}
 }
 
-void ProjectiveCamera::GenerateRay(const float  time,
+Spectrum ProjectiveCamera::GenerateRay(const float  time,
 		const float filmX, const float filmY,
 		Ray *ray, PathVolumeInfo *volInfo,
-		const float u0, const float u1) const {
+		const float u0, const float u1, const float wavelength) const {
 	InitRay(ray, filmX, filmY);
 	if (HasVolume()) {
 		volInfo->AddVolume(GetVolume());
@@ -202,6 +202,8 @@ void ProjectiveCamera::GenerateRay(const float  time,
 	// World arbitrary clipping plane support
 	if (enableClippingPlane)
 		ApplyArbitraryClippingPlane(ray);
+
+	return Spectrum(1.f);
 }
 
 void ProjectiveCamera::Rotate(const float angle, const luxrays::Vector &axis) {

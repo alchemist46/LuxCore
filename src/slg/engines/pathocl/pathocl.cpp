@@ -109,6 +109,7 @@ void PathOCLRenderEngine::StartLockLess() {
 	// The light paths run only on the native threads
 	if (nativeRenderThreadCount == 0)
 		pathTracer.DisableHybridBackForward(RenderEngineType2String(GetType()));
+	pathTracer.CheckCameraForHybridBackForward(renderConfig.GetScene().GetCamera());
 
 	//--------------------------------------------------------------------------
 	// Restore render state if there is one

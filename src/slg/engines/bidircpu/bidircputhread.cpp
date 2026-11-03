@@ -114,14 +114,15 @@ void BiDirCPURenderThread::AOVWarmUp(
 
 		Ray eyeRay;
 		PathVolumeInfo volInfo;
-		camera.GenerateRay(time,
+		// The weight of the optical vignetting
+		const Spectrum cameraWeight = camera.GenerateRay(time,
 				sampleResult.filmX, sampleResult.filmY, &eyeRay,
 				&volInfo, sampler.GetSample(2), sampler.GetSample(3));
 
 		sampleResult.albedo = Spectrum(); // Just in case albedoToDo is never true
 		sampleResult.shadingNormal = Normal();
 
-		Spectrum pathThroughput(1.f);
+		Spectrum pathThroughput(cameraWeight);
 		u_int depth = 0;
 		BSDF bsdf;
 		while (depth < engine->maxEyePathDepth) {
@@ -985,13 +986,14 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 			eyeSampleResult.filmX = sampler->GetSample(0);
 			eyeSampleResult.filmY = sampler->GetSample(1);
 			Ray eyeRay;
-			camera.GenerateRay(time,
+			// The weight of the optical vignetting
+			const Spectrum cameraWeight = camera.GenerateRay(time,
 					eyeSampleResult.filmX, eyeSampleResult.filmY, &eyeRay,
 					&eyeVertex.volInfo, sampler->GetSample(10), sampler->GetSample(11));
 
 			// Required by MIS weights update
 			eyeVertex.bsdf.hitPoint.fixedDir = -eyeRay.d;
-			eyeVertex.throughput = Spectrum(1.f);
+			eyeVertex.throughput = cameraWeight;
 			eyeVertex.wavelength = wavelength;
 			eyeVertex.dispersionTinted = false;
 			float cameraPdfW;

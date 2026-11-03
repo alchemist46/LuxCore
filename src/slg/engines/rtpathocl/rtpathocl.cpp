@@ -29,6 +29,18 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+// The camera reads the camera data buffer (a custom bokeh, the optical
+// vignetting, a realistic lens), which the fast camera edit path does not
+// update
+static bool CameraUsesDataBuffer(const Camera &camera) {
+	if (camera.GetType() == Camera::PERSPECTIVE) {
+		const PerspectiveCamera &perspCamera = dynamic_cast<const PerspectiveCamera &>(camera);
+		return perspCamera.bokehDistributionImageMap || perspCamera.HasVignetting();
+	}
+
+	return (camera.GetType() == Camera::REALISTIC);
+}
+
 //------------------------------------------------------------------------------
 // RTPathOCLRenderEngine
 //------------------------------------------------------------------------------
@@ -103,8 +115,7 @@ void RTPathOCLRenderEngine::StartLockLess() {
 
 	updateActions.Reset();
 	useFastCameraEditPath = false;
-	cameraIsUsingCustomBokeh = (renderConfig.GetScene().GetCamera().GetType() == Camera::PERSPECTIVE) &&
-			(dynamic_cast<const PerspectiveCamera*>(&renderConfig.GetScene().GetCamera()))->bokehDistributionImageMap;
+	cameraIsUsingCustomBokeh = CameraUsesDataBuffer(renderConfig.GetScene().GetCamera());
 
 	if (compileOnly)
 		// The render threads are not started (so no one will arrive at
@@ -202,9 +213,9 @@ void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
 	// Check if I can use the fast camera edit path
 	if (editActions.HasOnly(CAMERA_EDIT) &&
 			(renderConfig.GetScene().GetCamera().GetType() == Camera::PERSPECTIVE) &&
-			// Camera is not using custom bokeh
-			!(dynamic_cast<const PerspectiveCamera*>(&renderConfig.GetScene().GetCamera()))->bokehDistributionImageMap &&
-			// Camera was not using custom bokeh
+			// Camera is not using the camera data buffer
+			!CameraUsesDataBuffer(renderConfig.GetScene().GetCamera()) &&
+			// Camera was not using the camera data buffer
 			!cameraIsUsingCustomBokeh) {
 		TilePathOCLRenderEngine::EndSceneEdit(editActions);
 		useFastCameraEditPath = true;
@@ -214,8 +225,7 @@ void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
 		syncBarrier->arrive_and_wait();
 
 		TilePathOCLRenderEngine::EndSceneEdit(editActions);
-		cameraIsUsingCustomBokeh = (renderConfig.GetScene().GetCamera().GetType() == Camera::PERSPECTIVE) &&
-				(dynamic_cast<const PerspectiveCamera*>(&renderConfig.GetScene().GetCamera()))->bokehDistributionImageMap;
+		cameraIsUsingCustomBokeh = CameraUsesDataBuffer(renderConfig.GetScene().GetCamera());
 		syncBarrier->arrive_and_wait();
 		
 		// Here, rendering thread 0 will update all OpenCL buffers here

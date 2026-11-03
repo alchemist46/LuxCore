@@ -95,10 +95,10 @@ public:
 	virtual void UpdateAuto(SceneConstRef scene, luxrays::IntersectionDevice *device = nullptr) { };
 
 	// Rendering methods
-	virtual void GenerateRay(const float time,
+	virtual luxrays::Spectrum GenerateRay(const float time,
 		const float filmX, const float filmY,
 		luxrays::Ray *ray, PathVolumeInfo *volInfo,
-		const float u1, const float u2) const;
+		const float u1, const float u2, const float wavelength = 587.56f) const;
 
 	// Used for connecting light paths to the camera
 	virtual void ClampRay(luxrays::Ray *ray) const;

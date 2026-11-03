@@ -104,7 +104,8 @@ OPENCL_FORCE_INLINE void Camera_ApplyArbitraryClippingPlane(
 // Perspective camera
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE void PerspectiveCamera_LocalSampleLens(
+// A point of the aperture in lens radii (see PerspectiveCamera::SampleAperture())
+OPENCL_FORCE_INLINE void PerspectiveCamera_SampleAperture(
 		__global const PerspectiveCamera* restrict cameraPersp,
 		__global const float* restrict cameraBokehDistribution,
 		const float u1, const float u2,
@@ -112,12 +113,23 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_LocalSampleLens(
 	*lensU = 0.f;
 	*lensV = 0.f;
 
-	if (cameraPersp->projCamera.lensRadius > 0.f) {
+	{
 		const float bokehBlades = cameraPersp->bokehBlades;
 		const BokehDistributionType bokehDistribution = cameraPersp->bokehDistribution;
-		if ((bokehDistribution == DIST_NONE) || ((bokehDistribution != DIST_CUSTOM) && (bokehBlades < 3)))
+		const float bokehObstruction = cameraPersp->bokehObstruction;
+		if ((bokehDistribution == DIST_NONE) || ((bokehDistribution != DIST_CUSTOM) && (bokehBlades < 3))) {
 			ConcentricSampleDisk(u1, u2, lensU, lensV);
-		else {
+
+			if (bokehObstruction > 0.f) {
+				// The disk mapped to the annulus, keeping the uniform density
+				const float r2 = (*lensU) * (*lensU) + (*lensV) * (*lensV);
+				if (r2 > 0.f) {
+					const float k = sqrt((bokehObstruction * bokehObstruction + (1.f - bokehObstruction * bokehObstruction) * r2) / r2);
+					*lensU *= k;
+					*lensV *= k;
+				}
+			}
+		} else {
 			// Bokeh support
 			
 			if (bokehDistribution == DIST_CUSTOM) {
@@ -127,46 +139,79 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_LocalSampleLens(
 				if (distPdf > 0.f) {
 					*lensU = sampleUV.x * cameraPersp->bokehScaleX;
 					*lensV = sampleUV.y * cameraPersp->bokehScaleY;
-				}	
+
+					const float bokehRotation = cameraPersp->bokehRotation;
+					if (bokehRotation != 0.f) {
+						const float pu = *lensU;
+						*lensU = pu * cos(bokehRotation) - (*lensV) * sin(bokehRotation);
+						*lensV = pu * sin(bokehRotation) + (*lensV) * cos(bokehRotation);
+					}
+				}
 			} else {
 				const float halfAngle = M_PI_F / bokehBlades;
 				const float honeyRadius = cos(halfAngle);
 
 				const float theta = 2.f * M_PI_F * u2;
 
-				const uint sector = Floor2UInt(theta / halfAngle);
-				const float rho = (sector % 2 == 0) ? (theta - sector * halfAngle) :
-						((sector + 1) * halfAngle - theta);
+				// The angle in the polygon turned by the rotation
+				float a = theta - cameraPersp->bokehRotation;
+				if (a < 0.f)
+					a += 2.f * M_PI_F;
+				const uint sector = Floor2UInt(a / halfAngle);
+				const float rho = (sector % 2 == 0) ? (a - sector * halfAngle) :
+						((sector + 1) * halfAngle - a);
 
 				float r = honeyRadius / cos(rho);
+				// Blended toward the circumscribed circle
+				r += cameraPersp->bokehRoundness * (1.f - r);
+
+				float r2;
 				switch (cameraPersp->bokehDistribution) {
 					case DIST_UNIFORM:
-						r *= sqrt(u1);
+						r2 = u1;
 						break;
 					case DIST_EXPONENTIAL:
-						r *= sqrt(ExponentialSampleDisk(u1, cameraPersp->bokehPower));
+						r2 = ExponentialSampleDisk(u1, cameraPersp->bokehPower);
 						break;
 					case DIST_INVERSEEXPONENTIAL:
-						r *= sqrt(InverseExponentialSampleDisk(u1, cameraPersp->bokehPower));
+						r2 = InverseExponentialSampleDisk(u1, cameraPersp->bokehPower);
 						break;
 					case DIST_GAUSSIAN:
-						r *= sqrt(GaussianSampleDisk(u1));
+						r2 = GaussianSampleDisk(u1);
 						break;
 					case DIST_INVERSEGAUSSIAN:
-						r *= sqrt(InverseGaussianSampleDisk(u1));
+						r2 = InverseGaussianSampleDisk(u1);
 						break;
 					case DIST_TRIANGULAR:
-						r *= sqrt(TriangularSampleDisk(u1));
+						r2 = TriangularSampleDisk(u1);
 						break;
 					default:
 						// Something wrong here
+						r2 = 0.f;
 						break;
 				}
+				// The disk mapped to the annulus of the obstruction
+				if (bokehObstruction > 0.f)
+					r2 = bokehObstruction * bokehObstruction + (1.f - bokehObstruction * bokehObstruction) * r2;
+				r *= sqrt(r2);
 
 				*lensU = r * cos(theta) * cameraPersp->bokehScaleX;
 				*lensV = r * sin(theta) * cameraPersp->bokehScaleY;
 			}
 		}
+	}
+}
+
+OPENCL_FORCE_INLINE void PerspectiveCamera_LocalSampleLens(
+		__global const PerspectiveCamera* restrict cameraPersp,
+		__global const float* restrict cameraBokehDistribution,
+		const float u1, const float u2,
+		float *lensU, float *lensV) {
+	*lensU = 0.f;
+	*lensV = 0.f;
+
+	if (cameraPersp->projCamera.lensRadius > 0.f) {
+		PerspectiveCamera_SampleAperture(cameraPersp, cameraBokehDistribution, u1, u2, lensU, lensV);
 
 		const float lensRadius = cameraPersp->projCamera.lensRadius;
 		*lensU *= lensRadius;
@@ -174,7 +219,88 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_LocalSampleLens(
 	}
 }
 
-OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRayImpl(
+// The ray of the thin lens model (ROADMAP F11, see PerspectiveCamera::GenerateRay())
+// in camera space from the pinhole point pCamera of the film point (on the
+// hither plane): returns the weight of the optical vignetting
+OPENCL_FORCE_INLINE float PerspectiveCamera_LensModelRay(
+		__global const CameraBase* restrict cameraBase,
+		__global const PerspectiveCamera* restrict cameraPersp,
+		__global const float* restrict cameraBokehDistribution,
+		const float3 pCamera,
+		const float dofSampleX, const float dofSampleY, const float wavelength,
+		float3 *rayOrig, float3 *rayDir) {
+	// The pinhole ray of the film point (z = 1), moved by the distortion and
+	// the lateral dispersion
+	const float tanX = pCamera.x / pCamera.z;
+	const float tanY = pCamera.y / pCamera.z;
+	const float tanLength = sqrt(tanX * tanX + tanY * tanY);
+	const float h = tanLength * cameraPersp->invHalfDiagonal;
+	const float h2 = h * h;
+	const bool dispersive = (cameraPersp->dispersionLongitudinal != 0.f) || (cameraPersp->dispersionLateral != 0.f);
+	const float dispersion = dispersive ? Lens_NormalizedDispersion(wavelength) : 0.f;
+	// The image of the wavelength is larger by 1 + dispersionLateral D: its
+	// film point sees a smaller angle
+	const float scale = (1.f + cameraPersp->distortionK1 * h2 + cameraPersp->distortionK2 * h2 * h2) /
+			(1.f + cameraPersp->dispersionLateral * dispersion);
+	float3 dir = MAKE_FLOAT3(tanX * scale, tanY * scale, 1.f);
+	float3 orig = MAKE_FLOAT3(0.f, 0.f, 0.f);
+
+	float weight = 1.f;
+	const float lensRadius = cameraPersp->projCamera.lensRadius;
+	const float focalDistance = cameraPersp->projCamera.focalDistance;
+	if ((lensRadius > 0.f) && (focalDistance > 0.f)) {
+		// A point of the aperture (lens radii)
+		float lensX, lensY;
+		PerspectiveCamera_SampleAperture(cameraPersp, cameraBokehDistribution,
+				dofSampleX, dofSampleY, &lensX, &lensY);
+
+		const uint vignettingTableOffset = cameraPersp->vignettingTableOffset;
+		if (vignettingTableOffset != NULL_INDEX) {
+			// The barrel opening seen from the lens along the pinhole ray
+			const float vignettingScale = cameraPersp->vignettingScale;
+			const float barrelX = -cameraPersp->vignettingDistance * dir.x / lensRadius;
+			const float barrelY = -cameraPersp->vignettingDistance * dir.y / lensRadius;
+
+			bool inside = Lens_InsideBarrel(lensX, lensY, barrelX, barrelY, vignettingScale);
+			for (uint i = 1; (i < LENS_VIGNETTING_TRIES) && !inside; ++i) {
+				float v0, v1;
+				Lens_VignettingRetrySample(dofSampleX, dofSampleY, i, &v0, &v1);
+				PerspectiveCamera_SampleAperture(cameraPersp, cameraBokehDistribution,
+						v0, v1, &lensX, &lensY);
+				inside = Lens_InsideBarrel(lensX, lensY, barrelX, barrelY, vignettingScale);
+			}
+
+			weight = inside ? Lens_VignettingWeight(Lens_VignettingShare(
+					&cameraBokehDistribution[vignettingTableOffset], barrelX, barrelY,
+					cameraPersp->vignettingMaxOffset)) : 0.f;
+		}
+
+		lensX *= lensRadius;
+		lensY *= lensRadius;
+
+		// The meridional direction of the image point
+		const float mx = (tanLength > 0.f) ? (tanX / tanLength) : 1.f;
+		const float my = (tanLength > 0.f) ? (tanY / tanLength) : 0.f;
+
+		const float3 focusPoint = Lens_FocusPoint(dir, lensX, lensY, lensRadius,
+				focalDistance, VLOAD3F(&cameraPersp->focusNormal.x),
+				h, mx, my,
+				cameraPersp->aberrationSpherical, cameraPersp->aberrationComa,
+				cameraPersp->aberrationAstigmatism, cameraPersp->aberrationFieldCurvature,
+				cameraPersp->dispersionLongitudinal * dispersion);
+
+		orig = MAKE_FLOAT3(lensX, lensY, 0.f);
+		dir = focusPoint - orig;
+	}
+
+	// The ray starts on the plane of the hither clip
+	*rayOrig = orig + dir * (cameraBase->hither / dir.z);
+	*rayDir = dir;
+
+	return weight;
+}
+
+OPENCL_FORCE_INLINE float PerspectiveCamera_GenerateRayImpl(
 		__global const CameraBase* restrict cameraBase,
 		__global const PerspectiveCamera* restrict cameraPersp,
 		__global const Transform* restrict rasterToCamera,
@@ -184,7 +310,7 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRayImpl(
 		__global Ray *ray,
 		__global PathVolumeInfo *volInfo,
 		const float filmX, const float filmY, const float timeSample,
-		const float dofSampleX, const float dofSampleY) {
+		const float dofSampleX, const float dofSampleY, const float wavelength) {
 	PathVolumeInfo_StartVolume(volInfo, cameraBase->volumeIndex);
 
 	float3 Pras;
@@ -200,9 +326,13 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRayImpl(
 
 	const float hither = cameraBase->hither;
 
+	float weight = 1.f;
 	const float lensRadius = cameraPersp->projCamera.lensRadius;
 	const float focalDistance = cameraPersp->projCamera.focalDistance;
-	if ((lensRadius > 0.f) && (focalDistance > 0.f)) {
+	if (cameraPersp->enableLensModel) {
+		weight = PerspectiveCamera_LensModelRay(cameraBase, cameraPersp, cameraBokehDistribution,
+				rayOrig, dofSampleX, dofSampleY, wavelength, &rayOrig, &rayDir);
+	} else if ((lensRadius > 0.f) && (focalDistance > 0.f)) {
 		// Sample point on lens
 		float lensU, lensV;
 		PerspectiveCamera_LocalSampleLens(cameraPersp, cameraBokehDistribution, dofSampleX, dofSampleY, &lensU, &lensV);
@@ -250,28 +380,87 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRayImpl(
 	/*printf("(%f, %f, %f) (%f, %f, %f) [%f, %f]\n",
 		ray->o.x, ray->o.y, ray->o.z, ray->d.x, ray->d.y, ray->d.z,
 		ray->mint, ray->maxt);*/
+
+	return weight;
 }
 
-OPENCL_FORCE_INLINE void PerspectiveCamera_GenerateRay(
+OPENCL_FORCE_INLINE float PerspectiveCamera_GenerateRay(
 		__global const Camera* restrict camera,
 		__global const float* restrict cameraBokehDistribution,
 		const uint filmWidth, const uint filmHeight,
 		__global Ray *ray,
 		__global PathVolumeInfo *volInfo,
 		const float filmX, const float filmY, const float timeSample,
-		const float dofSampleX, const float dofSampleY) {
-	PerspectiveCamera_GenerateRayImpl(&camera->base, &camera->persp,
+		const float dofSampleX, const float dofSampleY, const float wavelength) {
+	return PerspectiveCamera_GenerateRayImpl(&camera->base, &camera->persp,
 			&camera->base.rasterToCamera, &camera->base.cameraToWorld,
 			cameraBokehDistribution,
 			filmWidth, filmHeight, ray, volInfo, filmX, filmY,
-			timeSample, dofSampleX, dofSampleY);
+			timeSample, dofSampleX, dofSampleY, wavelength);
+}
+
+//------------------------------------------------------------------------------
+// Realistic camera (ROADMAP F12, see RealisticCamera)
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float RealisticCamera_GenerateRay(
+		__global const Camera* restrict camera,
+		__global const float* restrict cameraData,
+		const uint filmWidth, const uint filmHeight,
+		__global Ray *ray,
+		__global PathVolumeInfo *volInfo,
+		const float filmX, const float filmY, const float timeSample,
+		const float dofSampleX, const float dofSampleY, const float wavelength) {
+	PathVolumeInfo_StartVolume(volInfo, camera->base.volumeIndex);
+
+	// The point of the sensor
+	const float3 Pras = MAKE_FLOAT3(filmX, filmHeight - filmY, 0.f);
+	const float3 filmPoint = Transform_ApplyPoint(&camera->base.rasterToCamera, Pras);
+
+	float3 rayOrig, rayDir;
+	const float weight = RealisticCamera_LensRay(&camera->realistic, cameraData, filmPoint,
+			dofSampleX, dofSampleY, wavelength, &rayOrig, &rayDir);
+
+	// The clipping planes across the axis at their distances from the
+	// entrance pupil (see RealisticCamera::GenerateRay())
+	float tHither = 0.f;
+	float maxt = camera->base.yon;
+	if (rayDir.z > 0.f) {
+		tHither = fmax((camera->base.hither - rayOrig.z) / rayDir.z, 0.f);
+		maxt = fmax((camera->base.yon - rayOrig.z) / rayDir.z, tHither);
+	}
+	const float time = mix(camera->base.shutterOpen, camera->base.shutterClose, timeSample);
+
+	// Transform ray in world coordinates
+	rayOrig = Transform_ApplyPoint(&camera->base.cameraToWorld, rayOrig);
+	rayDir = Transform_ApplyVector(&camera->base.cameraToWorld, rayDir);
+
+	const uint interpolatedTransformFirstIndex = camera->base.motionSystem.interpolatedTransformFirstIndex;
+	if (interpolatedTransformFirstIndex != NULL_INDEX) {
+		Matrix4x4 m;
+		MotionSystem_Sample(&camera->base.motionSystem, time, camera->base.interpolatedTransforms, &m);
+
+		rayOrig = Matrix4x4_ApplyPoint_Private(&m, rayOrig);
+		rayDir = normalize(Matrix4x4_ApplyVector_Private(&m, rayDir));
+	}
+
+	Ray_Init3(ray, rayOrig, rayDir, maxt, time);
+	ray->mint = fmax(ray->mint, tHither);
+
+	if (camera->realistic.projCamera.enableClippingPlane) {
+		Camera_ApplyArbitraryClippingPlane(ray,
+				VLOAD3F(&camera->realistic.projCamera.clippingPlaneCenter.x),
+				VLOAD3F(&camera->realistic.projCamera.clippingPlaneNormal.x));
+	}
+
+	return weight;
 }
 
 //------------------------------------------------------------------------------
 // Orthographic camera
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE void OrthographicCamera_GenerateRay(
+OPENCL_FORCE_INLINE float OrthographicCamera_GenerateRay(
 		__global const Camera* restrict camera,
 		const uint filmWidth, const uint filmHeight,
 		__global Ray *ray,
@@ -334,6 +523,8 @@ OPENCL_FORCE_INLINE void OrthographicCamera_GenerateRay(
 				VLOAD3F(&camera->ortho.projCamera.clippingPlaneCenter.x),
 				VLOAD3F(&camera->ortho.projCamera.clippingPlaneNormal.x));
 	}
+
+	return 1.f;
 
 
 	/*printf("(%f, %f, %f) (%f, %f, %f) [%f, %f]\n",
@@ -401,14 +592,16 @@ OPENCL_FORCE_INLINE void EnvironmentCamera_GenerateRay(
 // Stereo camera
 //------------------------------------------------------------------------------
 
-OPENCL_FORCE_INLINE void StereoCamera_GenerateRay(
+OPENCL_FORCE_INLINE float StereoCamera_GenerateRay(
 		__global const Camera* restrict camera,
 		__global const float* restrict cameraBokehDistribution,
 		const uint origFilmWidth, const uint origFilmHeight,
 		__global Ray *ray,
 		__global PathVolumeInfo *volInfo,
 		const float origFilmX, const float origFilmY, const float timeSample,
-		const float dofSampleX, const float dofSampleY) {
+		const float dofSampleX, const float dofSampleY, const float wavelength) {
+	float weight = 1.f;
+
 	PathVolumeInfo_StartVolume(volInfo, camera->base.volumeIndex);
 
 	switch(camera->stereo.stereoCameraType) {
@@ -429,9 +622,10 @@ OPENCL_FORCE_INLINE void StereoCamera_GenerateRay(
 			}
 			filmY = origFilmY;
 
-			PerspectiveCamera_GenerateRayImpl(&camera->base, &camera->stereo.perspCamera,
+			weight = PerspectiveCamera_GenerateRayImpl(&camera->base, &camera->stereo.perspCamera,
 					rasterToCamera, cameraToWorld, cameraBokehDistribution,
-					filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
+					filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY,
+					wavelength);
 			break;
 		}
 		case STEREO_ENVIRONMENT_180: {
@@ -486,36 +680,40 @@ OPENCL_FORCE_INLINE void StereoCamera_GenerateRay(
 	/*printf("(%f, %f, %f) (%f, %f, %f) [%f, %f]\n",
 		ray->o.x, ray->o.y, ray->o.z, ray->d.x, ray->d.y, ray->d.z,
 		ray->mint, ray->maxt);*/
+
+	return weight;
 }
 
 //------------------------------------------------------------------------------
 // Generic function
 //------------------------------------------------------------------------------
 
-OPENCL_HOT_FUNCTION void Camera_GenerateRay(
+// Returns the weight of the ray (see Camera::GenerateRay()). The camera data
+// buffer has the custom bokeh distribution at its start, the table of the
+// optical vignetting and the lens of the realistic camera at their offsets
+OPENCL_HOT_FUNCTION float Camera_GenerateRay(
 		__global const Camera* restrict camera,
 		__global const float* restrict cameraBokehDistribution,
 		const uint filmWidth, const uint filmHeight,
 		__global Ray *ray,
 		__global PathVolumeInfo *volInfo,
 		const float filmX, const float filmY, const float timeSample,
-		const float dofSampleX, const float dofSampleY) {
+		const float dofSampleX, const float dofSampleY, const float wavelength) {
 	switch (camera->type) {
 		case PERSPECTIVE:
-			PerspectiveCamera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
-			break;
+			return PerspectiveCamera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY, wavelength);
 		case ORTHOGRAPHIC:
-			OrthographicCamera_GenerateRay(camera, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
-			break;
+			return OrthographicCamera_GenerateRay(camera, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
 		case STEREO:
-			StereoCamera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
-			break;
+			return StereoCamera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY, wavelength);
 		case ENVIRONMENT:
 			EnvironmentCamera_GenerateRay(camera, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY);
-			break;
+			return 1.f;
+		case REALISTIC:
+			return RealisticCamera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight, ray, volInfo, filmX, filmY, timeSample, dofSampleX, dofSampleY, wavelength);
 		default:
 			// Something really wrong here
-			break;
+			return 0.f;
 	}
 }
 // vim: autoindent noexpandtab tabstop=4 shiftwidth=4

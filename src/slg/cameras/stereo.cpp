@@ -170,24 +170,22 @@ void StereoCamera::Update(const u_int width, const u_int height,
 	}
 }
 
-void StereoCamera::GenerateRay(const float time,
+Spectrum StereoCamera::GenerateRay(const float time,
 		const float filmX, const float filmY,
 		Ray *ray, PathVolumeInfo *volInfo,
-		const float u0, const float u1) const {
+		const float u0, const float u1, const float wavelength) const {
 	switch(stereoType) {
 		case STEREO_PERSPECTIVE:
 		case STEREO_ENVIRONMENT_180:
 			if (filmX < filmWidth / 2)
-				leftEye->GenerateRay(time, filmX, filmY, ray, volInfo, u0, u1);
+				return leftEye->GenerateRay(time, filmX, filmY, ray, volInfo, u0, u1, wavelength);
 			else
-				rightEye->GenerateRay(time, filmX - filmWidth / 2, filmY, ray, volInfo, u0, u1);
-			break;
+				return rightEye->GenerateRay(time, filmX - filmWidth / 2, filmY, ray, volInfo, u0, u1, wavelength);
 		case STEREO_ENVIRONMENT_360:
 			if (filmY < filmHeight / 2)
-				leftEye->GenerateRay(time, filmX, filmY, ray, volInfo, u0, u1);
+				return leftEye->GenerateRay(time, filmX, filmY, ray, volInfo, u0, u1, wavelength);
 			else
-				rightEye->GenerateRay(time, filmX, filmY - filmHeight / 2, ray, volInfo, u0, u1);
-			break;
+				return rightEye->GenerateRay(time, filmX, filmY - filmHeight / 2, ray, volInfo, u0, u1, wavelength);
 		default:
 			throw runtime_error("Unknown StereoCamera type in StereoCamera::GenerateRay(): " + ToString(stereoType));
 	}		

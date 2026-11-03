@@ -2195,6 +2195,7 @@ constexpr std::string_view cam_name(luxcore::Camera::CameraType cam) {
 		case luxcore::Camera::CameraType::ORTHOGRAPHIC: return "ORTHOGRAPHIC";
 		case luxcore::Camera::CameraType::STEREO: return "STEREO";
 		case luxcore::Camera::CameraType::ENVIRONMENT: return "ENVIRONMENT";
+		case luxcore::Camera::CameraType::REALISTIC: return "REALISTIC";
 		default: return "UNKNOWN";
 	}
 }

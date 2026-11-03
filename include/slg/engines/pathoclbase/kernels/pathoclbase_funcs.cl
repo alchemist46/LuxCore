@@ -121,23 +121,30 @@ OPENCL_FORCE_INLINE void GenerateEyePath(
 	const float dofSampleY = Sampler_GetSample(taskConfig, IDX_DOF_Y(eyeSampleSize) SAMPLER_PARAM);
 
 #if defined(RENDER_ENGINE_TILEPATHOCL) || defined(RENDER_ENGINE_RTPATHOCL)
-	Camera_GenerateRay(camera, cameraBokehDistribution, cameraFilmWidth, cameraFilmHeight,
+	const float cameraWeight = Camera_GenerateRay(camera, cameraBokehDistribution, cameraFilmWidth, cameraFilmHeight,
 			ray,
 			&pathInfo->volume,
 			sampleResult->filmX + tileStartX, sampleResult->filmY + tileStartY,
 			timeSample,
-			dofSampleX, dofSampleY);
+			dofSampleX, dofSampleY, pathInfo->wavelength);
 #else
-	Camera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight,
+	const float cameraWeight = Camera_GenerateRay(camera, cameraBokehDistribution, filmWidth, filmHeight,
 			ray,
 			&pathInfo->volume,
 			sampleResult->filmX, sampleResult->filmY,
 			timeSample,
-			dofSampleX, dofSampleY);
+			dofSampleX, dofSampleY, pathInfo->wavelength);
 #endif
 
-	// Initialize the path state (the PathState is set by the caller)
-	VSTORE3F(WHITE, taskState->throughput.c);
+	// Initialize the path state (the PathState is set by the caller): the
+	// weight of the camera ray, and the colour of the wavelength after a
+	// dispersive lens (see PathTracer::RenderEyeSample())
+	float3 throughput = MAKE_FLOAT3(cameraWeight, cameraWeight, cameraWeight);
+	if (camera->base.tintPath) {
+		throughput *= WorkingColorSpace_FromRec709(GlassMaterial_WaveLength2RGB(pathInfo->wavelength));
+		pathInfo->dispersionTinted = 1;
+	}
+	VSTORE3F(throughput, taskState->throughput.c);
 	// The albedo and the shading normal are computed only for the film
 	// channels that read them
 	taskState->albedoToDo = SampleResult_HasAlbedoChannels(&taskConfig->film);

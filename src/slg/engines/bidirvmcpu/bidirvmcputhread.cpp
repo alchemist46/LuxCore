@@ -179,12 +179,13 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 			Ray eyeRay;
 			// The lens samples of BiDirCPURenderThread::RenderFunc() (9 is
 			// one of Emit()'s)
-			camera.GenerateRay(time,
+			// The weight of the optical vignetting
+			const Spectrum cameraWeight = camera.GenerateRay(time,
 					eyeSampleResult.filmX, eyeSampleResult.filmY, &eyeRay,
 					&eyeVertex.volInfo, sampler->GetSample(10), sampler->GetSample(11));
 
 			eyeVertex.bsdf.hitPoint.fixedDir = -eyeRay.d;
-			eyeVertex.throughput = Spectrum(1.f);
+			eyeVertex.throughput = cameraWeight;
 			eyeVertex.wavelength = wavelength;
 			eyeVertex.dispersionTinted = false;
 			float cameraPdfW;

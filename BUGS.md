@@ -17,6 +17,20 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### Camera: the custom image bokeh is not centered on the lens axis
+- Found: 2026-11-02
+- Area: camera
+- Problem: with `scene.camera.bokeh.distribution.type = CUSTOM`, `PerspectiveCamera::SampleAperture()` (and `PerspectiveCamera_SampleAperture()` on the GPU) take the lens point as the image sample `uv` times the bokeh scale, with `uv` in [0, 1]^2 (`Distribution2D::SampleContinuous()`): the aperture is the square from the lens center to (1, 1) lens radii, off the axis, and smaller than the other distributions' (radius 1). The out-of-focus parts of the image shift with their defocus, as through an off-center aperture.
+- Reproduce: a small emitting dot out of focus (lens radius 0.1, focus 5, the dot at 2.5) with a custom bokeh image of a centered disk, against `UNIFORM` with 0 blades: the bokeh moves away from the dot's in-focus position. Read from the code (F11, 2026-11-02), not rendered yet.
+- Notes: the expected mapping is `(2 uv - 1)` times the scale. Fixing it changes the images of the scenes that use a custom bokeh; the optical vignetting table (F11) samples the aperture the same way, so it follows.
+
+### Camera: the stereo camera's bokeh is not compiled for the GPU
+- Found: 2026-11-02
+- Area: camera
+- Problem: `CompiledScene::CompileCamera()` sets the lens radius and the focal distance of `STEREO` but not its `bokehBlades`, `bokehPower`, `bokehDistribution` and `bokehScaleX/Y`: the GPU reads what the union `Camera` holds from an earlier camera (or zeros). The CPU eyes are new `PerspectiveCamera`s with the default bokeh, so they ignore the scene's bokeh too.
+- Reproduce: `scene.camera.type = stereo` with `scene.camera.lensradius = 0.1` and `scene.camera.bokeh.blades = 6`, `UNIFORM`, PATHOCL against PATHCPU. Read from the code, not rendered.
+- Notes: found while adding the F11 fields (2026-11-02), which `CompileCamera()` now sets to their defaults for `STEREO`.
+
 ### OpenPBR: coated glass reflects too much (the translucent Fresnel is relative to the exterior, not the coat)
 - Found: 2026-11-01
 - Area: material

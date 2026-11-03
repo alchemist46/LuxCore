@@ -34,6 +34,8 @@ BiDirCPURenderEngine::BiDirCPURenderEngine(RenderConfigRef rcfg) :
 		photonGICache(nullptr) {
 	if (rcfg.GetScene().GetCamera().GetType() == Camera::STEREO)
 		throw std::runtime_error("BIDIRCPU render engine doesn't support stereo camera");
+	if (!rcfg.GetScene().GetCamera().SupportsLightTracing())
+		throw std::runtime_error("BIDIRCPU render engine doesn't support the lens of the camera (a realistic lens, or the aberrations or the dispersion of the thin lens): the light paths can not reach the film through it");
 
 	lightPathsCount = 1;
 	baseRadius = 0.f;

@@ -21,6 +21,7 @@
 #include "slg/cameras/environment.h"
 #include "slg/cameras/perspective.h"
 #include "slg/cameras/orthographic.h"
+#include "slg/cameras/realistic.h"
 #include "slg/cameras/stereo.h"
 #include "slg/scene/scene.h"
 #include "slg/utils/filenameresolver.h"
@@ -77,7 +78,8 @@ CameraUPtr Scene::CreateCamera(const Properties &props) {
 	SDL_LOG("Camera target: " << target);
 
 	CameraUPtr camera;
-	if ((type == "environment") || (type == "orthographic") || (type == "perspective") || (type == "stereo")) {
+	if ((type == "environment") || (type == "orthographic") || (type == "perspective") || (type == "stereo") ||
+			(type == "realistic")) {
 		if (type == "orthographic") {
 			OrthographicCamera *orthoCamera;
 
@@ -138,6 +140,57 @@ CameraUPtr Scene::CreateCamera(const Properties &props) {
 			perspCamera->bokehScaleY = props.Get(Property("scene.camera.bokeh.scale.y")(1.0)).Get<double>();
 
 			perspCamera->enableOculusRiftBarrel = props.Get(Property("scene.camera.oculusrift.barrelpostpro.enable")(false)).Get<bool>();
+
+			// The aperture shape and the thin lens model (ROADMAP F11)
+			perspCamera->bokehRotation = props.Get(Property("scene.camera.bokeh.rotation")(0.0)).Get<double>();
+			perspCamera->bokehRoundness = Clamp(props.Get(Property("scene.camera.bokeh.roundness")(0.0)).Get<double>(), 0.0, 1.0);
+			perspCamera->bokehObstruction = Clamp(props.Get(Property("scene.camera.bokeh.obstruction")(0.0)).Get<double>(), 0.0, .95);
+			perspCamera->vignettingDistance = props.Get(Property("scene.camera.opticalvignetting.distance")(0.0)).Get<double>();
+			perspCamera->vignettingScale = Max(props.Get(Property("scene.camera.opticalvignetting.scale")(1.0)).Get<double>(), 1e-3);
+			perspCamera->distortionK1 = props.Get(Property("scene.camera.distortion.k1")(0.0)).Get<double>();
+			perspCamera->distortionK2 = props.Get(Property("scene.camera.distortion.k2")(0.0)).Get<double>();
+			perspCamera->aberrationSpherical = props.Get(Property("scene.camera.aberration.spherical")(0.0)).Get<double>();
+			perspCamera->aberrationComa = props.Get(Property("scene.camera.aberration.coma")(0.0)).Get<double>();
+			perspCamera->aberrationAstigmatism = props.Get(Property("scene.camera.aberration.astigmatism")(0.0)).Get<double>();
+			perspCamera->aberrationFieldCurvature = props.Get(Property("scene.camera.aberration.fieldcurvature")(0.0)).Get<double>();
+			perspCamera->tiltX = Clamp(props.Get(Property("scene.camera.tilt.x")(0.0)).Get<double>(), -80.0, 80.0);
+			perspCamera->tiltY = Clamp(props.Get(Property("scene.camera.tilt.y")(0.0)).Get<double>(), -80.0, 80.0);
+			perspCamera->dispersionLongitudinal = props.Get(Property("scene.camera.dispersion.longitudinal")(0.0)).Get<double>();
+			perspCamera->dispersionLateral = props.Get(Property("scene.camera.dispersion.lateral")(0.0)).Get<double>();
+		} else if (type == "realistic") {
+			// ROADMAP F12
+			RealisticCamera *realisticCamera;
+			if (props.IsDefined("scene.camera.screenwindow")) {
+				float screenWindow[4];
+
+				const Property &prop = props.Get(Property("scene.camera.screenwindow")(0.f, 1.f, 0.f, 1.f));
+				screenWindow[0] = prop.Get<double>(0);
+				screenWindow[1] = prop.Get<double>(1);
+				screenWindow[2] = prop.Get<double>(2);
+				screenWindow[3] = prop.Get<double>(3);
+
+				realisticCamera = new RealisticCamera(orig, target, up, &screenWindow[0]);
+			} else
+				realisticCamera = new RealisticCamera(orig, target, up);
+			camera.reset(realisticCamera);
+
+			realisticCamera->lensFileName = props.Get(Property("scene.camera.realistic.lens.file")("")).Get<string>();
+			if (!realisticCamera->lensFileName.empty())
+				realisticCamera->lens = RealisticCamera::ReadLensFile(SLG_FileNameResolver.ResolveFile(realisticCamera->lensFileName));
+			else {
+				realisticCamera->lensPreset = props.Get(Property("scene.camera.realistic.lens.preset")("dgauss")).Get<string>();
+				realisticCamera->lens = RealisticCamera::GetLensPreset(realisticCamera->lensPreset);
+			}
+			realisticCamera->focalLength = Max(props.Get(Property("scene.camera.realistic.focallength")(0.0)).Get<double>(), 0.0);
+			realisticCamera->sensorWidth = Max(props.Get(Property("scene.camera.realistic.sensorwidth")(36.0)).Get<double>(), .1);
+			realisticCamera->fStop = Max(props.Get(Property("scene.camera.realistic.fstop")(0.0)).Get<double>(), 0.0);
+			realisticCamera->dispersion = props.Get(Property("scene.camera.realistic.dispersion")(false)).Get<bool>();
+
+			// The shape of the aperture stop
+			realisticCamera->stopBlades = Min(props.Get(Property("scene.camera.bokeh.blades")(0u)).Get<u_int>(), 64u);
+			realisticCamera->stopRotation = props.Get(Property("scene.camera.bokeh.rotation")(0.0)).Get<double>();
+			realisticCamera->stopRoundness = Clamp(props.Get(Property("scene.camera.bokeh.roundness")(0.0)).Get<double>(), 0.0, 1.0);
+			realisticCamera->stopObstruction = Clamp(props.Get(Property("scene.camera.bokeh.obstruction")(0.0)).Get<double>(), 0.0, .95);
 		} else if (type == "stereo")  {
 			const string stereoTypeStr = props.Get(Property("scene.camera.stereo.type")("perspective")).Get<string>();	
 

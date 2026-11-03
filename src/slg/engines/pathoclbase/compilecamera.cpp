@@ -29,6 +29,7 @@
 
 #include "slg/cameras/orthographic.h"
 #include "slg/cameras/perspective.h"
+#include "slg/cameras/realistic.h"
 #include "slg/cameras/stereo.h"
 #include "slg/cameras/environment.h"
 
@@ -36,8 +37,43 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+// The aperture shape and the thin lens model (ROADMAP F11) of a perspective
+// camera, the table of its optical vignetting appended to the camera data
+static void CompilePerspectiveLensModel(const PerspectiveCamera &perspCamera,
+		slg::ocl::PerspectiveCamera &camera, vector<float> &cameraData) {
+	camera.bokehRotation = Radians(perspCamera.bokehRotation);
+	camera.bokehRoundness = perspCamera.bokehRoundness;
+	camera.bokehObstruction = perspCamera.bokehObstruction;
+
+	camera.enableLensModel = perspCamera.HasLensModel();
+	camera.invHalfDiagonal = perspCamera.GetInvHalfDiagonal();
+	camera.distortionK1 = perspCamera.distortionK1;
+	camera.distortionK2 = perspCamera.distortionK2;
+	camera.vignettingDistance = perspCamera.vignettingDistance;
+	camera.vignettingScale = perspCamera.vignettingScale;
+	camera.vignettingMaxOffset = perspCamera.GetVignettingMaxOffset();
+	if (perspCamera.HasVignetting()) {
+		camera.vignettingTableOffset = cameraData.size();
+		const vector<float> &table = perspCamera.GetVignettingTable();
+		cameraData.insert(cameraData.end(), table.begin(), table.end());
+	} else
+		camera.vignettingTableOffset = NULL_INDEX;
+	ASSIGN_VECTOR(camera.focusNormal, perspCamera.GetFocusNormal());
+	camera.aberrationSpherical = perspCamera.aberrationSpherical;
+	camera.aberrationComa = perspCamera.aberrationComa;
+	camera.aberrationAstigmatism = perspCamera.aberrationAstigmatism;
+	camera.aberrationFieldCurvature = perspCamera.aberrationFieldCurvature;
+	camera.dispersionLongitudinal = perspCamera.dispersionLongitudinal;
+	camera.dispersionLateral = perspCamera.dispersionLateral;
+}
+
 void CompiledScene::CompileCamera() {
 	wasCameraCompiled = true;
+
+	// The camera data buffer: the custom bokeh distribution at its start,
+	// then the data of the lens
+	cameraBokehDistribution.clear();
+	cameraBokehDistributionSize = 0;
 
 	//SLG_LOG("Compile Camera");
 
@@ -56,6 +92,7 @@ void CompiledScene::CompileCamera() {
 	camera.base.shutterClose = sceneCamera.shutterClose;
 	camera.base.volumeIndex = sceneCamera.HasVolume() ?
 		scene.GetMaterials().GetMaterialIndex(sceneCamera.GetVolume()) : NULL_INDEX;
+	camera.base.tintPath = sceneCamera.TintsPath();
 
 	if (sceneCamera.motionSystem) {
 		if (sceneCamera.motionSystem->interpolatedTransforms.size() > CAMERA_MAX_INTERPOLATED_TRANSFORM)
@@ -124,6 +161,7 @@ void CompiledScene::CompileCamera() {
 			switch (perspCamera.bokehDistribution) {
 				case PerspectiveCamera::DIST_NONE:
 					camera.persp.bokehDistribution = slg::ocl::DIST_NONE;
+					break;
 				case PerspectiveCamera::DIST_UNIFORM:
 					camera.persp.bokehDistribution = slg::ocl::DIST_UNIFORM;
 					break;
@@ -154,6 +192,33 @@ void CompiledScene::CompileCamera() {
 			}
 			camera.persp.bokehScaleX = perspCamera.bokehScaleX;
 			camera.persp.bokehScaleY = perspCamera.bokehScaleY;
+
+			CompilePerspectiveLensModel(perspCamera, camera.persp, cameraBokehDistribution);
+			break;
+		}
+		case Camera::REALISTIC: {
+			auto& realisticCamera = dynamic_cast<const RealisticCamera&>(sceneCamera);
+			camera.type = slg::ocl::REALISTIC;
+
+			memcpy(camera.base.rasterToCamera.m.m, realisticCamera.GetRasterToCamera().m.m, 4 * 4 * sizeof(float));
+			memcpy(camera.base.cameraToWorld.m.m, realisticCamera.GetCameraToWorld().m.m, 4 * 4 * sizeof(float));
+
+			camera.realistic = realisticCamera.GetLensCamera();
+			// After the custom bokeh distribution, if any
+			const u_int offset = cameraBokehDistribution.size();
+			camera.realistic.surfacesOffset += offset;
+			camera.realistic.pupilBoundsOffset += offset;
+			const vector<float> &lensData = realisticCamera.GetLensData();
+			cameraBokehDistribution.insert(cameraBokehDistribution.end(), lensData.begin(), lensData.end());
+
+			camera.realistic.projCamera.lensRadius = realisticCamera.lensRadius;
+			camera.realistic.projCamera.focalDistance = realisticCamera.focalDistance;
+			if (realisticCamera.enableClippingPlane) {
+				camera.realistic.projCamera.enableClippingPlane = true;
+				ASSIGN_VECTOR(camera.realistic.projCamera.clippingPlaneCenter, realisticCamera.clippingPlaneCenter);
+				ASSIGN_VECTOR(camera.realistic.projCamera.clippingPlaneNormal, realisticCamera.clippingPlaneNormal);
+			} else
+				camera.realistic.projCamera.enableClippingPlane = false;
 			break;
 		}
 		case Camera::ENVIRONMENT: {
@@ -194,6 +259,12 @@ void CompiledScene::CompileCamera() {
 			memcpy(camera.stereo.rightEyeCameraToWorld.m.m, stereoCamera.GetCameraToWorld(1).m.m, 4 * 4 * sizeof(float));
 
 			camera.stereo.perspCamera.enableOculusRiftBarrel = stereoCamera.enableOculusRiftBarrel;
+			// No aperture shape nor thin lens model
+			camera.stereo.perspCamera.bokehRotation = 0.f;
+			camera.stereo.perspCamera.bokehRoundness = 0.f;
+			camera.stereo.perspCamera.bokehObstruction = 0.f;
+			camera.stereo.perspCamera.enableLensModel = false;
+			camera.stereo.perspCamera.vignettingTableOffset = NULL_INDEX;
 			if (stereoCamera.enableClippingPlane) {
 				camera.stereo.perspCamera.projCamera.enableClippingPlane = true;
 				ASSIGN_VECTOR(camera.stereo.perspCamera.projCamera.clippingPlaneCenter, stereoCamera.clippingPlaneCenter);
@@ -205,6 +276,8 @@ void CompiledScene::CompileCamera() {
 		default:
 			throw runtime_error("Unknown camera type in CompiledScene::CompileCamera(): " + ToString(sceneCamera.GetType()));
 	}
+
+	cameraBokehDistributionSize = cameraBokehDistribution.size() * sizeof(float);
 }
 
 #endif

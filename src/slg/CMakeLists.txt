@@ -124,6 +124,7 @@ set(SLG_CORE_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/environment.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/orthographic.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/perspective.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/cameras/realistic.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/projective.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/cameras/stereo.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/core/colorspace.cpp

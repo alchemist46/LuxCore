@@ -96,10 +96,10 @@ public:
 		luxrays::Point *lensPoint) const = 0;
 
 	// Rendering methods
-	virtual void GenerateRay(const float time,
+	virtual luxrays::Spectrum GenerateRay(const float time,
 		const float filmX, const float filmY,
 		luxrays::Ray *ray, PathVolumeInfo *volInfo,
-		const float u0, const float u1) const;
+		const float u0, const float u1, const float wavelength = 587.56f) const;
 
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
 

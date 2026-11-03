@@ -58,6 +58,7 @@ set(LUXRAYS_KERNELS
 set(SLG_KERNELS
     include/slg/cameras/camera_types.cl
     include/slg/cameras/camera_funcs.cl
+    include/slg/cameras/lens_funcs.cl
     include/slg/engines/caches/photongi/pgic_types.cl
     include/slg/engines/caches/photongi/pgic_funcs.cl
     include/slg/engines/pathoclbase/kernels/pathoclbase_datatypes.cl
