@@ -59,6 +59,9 @@ public:
 	virtual luxrays::PropertiesUPtr ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
 
 	StereoCameraType GetStereoType() const { return stereoType; }
+	// The camera of an eye (0 left, 1 right), set by Update(): a
+	// PerspectiveCamera for STEREO_PERSPECTIVE
+	const Camera &GetEye(const u_int index) const { return (index == 0) ? *leftEye : *rightEye; }
 
 	float horizStereoEyesDistance, horizStereoLensDistance;
 

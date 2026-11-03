@@ -550,8 +550,9 @@ void PerspectiveCamera::SampleAperture(const float u1, const float u2,
 				float distPdf;
 				bokehDistributionMap->SampleContinuous(u1, u2, uv, &distPdf);
 				if (distPdf > 0.f) {
-					lensPoint.x = uv[0] * bokehScaleX;
-					lensPoint.y = uv[1] * bokehScaleY;
+					// The image on [-1, 1]^2, centred on the lens axis
+					lensPoint.x = (2.f * uv[0] - 1.f) * bokehScaleX;
+					lensPoint.y = (2.f * uv[1] - 1.f) * bokehScaleY;
 
 					if (bokehRotation != 0.f) {
 						const float a = Radians(bokehRotation);

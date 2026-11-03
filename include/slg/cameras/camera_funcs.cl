@@ -137,8 +137,9 @@ OPENCL_FORCE_INLINE void PerspectiveCamera_SampleAperture(
 				float distPdf;
 				Distribution2D_SampleContinuous(cameraBokehDistribution, u1, u2, &sampleUV, &distPdf);
 				if (distPdf > 0.f) {
-					*lensU = sampleUV.x * cameraPersp->bokehScaleX;
-					*lensV = sampleUV.y * cameraPersp->bokehScaleY;
+					// The image on [-1, 1]^2, centred on the lens axis
+					*lensU = (2.f * sampleUV.x - 1.f) * cameraPersp->bokehScaleX;
+					*lensV = (2.f * sampleUV.y - 1.f) * cameraPersp->bokehScaleY;
 
 					const float bokehRotation = cameraPersp->bokehRotation;
 					if (bokehRotation != 0.f) {

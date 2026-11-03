@@ -77,6 +77,20 @@ void StereoCamera::Update(const u_int width, const u_int height,
 	y = Cross(x, dir);
 	y = Normalize(y);
 
+	// The aperture shape of the eyes, the scene's (their Update() normalizes
+	// the scale and builds the custom distribution)
+	const auto setBokeh = [this](PerspectiveCamera &eye) {
+		eye.bokehBlades = bokehBlades;
+		eye.bokehPower = bokehPower;
+		eye.bokehDistribution = bokehDistribution;
+		eye.bokehDistributionImageMap = bokehDistributionImageMap;
+		eye.bokehScaleX = bokehScaleX;
+		eye.bokehScaleY = bokehScaleY;
+		eye.bokehRotation = bokehRotation;
+		eye.bokehRoundness = bokehRoundness;
+		eye.bokehObstruction = bokehObstruction;
+	};
+
 	switch(stereoType) {
 		case STEREO_PERSPECTIVE: {
 			// Create left eye camera
@@ -95,6 +109,7 @@ void StereoCamera::Update(const u_int width, const u_int height,
 			left->lensRadius = lensRadius;
 			left->focalDistance = focalDistance;
 			left->autoFocus = autoFocus;
+			setBokeh(*left);
 
 			left->screenOffsetX = -horizStereoLensDistance * .5f;
 			left->fieldOfView = fieldOfView;
@@ -120,6 +135,7 @@ void StereoCamera::Update(const u_int width, const u_int height,
 			right->lensRadius = lensRadius;
 			right->focalDistance = focalDistance;
 			right->autoFocus = autoFocus;
+			setBokeh(*right);
 
 			right->screenOffsetX = horizStereoLensDistance * .5f;
 			right->fieldOfView = fieldOfView;

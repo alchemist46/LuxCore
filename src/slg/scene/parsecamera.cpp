@@ -77,6 +77,38 @@ CameraUPtr Scene::CreateCamera(const Properties &props) {
 	SDL_LOG("Camera position: " << orig);
 	SDL_LOG("Camera target: " << target);
 
+	// The field of view and the aperture shape of a perspective camera, the
+	// eyes of a stereo one too
+	const auto ParseAperture = [&](PerspectiveCamera *perspCamera) {
+		perspCamera->fieldOfView = Clamp(props.Get(Property("scene.camera.fieldofview")(45.0)).Get<double>(),
+				DEFAULT_EPSILON_STATIC_DBL, 180.0 - DEFAULT_EPSILON_STATIC_DBL);
+
+		perspCamera->bokehBlades = props.Get(Property("scene.camera.bokeh.blades")(0u)).Get<u_int>();
+		perspCamera->bokehPower = props.Get(Property("scene.camera.bokeh.power")(3u)).Get<u_int>();
+
+		perspCamera->bokehDistribution = PerspectiveCamera::String2BokehDistributionType(
+				props.Get(Property("scene.camera.bokeh.distribution.type")("NONE")).Get<string>());
+		if (perspCamera->bokehDistribution == PerspectiveCamera::DIST_CUSTOM) {
+			const string imgMapName = props.Get(Property("scene.camera.bokeh.distribution.image")("image.png")).Get<string>();
+
+			ImageMapConfig imgCfg(props, "scene.camera.bokeh.distribution.image");
+			// Force float storage
+			imgCfg.SetStorageType(ImageMapStorage::FLOAT);
+
+			perspCamera->bokehDistributionImageMap = &imgMapCache.GetImageMap(imgMapName, imgCfg, false);
+
+			if (perspCamera->bokehDistributionImageMap->GetSpectrumMean() == 0.f)
+				throw runtime_error("Used a black image in camera bokeh distribution: " + imgMapName);
+		}
+
+		perspCamera->bokehScaleX = props.Get(Property("scene.camera.bokeh.scale.x")(1.0)).Get<double>();
+		perspCamera->bokehScaleY = props.Get(Property("scene.camera.bokeh.scale.y")(1.0)).Get<double>();
+
+		perspCamera->bokehRotation = props.Get(Property("scene.camera.bokeh.rotation")(0.0)).Get<double>();
+		perspCamera->bokehRoundness = Clamp(props.Get(Property("scene.camera.bokeh.roundness")(0.0)).Get<double>(), 0.0, 1.0);
+		perspCamera->bokehObstruction = Clamp(props.Get(Property("scene.camera.bokeh.obstruction")(0.0)).Get<double>(), 0.0, .95);
+	};
+
 	CameraUPtr camera;
 	if ((type == "environment") || (type == "orthographic") || (type == "perspective") || (type == "stereo") ||
 			(type == "realistic")) {
@@ -115,36 +147,10 @@ CameraUPtr Scene::CreateCamera(const Properties &props) {
 				perspCamera = new PerspectiveCamera(orig, target, up);
 			camera.reset(perspCamera);
 
-			perspCamera->fieldOfView = Clamp(props.Get(Property("scene.camera.fieldofview")(45.0)).Get<double>(),
-					DEFAULT_EPSILON_STATIC_DBL, 180.0 - DEFAULT_EPSILON_STATIC_DBL);
-
-			perspCamera->bokehBlades = props.Get(Property("scene.camera.bokeh.blades")(0u)).Get<u_int>();
-			perspCamera->bokehPower = props.Get(Property("scene.camera.bokeh.power")(3u)).Get<u_int>();
-
-			perspCamera->bokehDistribution = PerspectiveCamera::String2BokehDistributionType(
-					props.Get(Property("scene.camera.bokeh.distribution.type")("NONE")).Get<string>());
-			if (perspCamera->bokehDistribution == PerspectiveCamera::DIST_CUSTOM) {
-				const string imgMapName = props.Get(Property("scene.camera.bokeh.distribution.image")("image.png")).Get<string>();
-
-				ImageMapConfig imgCfg(props, "scene.camera.bokeh.distribution.image");
-				// Force float storage
-				imgCfg.SetStorageType(ImageMapStorage::FLOAT);
-
-				perspCamera->bokehDistributionImageMap = &imgMapCache.GetImageMap(imgMapName, imgCfg, false);
-
-				if (perspCamera->bokehDistributionImageMap->GetSpectrumMean() == 0.f)
-					throw runtime_error("Used a black image in camera bokeh distribution: " + imgMapName);
-			}
-
-			perspCamera->bokehScaleX = props.Get(Property("scene.camera.bokeh.scale.x")(1.0)).Get<double>();
-			perspCamera->bokehScaleY = props.Get(Property("scene.camera.bokeh.scale.y")(1.0)).Get<double>();
-
+			ParseAperture(perspCamera);
 			perspCamera->enableOculusRiftBarrel = props.Get(Property("scene.camera.oculusrift.barrelpostpro.enable")(false)).Get<bool>();
 
-			// The aperture shape and the thin lens model (ROADMAP F11)
-			perspCamera->bokehRotation = props.Get(Property("scene.camera.bokeh.rotation")(0.0)).Get<double>();
-			perspCamera->bokehRoundness = Clamp(props.Get(Property("scene.camera.bokeh.roundness")(0.0)).Get<double>(), 0.0, 1.0);
-			perspCamera->bokehObstruction = Clamp(props.Get(Property("scene.camera.bokeh.obstruction")(0.0)).Get<double>(), 0.0, .95);
+			// The thin lens model (ROADMAP F11)
 			perspCamera->vignettingDistance = props.Get(Property("scene.camera.opticalvignetting.distance")(0.0)).Get<double>();
 			perspCamera->vignettingScale = Max(props.Get(Property("scene.camera.opticalvignetting.scale")(1.0)).Get<double>(), 1e-3);
 			perspCamera->distortionK1 = props.Get(Property("scene.camera.distortion.k1")(0.0)).Get<double>();
@@ -204,6 +210,7 @@ CameraUPtr Scene::CreateCamera(const Properties &props) {
 			else
 				throw runtime_error("Unknown StereoCamera type: " + stereoTypeStr);
 			camera.reset(stereoCamera);
+			ParseAperture(stereoCamera);
 			stereoCamera->enableOculusRiftBarrel = props.Get(Property("scene.camera.oculusrift.barrelpostpro.enable")(false)).Get<bool>();
 			stereoCamera->horizStereoEyesDistance = props.Get(Property("scene.camera.eyesdistance")(.0626f)).Get<double>();
 			stereoCamera->horizStereoLensDistance = props.Get(Property("scene.camera.lensdistance")(.2779f)).Get<double>();

@@ -37,6 +37,48 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
+// The aperture distribution of a perspective camera, the custom one at the
+// start of the camera data
+static void CompilePerspectiveBokeh(const PerspectiveCamera &perspCamera,
+		slg::ocl::PerspectiveCamera &camera, vector<float> &cameraData) {
+	camera.bokehBlades = perspCamera.bokehBlades;
+	camera.bokehPower = perspCamera.bokehPower;
+	switch (perspCamera.bokehDistribution) {
+		case PerspectiveCamera::DIST_NONE:
+			camera.bokehDistribution = slg::ocl::DIST_NONE;
+			break;
+		case PerspectiveCamera::DIST_UNIFORM:
+			camera.bokehDistribution = slg::ocl::DIST_UNIFORM;
+			break;
+		case PerspectiveCamera::DIST_EXPONENTIAL:
+			camera.bokehDistribution = slg::ocl::DIST_EXPONENTIAL;
+			break;
+		case PerspectiveCamera::DIST_INVERSEEXPONENTIAL:
+			camera.bokehDistribution = slg::ocl::DIST_INVERSEEXPONENTIAL;
+			break;
+		case PerspectiveCamera::DIST_GAUSSIAN:
+			camera.bokehDistribution = slg::ocl::DIST_GAUSSIAN;
+			break;
+		case PerspectiveCamera::DIST_INVERSEGAUSSIAN:
+			camera.bokehDistribution = slg::ocl::DIST_INVERSEGAUSSIAN;
+			break;
+		case PerspectiveCamera::DIST_TRIANGULAR:
+			camera.bokehDistribution = slg::ocl::DIST_TRIANGULAR;
+			break;
+		case PerspectiveCamera::DIST_CUSTOM: {
+			camera.bokehDistribution = slg::ocl::DIST_CUSTOM;
+
+			std::tie(cameraData, std::ignore) =
+				CompiledScene::CompileDistribution2D(*perspCamera.bokehDistributionMap);
+			break;
+		}
+		default:
+			throw runtime_error("Unknown bokeh distribution type in CompiledScene::CompileCamera(): " + ToString(perspCamera.bokehDistribution));
+	}
+	camera.bokehScaleX = perspCamera.bokehScaleX;
+	camera.bokehScaleY = perspCamera.bokehScaleY;
+}
+
 // The aperture shape and the thin lens model (ROADMAP F11) of a perspective
 // camera, the table of its optical vignetting appended to the camera data
 static void CompilePerspectiveLensModel(const PerspectiveCamera &perspCamera,
@@ -156,43 +198,7 @@ void CompiledScene::CompileCamera() {
 			} else
 				camera.persp.projCamera.enableClippingPlane = false;
 
-			camera.persp.bokehBlades = perspCamera.bokehBlades;
-			camera.persp.bokehPower = perspCamera.bokehPower;
-			switch (perspCamera.bokehDistribution) {
-				case PerspectiveCamera::DIST_NONE:
-					camera.persp.bokehDistribution = slg::ocl::DIST_NONE;
-					break;
-				case PerspectiveCamera::DIST_UNIFORM:
-					camera.persp.bokehDistribution = slg::ocl::DIST_UNIFORM;
-					break;
-				case PerspectiveCamera::DIST_EXPONENTIAL:
-					camera.persp.bokehDistribution = slg::ocl::DIST_EXPONENTIAL;
-					break;
-				case PerspectiveCamera::DIST_INVERSEEXPONENTIAL:
-					camera.persp.bokehDistribution = slg::ocl::DIST_INVERSEEXPONENTIAL;
-					break;
-				case PerspectiveCamera::DIST_GAUSSIAN:
-					camera.persp.bokehDistribution = slg::ocl::DIST_GAUSSIAN;
-					break;
-				case PerspectiveCamera::DIST_INVERSEGAUSSIAN:
-					camera.persp.bokehDistribution = slg::ocl::DIST_INVERSEGAUSSIAN;
-					break;
-				case PerspectiveCamera::DIST_TRIANGULAR:
-					camera.persp.bokehDistribution = slg::ocl::DIST_TRIANGULAR;
-					break;
-				case PerspectiveCamera::DIST_CUSTOM: {
-					camera.persp.bokehDistribution = slg::ocl::DIST_CUSTOM;
-
-					std::tie(cameraBokehDistribution, cameraBokehDistributionSize) =
-						CompileDistribution2D(*perspCamera.bokehDistributionMap);
-					break;
-				}
-				default:
-					throw runtime_error("Unknown bokeh distribution type in CompiledScene::CompileCamera(): " + ToString(perspCamera.bokehDistribution));
-			}
-			camera.persp.bokehScaleX = perspCamera.bokehScaleX;
-			camera.persp.bokehScaleY = perspCamera.bokehScaleY;
-
+			CompilePerspectiveBokeh(perspCamera, camera.persp, cameraBokehDistribution);
 			CompilePerspectiveLensModel(perspCamera, camera.persp, cameraBokehDistribution);
 			break;
 		}
@@ -259,12 +265,21 @@ void CompiledScene::CompileCamera() {
 			memcpy(camera.stereo.rightEyeCameraToWorld.m.m, stereoCamera.GetCameraToWorld(1).m.m, 4 * 4 * sizeof(float));
 
 			camera.stereo.perspCamera.enableOculusRiftBarrel = stereoCamera.enableOculusRiftBarrel;
-			// No aperture shape nor thin lens model
-			camera.stereo.perspCamera.bokehRotation = 0.f;
-			camera.stereo.perspCamera.bokehRoundness = 0.f;
-			camera.stereo.perspCamera.bokehObstruction = 0.f;
-			camera.stereo.perspCamera.enableLensModel = false;
-			camera.stereo.perspCamera.vignettingTableOffset = NULL_INDEX;
+			if (stereoCamera.GetStereoType() == StereoCamera::STEREO_PERSPECTIVE) {
+				// The aperture of the eyes (StereoCamera::Update()), no thin
+				// lens model
+				auto& eye = dynamic_cast<const PerspectiveCamera&>(stereoCamera.GetEye(0));
+				CompilePerspectiveBokeh(eye, camera.stereo.perspCamera, cameraBokehDistribution);
+				CompilePerspectiveLensModel(eye, camera.stereo.perspCamera, cameraBokehDistribution);
+			} else {
+				camera.stereo.perspCamera.bokehBlades = 0;
+				camera.stereo.perspCamera.bokehDistribution = slg::ocl::DIST_NONE;
+				camera.stereo.perspCamera.bokehRotation = 0.f;
+				camera.stereo.perspCamera.bokehRoundness = 0.f;
+				camera.stereo.perspCamera.bokehObstruction = 0.f;
+				camera.stereo.perspCamera.enableLensModel = false;
+				camera.stereo.perspCamera.vignettingTableOffset = NULL_INDEX;
+			}
 			if (stereoCamera.enableClippingPlane) {
 				camera.stereo.perspCamera.projCamera.enableClippingPlane = true;
 				ASSIGN_VECTOR(camera.stereo.perspCamera.projCamera.clippingPlaneCenter, stereoCamera.clippingPlaneCenter);
