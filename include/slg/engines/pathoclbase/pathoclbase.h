@@ -48,7 +48,7 @@ public:
 	virtual ~PathOCLBaseRenderEngine();
 
 	virtual bool HasDone() const;
-	virtual void WaitForDone() const;
+	virtual void WaitForDone();
 
 	static bool HasCachedKernels(const RenderConfig &renderConfig);
 

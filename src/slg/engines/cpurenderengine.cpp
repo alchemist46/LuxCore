@@ -17,7 +17,9 @@
  ***************************************************************************/
 
 #include <boost/format.hpp>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 #include "luxrays/usings.h"
 #include "luxrays/utils/thread.h"
@@ -180,7 +182,15 @@ bool CPURenderEngine::HasDone() const {
 	return true;
 }
 
-void CPURenderEngine::WaitForDone() const {
+void CPURenderEngine::WaitForDone() {
+	// The render threads stop when the film tests of UpdateFilm() find a halt
+	// condition met (Film::RunTests()): without a caller of UpdateStats(),
+	// run them here
+	while (started && !HasDone()) {
+		UpdateFilm();
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+
 	for (size_t i = 0; i < renderThreads.size(); ++i)
 		renderThreads[i]->WaitForDone();
 }

@@ -83,7 +83,7 @@ public:
 	virtual ~CPURenderEngine();
 
 	virtual bool HasDone() const;
-	virtual void WaitForDone() const;
+	virtual void WaitForDone();
 
 	static luxrays::PropertiesUPtr ToProperties(const luxrays::Properties &cfg);
 

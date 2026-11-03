@@ -39,7 +39,7 @@ public:
 	virtual std::string GetTag() const { return GetObjectTag(); }
 
 	virtual bool HasDone() const { return true; }
-	virtual void WaitForDone() const { }
+	virtual void WaitForDone() { }
 
 	static void ExportScene(RenderConfigRef renderConfig, const std::string &directoryName,
 		const std::string &renderEngineType);

@@ -82,7 +82,9 @@ public:
 	virtual void Resume();
 
 	virtual bool HasDone() const = 0;
-	virtual void WaitForDone() const = 0;
+	// Returns when the halt conditions are met (or Stop() is called): the
+	// engines that check them only in UpdateFilm() run it while they wait
+	virtual void WaitForDone() = 0;
 
 	void UpdateFilm();
 	virtual void WaitNewFrame() { }
