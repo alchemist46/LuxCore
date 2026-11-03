@@ -605,6 +605,10 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			isRec709 = true;
 		}
 	};
+	// The colour space of the image at the current place of the pipeline
+	auto ImageColorSpace = [&]() {
+		return isRec709 ? WorkingColorSpace() : workingColorSpace;
+	};
 
 	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames(imagePipelinePrefix, true);
 	if (imagePipelineKeys.size() > 0) {
@@ -675,8 +679,8 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 				imagePipeline->AddPlugin(new ContourLinesPlugin(scale, range, steps, zeroGridSize));
 			} else if (type == "BACKGROUND_IMG") {
-				// Composited with the rendered image: in its working colour space
-				auto im = ImageMap::FromProperties(props, prefix, workingColorSpace);
+				// Composited with the rendered image: in its colour space
+				auto im = ImageMap::FromProperties(props, prefix, ImageColorSpace());
 
 				imagePipeline->AddPlugin(new BackgroundImgPlugin(std::move(im)));
 			} else if (type == "BLOOM") {
@@ -703,7 +707,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				// space of the image at this point of the pipeline
 				imagePipeline->AddPlugin(new GlarePlugin(fstop, sensorWidth, blades, rotation,
 						roundness, obstruction, scatter, scatterRadius, scatterFalloff,
-						scale, radius, samples, isRec709 ? WorkingColorSpace() : workingColorSpace));
+						scale, radius, samples, ImageColorSpace()));
 			} else if (type == "OBJECT_ID_MASK") {
 				const u_int objectID = props.Get(Property(prefix + ".id")(0)).Get<u_int>();
 
@@ -739,7 +743,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				// at this point of the pipeline
 				imagePipeline->AddPlugin(new ColorAberrationPlugin(scaleX, scaleY, mode, samples,
 						center.Get<double>(0), center.Get<double>(1),
-						isRec709 ? WorkingColorSpace() : workingColorSpace));
+						ImageColorSpace()));
 			} else if (type == "PREMULTIPLY_ALPHA") {
 				imagePipeline->AddPlugin(new PremultiplyAlphaPlugin());
 			} else if (type == "MIST") {
@@ -851,7 +855,7 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				// normalization, which makes the image black
 				const bool normalize = props.Get(Property(prefix + ".normalize")(true)).Get<bool>();
 
-				imagePipeline->AddPlugin(new WhiteBalance(temperature, reverse, normalize, workingColorSpace));
+				imagePipeline->AddPlugin(new WhiteBalance(temperature, reverse, normalize, ImageColorSpace()));
 			} else if (type == "BAKEMAP_MARGIN") {
 				const u_int marginPixels = Max(props.Get(Property(prefix + ".margin")(2)).Get<u_int>(), 1u);
 				const float samplesThreshold = Max(props.Get(Property(prefix + ".samplesthreshold")(0.0)).Get<double>(), 0.0);
@@ -884,17 +888,18 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 					return OCIO::ROLE_RENDERING;
 				};
 
-				// The default source is the working space (the rendering role
-				// in Rec.709, or if the config has no such colour space)
+				// The default source is the space of the image (the rendering
+				// role in Rec.709, or if the config has no such colour space)
 				auto ocioSource = [&](const string &prefix) -> string {
 					const string configName = props.Get(Property(prefix + ".config")("")).Get<string>();
-					if (workingColorSpace.IsRec709())
+					const WorkingColorSpace imageColorSpace = ImageColorSpace();
+					if (imageColorSpace.IsRec709())
 						return ocioRec709Source(configName);
-					const string name = workingColorSpace.FindOpenColorIOColorSpace(configName);
+					const string name = imageColorSpace.FindOpenColorIOColorSpace(configName);
 					if (name == "") {
 						const string role = ocioRec709Source(configName);
 						SLG_LOG("WARNING: the OpenColorIO config \"" << configName << "\" has no " <<
-								WorkingColorSpace::WorkingColorSpaceType2String(workingColorSpace.GetType()) <<
+								WorkingColorSpace::WorkingColorSpaceType2String(imageColorSpace.GetType()) <<
 								" color space, the pixels are taken as its " << role <<
 								" role (set " << prefix << ".src)");
 						return role;

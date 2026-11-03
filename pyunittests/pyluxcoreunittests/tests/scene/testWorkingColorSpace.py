@@ -253,7 +253,7 @@ class TestWorkingColorSpace(unittest.TestCase):
 		# working space.
 		self.CheckLinear(DISNEY_SCENE, True, 1e-3, meanError=True)
 
-	def CheckImagePipeline(self, imagePipeline):
+	def CheckImagePipeline(self, imagePipeline, tolerance=2e-3):
 		# The image pipeline converts to Rec.709 before the gamma, so its output
 		# doesn't depend on the working space when the image is linear in the
 		# inputs. (The 4096 entries of the gamma table round the result.)
@@ -263,7 +263,7 @@ class TestWorkingColorSpace(unittest.TestCase):
 		for space in TO_REC709:
 			img = RenderRGB(space, imagePipeline=imagePipeline)
 			maxDiff = max(abs(a - b) for a, b in zip(img, ref))
-			self.assertLess(maxDiff, 2e-3, space)
+			self.assertLess(maxDiff, tolerance, space)
 
 	def test_WorkingColorSpace_GammaPipeline(self):
 		self.CheckImagePipeline("""
@@ -297,6 +297,18 @@ class TestWorkingColorSpace(unittest.TestCase):
 			self.assertGreater(maxValue, 0.0, space)
 			maxDiff = max(max(abs(img[i] - img[i + 1]), abs(img[i + 1] - img[i + 2])) for i in range(0, len(img), 3))
 			self.assertLess(maxDiff / maxValue, 1e-4, space)
+
+	def test_WorkingColorSpace_WhiteBalanceAfterGamma(self):
+		# After the gamma the image is in Rec.709 whatever the working space,
+		# and so is the white point of a white balance placed there
+		self.CheckImagePipeline("""
+			film.imagepipelines.0.0.type = TONEMAP_LINEAR
+			film.imagepipelines.0.0.scale = 1.0
+			film.imagepipelines.0.1.type = GAMMA_CORRECTION
+			film.imagepipelines.0.1.value = 2.2
+			film.imagepipelines.0.2.type = WHITE_BALANCE
+			film.imagepipelines.0.2.temperature = 3000
+			""", 5e-3)
 
 	#---------------------------------------------------------------------------
 	# Blackbody temperatures normalized to luminance 1

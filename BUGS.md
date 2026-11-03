@@ -92,13 +92,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `BLENDER=<blender.exe> tests/run.sh <site-packages> test_openpbr_principled test_cycles_convert_disney` in BlendLuxCore, with the site-packages of a wheel built at ff14bf4ef (PATH on the CPU, a sphere before a gray backdrop under an area light, orthographic camera).
 - Notes: not bisected. The core commits in between that change light transport on the CPU: 07044a57f (one-sided transparency), 4c2929422 (shadow transparency MIS), 588d590bc (film splatting), 60c4c9fee (light tracing path length), 0f9d314ef (volume priorities), c0f396c1c (GlossyCoating). The darker glass points first at the shadow and transparency changes. A difference from Cycles is not a bug by itself: if the commit that moved it made the light transport right, the tests' references change instead. Found while testing BlendLuxCore 1.12 step 7, which does not touch materials.
 
-### WHITE_BALANCE and BACKGROUND_IMG use the working space after a display curve has converted the image to Rec.709
-- Found: 2026-11-02
-- Area: film (image pipeline)
-- Problem: in a working space other than Rec.709, `GAMMA_CORRECTION` and `CAMERA_RESPONSE_FUNC` insert a `WorkingToRec709Plugin` in front of themselves (`ConvertToRec709()`, `filmparse.cpp:600-606`), so the plugins after them see a Rec.709 image. `WHITE_BALANCE` still builds its scale with `workingColorSpace.FromRec709()` and `.Y()` (`filmparse.cpp` WHITE_BALANCE, `whitebalance.cpp:35-44`), and `BACKGROUND_IMG` loads its image into the working space (`ImageMap::FromProperties(props, prefix, workingColorSpace)`). Placed after a display curve, both apply the colours of the wrong space: a slightly wrong white point, a background with Rec.2020 or ACEScg primaries read as Rec.709 (less saturated).
-- Reproduce: `scene.colorspace.working = rec2020` (or acescg), a pipeline TONEMAP_LINEAR, GAMMA_CORRECTION, WHITE_BALANCE 3000 K; compare with WHITE_BALANCE in front of GAMMA_CORRECTION (on a linear image the two orders differ only by the gamma).
-- Notes: found while adding the spectral COLOR_ABERRATION (ROADMAP F10), which takes `isRec709 ? WorkingColorSpace() : workingColorSpace` at its place in the pipeline. The same fix applies to both: pass the space of the image at the plugin's place. Not measured.
-
 ### TILEPATHCPU: a render halted by spp stops at a different point of the next pass in each run
 - Found: 2026-11-03
 - Area: engine (TILEPATHCPU), film
