@@ -17,6 +17,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### One-sided emitters: a BSDF ray goes through the light, so the light after a specular bounce is lost
+- Found: 2026-11-03
+- Area: engine (path tracers), materials (transparency)
+- Problem: since 07044a57f ("One-sided transparency: every ray but the camera's reads the light's side"), a BSDF ray of the eye path reads the transparency of the far side of the surface it hits. An emitter with `transparency.front = 1` and `transparency.back = 0` (every area light the addon exports, LynxSpider's Background card) is hit on its emitting front, reads its back (0: see-through) and lets the ray go through without its emission; its MIS factor (`Material::avgPassThroughTransparency`, now the back transparency) is 0. On non-specular vertices the light sampling then takes all of it (weight 1), but where only BSDF sampling reaches the light, after a specular (smooth glass, mirror) bounce, it is lost: the light seen through glass or in a mirror and its caustics are missing.
+- Reproduce: the addon's `tests/test_openpbr_principled.py` "smooth glass" (a smooth glass sphere, a backdrop, a Blender area light, PATHCPU 64x64): LuxCore/Cycles 1.003 with a build before 07044a57f, 0.898 after (0.976 for the 0.1 roughness glass); native Glass too, not OpenPBR. The image is 0.43-0.55 of the old one on the light's image through the sphere and 0.03-0.3 on the caustic. 07044a57f reverted on HEAD: 1.003 and 1.000. The addon's `test_cycles_convert_disney` principled_coat_sheen fails from it too (native/reader 0.967/0.981/0.945, 1.002/1.001/1.004 with the revert). Scene export and scripts: the 2026-11-03 session scratchpad (`glass/`, `glass_render.py`).
+- Notes: not fixed. Reading the hit side for emitters (the state before 07044a57f) would bring back the LynxSpider MIS error that commit fixed (the environment behind the one-sided Background card reached by the light sampling but not by the BSDF rays). The consistent fix: a BSDF ray that passes through an emitter's emitting face collects its emission there (a direct hit with the MIS weight of the last scattering vertex, as the shadow transparency pseudo-vertex of 4c2929422) and goes on, and the MIS factor of such an emitter is 1 again; on the CPU and the GPU path tracers, and checked against BiDir.
+
 ### PATHOCL: a render halted by spp is darker or brighter by the samples in flight
 - Found: 2026-11-03
 - Area: engine (PATHOCL)
