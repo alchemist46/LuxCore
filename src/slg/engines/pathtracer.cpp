@@ -569,7 +569,8 @@ bool PathTracer::SubsurfaceRandomWalk(IntersectionDeviceRef device,
 void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		SceneConstRef scene, Sampler& sampler, EyePathInfo &pathInfo,
 		Ray &eyeRay,  const luxrays::Spectrum &eyeTroughput,
-		vector<SampleResult> &sampleResults) const {
+		vector<SampleResult> &sampleResults,
+		const bool cameraRayStopped, const bool filmNeedsAlbedo) const {
 	// To keep track of the number of rays traced
 	const double deviceRayCount = device.GetTotalRaysCount();
 
@@ -869,6 +870,14 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 				(photonGIIndirect && bsdf.IsVolume()))
 			break;
 
+		// A camera ray the lens stopped (the weight 0, RealisticCamera and the
+		// optical vignetting): nothing after its first vertex changes a film
+		// channel, unless the albedo of a film channel is still to find or the
+		// alpha can change (a shadow catcher, a transmission, a volume)
+		if (cameraRayStopped && sampleResult.firstPathVertex && (!albedoToDo || !filmNeedsAlbedo) &&
+				!bsdf.IsVolume() && !bsdf.IsShadowCatcher() && !(bsdf.GetEventTypes() & TRANSMIT))
+			break;
+
 		//------------------------------------------------------------------
 		// Build the next vertex path ray
 		//------------------------------------------------------------------
@@ -1056,7 +1065,13 @@ void PathTracer::RenderEyeSample(
 		pathInfo.dispersionTinted = true;
 	}
 
-	RenderEyePath(device, scene, sampler, pathInfo, eyeRay, cameraWeight, sampleResults);
+	// A camera ray the lens stopped (see RenderEyePath())
+	const bool cameraRayStopped = cameraWeight.Black() && !film.HasChannel(Film::IRRADIANCE);
+	const bool filmNeedsAlbedo = cameraRayStopped && (film.HasChannel(Film::ALBEDO) ||
+			film.HasChannel(Film::AVG_SHADING_NORMAL) || film.HasChannel(Film::SHADING_NORMAL));
+
+	RenderEyePath(device, scene, sampler, pathInfo, eyeRay, cameraWeight, sampleResults,
+			cameraRayStopped, filmNeedsAlbedo);
 }
 
 //------------------------------------------------------------------------------

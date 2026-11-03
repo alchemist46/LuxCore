@@ -17,8 +17,10 @@
  ***************************************************************************/
 
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 
 #include <boost/algorithm/string.hpp>
@@ -318,6 +320,22 @@ bool TraceLens(const vector<float> &surfaces, const u_int first, const u_int cou
 
 }
 
+// The last lens set-ups, by the values they are for: a camera edit parses a
+// new camera (moving the camera in the viewport does too), which would set up
+// the same lens again
+namespace {
+struct LensSetUp {
+	string key;
+	slg::ocl::RealisticCamera lensCamera;
+	vector<float> lensData;
+	float filmZ, effectiveFocalLength, effectiveFStop;
+};
+
+const size_t LENS_SETUP_CACHE_SIZE = 8;
+mutex lensSetUpCacheMutex;
+deque<LensSetUp> lensSetUpCache;
+}
+
 void RealisticCamera::UpdateLens() {
 	// The values the lens is set up for
 	stringstream key;
@@ -332,6 +350,21 @@ void RealisticCamera::UpdateLens() {
 			screenWindow[2] << " " << screenWindow[3];
 	if (key.str() == lensKey)
 		return;
+
+	{
+		lock_guard<mutex> lock(lensSetUpCacheMutex);
+		for (const LensSetUp &setUp : lensSetUpCache) {
+			if (setUp.key == key.str()) {
+				lensCamera = setUp.lensCamera;
+				lensData = setUp.lensData;
+				filmZ = setUp.filmZ;
+				effectiveFocalLength = setUp.effectiveFocalLength;
+				effectiveFStop = setUp.effectiveFStop;
+				lensKey = setUp.key;
+				return;
+			}
+		}
+	}
 
 	const double tStart = WallClockTime();
 
@@ -625,6 +658,13 @@ void RealisticCamera::UpdateLens() {
 	lensCamera.weightScale = (float)(Sqr(centerSamples) / centerWeight);
 
 	lensKey = key.str();
+
+	{
+		lock_guard<mutex> lock(lensSetUpCacheMutex);
+		lensSetUpCache.push_front({ lensKey, lensCamera, lensData, filmZ, effectiveFocalLength, effectiveFStop });
+		if (lensSetUpCache.size() > LENS_SETUP_CACHE_SIZE)
+			lensSetUpCache.pop_back();
+	}
 
 	const double tEnd = WallClockTime();
 	SDL_LOG("RealisticCamera lens set up in " << int((tEnd - tStart) * 1000.0) << "ms: focal length " <<

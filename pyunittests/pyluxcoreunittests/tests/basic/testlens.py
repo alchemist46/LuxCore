@@ -275,6 +275,29 @@ class ThinLens(unittest.TestCase):
 			self.assertAlmostEqual(Pixel(a, x, y), 1., delta=0.02)
 			self.assertAlmostEqual(Pixel(b, x, y), share, delta=0.03, msg="pixel %d %d" % (x, y))
 
+	def test_ThinLens_VignettingTableCache(self):
+		# A camera parsed again with the same aperture takes its vignetting
+		# table from the cache: the same image as the table computed first,
+		# and again once the cache dropped it (8 other tables)
+		def Scene(scale):
+			return Props("""
+				scene.lights.sky.type = constantinfinite
+				scene.lights.sky.color = 1.0 1.0 1.0
+				""" + Camera("""
+				scene.camera.lensradius = 0.05
+				scene.camera.focaldistance = 10.0
+				scene.camera.opticalvignetting.distance = 0.08
+				scene.camera.opticalvignetting.scale = %f
+				""" % scale))
+		oneThread = TILE_ONE_PASS
+		a = Render(Scene(0.8765), size=32, spp=16, extraCfg=oneThread)
+		b = Render(Scene(0.8765), size=32, spp=16, extraCfg=oneThread)
+		for i in range(8):
+			Render(Scene(0.9 + 0.01 * i), size=8, spp=1)
+		c = Render(Scene(0.8765), size=32, spp=16, extraCfg=oneThread)
+		self.assertEqual(max(abs(p - q) for p, q in zip(a, b)), 0.)
+		self.assertEqual(max(abs(p - q) for p, q in zip(a, c)), 0.)
+
 	def test_ThinLens_Aberrations(self):
 		# A dot on the plane of focus: sharp without aberrations, blurred by
 		# the spherical one. Off the axis the coma moves the centroid of the
@@ -439,6 +462,22 @@ class RealisticLens(unittest.TestCase):
 					f.write("%s %s %s %s\n" % r)
 			b = Render(Props(dot + Realistic("scene.camera.focaldistance = 4.0\nscene.camera.realistic.lens.file = " + fileName.replace("\\", "/"))), spp=16, extraCfg=oneThread)
 		self.assertEqual(max(abs(p - q) for p, q in zip(a, b)), 0.)
+
+	def test_RealisticLens_SetUpCache(self):
+		# A camera parsed again with the same lens takes its set-up from the
+		# cache: the same image as the set-up done first, and again once the
+		# cache dropped it (8 other set-ups)
+		dot = Dots([(0.3, 5.0, 0.2, 0.01)])
+		def Scene(focus):
+			return Props(dot + Realistic("scene.camera.focaldistance = %f\nscene.camera.realistic.fstop = 2.8" % focus))
+		oneThread = TILE_ONE_PASS
+		a = Render(Scene(4.321), spp=16, extraCfg=oneThread)
+		b = Render(Scene(4.321), spp=16, extraCfg=oneThread)
+		for i in range(8):
+			Render(Scene(5.0 + 0.1 * i), size=8, spp=1)
+		c = Render(Scene(4.321), spp=16, extraCfg=oneThread)
+		self.assertEqual(max(abs(p - q) for p, q in zip(a, b)), 0.)
+		self.assertEqual(max(abs(p - q) for p, q in zip(a, c)), 0.)
 
 	def test_RealisticLens_Dispersion(self):
 		# The lateral color of the lens: the red and blue images of an off-axis

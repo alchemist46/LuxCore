@@ -296,6 +296,16 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_GenerateNextVertexRay(
 			return MK_SPLAT_SAMPLE;
 	}
 
+	// A camera ray the lens stopped (the weight 0): nothing after its first
+	// vertex changes a film channel, unless the albedo is still to find, the
+	// alpha can change (a shadow catcher, a transmission, a volume) or the film
+	// has the irradiance, see PathTracer::RenderEyePath()
+	if (sampleResult->firstPathVertex && Spectrum_IsBlack(VLOAD3F(taskState->throughput.c)) &&
+			!taskState->albedoToDo && !bsdf->isVolume && !taskConfig->film.hasChannelIrradiance &&
+			!BSDF_IsShadowCatcher(bsdf MATERIALS_PARAM) &&
+			!(BSDF_GetEventTypes(bsdf MATERIALS_PARAM) & TRANSMIT))
+		return MK_SPLAT_SAMPLE;
+
 	// Sample the BSDF
 	float3 sampledDir;
 	float3 bsdfSample;

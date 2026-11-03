@@ -133,7 +133,12 @@ public:
 		Sampler& sampler,
 		EyePathInfo &pathInfo,
 		luxrays::Ray &eyeRay, const luxrays::Spectrum &eyeTroughput,
-		std::vector<SampleResult> &sampleResults) const;
+		std::vector<SampleResult> &sampleResults,
+		// A camera ray the lens stopped (the weight 0) whose path can end at
+		// its first vertex: the film has no irradiance (its indirect part
+		// does not have the camera weight). The film has an albedo or a
+		// shading normal channel: the path goes on to its albedo end point.
+		const bool cameraRayStopped = false, const bool filmNeedsAlbedo = false) const;
 	void RenderEyeSample(
 		luxrays::IntersectionDeviceRef device,
 		SceneConstRef scene, FilmConstRef film,

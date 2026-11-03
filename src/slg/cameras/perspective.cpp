@@ -17,6 +17,9 @@
  ***************************************************************************/
 
 #include <cstddef>
+#include <deque>
+#include <mutex>
+#include <sstream>
 
 #include "slg/cameras/perspective.h"
 #include "slg/film/film.h"
@@ -161,11 +164,47 @@ void PerspectiveCamera::InitCameraData() {
 	InitVignettingTable();
 }
 
+// The last optical vignetting tables, by the aperture and the barrel radius
+// they are for: a camera edit parses a new camera (moving the camera in the
+// viewport does too), which would compute the same table again
+namespace {
+struct VignettingTable {
+	string key;
+	vector<float> table;
+	float maxOffset;
+};
+
+const size_t VIGNETTING_TABLE_CACHE_SIZE = 8;
+mutex vignettingTableCacheMutex;
+deque<VignettingTable> vignettingTableCache;
+}
+
 void PerspectiveCamera::InitVignettingTable() {
 	vignettingTable.clear();
 	vignettingMaxOffset = 0.f;
 	if (!enableVignetting)
 		return;
+
+	// The custom bokeh is not cached: its image is not in the key
+	string key;
+	if (bokehDistribution != DIST_CUSTOM) {
+		stringstream ss;
+		ss.imbue(locale::classic());
+		ss.precision(9);
+		ss << bokehDistribution << "|" << bokehBlades << "|" << bokehPower << "|" <<
+				bokehScaleX << "|" << bokehScaleY << "|" << bokehRotation << "|" <<
+				bokehRoundness << "|" << bokehObstruction << "|" << vignettingScale;
+		key = ss.str();
+
+		lock_guard<mutex> lock(vignettingTableCacheMutex);
+		for (const VignettingTable &t : vignettingTableCache) {
+			if (t.key == key) {
+				vignettingTable = t.table;
+				vignettingMaxOffset = t.maxOffset;
+				return;
+			}
+		}
+	}
 
 	// A stratified set of points of the aperture, with its distribution
 	const u_int n = 64;
@@ -197,6 +236,13 @@ void PerspectiveCamera::InitVignettingTable() {
 			}
 			vignettingTable[r * LENS_VIGNETTING_ANGLES + a] = inside / (float)(n * n);
 		}
+	}
+
+	if (!key.empty()) {
+		lock_guard<mutex> lock(vignettingTableCacheMutex);
+		vignettingTableCache.push_front({ key, vignettingTable, vignettingMaxOffset });
+		if (vignettingTableCache.size() > VIGNETTING_TABLE_CACHE_SIZE)
+			vignettingTableCache.pop_back();
 	}
 }
 

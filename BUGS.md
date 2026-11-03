@@ -17,6 +17,13 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
+### PATHOCL: a render halted by spp is darker or brighter by the samples in flight
+- Found: 2026-11-03
+- Area: engine (PATHOCL)
+- Problem: the image mean of a PATHOCL render halted by `batch.haltspp` depends on the number of GPU tasks, by a term that falls as 1/spp: the samples still in flight at the halt are left out, and they are more often the long paths. Plain cornell (perspective, field of view 70, 480x320, SOBOL, adaptive sampling off, 64 spp): 0.3058 and 0.3057 with the default task count against 0.3064 and 0.3063 with `opencl.task.count = 65536` (seeds 3, 4), 0.2%. A scene whose paths have very different lengths shows it most: a fisheye inside the cornell box (`scene.camera.type = realistic`, `lens.preset = fisheye`, half of the frame outside its image circle, whose rays end at their first vertex since 2026-11-03) is 1.5% darker at 64 spp, 0.35% at 256 and 0.08% at 1024 than the CPU (PATHCPU 1024 spp: 0.7343 on the pixels inside the circle), and the same as the CPU with 65536 tasks.
+- Reproduce: the two renders above, PATHOCL on HIP (RX 6950 XT), `film.opencl.enable = 0`, compare the means; with adaptive sampling on the per-pixel sample counts spread too (211-435 at 256 spp).
+- Notes: the CPU engines have one sample in flight per thread, too few to show it. To check: whether the halt drops the in-flight samples or stops the tasks mid-path; finishing the samples in flight (or not counting the ones started after the target) would remove it.
+
 ### Camera: the custom image bokeh is not centered on the lens axis
 - Found: 2026-11-02
 - Area: camera

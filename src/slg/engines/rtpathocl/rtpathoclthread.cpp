@@ -158,6 +158,10 @@ void RTPathOCLRenderThread::UpdateAllCameraThreadsOCLBuffers() {
 	// camera edit, a frame later.
 	{
 		std::lock_guard<std::mutex> lock(engine->cameraEditMutex);
+		// A camera reading a camera data buffer the threads do not have yet
+		// is uploaded with it by the sync. of EndSceneEdit()
+		if (!engine->cameraDataUploaded)
+			return;
 		engine->cameraUpload = engine->compiledScene->camera;
 	}
 

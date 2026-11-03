@@ -22,24 +22,11 @@
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
 #include "slg/slg.h"
-#include "slg/cameras/perspective.h"
 #include "slg/engines/rtpathocl/rtpathocl.h"
 
 using namespace std;
 using namespace luxrays;
 using namespace slg;
-
-// The camera reads the camera data buffer (a custom bokeh, the optical
-// vignetting, a realistic lens), which the fast camera edit path does not
-// update
-static bool CameraUsesDataBuffer(const Camera &camera) {
-	if (camera.GetType() == Camera::PERSPECTIVE) {
-		const PerspectiveCamera &perspCamera = dynamic_cast<const PerspectiveCamera &>(camera);
-		return perspCamera.bokehDistributionImageMap || perspCamera.HasVignetting();
-	}
-
-	return (camera.GetType() == Camera::REALISTIC);
-}
 
 //------------------------------------------------------------------------------
 // RTPathOCLRenderEngine
@@ -59,6 +46,7 @@ RTPathOCLRenderEngine::RTPathOCLRenderEngine(RenderConfigRef rcfg) :
 
 	frameTime = 0.f;
 	useFastCameraEditPath = false;
+	cameraDataUploaded = true;
 }
 
 RTPathOCLRenderEngine::~RTPathOCLRenderEngine() {
@@ -115,7 +103,8 @@ void RTPathOCLRenderEngine::StartLockLess() {
 
 	updateActions.Reset();
 	useFastCameraEditPath = false;
-	cameraIsUsingCustomBokeh = CameraUsesDataBuffer(renderConfig.GetScene().GetCamera());
+	uploadedCameraData = compiledScene->cameraBokehDistribution;
+	cameraDataUploaded = true;
 
 	if (compileOnly)
 		// The render threads are not started (so no one will arrive at
@@ -210,22 +199,36 @@ void RTPathOCLRenderEngine::StopLockLess() {
 }
 
 void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
-	// Check if I can use the fast camera edit path
+	const Camera::CameraType cameraType = renderConfig.GetScene().GetCamera().GetType();
 	if (editActions.HasOnly(CAMERA_EDIT) &&
-			(renderConfig.GetScene().GetCamera().GetType() == Camera::PERSPECTIVE) &&
-			// Camera is not using the camera data buffer
-			!CameraUsesDataBuffer(renderConfig.GetScene().GetCamera()) &&
-			// Camera was not using the camera data buffer
-			!cameraIsUsingCustomBokeh) {
+			((cameraType == Camera::PERSPECTIVE) || (cameraType == Camera::REALISTIC))) {
+		// The camera is compiled while the render threads go on
 		TilePathOCLRenderEngine::EndSceneEdit(editActions);
-		useFastCameraEditPath = true;
+
+		// The fast camera edit path when the camera data buffer did not change
+		// (moving a camera with a lens or a custom bokeh does not change it)
+		if (cameraDataUploaded) {
+			useFastCameraEditPath = true;
+			return;
+		}
+
+		// Rendering thread 0 uploads the camera and its data buffer
+		RequestSync(SYNCTYPE_ENDSCENEEDIT);
+		updateActions.AddActions(editActions.GetActions());
+		syncBarrier->arrive_and_wait();
+
+		SetCameraDataUploaded();
+		syncBarrier->arrive_and_wait();
+
+		syncType = SYNCTYPE_NONE;
+		syncBarrier->arrive_and_wait();
 	} else {
 		RequestSync(SYNCTYPE_ENDSCENEEDIT);
 		updateActions.AddActions(editActions.GetActions());
 		syncBarrier->arrive_and_wait();
 
 		TilePathOCLRenderEngine::EndSceneEdit(editActions);
-		cameraIsUsingCustomBokeh = CameraUsesDataBuffer(renderConfig.GetScene().GetCamera());
+		SetCameraDataUploaded();
 		syncBarrier->arrive_and_wait();
 		
 		// Here, rendering thread 0 will update all OpenCL buffers here
@@ -235,12 +238,25 @@ void RTPathOCLRenderEngine::EndSceneEdit(const EditActionList &editActions) {
 	}
 }
 
+// The render threads are waiting for rendering thread 0 to upload all the
+// buffers of the compiled scene
+void RTPathOCLRenderEngine::SetCameraDataUploaded() {
+	std::lock_guard<std::mutex> lock(cameraEditMutex);
+
+	uploadedCameraData = compiledScene->cameraBokehDistribution;
+	cameraDataUploaded = true;
+}
+
 void RTPathOCLRenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
 	// With the fast camera edit path, the render threads are running and
 	// render thread 0 can be copying the compiled camera
 	std::lock_guard<std::mutex> lock(cameraEditMutex);
 
 	TilePathOCLRenderEngine::EndSceneEditLockLess(editActions);
+
+	// Until it is uploaded, render thread 0 does not copy a camera that reads
+	// a different camera data buffer
+	cameraDataUploaded = (compiledScene->cameraBokehDistribution == uploadedCameraData);
 }
 
 // A fast path for film resize
@@ -282,6 +298,8 @@ void RTPathOCLRenderEngine::EndFilmEdit(FilmRef flm, std::mutex *flmMutex) {
 	compiledScene->Recompile(a);
 	if (compiledScene->wasCameraCompiled || compiledScene->wasMaterialsCompiled)
 		InitGPUTaskConfiguration();
+	// The restarted threads upload all the buffers
+	SetCameraDataUploaded();
 
 	// Re-start all rendering threads
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i)

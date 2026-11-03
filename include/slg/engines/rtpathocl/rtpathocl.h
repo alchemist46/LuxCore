@@ -130,6 +130,7 @@ protected:
 	virtual void UpdateFilmLockLess();
 
 	void ReleaseStartedRenderThreads();
+	void SetCameraDataUploaded();
 
 	// Sets syncType and wakes render thread 0 up if it waits in pause mode
 	void RequestSync(const RTPathOCLSyncType type);
@@ -138,10 +139,15 @@ protected:
 	EditActionList updateActions;
 	// Set by a camera only edit, taken by render thread 0 at the end of a frame
 	std::atomic<bool> useFastCameraEditPath;
-	bool cameraIsUsingCustomBokeh;
 	// The compiled camera is written by EndSceneEditLockLess() while the render
 	// threads run (the fast camera edit path) and read by render thread 0
 	std::mutex cameraEditMutex;
+	// The camera data buffer the render threads have (the custom bokeh, the
+	// optical vignetting, a realistic lens), which the fast camera edit path
+	// does not upload, and whether the compiled camera's is the same (guarded
+	// by cameraEditMutex)
+	std::vector<float> uploadedCameraData;
+	bool cameraDataUploaded;
 	// The copy the camera buffers are uploaded from (asynchronously)
 	slg::ocl::Camera cameraUpload;
 
