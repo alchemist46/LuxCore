@@ -39,6 +39,7 @@ namespace OCIO = OCIO_NAMESPACE;
 #include "slg/film/imagepipeline/plugins/contourlines.h"
 #include "slg/film/imagepipeline/plugins/gammacorrection.h"
 #include "slg/film/imagepipeline/plugins/gaussianblur3x3.h"
+#include "slg/film/imagepipeline/plugins/glare.h"
 #include "slg/film/imagepipeline/plugins/nop.h"
 #include "slg/film/imagepipeline/plugins/patterns.h"
 #include "slg/film/imagepipeline/plugins/outputswitcher.h"
@@ -683,6 +684,26 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const float weight = Clamp(props.Get(Property(prefix + ".weight")(.25)).Get<double>(), 0.0, 1.0);
 
 				imagePipeline->AddPlugin(new BloomFilterPlugin(radius, weight));
+			} else if (type == "GLARE") {
+				const float fstop = Max(props.Get(Property(prefix + ".fstop")(8.0)).Get<double>(), .5);
+				const float sensorWidth = Max(props.Get(Property(prefix + ".sensorwidth")(36.0)).Get<double>(), 1e-3);
+				const u_int blades = Min(props.Get(Property(prefix + ".blades")(6u)).Get<u_int>(), 64u);
+				const float rotation = props.Get(Property(prefix + ".rotation")(0.0)).Get<double>();
+				const float roundness = Clamp(props.Get(Property(prefix + ".roundness")(0.0)).Get<double>(), 0.0, 1.0);
+				const float obstruction = Clamp(props.Get(Property(prefix + ".obstruction")(0.0)).Get<double>(), 0.0, .95);
+				const float scatter = Clamp(props.Get(Property(prefix + ".scatter")(.02)).Get<double>(), 0.0, 1.0);
+				const float scatterRadius = Clamp(props.Get(Property(prefix + ".scatter.radius")(.001)).Get<double>(), 0.0, 1.0);
+				// The tail integrates to a finite energy only above 2
+				const float scatterFalloff = Clamp(props.Get(Property(prefix + ".scatter.falloff")(3.0)).Get<double>(), 2.1, 8.0);
+				const float scale = Max(props.Get(Property(prefix + ".scale")(1.0)).Get<double>(), 0.0);
+				const float radius = Clamp(props.Get(Property(prefix + ".radius")(.1)).Get<double>(), 1e-3, 1.0);
+				const u_int samples = Clamp(props.Get(Property(prefix + ".samples")(16u)).Get<u_int>(), 2u, 64u);
+
+				// On the linear image in front of the tone mapping, in the
+				// space of the image at this point of the pipeline
+				imagePipeline->AddPlugin(new GlarePlugin(fstop, sensorWidth, blades, rotation,
+						roundness, obstruction, scatter, scatterRadius, scatterFalloff,
+						scale, radius, samples, isRec709 ? WorkingColorSpace() : workingColorSpace));
 			} else if (type == "OBJECT_ID_MASK") {
 				const u_int objectID = props.Get(Property(prefix + ".id")(0)).Get<u_int>();
 
@@ -692,18 +713,33 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 				imagePipeline->AddPlugin(new VignettingPlugin(scale));
 			} else if (type == "COLOR_ABERRATION") {
+				const ColorAberrationPlugin::Mode mode = ColorAberrationPlugin::String2Mode(
+						props.Get(Property(prefix + ".mode")("SPECTRAL")).Get<string>());
+
+				// SPECTRAL uses only the first amount, and a negative one moves
+				// the blue toward the center instead of the red
+				const double minAmount = (mode == ColorAberrationPlugin::SPECTRAL) ? -1.0 : 0.0;
 				const Property defaultProp = Property(prefix + ".amount")(.005);
 				const Property &prop = props.Get(defaultProp);
 				float scaleX, scaleY;
 				if (prop.GetSize() == 2) {
-					scaleX = Clamp(prop.Get<double>(0), 0.0, 1.0);
-					scaleY = Clamp(prop.Get<double>(1), 0.0, 1.0);
+					scaleX = Clamp(prop.Get<double>(0), minAmount, 1.0);
+					scaleY = Clamp(prop.Get<double>(1), minAmount, 1.0);
 				} else {
-					scaleX = Clamp(prop.Get<double>(), 0.0, 1.0);
+					scaleX = Clamp(prop.Get<double>(), minAmount, 1.0);
 					scaleY = scaleX;
 				}
 
-				imagePipeline->AddPlugin(new ColorAberrationPlugin(scaleX, scaleY));
+				const u_int samples = Clamp(props.Get(Property(prefix + ".samples")(16)).Get<u_int>(), 2u, 256u);
+				const Property &center = props.Get(Property(prefix + ".center")(.5, .5));
+				if (center.GetSize() != 2)
+					throw runtime_error("COLOR_ABERRATION center must have 2 values: " + center.ToString());
+
+				// The colours of the wavelengths are in the space of the image
+				// at this point of the pipeline
+				imagePipeline->AddPlugin(new ColorAberrationPlugin(scaleX, scaleY, mode, samples,
+						center.Get<double>(0), center.Get<double>(1),
+						isRec709 ? WorkingColorSpace() : workingColorSpace));
 			} else if (type == "PREMULTIPLY_ALPHA") {
 				imagePipeline->AddPlugin(new PremultiplyAlphaPlugin());
 			} else if (type == "MIST") {

@@ -26,6 +26,7 @@
 #include "slg/kernels/kernels.h"
 #include "slg/film/film.h"
 #include "slg/film/imagepipeline/plugins/coloraberration.h"
+#include "slg/materials/glass.h"
 
 using namespace std;
 using namespace luxrays;
@@ -37,11 +38,17 @@ using namespace slg;
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::ColorAberrationPlugin)
 
-ColorAberrationPlugin::ColorAberrationPlugin(const float ax, const float ay) :
-		amountX(ax), amountY(ay),
+ColorAberrationPlugin::ColorAberrationPlugin(const float ax, const float ay,
+		const Mode m, const u_int s, const float cx, const float cy,
+		const WorkingColorSpace &colorSpace) :
+		amountX(ax), amountY(ay), mode(m), samples(s), centerX(cx), centerY(cy),
 		tmpBuffer(nullptr), tmpBufferSize(0) {
+	if (mode == SPECTRAL)
+		InitSpectralTable(colorSpace);
+
 	hardwareDevice = nullptr;
 	hwTmpBuffer = nullptr;
+	hwSpectralTable = nullptr;
 
 	applyKernel = nullptr;
 	copyKernel = nullptr;
@@ -50,12 +57,100 @@ ColorAberrationPlugin::ColorAberrationPlugin(const float ax, const float ay) :
 ColorAberrationPlugin::~ColorAberrationPlugin() {
 	delete[] tmpBuffer;
 
-	if (hardwareDevice)
+	if (hardwareDevice) {
 		hardwareDevice->FreeBuffer(&hwTmpBuffer);
+		hardwareDevice->FreeBuffer(&hwSpectralTable);
+	}
 }
 
 ImagePipelinePlugin *ColorAberrationPlugin::Copy() const {
-	return new ColorAberrationPlugin(amountX, amountY);
+	ColorAberrationPlugin *plugin = new ColorAberrationPlugin(amountX, amountY, LEGACY, samples, centerX, centerY);
+	plugin->mode = mode;
+	plugin->spectralTable = spectralTable;
+
+	return plugin;
+}
+
+ColorAberrationPlugin::Mode ColorAberrationPlugin::String2Mode(const string &type) {
+	if (type == "SPECTRAL")
+		return SPECTRAL;
+	else if (type == "LEGACY")
+		return LEGACY;
+	else
+		throw runtime_error("Unknown COLOR_ABERRATION mode: " + type);
+}
+
+string ColorAberrationPlugin::Mode2String(const Mode type) {
+	switch (type) {
+		case SPECTRAL:
+			return "SPECTRAL";
+		case LEGACY:
+			return "LEGACY";
+		default:
+			throw runtime_error("Unknown COLOR_ABERRATION mode: " + ToString(type));
+	}
+}
+
+//------------------------------------------------------------------------------
+// The wavelengths of the SPECTRAL mode
+//------------------------------------------------------------------------------
+
+// The magnification at the wavelength l is 1 + amount * SPECTRAL_AMOUNT_SCALE *
+// (n(l) - n_d) / (n_F - n_C), with the dispersion n(l) = A + B / l^2 of
+// Cauchy's equation (as GlassMaterial's): the ratio does not depend on A and B,
+// so on neither the IOR nor the Abbe number of the glass.
+//
+// SPECTRAL_AMOUNT_SCALE makes the spread between the F and C lines at the
+// corners of a square image as wide as the legacy fringes with the same amount.
+// Along the diagonal the legacy red/blue and green copies are amount * |o|^2 *
+// size apart (o the offset from the center as a fraction of the size, |o|^2 =
+// 1/2 at the corner), the F and C lines amount * scale * |o| * size: so the
+// scale is 2 |o| = sqrt(2)
+
+static const float SPECTRAL_AMOUNT_SCALE = 1.41421356f;
+
+// The Fraunhofer d, F and C lines, in nm
+static const float LAMBDA_D = 587.56f;
+static const float LAMBDA_F = 486.13f;
+static const float LAMBDA_C = 656.27f;
+
+static float NormalizedDispersion(const float lambda) {
+	return (1.f / Sqr(lambda) - 1.f / Sqr(LAMBDA_D)) /
+			(1.f / Sqr(LAMBDA_F) - 1.f / Sqr(LAMBDA_C));
+}
+
+vector<float> ColorAberrationPlugin::WavelengthWeights(const u_int samples,
+		const WorkingColorSpace &colorSpace) {
+	vector<float> table(samples * 4);
+
+	float sum[3] = { 0.f, 0.f, 0.f };
+	for (u_int i = 0; i < samples; ++i) {
+		const float lambda = 380.f + (i + .5f) * (400.f / samples);
+		const Spectrum c = GlassMaterial::WaveLengthColor(lambda, colorSpace);
+
+		table[i * 4] = lambda;
+		for (u_int j = 0; j < 3; ++j) {
+			table[i * 4 + 1 + j] = Max(c.c[j], 0.f);
+			sum[j] += table[i * 4 + 1 + j];
+		}
+	}
+
+	for (u_int i = 0; i < samples; ++i) {
+		for (u_int j = 0; j < 3; ++j) {
+			float &w = table[i * 4 + 1 + j];
+			w = (sum[j] > 0.f) ? (w / sum[j]) : (1.f / samples);
+		}
+	}
+
+	return table;
+}
+
+void ColorAberrationPlugin::InitSpectralTable(const WorkingColorSpace &colorSpace) {
+	// Each wavelength weighted by its colour, the wavelength replaced by its
+	// magnification minus 1
+	spectralTable = WavelengthWeights(samples, colorSpace);
+	for (u_int i = 0; i < samples; ++i)
+		spectralTable[i * 4] = amountX * SPECTRAL_AMOUNT_SCALE * NormalizedDispersion(spectralTable[i * 4]);
 }
 
 //------------------------------------------------------------------------------
@@ -155,8 +250,6 @@ void ColorAberrationPlugin::Apply(Film &film, const u_int index) {
 
 	const u_int width = film.GetWidth();
 	const u_int height = film.GetHeight();
-	const float invWidth = 1.f / width;
-	const float invHeight = 1.f / height;
 
 	// Allocate the temporary buffer if required
 	if ((!tmpBuffer) || (width * height != tmpBufferSize)) {
@@ -165,6 +258,90 @@ void ColorAberrationPlugin::Apply(Film &film, const u_int index) {
 		tmpBufferSize = width * height;
 		tmpBuffer = new Spectrum[tmpBufferSize];
 	}
+
+	if (mode == SPECTRAL)
+		ApplySpectral(film, index);
+	else
+		ApplyLegacy(film, index);
+
+	#pragma omp parallel for
+	for (
+			// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+			unsigned
+#endif
+			int y = 0; y < height; ++y)
+		copy(&tmpBuffer[y * width], &tmpBuffer[(y + 1) * width], &pixels[y * width]);
+}
+
+// Each channel is the sum of its own channel at the scaled positions of the
+// wavelengths, with the weights of the table
+void ColorAberrationPlugin::ApplySpectral(Film &film, const u_int index) {
+	const Spectrum *pixels = (Spectrum *)film.channel_IMAGEPIPELINEs[index]->GetPixels();
+
+	const u_int width = film.GetWidth();
+	const u_int height = film.GetHeight();
+	// The center in pixels: the pixel x covers [x, x + 1)
+	const float cx = centerX * width;
+	const float cy = centerY * height;
+
+	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
+	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+
+	#pragma omp parallel for
+	for (
+			// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+			unsigned
+#endif
+			int y = 0; y < height; ++y) {
+		const float dy = y + .5f - cy;
+
+		for (u_int xBegin = 0; xBegin < width; xBegin += LANES) {
+			const u_int lanes = Min(LANES, width - xBegin);
+
+			// The pixel centers are at x + .5, so the position scaled by the
+			// magnification 1 + s is c + (1 + s) * d - .5 = x + s * d in the
+			// coordinates of GetBilinearSamples() (the lanes past the end of
+			// the row are computed and not used)
+			float dx[LANES];
+			for (u_int i = 0; i < LANES; ++i)
+				dx[i] = (xBegin + i) + .5f - cx;
+
+			Spectrum sum[LANES];
+			for (u_int k = 0; k < samples; ++k) {
+				const float *entry = &spectralTable[k * 4];
+				const float s = entry[0];
+				const Spectrum weight(entry[1], entry[2], entry[3]);
+
+				float sx[LANES], sy[LANES];
+				for (u_int i = 0; i < LANES; ++i) {
+					sx[i] = (xBegin + i) + s * dx[i];
+					sy[i] = y + s * dy;
+				}
+
+				BilinearSamples bs;
+				GetBilinearSamples(bs, sx, sy, width, height);
+				for (u_int i = 0; i < lanes; ++i)
+					sum[i] += weight * bs.Get(pixels, width, i);
+			}
+
+			for (u_int i = 0; i < lanes; ++i) {
+				const u_int index = xBegin + i + y * width;
+
+				tmpBuffer[index] = film.HasSamples(hasPN, hasSN, index) ? sum[i] : pixels[index];
+			}
+		}
+	}
+}
+
+void ColorAberrationPlugin::ApplyLegacy(Film &film, const u_int index) {
+	const Spectrum *pixels = (Spectrum *)film.channel_IMAGEPIPELINEs[index]->GetPixels();
+
+	const u_int width = film.GetWidth();
+	const u_int height = film.GetHeight();
+	const float invWidth = 1.f / width;
+	const float invHeight = 1.f / height;
 
 	const bool hasPN = film.HasChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
 	const bool hasSN = film.HasChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
@@ -238,15 +415,6 @@ void ColorAberrationPlugin::Apply(Film &film, const u_int index) {
 			}
 		}
 	}
-
-	#pragma omp parallel for
-	for (
-			// Visual C++ 2013 supports only OpenMP 2.5
-#if _OPENMP >= 200805
-			unsigned
-#endif
-			int y = 0; y < height; ++y)
-		copy(&tmpBuffer[y * width], &tmpBuffer[(y + 1) * width], &pixels[y * width]);
 }
 
 //------------------------------------------------------------------------------
@@ -287,17 +455,35 @@ void ColorAberrationPlugin::ApplyHW(Film &film, const u_int index) {
 		// ColorAberrationPlugin_Apply kernel
 		//----------------------------------------------------------------------
 
-		SLG_LOG("[ColorAberrationPlugin] Compiling ColorAberrationPlugin_Apply Kernel");
-		applyKernel = hardwareDevice->GetKernel(*program, "ColorAberrationPlugin_Apply");
-
-		// Set kernel arguments
 		u_int argIndex = 0;
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, width);
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, height);
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, film.hw_IMAGEPIPELINE);
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, hwTmpBuffer);
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, amountX);
-		hardwareDevice->SetKernelArg(applyKernel, argIndex++, amountY);
+		if (mode == SPECTRAL) {
+			hardwareDevice->AllocBufferRO(&hwSpectralTable, spectralTable.data(),
+					spectralTable.size() * sizeof(float), "ColorAberration spectral table");
+
+			SLG_LOG("[ColorAberrationPlugin] Compiling ColorAberrationPlugin_ApplySpectral Kernel");
+			applyKernel = hardwareDevice->GetKernel(*program, "ColorAberrationPlugin_ApplySpectral");
+
+			// Set kernel arguments
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, width);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, height);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, film.hw_IMAGEPIPELINE);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, hwTmpBuffer);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, centerX * width);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, centerY * height);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, samples);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, hwSpectralTable);
+		} else {
+			SLG_LOG("[ColorAberrationPlugin] Compiling ColorAberrationPlugin_Apply Kernel");
+			applyKernel = hardwareDevice->GetKernel(*program, "ColorAberrationPlugin_Apply");
+
+			// Set kernel arguments
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, width);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, height);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, film.hw_IMAGEPIPELINE);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, hwTmpBuffer);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, amountX);
+			hardwareDevice->SetKernelArg(applyKernel, argIndex++, amountY);
+		}
 
 		//----------------------------------------------------------------------
 		// ColorAberrationPlugin_Copy kernel

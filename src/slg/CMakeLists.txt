@@ -67,6 +67,7 @@ SOURCE_GROUP("Source Files\\BCD Library" FILES ${BCD_SRCS})
 include_directories(${PROJECT_SOURCE_DIR}/deps/bcd-1.1/include)
 include_directories(${PROJECT_SOURCE_DIR}/deps/bcd-1.1/include/bcd/core)
 include_directories(${PROJECT_SOURCE_DIR}/deps/lut)
+include_directories(${PROJECT_SOURCE_DIR}/deps/pocketfft)
 
 add_library(bcd STATIC ${BCD_SRCS})
 
@@ -817,6 +818,7 @@ set(SLG_FILM_SRCS
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/contourlines.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/gammacorrection.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/gaussianblur3x3.cpp
+  ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/glare.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/mist.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/nop.cpp
   ${PROJECT_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/patterns.cpp

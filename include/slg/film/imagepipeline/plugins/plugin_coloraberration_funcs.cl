@@ -1,4 +1,4 @@
-#line 2 "plugin_vignetting_funcs.cl"
+#line 2 "plugin_coloraberration_funcs.cl"
 
 /***************************************************************************
  * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
@@ -78,6 +78,45 @@ __kernel void ColorAberrationPlugin_Apply(
 		newValue *= .5f;
 
 		VSTORE3F(newValue, &tmpBuffer[gid * 3]);
+	}
+}
+
+//------------------------------------------------------------------------------
+// ColorAberrationPlugin_ApplySpectral
+//------------------------------------------------------------------------------
+
+// The same as ColorAberrationPlugin::ApplySpectral(): each channel is the sum of
+// its own channel at the scaled positions of the wavelengths, with the weights
+// of the table (4 floats per wavelength: the magnification minus 1 and the
+// weights of the 3 channels)
+__kernel void ColorAberrationPlugin_ApplySpectral(
+		const uint filmWidth, const uint filmHeight,
+		__global float *channel_IMAGEPIPELINE,
+		__global float *tmpBuffer,
+		const float centerX, const float centerY,
+		const uint samples, __global const float *spectralTable) {
+	const size_t gid = get_global_id(0);
+	if (gid >= filmWidth * filmHeight)
+		return;
+
+	// Check if the pixel has received any sample
+	if (!isinf(channel_IMAGEPIPELINE[gid * 3])) {
+		const uint x = gid % filmWidth;
+		const uint y = gid / filmWidth;
+		const float dx = x + .5f - centerX;
+		const float dy = y + .5f - centerY;
+
+		float3 sum = MAKE_FLOAT3(0.f, 0.f, 0.f);
+		for (uint k = 0; k < samples; ++k) {
+			__global const float *entry = &spectralTable[k * 4];
+			const float s = entry[0];
+			const float3 weight = VLOAD3F(&entry[1]);
+
+			sum += weight * ColorAberrationPlugin_BilinearSampleImage(channel_IMAGEPIPELINE,
+					filmWidth, filmHeight, x + s * dx, y + s * dy);
+		}
+
+		VSTORE3F(sum, &tmpBuffer[gid * 3]);
 	}
 }
 
