@@ -93,7 +93,17 @@ GlossyCoatingMaterial::GlossyCoatingMaterial(
 	TextureConstPtr dark) :
 			Material(frontTransp, backTransp, emitted, bump), matBase(mB), Ks(ks), nu(u), nv(v),
 			Ka(ka), depth(d), index(i), multibounce(mbounce), darkening(dark) {
-	glossiness = Min(ComputeGlossiness(nu, nv), matBase->GetGlossiness());
+	UpdateGlossiness();
+}
+
+void GlossyCoatingMaterial::UpdateGlossiness() {
+	// A base without glossy lobes (matte) has glossiness 0: it doesn't make
+	// the coating any sharper (as MixMaterial::Preprocess())
+	const float coatGlossiness = ComputeGlossiness(nu, nv);
+	if (matBase->GetEventTypes() & GLOSSY)
+		glossiness = Min(coatGlossiness, matBase->GetGlossiness());
+	else
+		glossiness = coatGlossiness;
 }
 
 VolumeConstPtr GlossyCoatingMaterial::GetInteriorVolume(const HitPoint &hitPoint,
@@ -493,6 +503,8 @@ void GlossyCoatingMaterial::UpdateMaterialReferences(MaterialConstRef oldMat, Ma
 
 	// Update volumes too
 	Material::UpdateMaterialReferences(oldMat, newMat);
+
+	UpdateGlossiness();
 }
 
 bool GlossyCoatingMaterial::IsReferencing(MaterialConstRef mat) const {
@@ -542,16 +554,11 @@ void GlossyCoatingMaterial::UpdateTextureReferences(TextureConstRef oldTex, Text
 		darkening = &newTex;
 
 	// Always update glossiness just in case matBase->GetGlossiness() has changed
-	const float coatGlossiness = ComputeGlossiness(nu, nv);
-	if (matBase->GetEventTypes() & GLOSSY)
-		glossiness = Min(coatGlossiness, matBase->GetGlossiness());
-	else
-		glossiness = coatGlossiness;
+	UpdateGlossiness();
 }
 
 float GlossyCoatingMaterial::GetGlossyLobesGlossiness() const {
-	// The coating, and the base if it has glossy lobes (glossiness is the
-	// smallest of both even for a base without, see BUGS.md)
+	// The coating, and the base if it has glossy lobes
 	const float coatGlossiness = ComputeGlossiness(nu, nv);
 	return (matBase->GetEventTypes() & GLOSSY) ?
 		Min(coatGlossiness, matBase->GetGlossyLobesGlossiness()) : coatGlossiness;

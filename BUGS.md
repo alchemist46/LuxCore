@@ -83,13 +83,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: `tests/furnace/furnace.py BIDIRCPU toon spp=64 env=inf`.
 - Notes: by design the toon material is not a BSDF, so BiDir has no consistent estimator for it; the same rule (a connection at a toon eye vertex counted with weight 1 only for the light sampling strategy) would make BiDir agree with the path tracers. A toon inside a Mix, a glossy coating or a two-sided material gets the same blend on the path tracers too: only a top-level toon gets the rule (the Mix's pdf is the sum of its sub-materials', so the rule would need the toon's share of it). With point, spot and distant lights there is no MIS, so the steps stay sharp in every case. BiDir and a nested toon also ignore `lightcenter` (they evaluate the sampled direction; the light-centre direction is only in the path tracers' light sampling, `BSDF::EvaluateToon()`), so area lights blur their steps. A consistent BSDF (MoonRay's toon diffuse: the stepped lobe sampled and weighted as a BSDF) would fix both, but can't have `lightcenter`: a BSDF hit on a light would need the same value as the light sample of its centre.
 
-### A glossycoating over a material without glossy lobes reports glossiness 0 (its glossy bounces count as nearly specular)
-- Found: 2026-10-31
-- Area: material
-- Problem: `GlossyCoatingMaterial`'s constructor sets `glossiness = Min(ComputeGlossiness(nu, nv), matBase->GetGlossiness())` whatever the base, and a base without glossy lobes (matte, roughmatte) has glossiness 0, so the coating reports 0 however rough it is; `UpdateTextureReferences()` takes the base into account only when it has glossy lobes (as `MixMaterial::Preprocess()` does), so the value depends on whether a texture edit happened. Glossiness 0 makes every glossy bounce on the coating "nearly specular" (`PathInfo::IsNearlySpecular()`): the PhotonGI caches (no indirect cache at the next vertex, the caustic chain), hybrid back/forward and the shadow transparency rule (`IsSpecularPathAfter()`) treat a 0.3-rough coating as a mirror.
-- Reproduce: a `glossycoating` with `uroughness = 0.3` over a `matte`: `GetGlossiness()` returns 0 after `Scene.Parse()`, 0.3 after any texture edit of the material.
-- Notes: the fix is the constructor doing what `UpdateTextureReferences()` does; it moves the images of every scene with a coated material on these paths, so it needs its own parity and bias check. The PhotonGI glossy cutoff (CA4 follow-up) reads `GetGlossyLobesGlossiness()`, which leaves the base out already.
-
 ### Glass and coated Principled spheres render 3-10% darker than Cycles since the 2026-10-29 wheel
 - Found: 2026-10-30
 - Area: material (glass, coat), engine (PATHCPU)

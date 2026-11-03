@@ -135,6 +135,9 @@ protected:
 	virtual void UpdateAvgPassThroughTransparency();
 
 private:
+	// The coating's glossiness, with the base's when it has glossy lobes
+	void UpdateGlossiness();
+
 	// The factor of the base for the internal reflection of the coating
 	// (white without darkening)
 	luxrays::Spectrum DarkeningFactor(const HitPoint &hitPoint, const luxrays::Spectrum &ks) const;
