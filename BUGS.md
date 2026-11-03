@@ -17,15 +17,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 
 ## Open
 
-### PATHOCL: the film read after HasDone() and before Stop() has part of the samples
-- Found: 2026-11-03
-- Area: engine (PATHOCL), python
-- Problem: a script that polls `while not session.HasDone(): session.UpdateStats()` and then reads the film (`GetOutputFloat()`, `GetOutputUInt(SAMPLECOUNT)`) before `session.Stop()` gets an image without the last samples, the ones the device has not handed to the film yet; read after `Stop()`, the same render is complete. The missing samples are more often the long paths, so the image reads dark by a term that falls as 1/spp and depends on the task count, and it changes from one process to the next:
-  - plain cornell (perspective, field of view 70, 480x320, SOBOL, adaptive off, 64 spp, seed 3): read before `Stop()` 0.30576 (54-64 samples per pixel, mean 60.2) with the default task count and 0.30638 with `opencl.task.count = 65536`; read after `Stop()` 0.30646 with both (64-68 samples per pixel). The 2026-11-03 entry "PATHOCL: a render halted by spp is darker or brighter by the samples in flight" (a fisheye in the cornell box 1.5% dark at 64 spp, 0.35% at 256) was measured this way: the samples in flight are not lost.
-  - a small scene (96x64, 256 spp): 8-9 samples per pixel read early, 25-36 passes in the stats; the mean 0.09775 against 0.09992 after `Stop()`, and 0.09345-0.09668 for the same seed in different processes, so an A/B made that way looks like a 2-4% bias.
-- Reproduce: the 2026-11-03 session scratchpad `spp_after.py` (`ADAPT=0 python spp_after.py 64` against `AFTER=1 ...`) or `onesided.py` (`EARLY=1 NOSPHERE=1 python onesided.py PATHOCL 256` prints both means).
-- Notes: the repo's scripts (`tests/furnace/parity.py`, `furnace.py`) stop first and are not affected; the 2026-11-03 `glass_render.py`, `spp.py`, `spp_persp.py` and the first `onesided.py` read early. The addon's final render does it too: once the halt is reached, `engine/final.py` draws the final result (`framebuffer.draw(..., render_stopped=True)`) and only then calls `Stop()`, so a GPU render halted by spp or time may show the film of its last transfer only (not measured in Blender; the share missing is likely up to one film refresh interval). Not checked: PATHCPU. Either `HasDone()` should mean the film has every sample, or the film read should wait for the device's last transfer.
-
 ### OpenPBR: coated glass reflects too much (the translucent Fresnel is relative to the exterior, not the coat)
 - Found: 2026-11-01
 - Area: material

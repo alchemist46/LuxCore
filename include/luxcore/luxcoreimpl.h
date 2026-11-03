@@ -670,6 +670,9 @@ private:
 	std::unique_ptr<slg::RenderSession> renderSession;
 	FilmImplUPtr film;
 	luxrays::PropertiesUPtr stats;
+	// Whether the film was updated since HasDone() last returned false (see
+	// HasDone())
+	mutable bool filmUpdatedAtDone = false;
 
 	void InitFilm();
 

@@ -1849,6 +1849,7 @@ void RenderSessionImpl::Start() {
 	API_BEGIN_NOARGS();
 
 	renderSession->Start();
+	filmUpdatedAtDone = false;
 
 	// In order to populate the stats.* Properties
 	UpdateStats();
@@ -1934,6 +1935,16 @@ bool RenderSessionImpl::HasDone() const {
 	API_BEGIN_NOARGS();
 
 	const bool result = renderSession->renderEngine->HasDone();
+	// The device engines (PATHOCL) hand their last samples to their thread
+	// films when their threads end, and the film has them only after a film
+	// update: once at the end, so that the film read after HasDone() is
+	// complete without a Stop()
+	if (!result)
+		filmUpdatedAtDone = false;
+	else if (!filmUpdatedAtDone) {
+		renderSession->renderEngine->UpdateFilm();
+		filmUpdatedAtDone = true;
+	}
 
 	API_RETURN("{}", result);
 
@@ -1944,6 +1955,9 @@ void RenderSessionImpl::WaitForDone() const {
 	API_BEGIN_NOARGS();
 
 	renderSession->renderEngine->WaitForDone();
+	// As HasDone()
+	renderSession->renderEngine->UpdateFilm();
+	filmUpdatedAtDone = true;
 
 	API_END();
 }
