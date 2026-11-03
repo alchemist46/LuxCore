@@ -89,6 +89,26 @@ typedef int SceneRayType;
 
 class SampleResult;
 
+// The emission of the lights a BSDF ray of an eye path meets in
+// Scene::Intersect() (backTracing). The ray reads the transparency of the side
+// seen from the light, but a light emits from the side the ray hits, scaled by
+// the opacity of that side, as the light sampling and the light paths see it
+// (TriangleLight::GetOpacity()): a one-sided light (transparency.front 1,
+// transparency.back 0) lets the ray through and still emits toward it.
+class IntersectEmission {
+public:
+	virtual ~IntersectEmission() { }
+
+	// A light the ray goes through, t from the ray origin: its emission is
+	// scaled by opacity
+	virtual void AddPassThroughEmission(const BSDF &bsdf, const float t,
+			const luxrays::Spectrum &throughput, const luxrays::Spectrum &opacity) = 0;
+
+	// Set by Scene::Intersect(): the opacity that scales the emission of the
+	// surface the ray stops on
+	luxrays::Spectrum vertexOpacity = luxrays::Spectrum(1.f);
+};
+
 // Scene is the root container for all components of the scene. It owns:
 // - Camera
 // - Default volume
@@ -114,7 +134,8 @@ public:
 	bool Intersect(luxrays::IntersectionDevicePtr device, const SceneRayType rayType, PathVolumeInfo *volInfo,
 		const float passThrough, luxrays::Ray *ray, luxrays::RayHit *rayHit, BSDF *bsdf,
 		luxrays::Spectrum *connectionThroughput, const luxrays::Spectrum *pathThroughput = nullptr,
-		SampleResult *sampleResult = nullptr, const bool backTracing = false) const;
+		SampleResult *sampleResult = nullptr, const bool backTracing = false,
+		IntersectEmission *emission = nullptr) const;
 
 	void PreprocessCamera(const u_int filmWidth, const u_int filmHeight, const u_int *filmSubRegion);
 	void Preprocess(luxrays::Context & ctx,

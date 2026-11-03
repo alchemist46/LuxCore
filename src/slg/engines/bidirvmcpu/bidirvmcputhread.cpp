@@ -213,6 +213,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 				// not in any other place)
 				RayHit eyeRayHit;
 				Spectrum connectionThroughput, connectEmission;
+				EyePathEmission emission(*this, eyeVertex, eyeSampleResult, true);
 				const bool hit = scene.Intersect(
 					IntersectionDevicePtr(&device),
 					EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
@@ -222,7 +223,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 					&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult,
 					// The camera sees the side of a surface it faces, a BSDF ray
 					// the side seen from the light (see PathTracer::RenderEyePath())
-					!eyeSampleResult.firstPathVertex
+					!eyeSampleResult.firstPathVertex, &emission
 				);
 
 				if (!hit) {
@@ -265,7 +266,7 @@ void BiDirVMCPURenderThread::RenderFuncVM(std::stop_token stop_token) {
 
 				// Check if it is a light source
 				if (eyeVertex.bsdf.IsLightSource())
-					DirectHitLight(true, eyeVertex, eyeSampleResult);
+					DirectHitLight(true, eyeVertex, eyeSampleResult, emission.vertexOpacity);
 
 				// A path of path.maxdepth segments ends here (see
 				// BiDirCPURenderThread::RenderFunc())

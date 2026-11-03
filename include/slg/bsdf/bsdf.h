@@ -192,6 +192,12 @@ public:
 		float *anisotropy, float *eta) const;
 
 	luxrays::Spectrum GetPassThroughTransparency(const bool backTracing) const;
+	// True if the emission of the light hit by a BSDF ray depends on the
+	// opacity of the side it hits (see IntersectEmission)
+	bool HasEmissionOpacity() const;
+	// The opacity of the side the ray hits at the pass-through event, as
+	// TriangleLight::GetOpacity()
+	luxrays::Spectrum GetEmissionOpacity() const;
 	const luxrays::Spectrum &GetPassThroughShadowTransparency() const { return material->GetPassThroughShadowTransparency(); }
 	const bool &GetPassThroughShadowTransparencyOverride() const { return material->GetPassThroughShadowTransparencyOverride(); }
 	const luxrays::Frame &GetFrame() const { return frame; }

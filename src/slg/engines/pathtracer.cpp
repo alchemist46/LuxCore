@@ -607,6 +607,37 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		// The caustic cache was looked up here with a result
 		bool causticLookup = false;
 
+		const bool checkDirectLightHit =
+				// Avoid to render caustic path if hybridBackForwardEnable
+				(!hybridBackForwardEnable || !pathInfo.IsCausticPath()) &&
+				// Avoid to render caustic path if PhotonGI caustic cache is enabled
+				(!photonGICache ||
+					photonGICache->IsDirectLightHitVisible(causticChain));
+
+		// The lights the ray goes through emit as a light hit there, with
+		// the MIS weight of the last scattering vertex (see IntersectEmission)
+		class EyePathEmission : public IntersectEmission {
+		public:
+			EyePathEmission(const PathTracer &pt, SceneConstRef scn, const EyePathInfo &info,
+					SampleResult &result, const bool check) :
+					pathTracer(pt), scene(scn), pathInfo(info), sampleResult(result),
+					checkDirectLightHit(check) { }
+
+			void AddPassThroughEmission(const BSDF &bsdf, const float t,
+					const Spectrum &throughput, const Spectrum &opacity) override {
+				if (checkDirectLightHit)
+					pathTracer.DirectHitFiniteLight(scene, pathInfo, throughput * opacity,
+							bsdf, &sampleResult);
+			}
+
+		private:
+			const PathTracer &pathTracer;
+			SceneConstRef scene;
+			const EyePathInfo &pathInfo;
+			SampleResult &sampleResult;
+			const bool checkDirectLightHit;
+		} emission(*this, scene, pathInfo, sampleResult, checkDirectLightHit);
+
 		RayHit eyeRayHit;
 		const float passThrough = sampler.GetSample(sampleOffset + IDX_PASSTHROUGH);
 		bool hit;
@@ -625,17 +656,11 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 					EYE_RAY | (sampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 					&pathInfo.volume, passThrough,
 					&eyeRay, &eyeRayHit, hitBsdf, &connectionThroughput,
-					&pathThroughput, &sampleResult, !sampleResult.firstPathVertex);
+					&pathThroughput, &sampleResult, !sampleResult.firstPathVertex,
+					&emission);
 			pathThroughput *= connectionThroughput;
 			// Note: pass-through check is done inside Scene::Intersect()
 		}
-
-		const bool checkDirectLightHit =
-				// Avoid to render caustic path if hybridBackForwardEnable
-				(!hybridBackForwardEnable || !pathInfo.IsCausticPath()) &&
-				// Avoid to render caustic path if PhotonGI caustic cache is enabled
-				(!photonGICache ||
-					photonGICache->IsDirectLightHitVisible(causticChain));
 
 		if (!hit) {
 			// Nothing was hit, look for env. lights
@@ -769,7 +794,7 @@ void PathTracer::RenderEyePath(IntersectionDeviceRef device,
 		//----------------------------------------------------------------------
 
 		if (!subsurfaceExit && bsdf.IsLightSource() && checkDirectLightHit) {
-			DirectHitFiniteLight(scene, pathInfo, pathThroughput,
+			DirectHitFiniteLight(scene, pathInfo, pathThroughput * emission.vertexOpacity,
 					bsdf, &sampleResult);
 		}
 

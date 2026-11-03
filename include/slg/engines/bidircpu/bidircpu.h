@@ -113,8 +113,28 @@ protected:
 		const float u0, const float u1, const float u2,
 		const float u3, const float u4,
 		const PathVertexVM &eyeVertex, SampleResult &eyeSampleResult) const;
+	// emissionOpacity scales the emission of a finite light (see IntersectEmission)
 	void DirectHitLight(const bool finiteLightSource, const PathVertexVM &eyeVertex,
-		SampleResult &eyeSampleResult) const;
+		SampleResult &eyeSampleResult,
+		const luxrays::Spectrum &emissionOpacity = luxrays::Spectrum(1.f)) const;
+
+	// The lights an eye path ray goes through emit as a light hit there (see
+	// IntersectEmission)
+	class EyePathEmission : public IntersectEmission {
+	public:
+		EyePathEmission(const BiDirCPURenderThread &t, const PathVertexVM &v,
+				SampleResult &result, const bool enabled) :
+				thread(t), eyeVertex(v), eyeSampleResult(result), enabled(enabled) { }
+
+		void AddPassThroughEmission(const BSDF &bsdf, const float t,
+				const luxrays::Spectrum &throughput, const luxrays::Spectrum &opacity) override;
+
+	private:
+		const BiDirCPURenderThread &thread;
+		const PathVertexVM &eyeVertex;
+		SampleResult &eyeSampleResult;
+		const bool enabled;
+	};
 	void DirectHitLight(LightSourceConstRef light, const luxrays::Spectrum &lightRadiance,
 		const float directPdfA, const float emissionPdfW,
 		const PathVertexVM &eyeVertex, luxrays::Spectrum *radiance) const;

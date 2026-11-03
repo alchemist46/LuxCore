@@ -233,10 +233,10 @@ void Material::UpdateEmittedFactor() {
 }
 
 void Material::UpdateAvgPassThroughTransparency() {
-	// The probability that a BSDF ray stops on the emitting (front) face, for
-	// the MIS weight of a light: a BSDF ray after the camera's takes the side
-	// seen from the light (see PathTracer::RenderEyePath()), the back one
-	avgPassThroughTransparency = backTransparencyTex ? Clamp(backTransparencyTex->Filter(), 0.f, 1.f) : 1.f;
+	// The MIS factor of a light: the opacity of its emitting (front) face,
+	// which scales the emission a BSDF ray collects there whether it stops or
+	// goes through (see IntersectEmission), as the light sampling's
+	avgPassThroughTransparency = frontTransparencyTex ? Clamp(frontTransparencyTex->Filter(), 0.f, 1.f) : 1.f;
 }
 
 PropertiesUPtr Material::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const {

@@ -31,7 +31,8 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 		float3 *connectionThroughput,  const float3 pathThroughput,
 		__global SampleResult *sampleResult,
 		const bool backTracing,
-		__global Seed *seedPassThroughEvent
+		__global Seed *seedPassThroughEvent,
+		__global Spectrum *emissionOpacity
 		MATERIALS_PARAM_DECL
 		) {
 	*connectionThroughput = WHITE;
@@ -153,12 +154,32 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 			// Check if it is a camera invisible object and we are a tracing a camera ray
 			(cameraRay && sceneObjs[rayHit->meshIndex].cameraInvisible);
 
+		// A light with a transparency emits from the side the ray hits, with
+		// the opacity of that side, whether the ray stops or goes through (as
+		// BSDF::GetEmissionOpacity()): the opacity is written for the caller
+		// only on such a light (BSDF_HasEmissionOpacity()), black where it
+		// lets the ray through without a vertex or a pass-through event
+		const bool lightOpacity = emissionOpacity && backTracing &&
+				BSDF_HasEmissionOpacity(bsdf MATERIALS_PARAM);
+		if (lightOpacity && continueToTrace)
+			VSTORE3F(BLACK, emissionOpacity->c);
+
 		// Check if it is a pass through point
 		if (!continueToTrace) {
+			const uint matIndex = bsdf->materialIndex;
+
 			float vertexPassThroughEvent = -1.f;
 			const float3 passThroughTrans = BSDF_GetPassThroughTransparency(bsdf, backTracing,
 				&vertexPassThroughEvent
 				MATERIALS_PARAM);
+
+			if (lightOpacity) {
+				float hitSideVertexPassThroughEvent;
+				VSTORE3F(Spectrum_Clamp(WHITE - BSDF_GetPassThroughTransparency(bsdf, false,
+						&hitSideVertexPassThroughEvent
+						MATERIALS_PARAM)), emissionOpacity->c);
+			}
+
 			if (!Spectrum_IsBlack(passThroughTrans)) {
 				*connectionThroughput *= passThroughTrans;
 
@@ -168,7 +189,6 @@ OPENCL_HOT_FUNCTION bool Scene_Intersect(
 				// A vertex: the material's own choices need the pass-through
 				// event uniform again (as BSDF::SetVertexPassThroughEvent())
 				bsdf->hitPoint.passThroughEvent = vertexPassThroughEvent;
-				const uint matIndex = bsdf->materialIndex;
 				if (!mats[matIndex].constVolumes)
 					PathVolumeInfo_SetHitPointVolumes(
 							volInfo,

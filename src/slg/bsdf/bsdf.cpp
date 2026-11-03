@@ -642,6 +642,20 @@ Spectrum BSDF::GetPassThroughTransparency(const bool backTracing) const {
 			hitPoint.passThroughEvent, backTracing);
 }
 
+bool BSDF::HasEmissionOpacity() const {
+	// A null material keeps its emission and lets every ray through (see
+	// TriangleLight::GetOpacity())
+	return triangleLightSource && material->HasPassThroughTransparency() &&
+			(material->GetType() != NULLMAT);
+}
+
+Spectrum BSDF::GetEmissionOpacity() const {
+	const Vector localFixedDir = frame.ToLocal(hitPoint.fixedDir);
+
+	return (Spectrum(1.f) - material->GetPassThroughTransparency(hitPoint, localFixedDir,
+			hitPoint.passThroughEvent, false)).Clamp(0.f, 1.f);
+}
+
 Spectrum BSDF::GetEmittedRadiance(float *directPdfA, float *emissionPdfW) const {
 	return triangleLightSource ?
 		triangleLightSource->GetRadiance(hitPoint, directPdfA, emissionPdfW) :

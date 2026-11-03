@@ -522,7 +522,7 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_ShadowRayHit(
 			ray, rayHit, &taskTmp->tmpBsdf,
 			&connectionThroughput, WHITE,
 			NULL,
-			true, &taskDirectLight->seedPassThroughEvent
+			true, &taskDirectLight->seedPassThroughEvent, NULL
 			MATERIALS_PARAM
 			);
 	taskDirectLight->throughShadowTransparency = throughShadowTransparency;
@@ -644,6 +644,35 @@ OPENCL_FORCE_INLINE void AdvancePaths_HitNothing(
 	}
 }
 
+// The emission of a light the vertex ray hits: the surface it stops on, or a
+// light with a transparency it goes through (stop false), which emits as a
+// light hit there with the opacity of the side the ray hits (see
+// Scene_Intersect(), IntersectEmission on the CPU). A light with no
+// transparency emits only where the ray stops.
+OPENCL_FORCE_INLINE void AdvancePaths_DirectHitFiniteLight(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global GPUTaskState *taskState,
+		__global const BSDF *bsdf,
+		__global EyePathInfo *pathInfo,
+		__global SampleResult *sampleResult,
+		const bool stop
+		LIGHTS_PARAM_DECL) {
+	if (!BSDF_IsLightSource(bsdf))
+		return;
+
+	const float3 emissionOpacity = ((pathInfo->depth.depth > 0) &&
+			BSDF_HasEmissionOpacity(bsdf MATERIALS_PARAM)) ?
+		VLOAD3F(taskState->emissionOpacity.c) : (stop ? WHITE : BLACK);
+
+	if (!Spectrum_IsBlack(emissionOpacity) &&
+			// Avoid to render caustic path if hybridBackForwardEnable
+			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo)) &&
+			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
+				PhotonGICache_IsDirectLightHitVisible(taskConfig, taskState->photonGICausticChain)))
+		DirectHitFiniteLight(&taskConfig->film, pathInfo, emissionOpacity * VLOAD3F(taskState->throughput.c),
+				bsdf, sampleResult LIGHTS_PARAM);
+}
+
 // Something was hit: the shading of the hit and the direct light sampling of
 // the vertex (the next state is MK_RT_DL, MK_GENERATE_NEXT_VERTEX_RAY or
 // MK_SPLAT_SAMPLE)
@@ -713,29 +742,12 @@ OPENCL_FORCE_INLINE PathState AdvancePaths_HitObject(
 	// Check if it is a light source and I have to add light emission
 	//--------------------------------------------------------------------------
 
-	bool checkDirectLightHit = true;
-
-	checkDirectLightHit = checkDirectLightHit &&
-			// Avoid to render caustic path if hybridBackForwardEnable
-			(!taskConfig->pathTracer.hybridBackForward.enabled || !EyePathInfo_IsCausticPath(pathInfo));
-
-	checkDirectLightHit = checkDirectLightHit &&
-			((!taskConfig->pathTracer.pgic.indirectEnabled && !taskConfig->pathTracer.pgic.causticEnabled) ||
-			PhotonGICache_IsDirectLightHitVisible(taskConfig, taskState->photonGICausticChain));
-
 	// Check if it is a light source (note: I can hit only triangle area light sources)
 #if defined(PARAM_ENABLE_SUBSURFACE)
-	checkDirectLightHit = checkDirectLightHit && (bsdf->hitPoint.subsurface != HITPOINT_SSS_EXIT);
+	if (bsdf->hitPoint.subsurface != HITPOINT_SSS_EXIT)
 #endif
-	if (BSDF_IsLightSource(bsdf) && checkDirectLightHit) {
-		DirectHitFiniteLight(
-				&taskConfig->film,
-				pathInfo,
-				&taskState->throughput,
-				bsdf,
-				sampleResult
+		AdvancePaths_DirectHitFiniteLight(taskConfig, taskState, bsdf, pathInfo, sampleResult, true
 				LIGHTS_PARAM);
-	}
 
 	//----------------------------------------------------------------------
 	// Check if I can use the photon cache
@@ -1176,15 +1188,23 @@ __kernel void AdvancePaths_MK_RT(
 					sampleResult,
 					// The camera sees the side it faces, a BSDF ray the side
 					// seen from the light (as PathTracer::RenderEyePath())
-					pathInfo->depth.depth > 0, NULL
+					pathInfo->depth.depth > 0, NULL, &taskState->emissionOpacity
 					MATERIALS_PARAM
 					);
 			taskState->throughShadowTransparency = throughShadowTransparency;
 			VSTORE3F(connectionThroughput * VLOAD3F(taskState->throughput.c), taskState->throughput.c);
 		}
 
-		// If continueToTrace, there is nothing to do, just keep the same state
-		if (!continueToTrace) {
+		if (continueToTrace) {
+			// The same state, the ray goes on: a light with a transparency it
+			// goes through emits there. Not in a block shared with the
+			// vertices' AdvancePaths_HitObject(): one call of
+			// DirectHitFiniteLight() for both made the path kernel 2% slower
+			// on cornell (HIP).
+			if (!subsurfaceExit && (rayHits[gid].meshIndex != NULL_INDEX))
+				AdvancePaths_DirectHitFiniteLight(taskConfig, taskState, bsdf, pathInfo, sampleResult, false
+						LIGHTS_PARAM);
+		} else {
 			if (rayHits[gid].meshIndex == NULL_INDEX) {
 				// The BSDF of the last scattering vertex, not of a
 				// pass-through surface the ray went through: the environment

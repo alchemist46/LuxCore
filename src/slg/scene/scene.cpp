@@ -743,8 +743,11 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 		const SceneRayType rayType, PathVolumeInfo *volInfo,
 		const float initialPassThrough, Ray *ray, RayHit *rayHit, BSDF *bsdf,
 		Spectrum *connectionThroughput, const Spectrum *pathThroughput,
-		SampleResult *sampleResult, const bool backTracing) const {
+		SampleResult *sampleResult, const bool backTracing,
+		IntersectEmission *emission) const {
 	*connectionThroughput = Spectrum(1.f);
+	if (emission)
+		emission->vertexOpacity = Spectrum(1.f);
 
 	// The first pass-through event is the sample itself (stratified: it also
 	// picks the lobe of a Mix material), the next ones a sequence of
@@ -904,10 +907,22 @@ bool Scene::Intersect(IntersectionDevicePtr device,
 			// Check if it is a pass through point
 			if (!continueToTrace) {
 				const Spectrum transp = bsdf->GetPassThroughTransparency(backTracing);
+				// A light emits from the side the ray hits, with the opacity
+				// of that side, whether the ray stops or goes through (see
+				// IntersectEmission)
+				const bool emissionOpacity = emission && backTracing && bsdf->HasEmissionOpacity();
+				const Spectrum opacity = emissionOpacity ? bsdf->GetEmissionOpacity() : Spectrum(1.f);
 				if (!transp.Black()) {
 					*connectionThroughput *= transp;
 					continueToTrace = true;
+
+					if (emissionOpacity && !opacity.Black())
+						emission->AddPassThroughEmission(*bsdf, rayHit->t,
+								*pathThroughput * *connectionThroughput, opacity);
 				} else {
+					if (emission)
+						emission->vertexOpacity = opacity;
+
 					// A vertex: the material's own choices need the
 					// pass-through event uniform again
 					bsdf->SetVertexPassThroughEvent(*this, backTracing, volInfo);

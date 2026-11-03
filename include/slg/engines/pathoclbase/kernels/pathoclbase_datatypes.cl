@@ -117,6 +117,10 @@ typedef struct {
 // there (see AdvancePaths_MK_RT)
 typedef struct {
 	Spectrum throughput;
+	// The opacity that scales the emission of a light with a transparency
+	// the vertex ray stops on or goes through, written by Scene_Intersect()
+	// only there (see BSDF_HasEmissionOpacity())
+	Spectrum emissionOpacity;
 
 	// The pass-through events of the vertex ray: the sampler's value for the
 	// first one (negative once used), then the sequence of seedPassThroughEvent

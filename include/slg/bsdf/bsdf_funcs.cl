@@ -506,6 +506,17 @@ OPENCL_FORCE_INLINE bool BSDF_IsLightSource(__global const BSDF *bsdf) {
 	return (bsdf->triangleLightSourceIndex != NULL_INDEX);
 }
 
+// True if the emission of the light hit by a BSDF ray depends on the opacity
+// of the side it hits (as BSDF::HasEmissionOpacity()): a null material keeps
+// its emission and lets every ray through
+OPENCL_FORCE_INLINE bool BSDF_HasEmissionOpacity(__global const BSDF *bsdf
+		MATERIALS_PARAM_DECL) {
+	const uint matIndex = bsdf->materialIndex;
+
+	return (bsdf->triangleLightSourceIndex != NULL_INDEX) &&
+			!mats[matIndex].noPassThroughTransparency && (mats[matIndex].type != NULLMAT);
+}
+
 OPENCL_FORCE_INLINE float3 BSDF_GetEmittedRadiance(__global const BSDF *bsdf, float *directPdfA
 		LIGHTS_PARAM_DECL) {
 	const uint triangleLightSourceIndex = bsdf->triangleLightSourceIndex;

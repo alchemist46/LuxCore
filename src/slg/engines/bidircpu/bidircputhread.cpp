@@ -617,11 +617,12 @@ void BiDirCPURenderThread::DirectHitLight(
 void BiDirCPURenderThread::DirectHitLight(
 	const bool finiteLightSource,
 	const PathVertexVM &eyeVertex,
-	SampleResult &eyeSampleResult
+	SampleResult &eyeSampleResult,
+	const Spectrum &emissionOpacity
 ) const {
 	float directPdfA, emissionPdfW;
 	if (finiteLightSource) {
-		const Spectrum lightRadiance = eyeVertex.bsdf.GetEmittedRadiance(
+		const Spectrum lightRadiance = emissionOpacity * eyeVertex.bsdf.GetEmittedRadiance(
 			&directPdfA, &emissionPdfW
 		);
 
@@ -645,6 +646,26 @@ void BiDirCPURenderThread::DirectHitLight(
 					eyeVertex, &eyeSampleResult.radiance[el.GetID()]);
 		}
 	}
+}
+
+void BiDirCPURenderThread::EyePathEmission::AddPassThroughEmission(const BSDF &bsdf,
+		const float t, const Spectrum &throughput, const Spectrum &opacity) {
+	if (!enabled)
+		return;
+
+	// The vertex of a light hit at the surface the ray goes through, with the
+	// MIS constants of a hit (see RenderFunc())
+	PathVertexVM lightHitVertex = eyeVertex;
+	lightHitVertex.bsdf = bsdf;
+	lightHitVertex.throughput = throughput;
+	const float factor = 1.f / MIS(AbsDot(bsdf.hitPoint.shadeN, bsdf.hitPoint.fixedDir));
+	lightHitVertex.dVCM *= MIS(t * t) * factor;
+	lightHitVertex.dVC *= factor;
+	lightHitVertex.dVM *= factor;
+	for (float &term : lightHitVertex.dVCTerms)
+		term *= factor;
+
+	thread.DirectHitLight(true, lightHitVertex, eyeSampleResult, opacity);
 }
 
 bool BiDirCPURenderThread::TraceLightPath(const float time, const float wavelength,
@@ -1026,13 +1047,15 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 				Spectrum connectionThroughput;
 				// The camera sees the side of a surface it faces, a BSDF ray the
 				// side seen from the light (see PathTracer::RenderEyePath())
+				EyePathEmission emission(*this, eyeVertex, eyeSampleResult,
+						!photonGICausticCacheUsed);
 				const bool hit = scene.Intersect(
 						luxrays::make_observer(device),
 						EYE_RAY | (eyeSampleResult.firstPathVertex ? CAMERA_RAY : INDIRECT_RAY),
 						&eyeVertex.volInfo, sampler->GetSample(sampleOffset),
 						&eyeRay, &eyeRayHit, &hitBsdf,
 						&connectionThroughput, &eyeVertex.throughput, &eyeSampleResult,
-						!eyeSampleResult.firstPathVertex);
+						!eyeSampleResult.firstPathVertex, &emission);
 
 				if (!hit) {
 					// Nothing was hit, look for infinitelight
@@ -1112,7 +1135,7 @@ void BiDirCPURenderThread::RenderFunc(std::stop_token stop_token) {
 					// Avoid to render caustic path if PhotonGI caustic cache
 					// has been used (for SDS paths)
 					!photonGICausticCacheUsed){
-					DirectHitLight(true, eyeVertex, eyeSampleResult);
+					DirectHitLight(true, eyeVertex, eyeSampleResult, emission.vertexOpacity);
 				}
 
 				// A path of path.maxdepth segments ends here: the light

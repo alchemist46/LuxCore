@@ -237,7 +237,7 @@ OPENCL_FORCE_INLINE void DirectHitInfiniteLight(__constant const Film* restrict 
 
 OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict film,
 		__global EyePathInfo *pathInfo,
-		__global const Spectrum* restrict pathThroughput,
+		const float3 pathThroughput,
 		__global const BSDF *bsdf,
 		__global SampleResult *sampleResult
 		LIGHTS_PARAM_DECL) {
@@ -284,7 +284,7 @@ OPENCL_FORCE_INLINE void DirectHitFiniteLight(__constant const Film* restrict fi
 		}
 
 		SampleResult_AddEmission(film, sampleResult, BSDF_GetLightID(bsdf
-				MATERIALS_PARAM), VLOAD3F(pathThroughput->c), weight * emittedRadiance);
+				MATERIALS_PARAM), pathThroughput, weight * emittedRadiance);
 	}
 }
 
