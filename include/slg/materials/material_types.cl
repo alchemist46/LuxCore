@@ -251,6 +251,10 @@ typedef struct {
 #define OPENPBR_LOBE_THINFILM 64u		// thinfilm.weight
 #define OPENPBR_LOBE_EON 128u			// base.diffuseroughness (Lambertian at 0)
 #define OPENPBR_LOBE_ROTATION 256u		// tangent.rotation (0 exactly)
+// Not a part: the transmission has a depth (not the constant 0), so the
+// interior volume does its colour everywhere and the surface has none
+// (OpenPBRMaterial::HasTransmissionDepth())
+#define OPENPBR_LOBE_DEPTH 512u
 // The base specular lobes: the metal, the dielectric's specular and the
 // translucent interface (the specular.* inputs)
 #define OPENPBR_LOBES_BASE_SPECULAR (OPENPBR_LOBE_METAL | OPENPBR_LOBE_SPECULAR | OPENPBR_LOBE_TRANSMISSION)

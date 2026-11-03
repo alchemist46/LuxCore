@@ -131,8 +131,7 @@ OPENCL_FORCE_INLINE void OpenPBRMaterial_GetBSDF(__global const Material* restri
 		OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_WEIGHT, hitPoint TEXTURES_PARAM) : 0.f;
 	if (b->transmissionWeight > 0.f) {
 		// At depth, the interior volume does the colour
-		b->transmissionColor = (!b->thinWalled &&
-				(OpenPBRMaterial_GetFloat(material, OPENPBR_TRANSMISSION_DEPTH, hitPoint TEXTURES_PARAM) > 0.f)) ?
+		b->transmissionColor = (lobes & OPENPBR_LOBE_DEPTH) ?
 			WHITE : OpenPBRMaterial_GetSpectrum(material, OPENPBR_TRANSMISSION_COLOR, hitPoint TEXTURES_PARAM);
 	} else
 		b->transmissionColor = WHITE;

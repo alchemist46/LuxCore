@@ -120,8 +120,7 @@ void OpenPBR_GetBSDF(const OpenPBRMaterial &mat, const HitPoint &hitPoint,
 		mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_WEIGHT, hitPoint) : 0.f;
 	if (b.transmissionWeight > 0.f) {
 		// At depth, the interior volume does the colour
-		b.transmissionColor = (!b.thinWalled &&
-				(mat.GetFloat(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, hitPoint) > 0.f)) ?
+		b.transmissionColor = (lobes & OPENPBR_LOBE_DEPTH) ?
 			white : slg::ocl::ToFloat3(mat.GetSpectrum(slg::ocl::OPENPBR_TRANSMISSION_COLOR, hitPoint));
 	} else
 		b.transmissionColor = white;
@@ -305,7 +304,9 @@ void OpenPBRMaterial::GetAlwaysDelta(bool *spec, bool *coat) const {
 }
 
 bool OpenPBRMaterial::HasTransmissionDepth() const {
-	return !thinWalled && !IsZero(slg::ocl::OPENPBR_TRANSMISSION_DEPTH);
+	// A constant depth of 0 or less is none (the surface has the colour)
+	float depth;
+	return !thinWalled && !(GetConstant(slg::ocl::OPENPBR_TRANSMISSION_DEPTH, &depth) && !(depth > 0.f));
 }
 
 void OpenPBRMaterial::Update() {
@@ -370,6 +371,10 @@ void OpenPBRMaterial::Update() {
 			// (not clamped: only 0 is no rotation)
 			((GetConstant(slg::ocl::OPENPBR_TANGENT_ROTATION, &value) && (value == 0.f)) ?
 				0u : OPENPBR_LOBE_ROTATION);
+	// A textured depth too: the volume uses its average, so a surface tinted
+	// where it reads 0 would tint the light twice there
+	if ((lobes & OPENPBR_LOBE_TRANSMISSION) && HasTransmissionDepth())
+		lobes |= OPENPBR_LOBE_DEPTH;
 
 	UpdateGlossiness();
 }

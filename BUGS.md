@@ -31,13 +31,6 @@ The first entries were collected on 2026-10-20 from "Known open issues" in [MODE
 - Reproduce: an OpenPBR sphere with `transmission.weight 0.05`, `transmission.dispersionscale 1`, base colour white, under an area light, PATHOCL 64 spp: colour noise on the diffuse.
 - Notes: found by the OpenPBR review (2026-11-01). The opaque part (`eta`) does not depend on the wavelength; tinting only the translucent part needs the path's `dispersionTinted` handling to know which lobe was sampled.
 
-### OpenPBR: a textured transmission.depth that is 0 somewhere tints there twice
-- Found: 2026-11-01
-- Area: material
-- Problem: the interior volume uses the average of a textured `transmission.depth` (the volume needs a constant, `Scene::DefineOpenPBRInterior()` warns), but the surface takes `transmission.color` as its own tint where the depth reads 0 (`OpenPBRMaterial_GetBSDF()`, `OpenPBR_GetBSDF()`). There, the light gets the colour at the surface and again in the volume.
-- Reproduce: an OpenPBR glass with `transmission.depth` an image or checker with zeros, `transmission.color` red: the zero areas are redder.
-- Notes: found by the OpenPBR review (2026-11-01). Either the surface ignores the depth when the material has an interior volume, or a depth texture is not used for the volume.
-
 ### OpenPBR: speed items left from the review
 - Found: 2026-11-01
 - Area: material
